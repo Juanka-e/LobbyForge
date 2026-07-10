@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Ankara Gaming Voice - Storage Settings</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "text-muted": "#7F8A99",
+                        "secondary-container": "#3d4757",
+                        "surface-tint": "#a9c7ff",
+                        "primary-fixed": "#d6e3ff",
+                        "success": "#7CCFA6",
+                        "on-tertiary-container": "#614200",
+                        "on-error": "#690005",
+                        "outline-variant": "#434750",
+                        "on-primary-fixed-variant": "#124686",
+                        "error-container": "#93000a",
+                        "secondary": "#bcc7da",
+                        "on-secondary": "#26313f",
+                        "on-secondary-fixed": "#111c2a",
+                        "tertiary-fixed-dim": "#efbf70",
+                        "outline": "#8d919b",
+                        "tertiary": "#fccb7b",
+                        "on-error-container": "#ffdad6",
+                        "surface-container-highest": "#32353b",
+                        "on-primary-fixed": "#001b3d",
+                        "surface-bright": "#36393f",
+                        "border-strong": "#334155",
+                        "text-primary": "#F4F7FB",
+                        "primary": "#bdd3ff",
+                        "text-secondary": "#B7C0CC",
+                        "danger": "#E98282",
+                        "surface-raised": "#171E2B",
+                        "surface-dim": "#101419",
+                        "on-background": "#e0e2ea",
+                        "inverse-surface": "#e0e2ea",
+                        "on-tertiary-fixed": "#281900",
+                        "inverse-on-surface": "#2d3036",
+                        "error": "#ffb4ab",
+                        "tertiary-fixed": "#ffdeac",
+                        "on-surface": "#e0e2ea",
+                        "background": "#101419",
+                        "secondary-fixed": "#d8e3f6",
+                        "surface-floating": "#1D2533",
+                        "surface-container-high": "#272a30",
+                        "border-subtle": "#263142",
+                        "inverse-primary": "#325e9f",
+                        "on-secondary-fixed-variant": "#3d4757",
+                        "on-tertiary": "#432c00",
+                        "on-primary": "#003063",
+                        "on-primary-container": "#144787",
+                        "secondary-fixed-dim": "#bcc7da",
+                        "primary-container": "#8fb8ff",
+                        "on-surface-variant": "#c3c6d2",
+                        "surface-container": "#1d2025",
+                        "surface-variant": "#32353b",
+                        "surface": "#111722",
+                        "surface-container-lowest": "#0b0e13",
+                        "primary-fixed-dim": "#a9c7ff",
+                        "surface-container-low": "#181c21",
+                        "on-secondary-container": "#abb6c8",
+                        "bg-soft": "#0B1018",
+                        "on-tertiary-fixed-variant": "#5f4100",
+                        "tertiary-container": "#deb063"
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    spacing: {
+                        "section-gap": "120px",
+                        "margin-mobile": "24px",
+                        "container-max": "1240px",
+                        "gutter": "24px",
+                        "margin-desktop": "64px"
+                    },
+                    fontFamily: {
+                        "section-h2-mobile": ["Geist"],
+                        "section-h2": ["Geist"],
+                        "hero-h1": ["Geist"],
+                        "label-sm": ["Geist"],
+                        "hero-h1-mobile": ["Geist"],
+                        "body-lg": ["Geist"],
+                        "label-xs": ["Geist"],
+                        "body-md": ["Geist"]
+                    },
+                    fontSize: {
+                        "section-h2-mobile": ["32px", { "lineHeight": "1.2", "fontWeight": "600" }],
+                        "section-h2": ["52px", { "lineHeight": "1.2", "fontWeight": "600" }],
+                        "hero-h1": ["80px", { "lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "600" }],
+                        "label-sm": ["14px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "500" }],
+                        "hero-h1-mobile": ["40px", { "lineHeight": "1.2", "fontWeight": "600" }],
+                        "body-lg": ["18px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                        "label-xs": ["12px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "500" }],
+                        "body-md": ["16px", { "lineHeight": "1.6", "fontWeight": "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .glass-panel {
+            background: rgba(17, 23, 34, 0.78);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(148, 163, 184, 0.16);
+            box-shadow: 0 4px 24px -4px rgba(143, 184, 255, 0.05);
+        }
+        .toggle-checkbox:checked {
+            background-color: theme('colors.primary-container');
+            border-color: theme('colors.primary-container');
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            transform: translateX(100%);
+        }
+    </style>
+</head>
+<body class="bg-background text-text-primary font-body-md antialiased overflow-hidden flex h-screen">
+<!-- SideNavBar -->
+<nav class="bg-surface-container dark:bg-surface-container h-screen w-72 flex flex-col fixed left-0 top-0 overflow-y-auto border-r border-border-subtle z-40 hidden md:flex pb-6">
+<div class="px-6 py-6 pb-2">
+<h2 class="font-label-sm text-text-secondary uppercase tracking-widest text-xs mb-3">Community</h2>
+<ul class="space-y-1">
+<li><a class="flex items-center px-4 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined mr-3 text-[20px]">dashboard</span>Overview</a></li>
+<li><a class="flex items-center px-4 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined mr-3 text-[20px]">settings</span>Community Profile</a></li>
+<li><a class="flex items-center px-4 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined mr-3 text-[20px]">verified_user</span>Roles &amp; Permissions</a></li>
+<li><a class="flex items-center px-4 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined mr-3 text-[20px]">groups</span>Members</a></li>
+<li><a class="flex items-center px-4 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined mr-3 text-[20px]">chat_bubble</span>Channels</a></li>
+<li><a class="flex items-center px-4 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined mr-3 text-[20px]">mail</span>Invites</a></li>
+</ul>
+</div>
+<div class="px-6 py-2">
+<h2 class="font-label-sm text-text-secondary uppercase tracking-widest text-xs mb-3">Safety</h2>
+<ul class="space-y-1">
+<li><a class="flex items-center px-4 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined mr-3 text-[20px]">security</span>Moderation</a></li>
+<li><a class="flex items-center px-4 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined mr-3 text-[20px]">history</span>Audit Log</a></li>
+</ul>
+</div>
+<div class="px-6 py-2">
+<h2 class="font-label-sm text-text-secondary uppercase tracking-widest text-xs mb-3">Voice &amp; Media</h2>
+<ul class="space-y-1">
+<li><a class="flex items-center px-4 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined mr-3 text-[20px]">mic</span>Voice &amp; Media</a></li>
+<li><a class="flex items-center px-4 py-2 rounded-lg text-primary font-bold bg-primary-container/10 hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined mr-3 text-[20px]" style="font-variation-settings: 'FILL' 1;">storage</span>Storage</a></li>
+</ul>
+</div>
+<div class="px-6 py-2">
+<h2 class="font-label-sm text-text-secondary uppercase tracking-widest text-xs mb-3">System</h2>
+<ul class="space-y-1">
+<li><a class="flex items-center px-4 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined mr-3 text-[20px]">lock</span>Authentication</a></li>
+<li><a class="flex items-center px-4 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined mr-3 text-[20px]">backup</span>Backups</a></li>
+<li><a class="flex items-center px-4 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined mr-3 text-[20px]">system_update_alt</span>Updates</a></li>
+<li><a class="flex items-center px-4 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined mr-3 text-[20px]">medical_services</span>Doctor &amp; Health</a></li>
+</ul>
+</div>
+</nav>
+<!-- Main Content Wrapper -->
+<div class="flex-1 flex flex-col md:ml-72 relative">
+<!-- TopNavBar -->
+<header class="docked full-width top-0 h-20 bg-surface/80 backdrop-blur-md border-b border-border-subtle flex justify-between items-center w-full px-margin-desktop z-30 shrink-0">
+<div class="flex items-center space-x-4">
+<span class="font-label-sm text-text-secondary font-medium tracking-tight">Community Settings</span>
+</div>
+<div class="flex items-center space-x-6">
+<button class="text-text-secondary hover:text-primary transition-colors flex items-center justify-center p-2 rounded-full hover:bg-surface-raised">
+<span class="material-symbols-outlined">close</span>
+</button>
+</div>
+</header>
+<!-- Scrollable Content Area -->
+<main class="flex-1 overflow-y-auto pt-8 pb-32 px-margin-mobile md:px-margin-desktop">
+<div class="max-w-container-max mx-auto flex flex-col lg:flex-row gap-gutter">
+<!-- Left Column (Main Content) -->
+<div class="flex-1 space-y-12 pb-20">
+<!-- Header Section -->
+<section class="space-y-4">
+<h2 class="font-section-h2 text-section-h2 text-text-primary tracking-tight">Storage</h2>
+<p class="text-text-secondary font-body-lg max-w-2xl">Manage file uploads, media retention, and storage usage for Ankara Gaming Voice.</p>
+<!-- Summary Chips -->
+<div class="flex flex-wrap gap-3 pt-2">
+<div class="glass-panel px-4 py-2 rounded-full flex items-center space-x-2 border-l-2 border-l-primary-container">
+<span class="material-symbols-outlined text-primary-container text-[18px]">database</span>
+<span class="font-label-sm text-text-primary">12.4 GB used</span>
+</div>
+<div class="glass-panel px-4 py-2 rounded-full flex items-center space-x-2 border-l-2 border-l-success">
+<span class="material-symbols-outlined text-success text-[18px]">check_circle</span>
+<span class="font-label-sm text-text-primary">120 GB available</span>
+</div>
+<div class="glass-panel px-4 py-2 rounded-full flex items-center space-x-2">
+<span class="material-symbols-outlined text-text-secondary text-[18px]">attachment</span>
+<span class="font-label-sm text-text-secondary">246 attachments</span>
+</div>
+<div class="glass-panel px-4 py-2 rounded-full flex items-center space-x-2">
+<span class="material-symbols-outlined text-text-secondary text-[18px]">mic</span>
+<span class="font-label-sm text-text-secondary">18 voice clips</span>
+</div>
+<div class="glass-panel px-4 py-2 rounded-full flex items-center space-x-2 border-l-2 border-l-tertiary">
+<span class="material-symbols-outlined text-tertiary text-[18px]">shield</span>
+<span class="font-label-sm text-text-primary">Uploads protected</span>
+</div>
+</div>
+</section>
+<!-- 1. Storage Usage -->
+<section class="space-y-6">
+<h3 class="font-body-lg text-text-primary font-medium border-b border-border-subtle pb-2">Storage Usage</h3>
+<p class="text-sm text-text-secondary">Storage is managed by this self-hosted instance.</p>
+<div class="glass-panel rounded-xl p-6 relative overflow-hidden">
+<div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>
+<div class="flex justify-between items-end mb-4">
+<div>
+<p class="font-hero-h1-mobile text-primary-container">12.4 <span class="text-2xl text-text-secondary">GB</span></p>
+<p class="font-label-sm text-text-muted mt-1">Used of 120 GB (10%)</p>
+</div>
+<button class="px-4 py-2 border border-border-strong text-secondary rounded-lg font-label-sm hover:bg-surface-raised transition-all">Refresh Usage</button>
+</div>
+<!-- Bar -->
+<div class="w-full bg-surface-container-highest rounded-full h-3 mb-6 overflow-hidden flex">
+<div class="bg-primary-container h-full" style="width: 7%"></div>
+<div class="bg-tertiary h-full" style="width: 2%"></div>
+<div class="bg-outline h-full" style="width: 1%"></div>
+</div>
+<!-- Breakdown -->
+<div class="grid grid-cols-3 gap-4 border-t border-border-subtle pt-4">
+<div>
+<div class="flex items-center space-x-2 mb-1">
+<div class="w-2 h-2 rounded-full bg-primary-container"></div>
+<span class="font-label-sm text-text-primary">Attachments</span>
+</div>
+<span class="font-body-md text-text-secondary">246 files</span>
+</div>
+<div>
+<div class="flex items-center space-x-2 mb-1">
+<div class="w-2 h-2 rounded-full bg-tertiary"></div>
+<span class="font-label-sm text-text-primary">Previews</span>
+</div>
+<span class="font-body-md text-text-secondary">84 files</span>
+</div>
+<div>
+<div class="flex items-center space-x-2 mb-1">
+<div class="w-2 h-2 rounded-full bg-outline"></div>
+<span class="font-label-sm text-text-primary">Voice clips</span>
+</div>
+<span class="font-body-md text-text-secondary">18 files</span>
+</div>
+</div>
+</div>
+</section>
+<!-- 2. Upload Limits -->
+<section class="space-y-6">
+<h3 class="font-body-lg text-text-primary font-medium border-b border-border-subtle pb-2">Upload Limits</h3>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<div class="glass-panel rounded-xl p-5 flex justify-between items-center">
+<div>
+<p class="font-label-sm text-text-primary">Max file size</p>
+<p class="text-xs text-text-muted mt-1">Global limit for any upload</p>
+</div>
+<div class="relative w-24">
+<input class="w-full bg-surface-raised border border-border-strong rounded-lg py-1.5 px-3 text-sm text-text-primary text-right focus:border-primary-container focus:ring-1 focus:ring-primary-container" type="number" value="25"/>
+<span class="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-text-muted pointer-events-none">MB</span>
+</div>
+</div>
+<div class="glass-panel rounded-xl p-5 flex justify-between items-center">
+<div>
+<p class="font-label-sm text-text-primary">Max image size</p>
+<p class="text-xs text-text-muted mt-1">Specific limit for images</p>
+</div>
+<div class="relative w-24">
+<input class="w-full bg-surface-raised border border-border-strong rounded-lg py-1.5 px-3 text-sm text-text-primary text-right focus:border-primary-container focus:ring-1 focus:ring-primary-container" type="number" value="10"/>
+<span class="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-text-muted pointer-events-none">MB</span>
+</div>
+</div>
+<div class="glass-panel rounded-xl p-5 flex justify-between items-center">
+<div>
+<p class="font-label-sm text-text-primary">Max video size</p>
+<p class="text-xs text-text-muted mt-1">Specific limit for video files</p>
+</div>
+<div class="relative w-24">
+<input class="w-full bg-surface-raised border border-border-strong rounded-lg py-1.5 px-3 text-sm text-text-primary text-right focus:border-primary-container focus:ring-1 focus:ring-primary-container" type="number" value="50"/>
+<span class="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-text-muted pointer-events-none">MB</span>
+</div>
+</div>
+<div class="glass-panel rounded-xl p-5 flex justify-between items-center">
+<div>
+<p class="font-label-sm text-text-primary">Max files per message</p>
+<p class="text-xs text-text-muted mt-1">Bulk upload restriction</p>
+</div>
+<div class="relative w-24">
+<input class="w-full bg-surface-raised border border-border-strong rounded-lg py-1.5 px-3 text-sm text-text-primary text-right focus:border-primary-container focus:ring-1 focus:ring-primary-container" type="number" value="5"/>
+</div>
+</div>
+</div>
+</section>
+<!-- 3. Allowed Types -->
+<section class="space-y-6">
+<h3 class="font-body-lg text-text-primary font-medium border-b border-border-subtle pb-2">Allowed Types</h3>
+<p class="text-sm text-text-secondary">Potentially unsafe file types should remain disabled unless your community needs them.</p>
+<div class="glass-panel rounded-xl p-5 space-y-4">
+<div class="flex items-center justify-between">
+<div>
+<p class="font-label-sm text-text-primary">Images</p>
+<p class="text-xs text-text-muted">png, jpg, jpeg, gif, webp</p>
+</div>
+<div class="relative inline-block w-10 h-6 align-middle select-none">
+<input checked="" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer transition-transform duration-200 ease-in-out" id="toggle-images" name="toggle-images" type="checkbox"/>
+<label class="toggle-label block overflow-hidden h-6 rounded-full bg-surface-container-highest cursor-pointer" for="toggle-images"></label>
+</div>
+</div>
+<div class="flex items-center justify-between border-t border-border-subtle pt-4">
+<div>
+<p class="font-label-sm text-text-primary">Videos</p>
+<p class="text-xs text-text-muted">mp4, webm, mov</p>
+</div>
+<div class="relative inline-block w-10 h-6 align-middle select-none">
+<input checked="" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer transition-transform duration-200 ease-in-out" id="toggle-videos" name="toggle-videos" type="checkbox"/>
+<label class="toggle-label block overflow-hidden h-6 rounded-full bg-surface-container-highest cursor-pointer" for="toggle-videos"></label>
+</div>
+</div>
+<div class="flex items-center justify-between border-t border-border-subtle pt-4">
+<div>
+<p class="font-label-sm text-text-primary">Audio</p>
+<p class="text-xs text-text-muted">mp3, ogg, wav</p>
+</div>
+<div class="relative inline-block w-10 h-6 align-middle select-none">
+<input checked="" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer transition-transform duration-200 ease-in-out" id="toggle-audio" name="toggle-audio" type="checkbox"/>
+<label class="toggle-label block overflow-hidden h-6 rounded-full bg-surface-container-highest cursor-pointer" for="toggle-audio"></label>
+</div>
+</div>
+<div class="flex items-center justify-between border-t border-border-subtle pt-4">
+<div>
+<p class="font-label-sm text-text-primary">Documents</p>
+<p class="text-xs text-text-muted">pdf, txt, doc, docx</p>
+</div>
+<div class="relative inline-block w-10 h-6 align-middle select-none">
+<input checked="" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer transition-transform duration-200 ease-in-out" id="toggle-docs" name="toggle-docs" type="checkbox"/>
+<label class="toggle-label block overflow-hidden h-6 rounded-full bg-surface-container-highest cursor-pointer" for="toggle-docs"></label>
+</div>
+</div>
+<div class="flex items-center justify-between border-t border-border-subtle pt-4">
+<div>
+<p class="font-label-sm text-text-primary">Archives</p>
+<p class="text-xs text-text-muted">zip, rar, 7z</p>
+</div>
+<div class="relative inline-block w-10 h-6 align-middle select-none">
+<input class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer transition-transform duration-200 ease-in-out" id="toggle-archives" name="toggle-archives" type="checkbox"/>
+<label class="toggle-label block overflow-hidden h-6 rounded-full bg-surface-container-highest cursor-pointer" for="toggle-archives"></label>
+</div>
+</div>
+<div class="flex items-center justify-between border-t border-border-subtle pt-4">
+<div>
+<p class="font-label-sm text-text-primary">Executables</p>
+<p class="text-xs text-text-muted">exe, apk, sh, bat</p>
+</div>
+<div class="relative inline-block w-10 h-6 align-middle select-none">
+<input class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer transition-transform duration-200 ease-in-out" id="toggle-exe" name="toggle-exe" type="checkbox"/>
+<label class="toggle-label block overflow-hidden h-6 rounded-full bg-surface-container-highest cursor-pointer" for="toggle-exe"></label>
+</div>
+</div>
+</div>
+</section>
+<!-- 4. Media Previews -->
+<section class="space-y-6">
+<h3 class="font-body-lg text-text-primary font-medium border-b border-border-subtle pb-2">Media Previews</h3>
+<div class="glass-panel rounded-xl p-5 space-y-4">
+<div class="flex items-center justify-between">
+<div>
+<p class="font-label-sm text-text-primary">Generate Previews</p>
+<p class="text-xs text-text-muted">Automatically create lightweight previews for media</p>
+</div>
+<div class="relative inline-block w-10 h-6 align-middle select-none">
+<input checked="" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer transition-transform duration-200 ease-in-out" id="toggle-previews" name="toggle-previews" type="checkbox"/>
+<label class="toggle-label block overflow-hidden h-6 rounded-full bg-surface-container-highest cursor-pointer" for="toggle-previews"></label>
+</div>
+</div>
+<div class="flex items-center justify-between border-t border-border-subtle pt-4">
+<div>
+<p class="font-label-sm text-text-primary">Video Thumbnails</p>
+<p class="text-xs text-text-muted">Extract first frame for video uploads</p>
+</div>
+<div class="relative inline-block w-10 h-6 align-middle select-none">
+<input checked="" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer transition-transform duration-200 ease-in-out" id="toggle-vid-thumb" name="toggle-vid-thumb" type="checkbox"/>
+<label class="toggle-label block overflow-hidden h-6 rounded-full bg-surface-container-highest cursor-pointer" for="toggle-vid-thumb"></label>
+</div>
+</div>
+<div class="flex items-center justify-between border-t border-border-subtle pt-4">
+<div>
+<p class="font-label-sm text-text-primary">Compact Previews</p>
+<p class="text-xs text-text-muted">Use smaller dimensions for generated thumbnails</p>
+</div>
+<div class="relative inline-block w-10 h-6 align-middle select-none">
+<input class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer transition-transform duration-200 ease-in-out" id="toggle-compact" name="toggle-compact" type="checkbox"/>
+<label class="toggle-label block overflow-hidden h-6 rounded-full bg-surface-container-highest cursor-pointer" for="toggle-compact"></label>
+</div>
+</div>
+<div class="flex items-center justify-between border-t border-border-subtle pt-4">
+<div>
+<p class="font-label-sm text-text-primary">Blur Unsafe Content</p>
+<p class="text-xs text-text-muted">Apply heavy blur to media flagged by moderation</p>
+</div>
+<div class="relative inline-block w-10 h-6 align-middle select-none">
+<input checked="" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer transition-transform duration-200 ease-in-out" id="toggle-blur" name="toggle-blur" type="checkbox"/>
+<label class="toggle-label block overflow-hidden h-6 rounded-full bg-surface-container-highest cursor-pointer" for="toggle-blur"></label>
+</div>
+</div>
+</div>
+</section>
+<!-- 5. Retention Policy -->
+<section class="space-y-6">
+<h3 class="font-body-lg text-text-primary font-medium border-b border-border-subtle pb-2">Retention Policy</h3>
+<div class="glass-panel rounded-xl p-5 space-y-4">
+<div class="flex items-center justify-between">
+<div>
+<p class="font-label-sm text-text-primary">Temporary uploads</p>
+<p class="text-xs text-text-muted">Files uploaded but not yet attached to a message</p>
+</div>
+<select class="bg-surface-raised border border-border-strong rounded-lg py-1.5 px-3 text-sm text-text-primary focus:border-primary-container focus:ring-1 focus:ring-primary-container">
+<option>1 day</option>
+<option selected="">7 days</option>
+<option>30 days</option>
+</select>
+</div>
+<div class="flex items-center justify-between border-t border-border-subtle pt-4">
+<div>
+<p class="font-label-sm text-text-primary">Message attachments</p>
+<p class="text-xs text-text-muted">Files attached to active messages</p>
+</div>
+<select class="bg-surface-raised border border-border-strong rounded-lg py-1.5 px-3 text-sm text-text-primary focus:border-primary-container focus:ring-1 focus:ring-primary-container">
+<option>30 days</option>
+<option>90 days</option>
+<option>1 year</option>
+<option selected="">Forever</option>
+</select>
+</div>
+<div class="flex items-center justify-between border-t border-border-subtle pt-4">
+<div>
+<p class="font-label-sm text-text-primary">Deleted attachments</p>
+<p class="text-xs text-text-muted">Files kept after their message is deleted</p>
+</div>
+<select class="bg-surface-raised border border-border-strong rounded-lg py-1.5 px-3 text-sm text-text-primary focus:border-primary-container focus:ring-1 focus:ring-primary-container">
+<option>0 days (Immediate)</option>
+<option>7 days</option>
+<option selected="">30 days</option>
+<option>90 days</option>
+</select>
+</div>
+<div class="flex items-center justify-between border-t border-border-subtle pt-4">
+<div>
+<p class="font-label-sm text-text-primary">Voice clips</p>
+<p class="text-xs text-text-muted">Recorded audio snippets in channels</p>
+</div>
+<select class="bg-surface-raised border border-border-strong rounded-lg py-1.5 px-3 text-sm text-text-primary focus:border-primary-container focus:ring-1 focus:ring-primary-container">
+<option>7 days</option>
+<option selected="">30 days</option>
+<option>90 days</option>
+<option>Forever</option>
+</select>
+</div>
+</div>
+</section>
+<!-- 6. Cleanup -->
+<section class="space-y-6">
+<h3 class="font-body-lg text-text-primary font-medium border-b border-border-subtle pb-2">Cleanup</h3>
+<div class="glass-panel rounded-xl p-6">
+<div class="flex justify-between items-start mb-6">
+<div>
+<p class="font-hero-h1-mobile text-tertiary">1.8 <span class="text-xl text-text-secondary">GB reclaimable</span></p>
+<p class="text-sm text-text-muted mt-1">Found orphaned or expired files</p>
+</div>
+<div class="flex space-x-3">
+<button class="px-4 py-2 border border-border-strong text-text-primary rounded-lg font-label-sm hover:bg-surface-raised transition-all">Preview Cleanup</button>
+<button class="px-4 py-2 bg-surface-raised border border-border-strong text-danger rounded-lg font-label-sm hover:bg-surface-container-highest transition-all">Run Cleanup</button>
+</div>
+</div>
+<ul class="space-y-3 text-sm text-text-secondary">
+<li class="flex justify-between">
+<span>Expired temporary uploads</span>
+<span>0.4 GB</span>
+</li>
+<li class="flex justify-between">
+<span>Orphaned previews</span>
+<span>0.2 GB</span>
+</li>
+<li class="flex justify-between">
+<span>Deleted past retention</span>
+<span>1.2 GB</span>
+</li>
+</ul>
+</div>
+</section>
+</div>
+<!-- Right Panel (Fixed on Desktop) -->
+<div class="w-full lg:w-80 shrink-0">
+<div class="sticky top-28 space-y-6">
+<div class="glass-panel rounded-xl p-6">
+<h3 class="font-label-sm text-text-primary mb-4 uppercase tracking-wider text-xs">Storage Status</h3>
+<div class="flex items-center space-x-3 mb-6 p-3 bg-surface-raised rounded-lg border border-border-subtle">
+<span class="material-symbols-outlined text-success">check_circle</span>
+<div>
+<p class="font-label-sm text-success">Storage Healthy</p>
+<p class="text-xs text-text-muted">No issues detected</p>
+</div>
+</div>
+<ul class="space-y-3 mb-6">
+<li class="flex justify-between items-center">
+<span class="text-sm text-text-secondary">Used</span>
+<span class="font-label-sm text-text-primary">12.4 GB</span>
+</li>
+<li class="flex justify-between items-center">
+<span class="text-sm text-text-secondary">Available</span>
+<span class="font-label-sm text-text-primary">120 GB</span>
+</li>
+<li class="flex justify-between items-center">
+<span class="text-sm text-text-secondary">Reclaimable</span>
+<span class="font-label-sm text-tertiary">1.8 GB</span>
+</li>
+<li class="flex justify-between items-center border-t border-border-subtle pt-3 mt-3">
+<span class="text-sm text-text-secondary">Upload protection</span>
+<span class="font-label-sm text-success">Enabled</span>
+</li>
+<li class="flex justify-between items-center">
+<span class="text-sm text-text-secondary">Last cleanup</span>
+<span class="font-label-sm text-text-primary">2 days ago</span>
+</li>
+</ul>
+<div class="space-y-3 mb-4">
+<button class="w-full border border-border-strong text-text-primary rounded-lg py-2 font-label-sm hover:bg-surface-raised transition-all flex justify-center items-center">
+<span class="material-symbols-outlined text-[18px] mr-2">refresh</span>
+                                Refresh Usage
+                            </button>
+<button class="w-full border border-border-strong text-text-primary rounded-lg py-2 font-label-sm hover:bg-surface-raised transition-all flex justify-center items-center">
+<span class="material-symbols-outlined text-[18px] mr-2">cleaning_services</span>
+                                Preview Cleanup
+                            </button>
+</div>
+<p class="text-xs text-text-muted text-center">Storage settings affect files uploaded to this self-hosted community.</p>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="fixed bottom-0 right-0 h-16 bg-surface-container-low border-t border-border-subtle shadow-md flex items-center justify-between px-margin-desktop w-[calc(100%-18rem)] z-30 hidden md:flex">
+<p class="font-label-sm text-text-muted">Storage changes affect this self-hosted community.</p>
+<div class="flex space-x-4 items-center">
+<button class="text-text-muted hover:text-text-secondary font-label-sm transition-colors">Reset</button>
+<button class="bg-primary-container text-on-primary-container rounded-lg px-6 py-2 font-label-sm hover:bg-primary-container/90 transition-all">Save Changes</button>
+</div>
+</footer>
+</div>
+</body></html>

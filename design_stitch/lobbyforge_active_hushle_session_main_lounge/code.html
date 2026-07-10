@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en" style=""><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>LobbyForge - Apps &amp; Activities</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        @import url('https://fonts.googleapis.com/css2?family=Geist:wght@100..900&display=swap');
+        
+        body {
+            font-family: 'Geist', sans-serif;
+            background-color: #070A0F;
+            color: #E0E2EA;
+            overflow: hidden;
+        }
+
+        .glass-panel {
+            background: rgba(17, 23, 34, 0.78);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(148, 163, 184, 0.16);
+        }
+
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 10px;
+        }
+
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+        }
+
+        .active-nav-indicator::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 25%;
+            height: 50%;
+            width: 4px;
+            background-color: #8FB8FF;
+            border-radius: 0 4px 4px 0;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                "primary": "#bdd3ff",
+                "primary-container": "#8fb8ff",
+                "surface": "#111722",
+                "surface-dim": "#101419",
+                "surface-raised": "#171E2B",
+                "background": "#101419",
+                "bg-soft": "#070A0F",
+                "text-primary": "#F4F7FB",
+                "text-secondary": "#B7C0CC",
+                "text-muted": "#7F8A99",
+                "border-subtle": "#263142",
+                "border-strong": "#334155",
+                "success": "#7CCFA6",
+                "danger": "#E98282"
+              },
+              "fontFamily": {
+                "body-md": ["Geist"],
+                "hero-h1": ["Geist"],
+                "label-sm": ["Geist"],
+                "section-h2": ["Geist"]
+              }
+            }
+          }
+        }
+      </script>
+<link data-snapdom="injected-import" href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;display=swap" rel="stylesheet"/></head>
+<body class="h-screen w-screen flex select-none">
+<!-- FAR LEFT: OFFICIAL LOBBYFORGE CLIENT RAIL -->
+<!-- JSON Reference: SideNavBar (type: rail) -->
+<nav class="w-[72px] h-screen bg-background border-r border-border-subtle flex flex-col items-center py-3 flex-shrink-0 z-50">
+<div class="mb-4">
+<button class="w-12 h-12 rounded-2xl bg-surface-container flex items-center justify-center font-bold text-primary hover:rounded-xl hover:scale-105 hover:shadow-[0_0_15px_rgba(143,184,255,0.3)] transition-all duration-300 cursor-pointer" title="LobbyForge Home">LF</button>
+</div>
+<div class="w-8 h-[2px] bg-border-subtle mb-4"></div>
+<div class="flex-1 space-y-2">
+<div class="relative group">
+<button class="w-12 h-12 rounded-full flex items-center justify-center bg-surface-container text-primary hover:rounded-xl hover:scale-105 hover:shadow-[0_0_15px_rgba(143,184,255,0.3)] transition-all duration-300 group relative" title="LobbyForge Official">
+<span class="font-bold text-sm">LF</span>
+<div class="absolute -right-1 -top-1 w-4 h-4 bg-primary rounded-full flex items-center justify-center border-2 border-background"><span class="material-symbols-outlined text-[10px] text-on-primary font-bold">check</span></div>
+<div class="absolute -left-1 w-1 h-2 bg-text-primary rounded-r-full group-hover:h-5 transition-all opacity-0 group-hover:opacity-100"></div>
+</button>
+</div>
+<div class="relative group">
+<div class="absolute -left-1 top-1 w-1 h-10 bg-text-primary rounded-r-full"></div>
+<button class="w-12 h-12 rounded-xl flex items-center justify-center bg-primary text-on-primary hover:scale-105 transition-all duration-300" title="Ankara Gaming Voice">
+<span class="material-symbols-outlined">sports_esports</span>
+</button>
+</div>
+<div class="relative group">
+<button class="w-12 h-12 rounded-full flex items-center justify-center text-success border border-dashed border-border-subtle hover:bg-success/10 hover:border-success hover:scale-105 transition-all duration-300" title="Add a community">
+<span class="material-symbols-outlined">add</span>
+</button>
+</div>
+</div>
+</nav>
+<!-- LEFT: ANKARA GAMING VOICE COMMUNITY SIDEBAR -->
+<!-- JSON Reference: SideNavBar (type: standard) -->
+<aside class="w-64 bg-surface flex flex-col flex-shrink-0 z-40 border-r border-border-subtle">
+<header class="h-12 flex items-center px-4 border-b border-border-subtle shadow-sm hover:bg-white/5 cursor-pointer transition-colors duration-200">
+<h2 class="font-semibold text-sm truncate flex-1">Ankara Gaming Voice</h2>
+<span class="material-symbols-outlined text-sm">expand_more</span>
+</header>
+<div class="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-4">
+<div>
+<button class="flex items-center w-full px-1 mb-1 text-text-muted hover:text-text-primary uppercase text-[11px] font-bold tracking-wider group transition-colors">
+<span class="material-symbols-outlined text-xs mr-1">expand_more</span>
+<span class="">TEXT CHANNELS</span>
+</button>
+<nav class="space-y-0.5">
+<a class="flex items-center px-2 py-1.5 rounded-md hover:bg-surface-container text-text-secondary" href="#"><span class="text-lg mr-2 opacity-60">#</span><span class="text-sm">announcements</span></a>
+<a class="flex items-center px-2 py-1.5 rounded-md hover:bg-surface-container text-text-secondary" href="#"><span class="text-lg mr-2 opacity-60">#</span><span class="text-sm">general</span></a>
+<a class="flex items-center px-2 py-1.5 rounded-md hover:bg-surface-container text-text-secondary" href="#"><span class="text-lg mr-2 opacity-60">#</span><span class="text-sm">clips</span></a>
+</nav>
+</div>
+<div>
+<button class="flex items-center w-full px-1 mb-1 text-text-muted hover:text-text-primary uppercase text-[11px] font-bold tracking-wider group transition-colors">
+<span class="material-symbols-outlined text-xs mr-1">expand_more</span>
+<span class="">VOICE CHANNELS</span>
+</button>
+<div class="space-y-0.5">
+<button class="flex items-center w-full px-2 py-1.5 rounded-md text-text-muted hover:bg-surface-container"><span class="material-symbols-outlined text-lg mr-2">volume_up</span><span class="text-sm">Main Lounge</span></button><div class="ml-9 space-y-1 mb-2"><div class="flex items-center justify-between group/user cursor-pointer"><div class="flex items-center gap-2"><div class="relative"><img class="w-5 h-5 rounded-full" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAnFRDGViwSuF-6Y7LyW6c4H8rRLEhRx9uCtXRK1lf5ckFG7mjHaGhd2reTHLXURpwtI8IRmIf4vdN1YU_PDv7gqyWNFfkUQlYP1wORo8hlTXPfF_ZOjkIDGYE6JrMNe7vN3XSocmH_XZ1jr9OZvftTaJhJiq-EpyE5GvPnydnXCW3WqfpXQcZT1aUj2BM8f2zAqU_VIZhXAEUyqB2n0u49q1ilLMedLhf3319x2MN5Ppdy2F_vRxrdPuAE6A-rSHKv0G-c1CXWz4x8"/><div class="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-success border border-surface rounded-full"></div></div><span class="text-xs text-text-secondary group-hover/user:text-text-primary">juanka</span></div><span class="text-[10px] text-text-muted italic">Listening</span></div><div class="flex items-center gap-1.5 px-2 py-1 rounded bg-primary/5 border border-primary/10"><span class="material-symbols-outlined text-xs text-primary">music_note</span><span class="text-[10px] text-primary font-medium">Music Bot · Listening</span></div></div>
+<button class="flex items-center w-full px-2 py-1.5 rounded-md text-text-muted hover:bg-surface-container"><span class="material-symbols-outlined text-lg mr-2">volume_up</span><span class="text-sm">Game Room 1</span></button><div class="ml-9 mt-1 mb-2"><div class="flex items-center justify-between p-1.5 rounded bg-surface-variant/30 border border-border-subtle/50"><div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-xs text-text-primary">theater_comedy</span><span class="text-[10px] text-text-secondary">Hushle · 4 playing</span></div><button class="px-2 py-0.5 bg-primary text-on-primary text-[10px] font-bold rounded hover:brightness-110">Join</button></div></div>
+<button class="flex items-center w-full px-2 py-1.5 rounded-md text-text-muted hover:bg-surface-container"><span class="material-symbols-outlined text-lg mr-2">volume_up</span><span class="text-sm">Hushle Room</span></button>
+<button class="flex items-center w-full px-2 py-1.5 rounded-md text-text-muted hover:bg-surface-container"><span class="material-symbols-outlined text-lg mr-2">volume_up</span><span class="text-sm">Vampire Night</span></button>
+</div>
+</div>
+<div>
+<button class="flex items-center w-full px-1 mb-1 text-text-muted hover:text-text-primary uppercase text-[11px] font-bold tracking-wider group transition-colors">
+<span class="text-[11px] font-bold uppercase tracking-widest">APPS &amp; ACTIVITIES</span>
+</button>
+<nav class="space-y-0.5">
+<a class="flex items-center px-2 py-1.5 rounded-md bg-primary/10 text-primary font-medium" href="#">
+<span class="material-symbols-outlined text-lg mr-2">grid_view</span>
+<span class="text-sm">Browse Activities</span>
+</a>
+</nav>
+</div>
+</div>
+<div class="mt-auto bg-background/80 backdrop-blur-sm border-t border-border-subtle p-3 flex flex-col space-y-3">
+<div class="flex items-center justify-between"><div class="flex items-center space-x-2 min-w-0"><div class="relative flex-shrink-0"><img alt="juanka" class="w-9 h-9 rounded-full border border-primary/30" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAnFRDGViwSuF-6Y7LyW6c4H8rRLEhRx9uCtXRK1lf5ckFG7mjHaGhd2reTHLXURpwtI8IRmIf4vdN1YU_PDv7gqyWNFfkUQlYP1wORo8hlTXPfF_ZOjkIDGYE6JrMNe7vN3XSocmH_XZ1jr9OZvftTaJhJiq-EpyE5GvPnydnXCW3WqfpXQcZT1aUj2BM8f2zAqU_VIZhXAEUyqB2n0u49q1ilLMedLhf3319x2MN5Ppdy2F_vRxrdPuAE6A-rSHKv0G-c1CXWz4x8"/><div class="absolute bottom-0 right-0 w-2.5 h-2.5 bg-success border-2 border-background rounded-full"></div></div><div class="min-w-0"><div class="text-xs font-bold text-text-primary truncate">juanka</div><div class="text-[10px] text-text-muted font-medium">Online</div></div></div><div class="flex items-center space-x-0.5"><button class="w-7 h-7 flex items-center justify-center text-text-muted hover:text-primary hover:bg-surface-variant rounded transition-colors" title="Mute"><span class="material-symbols-outlined text-lg">mic</span></button><button class="w-7 h-7 flex items-center justify-center text-text-muted hover:text-primary hover:bg-surface-variant rounded transition-colors" title="Deafen"><span class="material-symbols-outlined text-lg">headset</span></button><button class="w-7 h-7 flex items-center justify-center text-text-muted hover:text-primary hover:bg-surface-variant rounded transition-colors" title="User Settings"><span class="material-symbols-outlined text-lg">settings</span></button></div></div>
+<div class="flex items-center justify-between bg-surface-container-low/50 p-1.5 rounded-lg border border-border-subtle/50"><div class="flex flex-col min-w-0 px-1"><div class="text-[10px] text-success font-bold flex items-center gap-1"><span class="w-1 h-1 rounded-full bg-success animate-pulse"></span>Voice Connected</div><div class="text-[10px] text-text-muted truncate">Main Lounge</div></div><div class="flex items-center space-x-1"><button class="w-7 h-7 flex items-center justify-center text-text-muted hover:text-primary hover:bg-surface-variant rounded transition-colors" title="Turn on Camera"><span class="material-symbols-outlined text-base">videocam</span></button><button class="w-7 h-7 flex items-center justify-center text-text-muted hover:text-primary hover:bg-surface-variant rounded transition-colors" title="Share Your Screen"><span class="material-symbols-outlined text-base">screen_share</span></button><button class="w-7 h-7 flex items-center justify-center text-danger hover:bg-danger/10 rounded transition-colors" title="Disconnect"><span class="material-symbols-outlined text-base">call_end</span></button></div></div>
+</div>
+</aside>
+<!-- MAIN CONTENT AREA -->
+<main class="flex-1 h-screen flex flex-col bg-bg-soft overflow-hidden relative">
+<!-- Top Toolbar -->
+<header class="h-14 flex-shrink-0 border-b border-border-subtle flex items-center justify-between px-8 bg-surface/50 backdrop-blur-md z-30"><div class="flex items-center gap-4"><div class="w-8 h-8 rounded-lg bg-[#FFE5B4] flex items-center justify-center"><span class="material-symbols-outlined text-[#8B5E3C] text-xl" style="font-variation-settings: 'FILL' 1;">theater_comedy</span></div><div><h1 class="font-semibold text-text-primary leading-none">Hushle</h1><div class="flex items-center gap-2 mt-0.5"><span class="text-xs text-text-muted">Main Lounge</span><span class="flex items-center gap-1 text-success text-[10px] font-bold uppercase tracking-wider"><span class="w-1.5 h-1.5 rounded-full bg-success animate-pulse"></span>Live</span></div></div></div><div class="flex items-center gap-2"><button class="p-2 hover:bg-surface-variant rounded-lg text-text-muted transition-colors" title="Activity Settings"><span class="material-symbols-outlined">settings</span></button><button class="p-2 hover:bg-surface-variant rounded-lg text-text-muted transition-colors" title="Pop out"><span class="material-symbols-outlined">open_in_new</span></button><button class="p-2 hover:bg-surface-variant rounded-lg text-text-muted transition-colors" title="Full screen"><span class="material-symbols-outlined">fullscreen</span></button><div class="w-px h-6 bg-border-subtle mx-1"></div><button class="px-3 py-1.5 bg-danger/10 text-danger hover:bg-danger/20 rounded-lg text-sm font-bold transition-colors">Leave Activity</button></div></header>
+<!-- Scrollable Content -->
+<div class="flex-1 overflow-y-auto custom-scrollbar p-8 space-y-8 pb-20"><div class="h-full flex flex-col bg-[#0D1117] rounded-2xl border border-border-subtle overflow-hidden"><div class="p-8 flex-1 flex flex-col items-center justify-center text-center space-y-8"><div class="space-y-2"><div class="flex items-center justify-center gap-3 mb-4"><span class="material-symbols-outlined text-[#E7B86A] text-5xl" style="font-variation-settings: 'FILL' 1;">theater_comedy</span><h2 class="text-4xl font-bold text-[#F4F7FB] tracking-tight">Hushle</h2></div><p class="text-[#E7B86A] font-medium">Waiting for players...</p><p class="text-text-muted text-sm">Players: 3/12</p></div><div class="grid grid-cols-3 gap-6 w-full max-w-3xl"><div class="bg-surface-raised/50 border border-[#E7B86A]/20 p-4 rounded-2xl flex flex-col items-center gap-3 relative"><div class="absolute top-2 right-2 px-1.5 py-0.5 bg-[#E7B86A]/20 text-[#E7B86A] text-[8px] font-bold rounded uppercase">Host</div><img class="w-12 h-12 rounded-full border-2 border-success" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAnFRDGViwSuF-6Y7LyW6c4H8rRLEhRx9uCtXRK1lf5ckFG7mjHaGhd2reTHLXURpwtI8IRmIf4vdN1YU_PDv7gqyWNFfkUQlYP1wORo8hlTXPfF_ZOjkIDGYE6JrMNe7vN3XSocmH_XZ1jr9OZvftTaJhJiq-EpyE5GvPnydnXCW3WqfpXQcZT1aUj2BM8f2zAqU_VIZhXAEUyqB2n0u49q1ilLMedLhf3319x2MN5Ppdy2F_vRxrdPuAE6A-rSHKv0G-c1CXWz4x8"/><span class="text-[#F4F7FB] font-bold">juanka</span><span class="text-success text-[10px] font-bold uppercase">Ready</span></div><div class="bg-surface-raised/50 border border-border-subtle p-4 rounded-2xl flex flex-col items-center gap-3"><div class="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center text-lg font-bold text-primary border-2 border-success">A</div><span class="text-[#F4F7FB] font-bold">Ayşe</span><span class="text-success text-[10px] font-bold uppercase">Ready</span></div><div class="bg-surface-raised/50 border border-border-subtle p-4 rounded-2xl flex flex-col items-center gap-3"><div class="w-12 h-12 rounded-full bg-surface-variant flex items-center justify-center text-lg font-bold text-text-muted border-2 border-border-subtle">M</div><span class="text-[#F4F7FB] font-bold">Mehmet</span><span class="text-text-muted text-[10px] font-bold uppercase">Not Ready</span></div></div><div class="bg-surface-dim/50 border border-border-subtle p-6 rounded-xl w-full max-w-xl grid grid-cols-3 gap-4 text-left"><div class="space-y-1"><p class="text-[10px] text-text-muted uppercase font-bold">Mode</p><p class="text-sm text-[#F4F7FB]">Teams (2)</p></div><div class="space-y-1"><p class="text-[10px] text-text-muted uppercase font-bold">Round Time</p><p class="text-sm text-[#F4F7FB]">60s</p></div><div class="space-y-1"><p class="text-[10px] text-text-muted uppercase font-bold">Difficulty</p><p class="text-sm text-[#F4F7FB]">Medium</p></div></div><div class="flex gap-4"><button class="px-8 py-3 bg-surface-raised border border-border-strong text-text-primary font-bold rounded-xl hover:bg-surface-variant transition-all">Edit Game Settings</button><button class="px-12 py-3 bg-primary-container text-[#07101E] font-bold rounded-xl hover:brightness-110 transition-all shadow-lg shadow-primary/20">Start Game</button></div><p class="text-text-muted text-xs italic">Voice remains connected through LobbyForge while the game is running.</p></div></div></div>
+</main>
+<!-- RIGHT: COLLAPSIBLE MEMBERS PANEL -->
+<!-- JSON Reference: SideNavBar (type: standard / participants) -->
+<aside class="w-60 bg-surface border-l border-border-subtle flex-shrink-0 z-40 hidden xl:flex flex-col"><header class="h-12 flex items-center border-b border-border-subtle px-2"><button class="flex-1 py-2 text-[10px] font-bold uppercase tracking-wider text-primary border-b-2 border-primary">Activity</button><button class="flex-1 py-2 text-[10px] font-bold uppercase tracking-wider text-text-muted hover:text-text-secondary">Members</button></header><div class="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-6"><div><h3 class="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-3">Current Activity</h3><div class="bg-surface-raised rounded-xl p-3 border border-border-subtle"><div class="flex items-center gap-3 mb-3"><div class="w-10 h-10 rounded-lg bg-[#FFE5B4] flex items-center justify-center"><span class="material-symbols-outlined text-[#8B5E3C] text-2xl" style="font-variation-settings: 'FILL' 1;">theater_comedy</span></div><div><p class="text-sm font-bold text-text-primary">Hushle</p><p class="text-[10px] text-text-muted">Main Lounge</p></div></div><div class="space-y-2"><div class="flex items-center justify-between text-[10px]"><span class="text-text-muted">Host</span><span class="text-primary font-bold">juanka</span></div><div class="flex items-center justify-between text-[10px]"><span class="text-text-muted">Players</span><span class="text-text-primary">3 / 12</span></div><div class="flex items-center justify-between text-[10px]"><span class="text-text-muted">Status</span><span class="text-success font-bold">Waiting</span></div></div></div></div><div><h3 class="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-3">In Activity</h3><div class="space-y-2"><div class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-white/5 cursor-pointer"><img class="w-6 h-6 rounded-full" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAnFRDGViwSuF-6Y7LyW6c4H8rRLEhRx9uCtXRK1lf5ckFG7mjHaGhd2reTHLXURpwtI8IRmIf4vdN1YU_PDv7gqyWNFfkUQlYP1wORo8hlTXPfF_ZOjkIDGYE6JrMNe7vN3XSocmH_XZ1jr9OZvftTaJhJiq-EpyE5GvPnydnXCW3WqfpXQcZT1aUj2BM8f2zAqU_VIZhXAEUyqB2n0u49q1ilLMedLhf3319x2MN5Ppdy2F_vRxrdPuAE6A-rSHKv0G-c1CXWz4x8"/><span class="text-xs text-text-primary font-medium">juanka</span><span class="material-symbols-outlined text-xs text-text-muted ml-auto">mic</span></div><div class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-white/5 cursor-pointer"><div class="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center text-[8px] font-bold text-primary">A</div><span class="text-xs text-text-secondary">Ayşe</span><span class="material-symbols-outlined text-xs text-text-muted ml-auto">mic</span></div><div class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-white/5 cursor-pointer"><div class="w-6 h-6 rounded-full bg-surface-variant flex items-center justify-center text-[8px] font-bold text-text-muted">M</div><span class="text-xs text-text-secondary">Mehmet</span><span class="material-symbols-outlined text-xs text-text-muted ml-auto">mic_off</span></div></div></div></div></aside>
+<!-- Global Layout Scripts -->
+<script>
+        // Simple micro-interaction for active session joining
+        document.querySelectorAll('button').forEach(button => {
+            button.addEventListener('click', (e) => {
+                if (button.disabled) return;
+                const originalText = button.innerHTML;
+                if(button.textContent.includes('Join')) {
+                    button.innerHTML = '<span class="material-symbols-outlined text-lg animate-spin">sync</span> Joining...';
+                    setTimeout(() => {
+                        button.innerHTML = '<span class="material-symbols-outlined text-lg">check</span> Connected';
+                        button.classList.replace('bg-primary', 'bg-success');
+                    }, 1200);
+                }
+            });
+        });
+    </script>
+</body></html>

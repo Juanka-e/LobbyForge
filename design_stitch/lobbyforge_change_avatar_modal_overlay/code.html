@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>LobbyForge - Change Avatar</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        .material-symbols-outlined {
+            font-family: 'Material Symbols Outlined';
+            font-weight: normal;
+            font-style: normal;
+            font-size: 24px;
+            line-height: 1;
+            letter-spacing: normal;
+            text-transform: none;
+            display: inline-block;
+            white-space: nowrap;
+            word-wrap: normal;
+            direction: ltr;
+            -webkit-font-feature-settings: 'liga';
+            -webkit-font-smoothing: antialiased;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-primary-fixed-variant": "#124686",
+                        "tertiary": "#fccb7b",
+                        "primary-fixed": "#d6e3ff",
+                        "on-surface": "#e0e2ea",
+                        "on-primary-container": "#144787",
+                        "on-error-container": "#ffdad6",
+                        "secondary-fixed-dim": "#bcc7da",
+                        "on-secondary-container": "#abb6c8",
+                        "surface-bright": "#36393f",
+                        "on-surface-variant": "#c3c6d2",
+                        "primary-container": "#8fb8ff",
+                        "on-tertiary": "#432c00",
+                        "surface-container": "#1d2025",
+                        "on-tertiary-fixed": "#281900",
+                        "danger": "#E98282",
+                        "outline-variant": "#434750",
+                        "tertiary-fixed": "#ffdeac",
+                        "surface-container-highest": "#32353b",
+                        "inverse-primary": "#325e9f",
+                        "secondary": "#bcc7da",
+                        "on-secondary-fixed": "#111c2a",
+                        "text-muted": "#7F8A99",
+                        "tertiary-fixed-dim": "#efbf70",
+                        "text-primary": "#F4F7FB",
+                        "on-primary": "#003063",
+                        "surface": "#111722",
+                        "on-tertiary-container": "#614200",
+                        "on-background": "#e0e2ea",
+                        "background": "#101419",
+                        "surface-floating": "#1D2533",
+                        "surface-container-low": "#181c21",
+                        "secondary-container": "#3d4757",
+                        "tertiary-container": "#deb063",
+                        "primary": "#bdd3ff",
+                        "inverse-on-surface": "#2d3036",
+                        "success": "#7CCFA6",
+                        "border-subtle": "#263142",
+                        "text-secondary": "#B7C0CC",
+                        "secondary-fixed": "#d8e3f6",
+                        "on-primary-fixed": "#001b3d",
+                        "error-container": "#93000a",
+                        "error": "#ffb4ab",
+                        "surface-variant": "#32353b",
+                        "surface-dim": "#101419",
+                        "primary-fixed-dim": "#a9c7ff",
+                        "surface-raised": "#171E2B",
+                        "on-tertiary-fixed-variant": "#5f4100",
+                        "surface-container-lowest": "#0b0e13",
+                        "surface-container-high": "#272a30",
+                        "surface-tint": "#a9c7ff",
+                        "bg-soft": "#0B1018",
+                        "border-strong": "#334155",
+                        "on-secondary": "#26313f",
+                        "outline": "#8d919b",
+                        "on-error": "#690005",
+                        "on-secondary-fixed-variant": "#3d4757",
+                        "inverse-surface": "#e0e2ea"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "2xl": "1.125rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "container-max": "1240px",
+                        "margin-mobile": "24px",
+                        "margin-desktop": "64px",
+                        "gutter": "24px",
+                        "section-gap": "120px"
+                    },
+                    "fontFamily": {
+                        "label-sm": ["Geist", "sans-serif"],
+                        "hero-h1": ["Geist", "sans-serif"],
+                        "body-md": ["Geist", "sans-serif"],
+                        "section-h2-mobile": ["Geist", "sans-serif"],
+                        "label-xs": ["Geist", "sans-serif"],
+                        "body-lg": ["Geist", "sans-serif"],
+                        "section-h2": ["Geist", "sans-serif"],
+                        "hero-h1-mobile": ["Geist", "sans-serif"]
+                    },
+                    "fontSize": {
+                        "label-sm": ["14px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "500" }],
+                        "hero-h1": ["80px", { "lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "600" }],
+                        "body-md": ["16px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                        "section-h2-mobile": ["32px", { "lineHeight": "1.2", "fontWeight": "600" }],
+                        "label-xs": ["12px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "500" }],
+                        "body-lg": ["18px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                        "section-h2": ["52px", { "lineHeight": "1.2", "fontWeight": "600" }],
+                        "hero-h1-mobile": ["40px", { "lineHeight": "1.2", "fontWeight": "600" }]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-background text-text-primary h-screen w-full overflow-hidden flex font-sans antialiased">
+<!-- Modal Overlay -->
+<div class="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-margin-mobile md:p-margin-desktop">
+<!-- Modal Container -->
+<div class="w-full max-w-[600px] bg-surface-floating border border-border-strong rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+<!-- Modal Header -->
+<div class="p-6 border-b border-border-subtle flex items-start justify-between">
+<div>
+<h2 class="font-section-h2-mobile text-section-h2-mobile text-text-primary mb-1">Change Avatar</h2>
+<p class="font-body-md text-body-md text-text-muted">Upload and adjust your community profile image.</p>
+</div>
+<button class="text-text-muted hover:text-text-primary transition-colors p-1 rounded-full hover:bg-surface-variant">
+<span class="material-symbols-outlined" data-icon="close">close</span>
+</button>
+</div>
+<!-- Modal Body -->
+<div class="p-6 flex flex-col gap-6">
+<!-- Editor Workspace -->
+<div class="w-full aspect-square max-h-[360px] bg-surface-dim rounded-xl overflow-hidden relative group border border-border-subtle cursor-move">
+<!-- Image to crop -->
+<img class="absolute inset-0 w-full h-full object-cover scale-110 origin-center transition-transform duration-300" data-alt="A professional headshot portrait of a modern adult male with dark hair and a neatly trimmed beard. He is wearing a dark, minimal corporate shirt. The lighting is calm, global, and neutral, emphasizing a premium and trustworthy technology platform aesthetic. The background is a very subtle, soft, out-of-focus modern office environment in cool grey tones." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCiKhlqYMKqyRhn5g929kubxTmAKByRyJOopiE9Xxb4221iNsAVh9xMAU9LP6dy_p_0A-eYyhjtNIMFYfSfKE7JQXU27KTvX9gT9j-J3L4TyVfB7xgdO1om7mEtqdrZyyNLPcmJHNzPG08ZgIb9drTI7sZfXpwW19U66McsI2gBSYyoIUEncP0gx1bNVmV1a2u9dc0UXE5rPJNBEjshSfM2NcnClPJ7PWL4gxa_5W5ao2zqH0xzITP-xyMkC9djqqHsHyA9Clt9i9qP"/>
+<!-- Crop Mask Overlay -->
+<div class="absolute inset-0 pointer-events-none flex items-center justify-center">
+<div class="w-[280px] h-[280px] rounded-full border border-primary/30 shadow-[0_0_0_9999px_rgba(17,23,34,0.85)] mix-blend-hard-light relative">
+<!-- Guide lines (optional subtle touch) -->
+<div class="absolute inset-0 border border-white/10 rounded-full border-dashed"></div>
+</div>
+</div>
+</div>
+<!-- Editor Controls -->
+<div class="flex items-center justify-between bg-surface-dim p-4 rounded-xl border border-border-subtle">
+<!-- Zoom Control -->
+<div class="flex items-center gap-3 flex-1 max-w-[240px]">
+<button class="text-text-muted hover:text-text-primary transition-colors">
+<span class="material-symbols-outlined text-[20px]" data-icon="remove">remove</span>
+</button>
+<div class="h-1 flex-1 bg-surface-variant rounded-full relative cursor-pointer">
+<div class="absolute left-0 top-0 bottom-0 w-1/3 bg-primary rounded-full"></div>
+<div class="absolute left-1/3 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-md transform -translate-x-1.5"></div>
+</div>
+<button class="text-text-muted hover:text-text-primary transition-colors">
+<span class="material-symbols-outlined text-[20px]" data-icon="add">add</span>
+</button>
+</div>
+<!-- Rotate & Reset -->
+<div class="flex items-center gap-2 border-l border-border-subtle pl-4 ml-4">
+<button class="p-2 text-text-muted hover:text-text-primary hover:bg-surface-variant rounded-lg transition-colors" title="Rotate Left">
+<span class="material-symbols-outlined text-[20px]" data-icon="rotate_left">rotate_left</span>
+</button>
+<button class="p-2 text-text-muted hover:text-text-primary hover:bg-surface-variant rounded-lg transition-colors" title="Rotate Right">
+<span class="material-symbols-outlined text-[20px]" data-icon="rotate_right">rotate_right</span>
+</button>
+<div class="w-px h-6 bg-border-subtle mx-2"></div>
+<button class="font-label-sm text-label-sm text-text-muted hover:text-text-primary transition-colors px-2 py-1">
+                            Reset
+                        </button>
+</div>
+</div>
+<!-- Upload & Preview Section -->
+<div class="flex items-center justify-between pt-2">
+<div class="flex flex-col gap-2">
+<button class="flex items-center gap-2 px-4 py-2 bg-surface-variant border border-border-strong text-text-secondary hover:text-text-primary hover:border-text-muted rounded-lg transition-colors w-fit font-label-sm text-label-sm">
+<span class="material-symbols-outlined text-[18px]" data-icon="upload">upload</span>
+                            Choose Another Image
+                        </button>
+<p class="font-label-xs text-label-xs text-text-muted">PNG, JPG or WebP · Maximum 5 MB</p>
+</div>
+<!-- Preview Circle -->
+<div class="flex flex-col items-center gap-2">
+<div class="w-16 h-16 rounded-full overflow-hidden border border-border-strong bg-surface">
+<img class="w-full h-full object-cover" data-alt="A professional headshot portrait of a modern adult male with dark hair and a neatly trimmed beard. He is wearing a dark, minimal corporate shirt. The lighting is calm, global, and neutral, emphasizing a premium and trustworthy technology platform aesthetic. The background is a very subtle, soft, out-of-focus modern office environment in cool grey tones." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAlUuz5x0MmHmDJ4nGwtWxWSy9Njw6xrnwnWqXQu2YpfGLFqypipNl8_z9XbjhJljapbTm29T5p65CD43drSMdnRIgn3pEI_LCo0YXFpO4RJCANX8I_UflawrADo2iiC4y0apkxWv9CabHz5orFXtViemJ-Z3kcJuWm5MiTrCwZE__IZpy2AHjoPzLU8QwmXH3QuIPJJYntVENYrmKZAuEFsM-JtrOCfMPqX_pyf--aqEZ9MpGe4mTW-3mDfU4pnAtUlGXZno-Jsqc0"/>
+</div>
+<span class="font-label-xs text-label-xs text-text-muted uppercase tracking-wider">Preview</span>
+</div>
+</div>
+</div>
+<!-- Modal Footer -->
+<div class="p-6 bg-surface-dim/50 border-t border-border-subtle flex items-center justify-end gap-4">
+<button class="px-5 py-2.5 rounded-lg border border-border-strong text-text-secondary font-label-sm text-label-sm hover:bg-surface-variant hover:text-text-primary transition-all">
+                    Cancel
+                </button>
+<button class="px-5 py-2.5 rounded-lg bg-primary-container text-[#07101E] font-label-sm text-label-sm font-medium hover:brightness-110 shadow-[0_0_15px_rgba(143,184,255,0.15)] transition-all">
+                    Save Avatar
+                </button>
+</div>
+</div>
+</div>
+<!-- Background Context (Blurred Out User Settings) -->
+<div class="flex w-full h-full filter blur-[2px] opacity-60 transition-all duration-300 pointer-events-none select-none">
+<!-- Side Nav Rail -->
+<nav class="bg-background border-r border-border-subtle flex flex-col items-center py-4 h-screen w-20 flex-shrink-0 transition-all duration-200 ease-in-out hidden md:flex z-10">
+<div class="mb-8 font-hero-h1 text-label-sm text-primary flex flex-col items-center gap-1">
+<span class="material-symbols-outlined text-[32px]" data-icon="dns" data-weight="fill" style="font-variation-settings: 'FILL' 1;">dns</span>
+</div>
+<div class="flex flex-col gap-4 flex-1 w-full px-2">
+<a class="text-text-muted hover:text-text-primary hover:bg-surface-variant flex flex-col items-center justify-center p-3 rounded-xl transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="hub">hub</span>
+</a>
+<a class="text-text-muted hover:text-text-primary hover:bg-surface-variant flex flex-col items-center justify-center p-3 rounded-xl transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="grid_view">grid_view</span>
+</a>
+<a class="text-text-muted hover:text-text-primary hover:bg-surface-variant flex flex-col items-center justify-center p-3 rounded-xl transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="code">code</span>
+</a>
+</div>
+<div class="mt-auto w-full px-2 flex flex-col gap-4">
+<!-- Settings Active -->
+<a class="text-primary border-l-4 border-primary bg-primary/10 flex flex-col items-center justify-center p-3 rounded-r-xl transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="settings" data-weight="fill" style="font-variation-settings: 'FILL' 1;">settings</span>
+</a>
+<div class="w-10 h-10 rounded-full bg-surface-variant border border-border-strong overflow-hidden mx-auto mt-2">
+<img class="w-full h-full object-cover" data-alt="A professional headshot portrait of a modern adult male with dark hair and a neatly trimmed beard. He is wearing a dark, minimal corporate shirt. The lighting is calm, global, and neutral, emphasizing a premium and trustworthy technology platform aesthetic. The background is a very subtle, soft, out-of-focus modern office environment in cool grey tones." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBX3xdyLhLAbTGzpCRY4Wf7W8fj0GlqNx8zLpLBbRsAP65S7dlvwKvttSKXBOcjI1sYJT0R44BdUi30jWIK396Q-WyTWLG4KL4HjjVEGxDVCp6QsWE_S-yesI2HzMDXxdYPSNfhVSC9kwNEo5KDk7CUR4-FrOPEV_aezHmYBlEPIHfu4jWg9An-cAWp_XAmJ-mPISTb6G7MSuvtyU8UTpdPI5472sso3K8uQONfbJ1apsi8GvGnY29_V_g56vwj7w7HYhth6omrBwwG"/>
+</div>
+</div>
+</nav>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col relative bg-surface-dim overflow-y-auto">
+<!-- Top Nav -->
+<header class="bg-surface-dim/80 backdrop-blur-md border-b border-border-subtle shadow-sm flex justify-between items-center px-gutter w-full z-40 docked full-width top-0 h-16 sticky">
+<div class="flex items-center gap-6">
+<h1 class="font-hero-h1-mobile text-body-lg font-bold text-primary mr-4">LobbyForge</h1>
+<nav class="hidden md:flex items-center gap-6 h-full">
+<a class="text-text-muted hover:text-text-primary transition-all duration-200 py-5" href="#">Dashboard</a>
+<a class="text-text-muted hover:text-text-primary transition-all duration-200 py-5" href="#">Servers</a>
+<a class="text-text-muted hover:text-text-primary transition-all duration-200 py-5" href="#">Members</a>
+</nav>
+</div>
+</header>
+<!-- Settings Content Mockup -->
+<div class="flex-1 p-margin-mobile md:p-margin-desktop max-w-[800px] mx-auto w-full">
+<h2 class="font-section-h2 text-section-h2 text-text-primary mb-8">User Settings</h2>
+<div class="bg-surface border border-border-subtle rounded-2xl p-8 shadow-sm mb-8">
+<h3 class="font-body-lg text-body-lg text-text-primary mb-6 border-b border-border-subtle pb-4">Public Profile</h3>
+<div class="flex items-start gap-8 mb-8">
+<div class="flex flex-col items-center gap-4">
+<div class="w-24 h-24 rounded-full bg-surface-variant border-2 border-border-strong overflow-hidden relative group">
+<img class="w-full h-full object-cover" data-alt="A professional headshot portrait of a modern adult male with dark hair and a neatly trimmed beard. He is wearing a dark, minimal corporate shirt. The lighting is calm, global, and neutral, emphasizing a premium and trustworthy technology platform aesthetic. The background is a very subtle, soft, out-of-focus modern office environment in cool grey tones." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDj7cbxbtjtQ0AqBSUIbKqvb_TAIDIModX9yCYo68GTD3Fs_taxZefJg7zkLSwgyD5Q5AccQ8-LYUZoQs3r4PKAXNJZS66LE3T5JeP1Tj-1dGuV1ZmuYHi4WM48iWBvGcc53sc86PHoulJ8mvuQqxGdI9MfD1CxbXTIvp6K9cwIXV_mLADk1kbnmmzmYYelP5cIVEpm3YAXRD7uHEjt8JTsMDvDDkfySpwLJQfpwI_r7IOk54ku0NepSYNvMXKtTAsC93au3gsBBV00"/>
+</div>
+<button class="px-4 py-2 border border-border-strong rounded-lg text-text-secondary font-label-sm text-label-sm">Change Avatar</button>
+</div>
+<div class="flex-1 space-y-4">
+<div>
+<label class="block font-label-sm text-label-sm text-text-secondary mb-2">Display Name</label>
+<input class="w-full bg-surface-dim border border-border-strong rounded-lg px-4 py-3 text-text-primary focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-all" disabled="" type="text" value="juanka"/>
+</div>
+<div>
+<label class="block font-label-sm text-label-sm text-text-secondary mb-2">Bio</label>
+<textarea class="w-full bg-surface-dim border border-border-strong rounded-lg px-4 py-3 text-text-primary focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-all" disabled="" rows="3">Infrastructure Architect &amp; Community Manager.</textarea>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+</div>
+</body></html>

@@ -1,0 +1,357 @@
+<!DOCTYPE html><html class="dark" lang="en" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>LobbyForge - Build the voice community you control</title>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-bright": "#36393f",
+                        "on-primary-fixed-variant": "#124686",
+                        "bg-soft": "#0B1018",
+                        "secondary-fixed-dim": "#bcc7da",
+                        "text-primary": "#F4F7FB",
+                        "surface-dim": "#101419",
+                        "background": "#101419",
+                        "on-secondary-fixed-variant": "#3d4757",
+                        "on-error-container": "#ffdad6",
+                        "primary-fixed-dim": "#a9c7ff",
+                        "on-tertiary-fixed-variant": "#5f4100",
+                        "surface-variant": "#32353b",
+                        "primary-container": "#8fb8ff",
+                        "secondary-container": "#3d4757",
+                        "inverse-primary": "#325e9f",
+                        "on-tertiary-container": "#614200",
+                        "surface-container-low": "#181c21",
+                        "on-tertiary-fixed": "#281900",
+                        "inverse-on-surface": "#2d3036",
+                        "primary-fixed": "#d6e3ff",
+                        "border-strong": "#334155",
+                        "on-surface-variant": "#c3c6d2",
+                        "on-primary-container": "#144787",
+                        "secondary-fixed": "#d8e3f6",
+                        "outline": "#8d919b",
+                        "error-container": "#93000a",
+                        "border-subtle": "#263142",
+                        "outline-variant": "#434750",
+                        "on-primary": "#003063",
+                        "surface-container-lowest": "#0b0e13",
+                        "on-secondary": "#26313f",
+                        "on-secondary-container": "#abb6c8",
+                        "danger": "#E98282",
+                        "text-secondary": "#B7C0CC",
+                        "text-muted": "#7F8A99",
+                        "tertiary": "#fccb7b",
+                        "error": "#ffb4ab",
+                        "surface-tint": "#a9c7ff",
+                        "tertiary-fixed": "#ffdeac",
+                        "success": "#8FB8FF", /* Changed from bright green to primary blue */
+                        "inverse-surface": "#e0e2ea",
+                        "on-tertiary": "#432c00",
+                        "tertiary-container": "#deb063",
+                        "on-secondary-fixed": "#111c2a",
+                        "surface-floating": "#1D2533",
+                        "surface-container-highest": "#32353b",
+                        "surface-container-high": "#272a30",
+                        "on-background": "#e0e2ea",
+                        "surface": "#111722",
+                        "surface-raised": "#171E2B",
+                        "on-primary-fixed": "#001b3d",
+                        "surface-container": "#1d2025",
+                        "tertiary-fixed-dim": "#efbf70",
+                        "on-error": "#690005",
+                        "secondary": "#bcc7da",
+                        "on-surface": "#e0e2ea",
+                        "primary": "#bdd3ff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px",
+                        "mockup": "32px"
+                    },
+                    "spacing": {
+                        "margin-desktop": "64px",
+                        "gutter": "24px",
+                        "section-gap": "120px",
+                        "container-max": "1240px",
+                        "margin-mobile": "24px"
+                    },
+                    "fontFamily": {
+                        "body-md": ["Geist", "sans-serif"],
+                        "section-h2": ["Geist", "sans-serif"],
+                        "section-h2-mobile": ["Geist", "sans-serif"],
+                        "hero-h1": ["Geist", "sans-serif"],
+                        "hero-h1-mobile": ["Geist", "sans-serif"],
+                        "label-sm": ["Geist", "sans-serif"],
+                        "label-xs": ["Geist", "sans-serif"],
+                        "body-lg": ["Geist", "sans-serif"]
+                    },
+                    "fontSize": {
+                        "body-md": ["16px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                        "section-h2": ["52px", { "lineHeight": "1.2", "fontWeight": "600" }],
+                        "section-h2-mobile": ["32px", { "lineHeight": "1.2", "fontWeight": "600" }],
+                        "hero-h1": ["80px", { "lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "600" }],
+                        "hero-h1-mobile": ["40px", { "lineHeight": "1.2", "fontWeight": "600" }],
+                        "label-sm": ["14px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "500" }],
+                        "label-xs": ["12px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "500" }],
+                        "body-lg": ["18px", { "lineHeight": "1.6", "fontWeight": "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body {
+            background-color: #070A0F;
+            color: #F4F7FB;
+            background-image: radial-gradient(circle at 50% 0%, rgba(143, 184, 255, 0.05) 0%, transparent 60%);
+        }
+        .mockup-highlight {
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 20px 40px -10px rgba(143, 184, 255, 0.05);
+        }
+    </style>
+</head>
+<body class="font-body-md text-body-md antialiased min-h-screen flex flex-col">
+<!-- TopNavBar Shared Component -->
+<nav class="bg-background/80 backdrop-blur-md fixed top-0 w-full z-50 border-b border-border-subtle/50 shadow-sm shadow-primary/5">
+<div class="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop flex justify-between items-center h-20">
+<div class="font-hero-h1 text-body-lg font-bold text-primary tracking-tight">
+                LobbyForge
+            </div>
+<div class="hidden md:flex gap-8">
+<a class="text-text-secondary hover:text-text-primary transition-colors hover:bg-surface-variant/30 rounded-lg px-3 py-2" href="#">Product</a>
+<a class="text-text-secondary hover:text-text-primary transition-colors hover:bg-surface-variant/30 rounded-lg px-3 py-2" href="#">Apps</a>
+<a class="text-text-secondary hover:text-text-primary transition-colors hover:bg-surface-variant/30 rounded-lg px-3 py-2" href="#">Self-host</a>
+<a class="text-text-secondary hover:text-text-primary transition-colors hover:bg-surface-variant/30 rounded-lg px-3 py-2" href="#">Docs</a>
+<a class="text-text-secondary hover:text-text-primary transition-colors hover:bg-surface-variant/30 rounded-lg px-3 py-2" href="#">GitHub</a>
+</div>
+<div class="flex items-center gap-4">
+<button class="hidden md:block text-text-secondary hover:text-text-primary font-label-sm text-label-sm">Sign In</button>
+<button class="bg-primary-container text-[#07101E] px-4 py-2 rounded-lg font-label-sm text-label-sm active:scale-95 duration-200 transition-all hover:brightness-110">Open Hub</button>
+</div>
+</div>
+</nav>
+<main class="flex-grow pt-32 pb-section-gap flex flex-col gap-section-gap">
+<!-- Hero Section -->
+<section class="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop w-full text-center">
+<h1 class="font-hero-h1-mobile md:font-hero-h1 text-hero-h1-mobile md:text-hero-h1 text-text-primary mb-6 max-w-4xl mx-auto">
+                Build the voice community you control.
+            </h1>
+<p class="font-body-lg text-body-lg text-text-secondary max-w-2xl mx-auto mb-10">
+                LobbyForge is an open-source platform for self-hosted voice rooms, built-in games, bots, and public discovery.
+            </p>
+<div class="flex flex-col sm:flex-row justify-center items-center gap-4 mb-12">
+<button class="w-full sm:w-auto bg-primary-container text-[#07101E] px-8 py-4 rounded-lg font-label-sm text-label-sm hover:brightness-110 transition-all">Explore LobbyForge</button>
+<button class="w-full sm:w-auto border border-border-strong text-secondary px-8 py-4 rounded-lg font-label-sm text-label-sm hover:bg-surface-variant/30 transition-all">View self-host setup</button>
+</div>
+<p class="font-label-sm text-label-sm text-text-muted mb-16 tracking-widest uppercase">
+                Open source • Self-hosted • Voice rooms • Built-in games
+            </p>
+<!-- Hero Mockup -->
+<div class="w-full rounded-[32px] bg-surface border border-border-subtle/30 overflow-hidden mockup-highlight relative flex" style="min-height: 500px;">
+<!-- Left Sidebar -->
+<div class="w-64 bg-surface-raised border-r border-border-subtle/50 p-4 flex flex-col gap-4 hidden md:flex shrink-0">
+<div class="flex items-center gap-2 text-text-primary font-label-sm text-label-sm pb-4 border-b border-border-subtle/50">
+<span class="material-symbols-outlined text-primary" style="font-variation-settings: 'FILL' 1;">dns</span>
+                        Self-Hosted Server
+                    </div>
+<div class="flex flex-col gap-2">
+<div class="text-text-muted font-label-xs text-label-xs mb-1">VOICE ROOMS</div>
+<div class="flex items-center gap-2 text-text-primary bg-surface-variant/50 p-2 rounded-lg">
+<span class="material-symbols-outlined text-text-secondary text-sm">volume_up</span>
+                            Main Lounge
+                        </div>
+<div class="flex items-center gap-2 text-text-secondary p-2 hover:bg-surface-variant/30 rounded-lg cursor-pointer">
+<span class="material-symbols-outlined text-sm">volume_up</span>
+                            Game Room 1
+                        </div>
+</div>
+<div class="mt-auto">
+<div class="flex items-center gap-2 text-primary bg-primary/10 p-2 rounded-lg font-label-xs text-label-xs border border-primary/20">
+<span class="material-symbols-outlined text-sm" style="font-variation-settings: 'FILL' 1;">health_and_safety</span>
+                            Doctor: All Systems Go
+                        </div>
+</div>
+</div>
+<!-- Main Area -->
+<div class="flex-grow flex flex-col bg-background/50">
+<div class="h-16 border-b border-border-subtle/50 flex items-center px-6 justify-between bg-surface/50 backdrop-blur-sm z-10 sticky top-0">
+<div class="flex items-center gap-2 text-text-primary font-label-sm text-label-sm">
+<span class="material-symbols-outlined text-text-secondary">tag</span>
+                            Main Lounge
+                        </div>
+<div class="flex gap-2">
+<button class="bg-primary/20 border border-primary/30 px-3 py-1.5 rounded-md text-primary font-label-xs text-label-xs flex items-center gap-1 hover:brightness-110 transition-all">
+<span class="material-symbols-outlined text-sm">sports_esports</span>
+                                Start Activity
+                            </button>
+</div>
+</div>
+<div class="flex-grow flex flex-col overflow-y-auto">
+<div class="p-6 flex flex-col gap-6 mt-auto">
+<!-- Activity Panel -->
+<div class="bg-surface-raised border border-primary/30 rounded-xl p-4 flex gap-4 items-center shadow-sm shadow-primary/5">
+<div class="w-12 h-12 bg-[#E7B86A]/20 border border-[#E7B86A]/30 rounded-lg flex items-center justify-center text-[#E7B86A] shrink-0">
+<span class="material-symbols-outlined">videogame_asset</span>
+</div>
+<div class="flex-grow">
+<div class="text-text-primary font-semibold text-label-sm">Hushle</div>
+<div class="text-text-secondary text-xs">Word guessing game • 2 playing</div>
+</div>
+<button class="bg-[#E7B86A] text-[#07101E] px-4 py-1.5 rounded font-bold text-label-xs hover:brightness-110 transition-all">
+Join Game
+</button>
+</div>
+<!-- Chat Messages -->
+<div class="flex gap-4 items-start w-max">
+<div class="w-10 h-10 rounded-full bg-surface-variant flex items-center justify-center text-primary font-bold shrink-0">U</div>
+<div>
+<div class="flex items-center gap-2 mb-1">
+<span class="text-text-primary font-label-sm text-label-sm">User</span>
+<span class="text-text-muted font-label-xs text-label-xs">12:00 PM</span>
+</div>
+<div class="text-text-secondary text-sm bg-surface p-3 rounded-lg border border-border-subtle/30 shadow-sm">
+                                        Ready to start the game?
+                                    </div>
+</div>
+</div>
+<div class="flex gap-4 items-start w-max">
+<div class="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold shrink-0">B</div>
+<div>
+<div class="flex items-center gap-2 mb-1">
+<span class="text-text-primary font-label-sm text-label-sm">GameBot</span>
+<span class="bg-primary/20 text-primary text-[10px] px-1 rounded uppercase font-bold tracking-wider">Bot</span>
+<span class="text-text-muted font-label-xs text-label-xs">12:01 PM</span>
+</div>
+<div class="text-text-secondary text-sm bg-surface p-3 rounded-lg border border-border-subtle/30 shadow-sm">
+                                        Hushle lobby created. Type /join to play.
+                                    </div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Right Sidebar -->
+<div class="w-60 bg-surface-raised border-l border-border-subtle/50 p-4 flex flex-col gap-4 hidden lg:flex shrink-0">
+<div class="text-text-muted font-label-xs text-label-xs mb-1">ONLINE — 2</div>
+<div class="flex items-center gap-3 p-2 hover:bg-surface-variant/30 rounded-lg cursor-pointer">
+<div class="w-8 h-8 rounded-full bg-surface-variant flex items-center justify-center text-primary font-bold text-xs relative">
+                        U
+                        <div class="absolute bottom-0 right-0 w-2.5 h-2.5 bg-success rounded-full border-2 border-surface-raised"></div>
+</div>
+<span class="text-text-secondary font-label-sm text-label-sm">User</span>
+</div>
+<div class="flex items-center gap-3 p-2 hover:bg-surface-variant/30 rounded-lg cursor-pointer">
+<div class="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-xs">
+                        B
+                    </div>
+<div class="flex items-center gap-2">
+<span class="text-text-secondary font-label-sm text-label-sm">GameBot</span>
+<span class="bg-primary/20 text-primary text-[10px] px-1 rounded uppercase font-bold tracking-wider">Bot</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Feature Strip -->
+<section class="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop w-full">
+<div class="grid grid-cols-1 md:grid-cols-4 gap-8 py-8 border-y border-border-subtle/30">
+<div class="flex flex-col items-center text-center gap-3">
+<span class="material-symbols-outlined text-primary text-3xl font-light">dns</span>
+<h3 class="font-label-sm text-label-sm text-text-primary">Own your instance</h3>
+</div>
+<div class="flex flex-col items-center text-center gap-3">
+<span class="material-symbols-outlined text-primary text-3xl font-light">record_voice_over</span>
+<h3 class="font-label-sm text-label-sm text-text-primary">Voice rooms and chat</h3>
+</div>
+<div class="flex flex-col items-center text-center gap-3">
+<span class="material-symbols-outlined text-[#E7B86A] text-3xl font-light">sports_esports</span>
+<h3 class="font-label-sm text-label-sm text-text-primary">Games inside rooms</h3>
+</div>
+<div class="flex flex-col items-center text-center gap-3">
+<span class="material-symbols-outlined text-primary text-3xl font-light">public</span>
+<h3 class="font-label-sm text-label-sm text-text-primary">Public discovery optional</h3>
+</div>
+</div>
+</section>
+<!-- Product Preview Bento -->
+<section class="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop w-full">
+<h2 class="font-section-h2-mobile md:font-section-h2 text-section-h2-mobile md:text-section-h2 text-text-primary mb-12 text-center">
+                Built for communities.
+            </h2>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+<!-- Card 1 -->
+<div class="bg-surface/80 backdrop-blur-sm rounded-2xl border border-border-subtle/30 p-8 flex flex-col gap-4 mockup-highlight">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary">record_voice_over</span>
+<h3 class="font-body-lg text-body-lg font-semibold text-text-primary">Voice room + chat</h3>
+</div>
+<p class="text-text-secondary text-sm">Persistent text channels integrated natively with low-latency voice rooms.</p>
+</div>
+<!-- Card 2 -->
+<div class="bg-surface/80 backdrop-blur-sm rounded-2xl border border-border-subtle/30 p-8 flex flex-col gap-4 mockup-highlight">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-[#E7B86A]">sports_esports</span>
+<h3 class="font-body-lg text-body-lg font-semibold text-text-primary">Start Activity / Hushle</h3>
+</div>
+<p class="text-text-secondary text-sm">Launch built-in games and activities directly within the room with one click.</p>
+</div>
+<!-- Card 3 -->
+<div class="bg-surface/80 backdrop-blur-sm rounded-2xl border border-border-subtle/30 p-8 flex flex-col gap-4 mockup-highlight">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary">smart_toy</span>
+<h3 class="font-body-lg text-body-lg font-semibold text-text-primary">Bots and roles</h3>
+</div>
+<p class="text-text-secondary text-sm">Powerful permission systems and bot integrations to moderate and manage your community.</p>
+</div>
+<!-- Card 4 -->
+<div class="bg-surface/80 backdrop-blur-sm rounded-2xl border border-border-subtle/30 p-8 flex flex-col gap-4 mockup-highlight">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary">health_and_safety</span>
+<h3 class="font-body-lg text-body-lg font-semibold text-text-primary">Doctor health checks</h3>
+</div>
+<p class="text-text-secondary text-sm">Real-time diagnostics and performance monitoring for your self-hosted instance.</p>
+</div>
+</div>
+</section>
+<!-- Final CTA -->
+<section class="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop w-full text-center py-section-gap">
+<h2 class="font-section-h2-mobile md:font-section-h2 text-section-h2-mobile md:text-section-h2 text-text-primary mb-8 max-w-3xl mx-auto">
+                A voice platform for communities that want ownership.
+            </h2>
+<div class="flex flex-col sm:flex-row justify-center items-center gap-4">
+<button class="w-full sm:w-auto bg-primary-container text-[#07101E] px-8 py-4 rounded-lg font-label-sm text-label-sm hover:brightness-110 transition-all">Explore LobbyForge</button>
+<button class="w-full sm:w-auto border border-border-strong text-secondary px-8 py-4 rounded-lg font-label-sm text-label-sm hover:bg-surface-variant/30 transition-all">Read the docs</button>
+</div>
+</section>
+</main>
+<!-- Footer Shared Component -->
+<footer class="bg-surface-dim w-full pt-section-gap pb-12 border-t border-border-strong">
+<div class="max-w-container-max mx-auto px-margin-desktop flex flex-col md:flex-row justify-between items-center gap-8">
+<div class="font-hero-h1 text-body-md font-bold text-text-muted">
+                LobbyForge
+            </div>
+<div class="flex gap-6 flex-wrap justify-center font-label-sm text-label-sm">
+<a class="text-text-muted hover:text-text-secondary transition-colors transition-opacity duration-300 hover:underline decoration-primary/50 underline-offset-4" href="#">GitHub</a>
+<a class="text-text-muted hover:text-text-secondary transition-colors transition-opacity duration-300 hover:underline decoration-primary/50 underline-offset-4" href="#">Docs</a>
+<a class="text-text-muted hover:text-text-secondary transition-colors transition-opacity duration-300 hover:underline decoration-primary/50 underline-offset-4" href="#">Community</a>
+<a class="text-text-muted hover:text-text-secondary transition-colors transition-opacity duration-300 hover:underline decoration-primary/50 underline-offset-4" href="#">Privacy</a>
+<a class="text-text-muted hover:text-text-secondary transition-colors transition-opacity duration-300 hover:underline decoration-primary/50 underline-offset-4" href="#">Terms</a>
+</div>
+<div class="font-label-sm text-label-sm text-text-muted">
+                © 2024 LobbyForge. Self-hosted power for modern communities.
+            </div>
+</div>
+</footer>
+
+
+</body></html>

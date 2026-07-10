@@ -1,0 +1,397 @@
+﻿@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=block');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.safe-area-page {
+  padding-top: max(2.5rem, env(safe-area-inset-top));
+  padding-right: max(1.25rem, env(safe-area-inset-right));
+  padding-bottom: max(2.5rem, env(safe-area-inset-bottom));
+  padding-left: max(1.25rem, env(safe-area-inset-left));
+}
+
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-smoothing: antialiased;
+  font-variation-settings:
+    'FILL' 0,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 24;
+}
+
+@layer base {
+  :root {
+    --lf-background: #101419;
+    --lf-page-bg: #070a0f;
+    --lf-surface: #111722;
+    --lf-surface-raised: #171e2b;
+    --lf-surface-container: #1d2025;
+    --lf-surface-container-high: #272a30;
+    --lf-surface-dim: #101419;
+    --lf-border-subtle: #263142;
+    --lf-text-primary: #f4f7fb;
+    --lf-text-secondary: #b7c0cc;
+    --lf-text-muted: #7f8a99;
+    --lf-user-accent: #8fb8ff;
+  }
+
+  .lf-theme-dim {
+    --lf-background: #151a22;
+    --lf-page-bg: #10141c;
+    --lf-surface: #18202b;
+    --lf-surface-raised: #202938;
+    --lf-surface-container: #252e3d;
+    --lf-surface-container-high: #303a4c;
+    --lf-surface-dim: #121720;
+    --lf-border-subtle: #334054;
+    --lf-text-primary: #eef3fb;
+    --lf-text-secondary: #c1cad7;
+    --lf-text-muted: #8d98a8;
+  }
+
+  .lf-theme-light {
+    --lf-background: #eef2f7;
+    --lf-page-bg: #f7f9fc;
+    --lf-surface: #ffffff;
+    --lf-surface-raised: #f4f7fb;
+    --lf-surface-container: #e8edf4;
+    --lf-surface-container-high: #dbe3ee;
+    --lf-surface-dim: #eef2f7;
+    --lf-border-subtle: #c9d3e0;
+    --lf-text-primary: #101826;
+    --lf-text-secondary: #3d4a5c;
+    --lf-text-muted: #6b7787;
+  }
+
+  html,
+  body {
+    background-color: var(--lf-page-bg);
+    color: var(--lf-text-primary);
+  }
+
+  body {
+    background-image:
+      radial-gradient(circle at 50% 0%, rgba(143, 184, 255, 0.05) 0%, transparent 60%),
+      linear-gradient(180deg, var(--lf-page-bg) 0%, var(--lf-background) 55%, var(--lf-page-bg) 100%);
+    font-family: 'Geist', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  :where(button, a, [role='button'], summary, label, select, .material-symbols-outlined) {
+    user-select: none;
+  }
+
+  :where(button, a, [role='button'], summary) {
+    cursor: pointer;
+  }
+
+  :where(button, a, [role='button'], summary, label, select, .material-symbols-outlined):not(input):not(textarea) {
+    caret-color: transparent;
+  }
+
+  :where(input, textarea, [contenteditable='true']) {
+    caret-color: auto;
+    user-select: text;
+  }
+
+  .bg-background {
+    background-color: var(--lf-background) !important;
+  }
+  .bg-surface {
+    background-color: var(--lf-surface) !important;
+  }
+  .bg-surface-dim {
+    background-color: var(--lf-surface-dim) !important;
+  }
+  .bg-surface-raised,
+  .bg-surface-floating {
+    background-color: var(--lf-surface-raised) !important;
+  }
+  .bg-surface-container,
+  .bg-surface-container-low,
+  .bg-surface-container-lowest {
+    background-color: var(--lf-surface-container) !important;
+  }
+  .bg-surface-container-high,
+  .bg-surface-container-highest,
+  .bg-surface-variant {
+    background-color: var(--lf-surface-container-high) !important;
+  }
+  .text-text-primary {
+    color: var(--lf-text-primary) !important;
+  }
+  .text-text-secondary {
+    color: var(--lf-text-secondary) !important;
+  }
+  .text-text-muted {
+    color: var(--lf-text-muted) !important;
+  }
+  .text-primary {
+    color: var(--lf-user-accent) !important;
+  }
+  .bg-primary,
+  .bg-primary-container {
+    background-color: var(--lf-user-accent) !important;
+  }
+  .border-border-subtle {
+    border-color: var(--lf-border-subtle) !important;
+  }
+
+  /* Custom premium scrollbar - referenced by the lobby and other dark UIs. */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #263142;
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #334155;
+  }
+}
+
+@layer components {
+  /* Glass panel - used by the lobby's chat attachment cards and other raised surfaces. */
+  .glass-panel {
+    background: rgba(17, 23, 34, 0.78);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    box-shadow:
+      0 4px 6px -1px rgba(0, 0, 0, 0.1),
+      0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  }
+
+  .btn-primary-sm {
+    border-radius: 0.5rem;
+    background: #8fb8ff;
+    color: #07101e;
+    padding: 0.375rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    transition: filter 0.15s ease;
+  }
+
+  .btn-primary-sm:hover {
+    filter: brightness(1.08);
+  }
+
+  .btn-secondary-sm {
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: 0.5rem;
+    background: rgba(31, 41, 55, 0.64);
+    color: #d8e0ed;
+    padding: 0.375rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    transition:
+      background 0.15s ease,
+      color 0.15s ease;
+  }
+
+  .btn-secondary-sm:hover {
+    background: rgba(51, 65, 85, 0.72);
+    color: #f4f7fb;
+  }
+
+  /* Highlight ring for the speaking user pulse animation. */
+  @keyframes speaking-pulse {
+    0% {
+      box-shadow: 0 0 0 0 rgba(143, 184, 255, 0.4);
+    }
+    70% {
+      box-shadow: 0 0 0 4px rgba(143, 184, 255, 0);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(143, 184, 255, 0);
+    }
+  }
+
+  .is-speaking {
+    animation: speaking-pulse 2s infinite;
+  }
+
+  /**
+   * Calm Future motion utilities - canonical tokens sourced 1:1 from
+   * design_stitch/lobbyforge_animated_desktop_shell/code.html. The
+   * `animate-*` Tailwind utilities (tailwind.config.ts) cover the
+   * common case; the classes below cover non-Tailwind consumers
+   * (.stagger-* delays, .speaking-ring for video tiles, .rail-tooltip
+   * for hover hints) and the prefers-reduced-motion override.
+   */
+
+  /* Keyframes - kept in sync with tailwind.config.ts `keyframes`. */
+  @keyframes fadeInRight {
+    0% {
+      opacity: 0;
+      transform: translateX(-20px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+  @keyframes fadeInLeft {
+    0% {
+      opacity: 0;
+      transform: translateX(20px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+  @keyframes fadeInUp {
+    0% {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes pulseSoft {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.6;
+    }
+  }
+  @keyframes speakingPulse {
+    0%,
+    100% {
+      box-shadow: 0 0 0 2px #7ccfa6;
+    }
+    50% {
+      box-shadow: 0 0 0 4px rgba(124, 207, 166, 0.4);
+    }
+  }
+
+  /* Stagger delays for cascading entrance animations. */
+  .stagger-1 {
+    animation-delay: 0.1s;
+  }
+  .stagger-2 {
+    animation-delay: 0.2s;
+  }
+  .stagger-3 {
+    animation-delay: 0.3s;
+  }
+  .stagger-4 {
+    animation-delay: 0.4s;
+  }
+  .stagger-5 {
+    animation-delay: 0.5s;
+  }
+  .stagger-6 {
+    animation-delay: 0.6s;
+  }
+
+  /**
+   * Speaking ring for video-tile style participant frames (green,
+   * matches LiveKit participant grid convention). Distinct from
+   * `.is-speaking` above which is the small avatar dot pulse (ice blue)
+   * used in the sidebar voice roster.
+   */
+  .speaking-ring {
+    animation: speakingPulse 2s ease-in-out infinite;
+  }
+
+  /**
+   * Server-rail tooltip - slides in from the left on hover. Used by the
+   * 72px left navigation rail in the animated desktop shell.
+   */
+  .rail-tooltip {
+    transition: all 0.2s ease-in-out;
+    transform: translateX(-10px);
+    pointer-events: none;
+  }
+  .group:hover .rail-tooltip {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  .force-large-text {
+    font-size: 115%;
+  }
+
+  .force-high-contrast body {
+    background-image: none;
+  }
+
+  .force-high-contrast .bg-surface,
+  .force-high-contrast .bg-surface\/80,
+  .force-high-contrast .bg-surface-raised,
+  .force-high-contrast .bg-surface-container,
+  .force-high-contrast .bg-surface-container-low,
+  .force-high-contrast .bg-surface-container-high {
+    border-color: rgba(244, 247, 251, 0.42) !important;
+  }
+
+  .force-visible-focus :where(a, button, input, select, textarea, [tabindex]):focus {
+    outline: 2px solid #8fb8ff;
+    outline-offset: 2px;
+  }
+
+  .lf-density-compact body {
+    --lf-density-scale: 0.88;
+  }
+
+  .lf-chat-compact .chat-message,
+  .lf-chat-compact [data-chat-message] {
+    padding-top: 0.25rem !important;
+    padding-bottom: 0.25rem !important;
+  }
+
+  .lf-chat-hide-avatars .chat-avatar,
+  .lf-chat-hide-avatars [data-chat-avatar] {
+    display: none !important;
+  }
+
+  .lf-hide-empty-channels [data-empty-channel='true'] {
+    display: none !important;
+  }
+
+  /**
+   * Accessibility: disable all non-essential motion when the user has
+   * requested reduced motion at the OS level. The list of class names
+   * mirrors the Tailwind `animate-*` utilities + the special classes
+   * defined above. Also supports a manual `.force-reduced-motion`
+   * override applied to <html> by the Accessibility settings page.
+   */
+  @media (prefers-reduced-motion: reduce),
+    .force-reduced-motion {
+    .animate-fade-in-right,
+    .animate-fade-in-left,
+    .animate-fade-in-up,
+    .animate-pulse-soft,
+    .animate-speaking-pulse,
+    .is-speaking,
+    .speaking-ring {
+      animation: none !important;
+      transition: none !important;
+      transform: none !important;
+      opacity: 1 !important;
+    }
+  }
+}
+

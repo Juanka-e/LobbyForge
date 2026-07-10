@@ -1,0 +1,28 @@
+{
+  "name": "@lobbyforge/i18n",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./locales/*": "./locales/*.json"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint \"src/**/*.ts\"",
+    "i18n:check": "tsx scripts/check-i18n.ts"
+  },
+  "devDependencies": {
+    "@lobbyforge/config": "workspace:*",
+    "typescript": "^5.4.5",
+    "vitest": "^1.6.0",
+    "tsx": "^4.10.1"
+  }
+}

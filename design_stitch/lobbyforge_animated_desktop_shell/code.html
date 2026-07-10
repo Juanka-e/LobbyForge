@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>LobbyForge - Ankara Gaming Voice</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "primary": "#8fb8ff",
+                        "on-primary": "#003063",
+                        "background": "#070A0F",
+                        "bg-soft": "#0B1018",
+                        "surface": "#111722",
+                        "surface-container": "#1d2025",
+                        "surface-container-high": "#272a30",
+                        "surface-container-low": "#181c21",
+                        "border-subtle": "#1e242d",
+                        "text-primary": "#F4F7FB",
+                        "text-secondary": "#B7C0CC",
+                        "text-muted": "#7F8A99",
+                        "success": "#7CCFA6",
+                        "danger": "#E98282"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "sans": ["Geist", "sans-serif"]
+                    },
+                    "animation": {
+                        "fade-in-right": "fadeInRight 0.6s ease-out forwards",
+                        "fade-in-left": "fadeInLeft 0.6s ease-out forwards",
+                        "fade-in-up": "fadeInUp 0.5s ease-out forwards",
+                        "pulse-soft": "pulseSoft 3s ease-in-out infinite",
+                        "speaking-pulse": "speakingPulse 2s ease-in-out infinite"
+                    },
+                    "keyframes": {
+                        "fadeInRight": {
+                            "0%": { opacity: "0", transform: "translateX(-20px)" },
+                            "100%": { opacity: "1", transform: "translateX(0)" }
+                        },
+                        "fadeInLeft": {
+                            "0%": { opacity: "0", transform: "translateX(20px)" },
+                            "100%": { opacity: "1", transform: "translateX(0)" }
+                        },
+                        "fadeInUp": {
+                            "0%": { opacity: "0", transform: "translateY(10px)" },
+                            "100%": { opacity: "1", transform: "translateY(0)" }
+                        },
+                        "pulseSoft": {
+                            "0%, 100%": { opacity: "1" },
+                            "50%": { opacity: "0.6" }
+                        },
+                        "speakingPulse": {
+                            "0%, 100%": { boxShadow: "0 0 0 2px #7CCFA6" },
+                            "50%": { boxShadow: "0 0 0 4px rgba(124, 207, 166, 0.4)" }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        @font-face {
+            font-family: 'Geist';
+            src: url('https://cdn.jsdelivr.net/fontsource/fonts/geist-sans@latest/latin-400-normal.woff2') format('woff2');
+            font-weight: 400;
+        }
+        @font-face {
+            font-family: 'Geist';
+            src: url('https://cdn.jsdelivr.net/fontsource/fonts/geist-sans@latest/latin-500-normal.woff2') format('woff2');
+            font-weight: 500;
+        }
+        @font-face {
+            font-family: 'Geist';
+            src: url('https://cdn.jsdelivr.net/fontsource/fonts/geist-sans@latest/latin-600-normal.woff2') format('woff2');
+            font-weight: 600;
+        }
+        body { font-family: 'Geist', sans-serif; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #272a30; border-radius: 10px; }
+        
+        .speaking-ring { animation: speakingPulse 2s ease-in-out infinite; }
+        
+        .stagger-1 { animation-delay: 0.1s; }
+        .stagger-2 { animation-delay: 0.2s; }
+        .stagger-3 { animation-delay: 0.3s; }
+        .stagger-4 { animation-delay: 0.4s; }
+        .stagger-5 { animation-delay: 0.5s; }
+        .stagger-6 { animation-delay: 0.6s; }
+
+        @media (prefers-reduced-motion: reduce) {
+            .animate-fade-in-right, .animate-fade-in-left, .animate-fade-in-up, .animate-pulse-soft, .speaking-ring {
+                animation: none !important;
+                transition: none !important;
+                transform: none !important;
+                opacity: 1 !important;
+            }
+        }
+
+        .rail-tooltip {
+            transition: all 0.2s ease-in-out;
+            transform: translateX(-10px);
+            pointer-events: none;
+        }
+        .group:hover .rail-tooltip {
+            opacity: 1;
+            transform: translateX(0);
+        }
+    </style>
+</head>
+<body class="bg-background text-text-primary h-screen overflow-hidden flex w-full">
+<!-- Server Rail -->
+<nav class="w-[72px] h-screen bg-background border-r border-border-subtle flex flex-col items-center py-3 flex-shrink-0 z-50 animate-fade-in-right">
+<div class="mb-4">
+<button class="w-12 h-12 rounded-2xl bg-surface-container flex items-center justify-center font-bold text-primary hover:rounded-xl hover:scale-105 hover:shadow-[0_0_15px_rgba(143,184,255,0.3)] transition-all duration-300 cursor-pointer" title="LobbyForge Home">LF</button>
+</div>
+<div class="w-8 h-[2px] bg-border-subtle mb-4"></div>
+<div class="flex-1 space-y-2">
+<div class="relative group">
+<button class="w-12 h-12 rounded-full flex items-center justify-center bg-surface-container text-primary hover:rounded-xl hover:scale-105 hover:shadow-[0_0_15px_rgba(143,184,255,0.3)] transition-all duration-300 group relative" title="LobbyForge Official">
+<span class="font-bold text-sm">LF</span>
+<div class="absolute -right-1 -top-1 w-4 h-4 bg-primary rounded-full flex items-center justify-center border-2 border-background"><span class="material-symbols-outlined text-[10px] text-on-primary font-bold">check</span></div>
+<div class="absolute -left-1 w-1 h-2 bg-text-primary rounded-r-full group-hover:h-5 transition-all opacity-0 group-hover:opacity-100"></div>
+</button>
+<div class="absolute left-16 top-1/2 -translate-y-1/2 px-2 py-1 bg-surface-container-high text-xs rounded opacity-0 rail-tooltip whitespace-nowrap z-[60] border border-border-subtle">LobbyForge Official</div>
+</div>
+<div class="relative group">
+<div class="absolute -left-1 top-1 w-1 h-10 bg-text-primary rounded-r-full"></div>
+<button class="w-12 h-12 rounded-xl flex items-center justify-center bg-primary text-on-primary hover:scale-105 transition-all duration-300" title="Ankara Gaming Voice">
+<span class="material-symbols-outlined">sports_esports</span>
+</button>
+<div class="absolute left-16 top-1/2 -translate-y-1/2 px-2 py-1 bg-surface-container-high text-xs rounded opacity-0 rail-tooltip whitespace-nowrap z-[60] border border-border-subtle">Ankara Gaming Voice</div>
+</div>
+<div class="relative group">
+<button class="w-12 h-12 rounded-full flex items-center justify-center text-success border border-dashed border-border-subtle hover:bg-success/10 hover:border-success hover:scale-105 transition-all duration-300" title="Add a community">
+<span class="material-symbols-outlined">add</span>
+</button>
+<div class="absolute left-16 top-1/2 -translate-y-1/2 px-2 py-1 bg-surface-container-high text-xs rounded opacity-0 rail-tooltip whitespace-nowrap z-[60] border border-border-subtle">Add Community</div>
+</div>
+</div>
+</nav>
+<!-- Channels Sidebar -->
+<aside class="w-60 bg-surface flex flex-col flex-shrink-0 z-40 border-r border-border-subtle animate-fade-in-right stagger-1">
+<header class="h-12 flex items-center px-4 border-b border-border-subtle shadow-sm hover:bg-white/5 cursor-pointer transition-colors duration-200">
+<h2 class="font-semibold text-sm truncate flex-1">Ankara Gaming Voice</h2>
+<span class="material-symbols-outlined text-sm transition-transform duration-200 group-hover:translate-y-0.5">expand_more</span>
+</header>
+<div class="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-4">
+<!-- Text Channels -->
+<div>
+<button class="flex items-center w-full px-1 mb-1 text-text-muted hover:text-text-primary uppercase text-[11px] font-bold tracking-wider group transition-colors">
+<span class="material-symbols-outlined text-xs mr-1 transition-transform group-hover:rotate-0 -rotate-90">expand_more</span>
+<span class="">Text Channels</span>
+<span class="material-symbols-outlined text-sm ml-auto opacity-0 group-hover:opacity-100 transition-opacity">add</span>
+</button>
+<nav class="space-y-0.5">
+<a class="flex items-center px-2 py-1.5 rounded-md hover:bg-surface-container hover:text-text-secondary transition-all duration-200 group text-text-secondary hover:translate-x-1" href="#">
+<span class="text-lg mr-2 font-medium opacity-60">#</span>
+<span class="text-sm">announcements</span>
+</a>
+<a class="flex items-center px-2 py-1.5 rounded-md bg-surface-container-high text-text-primary font-medium group transition-all" href="#">
+<span class="text-lg mr-2 font-medium opacity-60">#</span>
+<span class="text-sm">general</span>
+</a>
+<a class="flex items-center px-2 py-1.5 rounded-md hover:bg-surface-container hover:text-text-secondary transition-all duration-200 group text-text-secondary hover:translate-x-1" href="#">
+<span class="text-lg mr-2 font-medium opacity-60">#</span>
+<span class="text-sm">clips</span>
+</a>
+</nav>
+</div>
+<!-- Voice Channels -->
+<div>
+<button class="flex items-center w-full px-1 mb-1 text-text-muted hover:text-text-primary uppercase text-[11px] font-bold tracking-wider group transition-colors">
+<span class="material-symbols-outlined text-xs mr-1 transition-transform group-hover:rotate-0 -rotate-90">expand_more</span>
+<span class="">Voice Channels</span>
+<span class="material-symbols-outlined text-sm ml-auto opacity-0 group-hover:opacity-100 transition-opacity">add</span>
+</button>
+<div class="space-y-0.5"><div class="mb-2"><button class="flex items-center w-full px-2 py-1.5 rounded-md text-text-muted hover:bg-surface-container transition-all duration-200 group hover:translate-x-1"><span class="material-symbols-outlined text-lg mr-2">volume_up</span><span class="text-sm flex-1 text-left">Main Lounge</span></button><div class="ml-8 space-y-1 mt-1"><div class="flex items-center space-x-2 px-2 py-1 hover:bg-white/5 rounded transition-colors group cursor-pointer"><img alt="juanka" class="w-6 h-6 rounded-full speaking-ring" src="https://lh3.googleusercontent.com/aida-public/AB6AXuC48Suew1cw3_ZlQ8yJ6KnzYH9S7MtryXxCpGDIyhP6a98PTfhh_9C0ifO9vL4GN4nHA4ljmfyx_JvYmn_Xe9hhPHm-DBAKyJ9ywHMDEP_-6IMWaPyx5xUECbmrop7-fvuF8m8ZdeaiG6ue818h0dZRFAkSp2voeScJ368yUJDpCAD6VctoJNYO8LHXj4r3HIkS18dn48IdJ9GF1DAHpXf9fMpnl667bdcwZhzo_8NJ_2nc_UhMG8AHDBg8FSxm0zzxcHyRfGyqtuYB"/><span class="text-sm text-text-secondary group-hover:text-text-primary">juanka</span></div><div class="flex items-center space-x-2 px-2 py-1 hover:bg-white/5 rounded transition-colors group cursor-pointer"><img alt="Ayşe" class="w-6 h-6 rounded-full" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCBL43s3jqIMRP2fKcNIRGYvlNYFL2ZZS1q0p_XSwGFdvPItUcYIvGcnjRPjetnEFDOtK1YgvcqUDI4uGUK15m7g4lo23Mx6TUnODF-vAjpkMa2epFVsZJJo440ll8H6vgVvavsN4QIaMTmtEuFBTHKZSVHFUKdnCtlCRF62MUo2LNvIpOl0pHm0aelSvedTX9IfU7YOCihEcUeTWoIYfSi0bxOoKFFG-xfYDr9RonxAqRej2omVR7BVmCFOLyXHIfwUnS6vWyzyT6e"/><span class="text-sm text-text-muted group-hover:text-text-secondary">Ayşe</span></div><div class="flex items-center space-x-2 px-2 py-1 hover:bg-white/5 rounded transition-colors group cursor-pointer"><img alt="Mehmet" class="w-6 h-6 rounded-full" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD_TMeCwUD24KvPYGUOWXG_yClJoclLBGrTwSGayVUfTMciiyPhvLR8rxpHQtrCQhDmTtlVY4gP9au4EC9-DTwo-4YUBKIPn9vPah3DX9wsTigdCu39Tou3dqFm9xI5LE-ZzODElVzaT0HDzHOoTwY-owg44w4OvgFCp0bqwJjFPjFU5uU3z-tup5YyYQNmQ_8AJwws_Ceg0IDPP4QRZ1pY1-pq2PC741Zfd-C0ZFFXBo3mzeZZgT-kEBn4zWm-ggsDqvm3y09ICSqk"/><span class="text-sm text-text-muted group-hover:text-text-secondary">Mehmet</span><div class="flex-1"></div><span class="material-symbols-outlined text-sm text-danger opacity-60 group-hover:opacity-100">mic_off</span></div></div></div><button class="flex items-center w-full px-2 py-1.5 rounded-md text-text-muted hover:bg-surface-container transition-all duration-200 group hover:translate-x-1"><span class="material-symbols-outlined text-lg mr-2">volume_up</span><span class="text-sm flex-1 text-left">Game Room 1</span></button><button class="flex items-center w-full px-2 py-1.5 rounded-md text-text-muted hover:bg-surface-container transition-all duration-200 group hover:translate-x-1"><span class="material-symbols-outlined text-lg mr-2">volume_up</span><span class="text-sm flex-1 text-left">Hushle Room</span></button><button class="flex items-center w-full px-2 py-1.5 rounded-md text-text-muted hover:bg-surface-container transition-all duration-200 group hover:translate-x-1"><span class="material-symbols-outlined text-lg mr-2">volume_up</span><span class="text-sm flex-1 text-left">Vampire Night</span></button></div>
+</div>
+</div>
+<!-- User & Voice Control Area -->
+<div class="mt-auto bg-background/50 border-t border-border-subtle p-2 flex flex-col space-y-2">
+<div class="flex items-center px-2 py-1 justify-between border-b border-border-subtle/50 pb-2 mb-1">
+<div class="min-w-0 flex-1">
+<div class="flex items-center space-x-1">
+<span class="material-symbols-outlined text-success text-xs animate-pulse-soft">signal_cellular_alt</span>
+<div class="text-[11px] font-bold text-success truncate">Voice Connected</div>
+</div>
+<div class="text-[10px] text-text-muted truncate">Main Lounge / Ankara</div>
+</div>
+<div class="flex items-center space-x-1">
+<button class="w-7 h-7 flex items-center justify-center text-text-muted hover:text-text-primary transition-all duration-200 hover:scale-110 active:scale-95 rounded" title="Camera"><span class="material-symbols-outlined text-lg">videocam</span></button>
+<button class="w-7 h-7 flex items-center justify-center text-text-muted hover:text-text-primary transition-all duration-200 hover:scale-110 active:scale-95 rounded" title="Screen Share"><span class="material-symbols-outlined text-lg">screen_share</span></button>
+<button class="w-7 h-7 flex items-center justify-center text-text-muted hover:text-danger transition-all duration-200 hover:scale-110 active:scale-95 rounded" title="Disconnect"><span class="material-symbols-outlined text-lg">call_end</span></button>
+</div>
+</div>
+<div class="flex items-center p-1 bg-surface-container-low rounded-lg transition-colors hover:bg-surface-container">
+<div class="relative flex-shrink-0 cursor-pointer group">
+<img alt="juanka" class="w-8 h-8 rounded-full transition-transform group-hover:scale-105" src="https://lh3.googleusercontent.com/aida-public/AB6AXuC48Suew1cw3_ZlQ8yJ6KnzYH9S7MtryXxCpGDIyhP6a98PTfhh_9C0ifO9vL4GN4nHA4ljmfyx_JvYmn_Xe9hhPHm-DBAKyJ9ywHMDEP_-6IMWaPyx5xUECbmrop7-fvuF8m8ZdeaiG6ue818h0dZRFAkSp2voeScJ368yUJDpCAD6VctoJNYO8LHXj4r3HIkS18dn48IdJ9GF1DAHpXf9fMpnl667bdcwZhzo_8NJ_2nc_UhMG8AHDBg8FSxm0zzxcHyRfGyqtuYB"/>
+<div class="absolute bottom-0 right-0 w-2.5 h-2.5 bg-success border-2 border-surface-container-low rounded-full"></div>
+</div>
+<div class="ml-2 flex-1 min-w-0">
+<div class="text-xs font-semibold text-text-primary">juanka</div>
+<div class="text-[9px] text-text-muted">Online</div>
+</div>
+<div class="flex items-center">
+<button class="w-6 h-6 flex items-center justify-center text-text-muted hover:text-text-primary transition-all duration-200 hover:scale-110 active:scale-95 rounded" title="Mute"><span class="material-symbols-outlined text-base">mic</span></button>
+<button class="w-6 h-6 flex items-center justify-center text-text-muted hover:text-text-primary transition-all duration-200 hover:scale-110 active:scale-95 rounded" title="Deafen"><span class="material-symbols-outlined text-base">headset</span></button>
+<button class="w-6 h-6 flex items-center justify-center text-text-muted hover:text-text-primary transition-all duration-200 hover:scale-110 active:scale-95 rounded" title="Settings"><span class="material-symbols-outlined text-base">settings</span></button>
+</div>
+</div>
+</div>
+</aside>
+<!-- Main Chat Area -->
+<main class="flex-1 bg-bg-soft flex flex-col relative">
+<header class="h-12 border-b border-border-subtle flex items-center px-4 bg-bg-soft/80 backdrop-blur-md sticky top-0 z-10">
+<div class="flex items-center flex-1 min-w-0">
+<span class="text-text-muted text-2xl mr-2 font-medium">#</span>
+<h3 class="font-semibold text-sm truncate mr-4">general</h3>
+<div class="h-4 w-px bg-border-subtle mr-4 hidden md:block"></div>
+<p class="text-xs text-text-muted truncate hidden md:block">Lobby and General Chat for Ankara Gaming</p>
+</div>
+<div class="flex items-center space-x-4 text-text-muted">
+<button class="hover:text-text-primary transition-colors duration-200"><span class="material-symbols-outlined text-xl">notifications</span></button>
+<button class="hover:text-text-primary transition-colors duration-200"><span class="material-symbols-outlined text-xl">push_pin</span></button>
+<button class="hover:text-text-primary transition-colors duration-200"><span class="material-symbols-outlined text-xl">people_alt</span></button>
+<div class="relative w-48 hidden lg:block group">
+<input class="w-full bg-background border-none rounded text-xs py-1 px-2 focus:ring-1 focus:ring-primary/30 transition-all placeholder:text-text-muted" placeholder="Search" type="text"/>
+<span class="material-symbols-outlined text-sm absolute right-2 top-1/2 -translate-y-1/2 group-focus-within:text-primary transition-colors">search</span>
+</div>
+<button class="hover:text-text-primary transition-colors duration-200"><span class="material-symbols-outlined text-xl">help</span></button>
+</div>
+</header>
+<!-- Messages Timeline -->
+<div class="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-6">
+<!-- Message Block -->
+<div class="flex group hover:bg-white/[0.02] -mx-4 px-4 py-1 transition-all duration-200 hover:-translate-y-0.5 animate-fade-in-up stagger-1">
+<img alt="Lina" class="w-10 h-10 rounded-full mr-4 cursor-pointer hover:scale-105 transition-transform" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDPkrZJqCW72PK5mKFExnwJKh-j-sIsCwF-0rdCAlTj4OZD6UGMMMjuELXwTwaZhPcGzJyixj6iGQkMUe-661gpPKM6S4Wx9MKYOZ7usLVjk4135drCyJCk4irxhhg0pXZUs3tOxLXdX2SicNR34usnpIoOlob_XeY2E6_cNqrksP5F5WI82xkkjRuYSVdaOsR6Ch3JJoJFDzTGIWhoI4cGseOF1g0qmPuLDwTRADdUSZTWtUYuEnYNmslw0YmuqNZ1-bTMBT6mJSFP"/>
+<div class="flex-1">
+<div class="flex items-baseline space-x-2">
+<span class="font-medium text-sm text-text-primary hover:underline cursor-pointer">Lina</span>
+<span class="text-[10px] text-text-muted">Today at 8:42 PM</span>
+</div>
+<div class="text-sm text-text-secondary leading-relaxed mt-0.5">Are we still on for Vampire Village tonight? I've got the new role cards ready.</div>
+</div>
+</div>
+<div class="flex group hover:bg-white/[0.02] -mx-4 px-4 py-1 transition-all duration-200 hover:-translate-y-0.5 animate-fade-in-up stagger-2">
+<img alt="Mehmet" class="w-10 h-10 rounded-full mr-4 cursor-pointer hover:scale-105 transition-transform" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBUynCi0LvfbHyVY9E2KPXH5sAoi9TQ9LCJ85ZiWMTbo-zR_dZqUDfXogxCmjdha_O1WAAGfHaV-nnuWRLOeh2IS4OXGA-7pF4W4p_YD_ByhNT7qBE1XpO-yefxg0KypRVKB597RPXZi_fnPIuavCXjQRq0LcFUedWSIGUarnJe6DHZK4vPLBPBsXOqWKra-7qRyQBjZ-Knw-vARqXy2xWhaOwSpWmplyRor1dM8fihka-mWh5N0KjerWo1jFVIR-URAys9zuUmPLii"/>
+<div class="flex-1">
+<div class="flex items-baseline space-x-2">
+<span class="font-medium text-sm text-text-primary hover:underline cursor-pointer">Mehmet</span>
+<span class="text-[10px] text-text-muted">Today at 8:45 PM</span>
+</div>
+<div class="text-sm text-text-secondary leading-relaxed mt-0.5">Yeah, server is updating now. Should be ready by 9. I'll ping everyone once it's live.</div>
+<div class="flex mt-2 space-x-1">
+<button class="bg-surface-container-high px-2 py-0.5 rounded-md border border-primary/20 text-xs flex items-center space-x-1 hover:border-primary transition-all duration-200 active:scale-95">
+<span class="">🔥</span> <span class="text-[10px] font-bold text-primary">3</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Reply -->
+<div class="flex group hover:bg-white/[0.02] -mx-4 px-4 py-1 transition-all duration-200 hover:-translate-y-0.5 animate-fade-in-up stagger-3 relative">
+<div class="absolute left-9 top-2 bottom-6 w-px bg-border-subtle"></div>
+<img alt="juanka" class="w-10 h-10 rounded-full mr-4 cursor-pointer z-10 hover:scale-105 transition-transform" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDSjU6TLBbUrHDvbRw-Obvio0lT6gurqZjqmHBwqN-NIvJ3rIbkwIpt_JpWDyYdRHAEWHuwFdqPKSMaRybiTqRpFfFNx4DU2XJ3Rg2FzuYAnXmDS1Kny6-IZDTs_PbrJJ5yqaB57KmsoRp19wMoHiUMmiTHIZMXNRL4KwSjl0VYhbcp731O0GnARNn98EP4XDB1z4MH9Nt_u9ZcBRXtHgOGfCjdg9Rn1_JQcVW1PNj9n_KkDksjfTf0NiJ5CYUznHh8sP_ebK3V4GiG"/>
+<div class="flex-1">
+<div class="flex items-baseline space-x-2">
+<span class="font-medium text-sm text-primary hover:underline cursor-pointer">juanka</span>
+<span class="text-[10px] text-text-muted">Today at 8:46 PM</span>
+</div>
+<div class="text-sm text-text-secondary leading-relaxed mt-0.5">
+<span class="text-primary hover:underline cursor-pointer mr-1">@Mehmet</span>
+                        I'll jump in the lobby early. Need to test my mic anyway, I think the gain was too low last time.
+                    </div>
+</div>
+</div>
+<!-- Divider -->
+<div class="relative flex items-center py-2 animate-fade-in-up stagger-4">
+<div class="flex-1 border-t border-danger/30"></div>
+<span class="px-2 text-[10px] font-bold text-danger uppercase tracking-widest bg-bg-soft z-10">New Messages</span>
+<div class="flex-1 border-t border-danger/30"></div>
+</div>
+<div class="flex group hover:bg-white/[0.02] -mx-4 px-4 py-1 transition-all duration-200 hover:-translate-y-0.5 animate-fade-in-up stagger-5">
+<div class="w-10 h-10 rounded-full bg-surface-container flex items-center justify-center mr-4 group-hover:scale-105 transition-transform">
+<span class="material-symbols-outlined text-text-muted">smart_toy</span>
+</div>
+<div class="flex-1">
+<div class="flex items-baseline space-x-2">
+<span class="font-medium text-sm text-primary hover:underline cursor-pointer">Vampire Narrator</span>
+<span class="bg-primary/10 text-primary text-[9px] px-1 rounded-sm font-bold">BOT</span>
+<span class="text-[10px] text-text-muted">Just now</span>
+</div>
+<div class="text-sm text-text-secondary leading-relaxed mt-0.5 italic">A cold wind blows through the village... The game starts in 15 minutes.</div>
+</div>
+</div>
+<div class="flex group hover:bg-white/[0.02] -mx-4 px-4 py-1 transition-all duration-200 hover:-translate-y-0.5 animate-fade-in-up stagger-6">
+<img alt="Ayşe" class="w-10 h-10 rounded-full mr-4 cursor-pointer hover:scale-105 transition-transform" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCBL43s3jqIMRP2fKcNIRGYvlNYFL2ZZS1q0p_XSwGFdvPItUcYIvGcnjRPjetnEFDOtK1YgvcqUDI4uGUK15m7g4lo23Mx6TUnODF-vAjpkMa2epFVsZJJo440ll8H6vgVvavsN4QIaMTmtEuFBTHKZSVHFUKdnCtlCRF62MUo2LNvIpOl0pHm0aelSvedTX9IfU7YOCihEcUeTWoIYfSi0bxOoKFFG-xfYDr9RonxAqRej2omVR7BVmCFOLyXHIfwUnS6vWyzyT6e"/>
+<div class="flex-1">
+<div class="flex items-baseline space-x-2"><span class="font-medium text-sm text-text-primary hover:underline cursor-pointer">Ayşe</span><span class="text-[10px] text-text-muted">Just now</span></div>
+<div class="text-sm text-text-secondary leading-relaxed mt-0.5">I'm so ready for this. I've been practicing my 'innocent villager' face all day.</div>
+</div>
+</div>
+</div>
+<!-- Chat Input -->
+<footer class="p-4 bg-bg-soft animate-fade-in-up stagger-6">
+<div class="bg-surface-container-high rounded-xl p-3 flex flex-col space-y-2 focus-within:shadow-[0_0_15px_rgba(143,184,255,0.1)] transition-shadow duration-300">
+<div class="flex items-center space-x-3">
+<button class="w-6 h-6 flex items-center justify-center rounded-full bg-text-muted text-bg-soft hover:bg-text-primary hover:scale-110 active:scale-95 transition-all duration-200">
+<span class="material-symbols-outlined text-lg">add</span>
+</button>
+<input class="flex-1 bg-transparent border-none focus:ring-0 text-sm text-text-primary placeholder:text-text-muted" placeholder="Message #general" type="text"/>
+<div class="flex items-center space-x-3 text-text-muted">
+<button class="hover:text-text-primary transition-all duration-200 hover:scale-110"><span class="material-symbols-outlined text-xl">casino</span></button>
+<button class="hover:text-text-primary transition-all duration-200 hover:scale-110"><span class="material-symbols-outlined text-xl">card_giftcard</span></button>
+<button class="hover:text-text-primary transition-all duration-200 hover:scale-110"><span class="material-symbols-outlined text-xl">gif_box</span></button>
+<button class="hover:text-text-primary transition-all duration-200 hover:scale-110"><span class="material-symbols-outlined text-xl">sticky_note_2</span></button>
+<button class="hover:text-text-primary transition-all duration-200 hover:scale-110"><span class="material-symbols-outlined text-xl">sentiment_satisfied</span></button>
+</div>
+</div>
+</div>
+</footer>
+</main>
+<!-- Member List -->
+<aside class="w-60 bg-surface border-l border-border-subtle flex-shrink-0 z-40 hidden xl:flex flex-col animate-fade-in-left">
+<header class="h-12 flex items-center px-4 border-b border-border-subtle">
+<span class="text-xs font-semibold uppercase text-text-muted tracking-wider">Members</span>
+</header>
+<div class="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-6">
+<div class="">
+<h3 class="text-[11px] font-bold text-text-muted uppercase tracking-wider mb-2 px-1">In Voice — 3</h3>
+<div class="space-y-1">
+<div class="flex items-center px-2 py-1.5 rounded hover:bg-white/5 cursor-pointer group transition-all duration-200 hover:translate-x-1">
+<div class="relative">
+<img alt="juanka" class="w-8 h-8 rounded-full transition-transform group-hover:scale-105" src="https://lh3.googleusercontent.com/aida-public/AB6AXuC48Suew1cw3_ZlQ8yJ6KnzYH9S7MtryXxCpGDIyhP6a98PTfhh_9C0ifO9vL4GN4nHA4ljmfyx_JvYmn_Xe9hhPHm-DBAKyJ9ywHMDEP_-6IMWaPyx5xUECbmrop7-fvuF8m8ZdeaiG6ue818h0dZRFAkSp2voeScJ368yUJDpCAD6VctoJNYO8LHXj4r3HIkS18dn48IdJ9GF1DAHpXf9fMpnl667bdcwZhzo_8NJ_2nc_UhMG8AHDBg8FSxm0zzxcHyRfGyqtuYB"/>
+<div class="absolute bottom-0 right-0 w-2.5 h-2.5 bg-success border-2 border-surface rounded-full"></div>
+</div>
+<span class="ml-3 text-sm text-primary font-medium truncate">juanka</span>
+</div>
+<div class="flex items-center px-2 py-1.5 rounded hover:bg-white/5 cursor-pointer group transition-all duration-200 hover:translate-x-1">
+<div class="relative">
+<img alt="Ayşe" class="w-8 h-8 rounded-full transition-transform group-hover:scale-105" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCBL43s3jqIMRP2fKcNIRGYvlNYFL2ZZS1q0p_XSwGFdvPItUcYIvGcnjRPjetnEFDOtK1YgvcqUDI4uGUK15m7g4lo23Mx6TUnODF-vAjpkMa2epFVsZJJo440ll8H6vgVvavsN4QIaMTmtEuFBTHKZSVHFUKdnCtlCRF62MUo2LNvIpOl0pHm0aelSvedTX9IfU7YOCihEcUeTWoIYfSi0bxOoKFFG-xfYDr9RonxAqRej2omVR7BVmCFOLyXHIfwUnS6vWyzyT6e"/><div class="absolute bottom-0 right-0 w-2.5 h-2.5 bg-success border-2 border-surface rounded-full"></div>
+</div>
+<span class="ml-3 text-sm text-text-secondary truncate group-hover:text-text-primary">Ayşe</span>
+</div>
+<div class="flex items-center px-2 py-1.5 rounded hover:bg-white/5 cursor-pointer group transition-all duration-200 hover:translate-x-1">
+<div class="relative">
+<img alt="Mehmet" class="w-8 h-8 rounded-full transition-transform group-hover:scale-105" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD_TMeCwUD24KvPYGUOWXG_yClJoclLBGrTwSGayVUfTMciiyPhvLR8rxpHQtrCQhDmTtlVY4gP9au4EC9-DTwo-4YUBKIPn9vPah3DX9wsTigdCu39Tou3dqFm9xI5LE-ZzODElVzaT0HDzHOoTwY-owg44w4OvgFCp0bqwJjFPjFU5uU3z-tup5YyYQNmQ_8AJwws_Ceg0IDPP4QRZ1pY1-pq2PC741Zfd-C0ZFFXBo3mzeZZgT-kEBn4zWm-ggsDqvm3y09ICSqk"/><div class="absolute bottom-0 right-0 w-2.5 h-2.5 bg-success border-2 border-surface rounded-full"></div>
+</div>
+<span class="ml-3 text-sm text-text-secondary truncate group-hover:text-text-primary">Mehmet</span>
+</div>
+</div>
+</div>
+<div class="">
+<h3 class="text-[11px] font-bold text-text-muted uppercase tracking-wider mb-2 px-1">Online — 1</h3>
+<div class="space-y-1">
+<div class="flex items-center px-2 py-1.5 rounded hover:bg-white/5 cursor-pointer group transition-all duration-200 hover:translate-x-1">
+<div class="relative">
+<img alt="Lina" class="w-8 h-8 rounded-full transition-transform group-hover:scale-105" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDPkrZJqCW72PK5mKFExnwJKh-j-sIsCwF-0rdCAlTj4OZD6UGMMMjuELXwTwaZhPcGzJyixj6iGQkMUe-661gpPKM6S4Wx9MKYOZ7usLVjk4135drCyJCk4irxhhg0pXZUs3tOxLXdX2SicNR34usnpIoOlob_XeY2E6_cNqrksP5F5WI82xkkjRuYSVdaOsR6Ch3JJoJFDzTGIWhoI4cGseOF1g0qmPuLDwTRADdUSZTWtUYuEnYNmslw0YmuqNZ1-bTMBT6mJSFP"/><div class="absolute bottom-0 right-0 w-2.5 h-2.5 bg-success border-2 border-surface rounded-full"></div>
+</div>
+<span class="ml-3 text-sm text-text-secondary truncate group-hover:text-text-primary">Lina</span>
+</div>
+</div>
+</div>
+<div class="">
+<h3 class="text-[11px] font-bold text-text-muted uppercase tracking-wider mb-2 px-1">Bots — 2</h3>
+<div class="space-y-1">
+<div class="flex items-center px-2 py-1.5 rounded hover:bg-white/5 cursor-pointer group transition-all duration-200 hover:translate-x-1">
+<div class="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center transition-transform group-hover:scale-105"><span class="material-symbols-outlined text-text-muted text-sm">smart_toy</span></div>
+<span class="ml-3 text-sm text-text-secondary truncate group-hover:text-text-primary">Vampire Narrator</span>
+<span class="ml-1.5 bg-primary/10 text-primary text-[8px] px-1 rounded-sm font-bold">BOT</span>
+</div>
+<div class="flex items-center px-2 py-1.5 rounded hover:bg-white/5 cursor-pointer group transition-all duration-200 hover:translate-x-1">
+<div class="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center transition-transform group-hover:scale-105"><span class="material-symbols-outlined text-text-muted text-sm">music_note</span></div>
+<span class="ml-3 text-sm text-text-secondary truncate group-hover:text-text-primary">Music Bot</span>
+<span class="ml-1.5 bg-primary/10 text-primary text-[8px] px-1 rounded-sm font-bold">BOT</span>
+</div>
+</div>
+</div>
+<div class="">
+<h3 class="text-[11px] font-bold text-text-muted uppercase tracking-wider mb-2 px-1">Offline — 1</h3>
+<div class="space-y-1 opacity-60">
+<div class="flex items-center px-2 py-1.5 rounded hover:bg-white/5 cursor-pointer group transition-all duration-200 hover:translate-x-1 hover:opacity-100">
+<div class="w-8 h-8 rounded-full bg-surface-container grayscale transition-transform group-hover:scale-105"></div>
+<span class="ml-3 text-sm text-text-muted truncate group-hover:text-text-secondary">Ozan_TR</span>
+</div>
+</div>
+</div>
+</div>
+</aside>
+</body></html>

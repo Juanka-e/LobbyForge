@@ -1,0 +1,29 @@
+{
+  "name": "@lobbyforge/registry",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint \"src/**/*.ts\"",
+    "dev": "echo registry dev: not yet wired in scaffold stage"
+  },
+  "dependencies": {
+    "@lobbyforge/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@lobbyforge/config": "workspace:*",
+    "typescript": "^5.4.5",
+    "vitest": "^1.6.0"
+  }
+}

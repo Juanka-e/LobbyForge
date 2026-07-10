@@ -1,0 +1,23 @@
+{
+  "extends": "@lobbyforge/config/tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": ".",
+    "noEmit": true,
+    "jsx": "preserve",
+    "allowJs": false,
+    "incremental": true,
+    // Next.js App Router: paths aliases + the next/server import are easier
+    // to resolve with `bundler` resolution than with the base `NodeNext`.
+    // The base keeps `NodeNext` for packages that publish dist + .js suffixes;
+    // the app override is a documented exception (see docs/WEB_APP.md).
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "paths": {
+      "@/*": ["./*"]
+    },
+    "plugins": [{ "name": "next" }]
+  },
+  "include": ["next-env.d.ts", "src/**/*", "app/**/*", "lib/**/*.ts", "instrumentation.ts", ".next/types/**/*.ts"],
+  "exclude": ["node_modules", ".next", "dist"]
+}

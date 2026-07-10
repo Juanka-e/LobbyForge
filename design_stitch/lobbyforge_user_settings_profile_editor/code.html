@@ -1,0 +1,544 @@
+<!DOCTYPE html><html class="dark" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>LobbyForge - User Settings</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "inverse-primary": "#325e9f",
+                        "background": "#101419",
+                        "on-surface-variant": "#c3c6d2",
+                        "surface-container-lowest": "#0b0e13",
+                        "on-secondary-container": "#abb6c8",
+                        "on-secondary": "#26313f",
+                        "on-error-container": "#ffdad6",
+                        "primary-container": "#8fb8ff",
+                        "surface-variant": "#32353b",
+                        "surface-container-highest": "#32353b",
+                        "primary-fixed": "#d6e3ff",
+                        "on-tertiary-fixed-variant": "#5f4100",
+                        "on-primary-fixed": "#001b3d",
+                        "surface-bright": "#36393f",
+                        "outline": "#8d919b",
+                        "text-primary": "#F4F7FB",
+                        "on-tertiary": "#432c00",
+                        "inverse-surface": "#e0e2ea",
+                        "surface-dim": "#101419",
+                        "primary-fixed-dim": "#a9c7ff",
+                        "on-error": "#690005",
+                        "surface-container-high": "#272a30",
+                        "text-muted": "#7F8A99",
+                        "surface-container": "#1d2025",
+                        "error-container": "#93000a",
+                        "text-secondary": "#B7C0CC",
+                        "tertiary-fixed": "#ffdeac",
+                        "secondary": "#bcc7da",
+                        "bg-soft": "#0B1018",
+                        "surface-tint": "#a9c7ff",
+                        "on-tertiary-container": "#614200",
+                        "tertiary": "#fccb7b",
+                        "secondary-fixed": "#d8e3f6",
+                        "on-tertiary-fixed": "#281900",
+                        "on-secondary-fixed": "#111c2a",
+                        "on-surface": "#e0e2ea",
+                        "tertiary-fixed-dim": "#efbf70",
+                        "on-secondary-fixed-variant": "#3d4757",
+                        "secondary-container": "#3d4757",
+                        "on-primary-container": "#144787",
+                        "inverse-on-surface": "#2d3036",
+                        "danger": "#E98282",
+                        "success": "#7CCFA6",
+                        "border-subtle": "#263142",
+                        "tertiary-container": "#deb063",
+                        "border-strong": "#334155",
+                        "surface-raised": "#171E2B",
+                        "on-primary-fixed-variant": "#124686",
+                        "surface-container-low": "#181c21",
+                        "outline-variant": "#434750",
+                        "primary": "#bdd3ff",
+                        "error": "#ffb4ab",
+                        "surface": "#111722",
+                        "secondary-fixed-dim": "#bcc7da",
+                        "on-primary": "#003063",
+                        "on-background": "#e0e2ea",
+                        "surface-floating": "#1D2533"
+                    },
+                    borderRadius: {
+                        DEFAULT: "0.25rem",
+                        lg: "0.5rem",
+                        xl: "0.75rem",
+                        full: "9999px"
+                    },
+                    spacing: {
+                        "section-gap": "120px",
+                        "margin-desktop": "64px",
+                        "gutter": "24px",
+                        "margin-mobile": "24px",
+                        "container-max": "1240px"
+                    },
+                    fontFamily: {
+                        "hero-h1-mobile": ["Geist"],
+                        "body-md": ["Geist"],
+                        "label-sm": ["Geist"],
+                        "section-h2-mobile": ["Geist"],
+                        "label-xs": ["Geist"],
+                        "hero-h1": ["Geist"],
+                        "section-h2": ["Geist"],
+                        "body-lg": ["Geist"]
+                    },
+                    fontSize: {
+                        "hero-h1-mobile": ["40px", { lineHeight: "1.2", fontWeight: "600" }],
+                        "body-md": ["16px", { lineHeight: "1.6", fontWeight: "400" }],
+                        "label-sm": ["14px", { lineHeight: "1.2", letterSpacing: "0.05em", fontWeight: "500" }],
+                        "section-h2-mobile": ["32px", { lineHeight: "1.2", fontWeight: "600" }],
+                        "label-xs": ["12px", { lineHeight: "1.2", letterSpacing: "0.05em", fontWeight: "500" }],
+                        "hero-h1": ["80px", { lineHeight: "1.1", letterSpacing: "-0.02em", fontWeight: "600" }],
+                        "section-h2": ["52px", { lineHeight: "1.2", fontWeight: "600" }],
+                        "body-lg": ["18px", { lineHeight: "1.6", fontWeight: "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { background-color: #070A0F; color: #F4F7FB; }
+        .glass-panel {
+            background: rgba(17, 23, 34, 0.78);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(38, 49, 66, 0.5);
+            box-shadow: 0 4px 24px -4px rgba(0, 0, 0, 0.5);
+        }
+        .rim-light {
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        }
+        
+        /* Custom Scrollbar for sleek dark mode */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #263142; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #334155; }
+    </style>
+</head>
+<body class="h-screen w-full flex overflow-hidden font-body-md text-body-md selection:bg-primary-container selection:text-on-primary-container">
+<!-- LEFT SIDEBAR: Community Shell -->
+<aside class="w-64 flex-shrink-0 flex flex-col bg-surface border-r border-border-subtle h-screen transition-colors duration-150 z-10 hidden md:flex">
+<!-- Server Header -->
+<div class="h-16 flex items-center px-4 border-b border-border-subtle hover:bg-surface-container cursor-pointer transition-colors">
+<div class="w-8 h-8 rounded-lg bg-surface-raised flex items-center justify-center mr-3 overflow-hidden border border-border-strong">
+<img class="w-full h-full object-cover" data-alt="A minimalist logo for a gaming community. The logo features abstract geometric shapes forming a stylized 'A' in deep blue and silver tones on a dark background. Corporate modern aesthetic, very clean and professional, lacking neon gaming clichés." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCG3KWBcNjzjLmiwWqYcybQK7J4FFX-DzWMaE42RhlXQS6diD56HGKO-N42mpOOe4KNXuresXwg1pVsl8XUwlHZE3EJGOC36id7ziU4V5KZMEf3K_fD7CMrxv154xkC5uy6DsnhefURR-t7IYcbmVrW07rbDpzSnBc0LqxRPo0zkJBtKaj7RGd25eMItKnVGqo-zrEdQo67xgWzRLJdqC7YMEKgC4dZ2XRczfFdclJzK8SimwD9EBEmQLHyJjRSFQDe1_VIOw05JEVs">
+</div>
+<div class="flex-1 min-w-0">
+<h2 class="font-section-h2 text-label-sm text-text-primary truncate font-bold">Ankara Gaming Voice</h2>
+<div class="text-[11px] text-text-muted flex items-center mt-0.5">
+<span class="w-1.5 h-1.5 rounded-full bg-success mr-1.5 shadow-[0_0_8px_rgba(124,207,166,0.4)]"></span>
+                    Self-Hosted
+                </div>
+</div>
+<span class="material-symbols-outlined text-text-muted text-sm" style="font-variation-settings: 'FILL' 0;">expand_more</span>
+</div>
+<!-- Channels List -->
+<div class="flex-1 overflow-y-auto py-3 px-2 space-y-4">
+<!-- Text Channels -->
+<div>
+<div class="flex items-center px-2 mb-1 group cursor-pointer">
+<span class="material-symbols-outlined text-text-muted text-[14px] mr-1 group-hover:text-text-secondary transition-colors" style="font-variation-settings: 'FILL' 0;">keyboard_arrow_down</span>
+<span class="text-[11px] font-bold text-text-muted uppercase tracking-wider group-hover:text-text-secondary transition-colors">Text Channels</span>
+</div>
+<div class="space-y-0.5">
+<button class="w-full flex items-center px-2 py-1.5 rounded text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors group">
+<span class="material-symbols-outlined text-lg mr-2 text-text-muted group-hover:text-text-secondary" style="font-variation-settings: 'FILL' 0;">tag</span>
+<span class="truncate">announcements</span>
+</button>
+<button class="w-full flex items-center px-2 py-1.5 rounded text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors group">
+<span class="material-symbols-outlined text-lg mr-2 text-text-muted group-hover:text-text-secondary" style="font-variation-settings: 'FILL' 0;">tag</span>
+<span class="truncate">general</span>
+</button>
+<button class="w-full flex items-center px-2 py-1.5 rounded text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors group">
+<span class="material-symbols-outlined text-lg mr-2 text-text-muted group-hover:text-text-secondary" style="font-variation-settings: 'FILL' 0;">tag</span>
+<span class="truncate">clips</span>
+</button>
+</div>
+</div>
+<!-- Voice Channels -->
+<div>
+<div class="flex items-center px-2 mb-1 group cursor-pointer">
+<span class="material-symbols-outlined text-text-muted text-[14px] mr-1 group-hover:text-text-secondary transition-colors" style="font-variation-settings: 'FILL' 0;">keyboard_arrow_down</span>
+<span class="text-[11px] font-bold text-text-muted uppercase tracking-wider group-hover:text-text-secondary transition-colors">Voice Channels</span>
+</div>
+<div class="space-y-1">
+<!-- Active Voice Channel -->
+<div class="bg-surface-container-high rounded border border-border-subtle p-1">
+<button class="w-full flex items-center px-2 py-1.5 rounded text-text-primary group">
+<span class="material-symbols-outlined text-lg mr-2 text-text-primary" style="font-variation-settings: 'FILL' 1;">volume_up</span>
+<span class="truncate font-medium text-sm">Main Lounge</span>
+</button>
+<!-- Voice Users -->
+<div class="pl-7 pr-2 pb-1 space-y-1 mt-1">
+<div class="flex items-center group cursor-pointer rounded hover:bg-surface-container px-1 py-0.5">
+<div class="relative w-6 h-6 mr-2 flex-shrink-0">
+<img class="w-full h-full rounded-full object-cover border border-success" data-alt="A small circular avatar of a bearded man in his 30s. He is wearing a dark techwear jacket. The background is a subtle dark graphite gradient. Professional, calm lighting, modern aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuA_Fg_lI_4JyA_jqkLcPvLGH2Tf5MOQc11yK7v5kN9PlKznfqq5ISPlOQLTwNJjXJHWhwD3_O0G4jMxdLs4H4ZOAUbJumUiNGxwfMmtsFyu0undvmKO38wKWTO_ewySOc6CKBygaswf9t_8XBgEIxAggnvHKyGKgmX-m-BRtFdxX-d0nZnoCR4RVDhNNR7bBmESGRLJLO6A97MvN6jM-DG5_3izwkOvUdr3ZxE4pOSX0_8ZVY6JEMnhNG2bpHELw3ggm0SMMO0h203n">
+<div class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-success rounded-full border-2 border-surface-container-high"></div>
+</div>
+<span class="text-sm text-success font-medium truncate">juanka</span>
+</div>
+<div class="flex items-center group cursor-pointer rounded hover:bg-surface-container px-1 py-0.5">
+<div class="relative w-6 h-6 mr-2 flex-shrink-0">
+<img class="w-full h-full rounded-full object-cover" data-alt="A small circular avatar of a young woman with short dark hair. She is wearing stylish glasses. The background is a soft abstract ice-blue glow. Professional, high-quality, corporate modern style." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBHzvSxs8Yf443Wrtw0jSquNQx9uDaZ1Iy5E8aCAleMzOM8qUj-50n3nqkqo30KWQoYVgbSUZp6N7xdycA0QVxL0luOdKL-z5nTXUb315uGK06kBZRTTim9CL8MzaRvyxUsLIuioA97NU-m7wdOLl2vrTRWfifldKobg3GW3IQkaB_4Z8khzFtNGvrWnWvIGpATeFETEmrWyBYZjSj5Yy7AVL5EAWvtUgVPlc9-lJ1I51zPTiR9K5VTypgEnwvLuq2ZZMEGRTBffYyI">
+</div>
+<span class="text-sm text-text-secondary truncate group-hover:text-text-primary">Ayşe</span>
+</div>
+<div class="flex items-center group cursor-pointer rounded hover:bg-surface-container px-1 py-0.5">
+<div class="relative w-6 h-6 mr-2 flex-shrink-0 bg-surface-raised flex items-center justify-center rounded-full text-xs text-text-primary font-medium">
+                                    M
+                                </div>
+<span class="text-sm text-text-secondary truncate group-hover:text-text-primary">Mehmet</span>
+</div>
+</div>
+</div>
+<!-- Other Voice Channels -->
+<button class="w-full flex items-center px-2 py-1.5 rounded text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors group">
+<span class="material-symbols-outlined text-lg mr-2 text-text-muted group-hover:text-text-secondary" style="font-variation-settings: 'FILL' 0;">volume_up</span>
+<span class="truncate">Game Room 1</span>
+</button>
+<button class="w-full flex items-center px-2 py-1.5 rounded text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors group">
+<span class="material-symbols-outlined text-lg mr-2 text-text-muted group-hover:text-text-secondary" style="font-variation-settings: 'FILL' 0;">lock</span>
+<span class="truncate">Hushle Room</span>
+</button>
+<button class="w-full flex items-center px-2 py-1.5 rounded text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors group">
+<span class="material-symbols-outlined text-lg mr-2 text-text-muted group-hover:text-text-secondary" style="font-variation-settings: 'FILL' 0;">volume_up</span>
+<span class="truncate">Vampire Night</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Bottom Voice Control Panel -->
+<div class="bg-surface-container border-t border-border-subtle p-3 flex flex-col gap-2">
+<!-- Connection Status -->
+<div class="flex items-center justify-between group cursor-pointer rounded hover:bg-surface-raised p-1 -mx-1 transition-colors">
+<div class="flex items-center min-w-0">
+<div class="text-success mr-2 flex items-center justify-center">
+<span class="material-symbols-outlined text-lg" style="font-variation-settings: 'FILL' 1;">signal_cellular_alt</span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="text-xs font-bold text-success truncate">Voice Connected</span>
+<span class="text-[11px] text-text-muted truncate group-hover:text-text-secondary">Main Lounge / Ankara</span>
+</div>
+</div>
+<button class="text-text-muted hover:text-text-primary transition-colors flex-shrink-0 p-1">
+<span class="material-symbols-outlined text-lg" style="font-variation-settings: 'FILL' 0;">call_end</span>
+</button>
+</div>
+<!-- User Controls -->
+<div class="flex items-center justify-between bg-surface-raised rounded-md p-1 border border-border-subtle">
+<div class="flex items-center min-w-0 px-1 cursor-pointer hover:bg-surface-container rounded py-1 flex-1 transition-colors">
+<div class="relative w-8 h-8 mr-2 flex-shrink-0">
+<img class="w-full h-full rounded-full object-cover" data-alt="A small circular avatar of a bearded man in his 30s. He is wearing a dark techwear jacket. The background is a subtle dark graphite gradient. Professional, calm lighting, modern aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAmPJG_JsidqMC_yTlv9a9hRiPFJxpwxoE1tRPrPytwXdoE9mq-m0B1-mszI1h298UWBu8uOM5kAJuZrS6d6IbNIpNDCBPF4ESJ3AkNglRRzBpVw4YKU2-MTzL-fJ94gMzxtsc6emU9TqUKBCKeGbk6NVeVOZq2MjCMku1rcriambw1rmclcugaENxn7c1Kp0jeIzoiSV4Tm6QAp61EoH15_SQo8marvW6iwNL7StuEhueiVFf11bTnqD_3ZhycwJVmAhV9DaB_wJur">
+<div class="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-success rounded-full border-2 border-surface-raised"></div>
+</div>
+<div class="flex flex-col min-w-0 leading-tight">
+<span class="text-sm font-medium text-text-primary truncate">juanka</span>
+<span class="text-[10px] text-text-muted truncate">#4912</span>
+</div>
+</div>
+<div class="flex items-center space-x-0.5 flex-shrink-0 pr-1">
+<button class="p-1.5 rounded text-text-muted hover:text-text-primary hover:bg-surface-container transition-colors group" title="Mute">
+<span class="material-symbols-outlined text-[20px] group-hover:scale-110 transition-transform" style="font-variation-settings: 'FILL' 0;">mic</span>
+</button>
+<button class="p-1.5 rounded text-text-muted hover:text-text-primary hover:bg-surface-container transition-colors group" title="Deafen">
+<span class="material-symbols-outlined text-[20px] group-hover:scale-110 transition-transform" style="font-variation-settings: 'FILL' 0;">headphones</span>
+</button>
+<button class="p-1.5 rounded text-primary bg-primary/10 transition-colors group relative" title="Settings">
+<span class="material-symbols-outlined text-[20px] group-hover:rotate-90 transition-transform duration-300" style="font-variation-settings: 'FILL' 1;">settings</span>
+<!-- Active indicator for Settings state -->
+<span class="absolute -top-1 -right-1 w-2 h-2 bg-primary rounded-full shadow-[0_0_8px_rgba(143,184,255,0.6)]"></span>
+</button>
+</div>
+</div>
+</div>
+</aside>
+<!-- MAIN SETTINGS AREA (Overlaying main app) -->
+<main class="flex-1 bg-background h-screen relative overflow-hidden flex flex-col z-20">
+<!-- Settings Header (Sticky) -->
+<header class="h-20 border-b border-border-subtle bg-surface-dim/80 backdrop-blur-md flex items-center justify-between px-8 z-30 flex-shrink-0">
+<div>
+<h1 class="text-2xl font-bold text-text-primary tracking-tight">User Settings</h1>
+<p class="text-sm text-text-muted mt-0.5">Manage your local account and community profile.</p>
+</div>
+<button class="flex items-center justify-center w-10 h-10 rounded-full border border-border-strong text-text-secondary hover:text-text-primary hover:bg-surface-raised hover:border-text-muted transition-all group">
+<span class="material-symbols-outlined group-hover:scale-110 transition-transform" style="font-variation-settings: 'FILL' 0;">close</span>
+</button>
+</header>
+<!-- Settings Content Area -->
+<div class="flex-1 overflow-hidden flex relative">
+<!-- Settings Navigation (Internal Sidebar) -->
+<nav class="w-64 bg-surface-dim h-full overflow-y-auto py-6 px-4 border-r border-border-subtle flex-shrink-0">
+<div class="mb-6">
+<h3 class="text-[11px] font-bold text-text-muted uppercase tracking-wider mb-2 px-3">User Settings</h3>
+<ul class="space-y-1">
+<li class="">
+<button class="w-full text-left px-3 py-2 rounded-lg text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors flex items-center">
+<span class="material-symbols-outlined mr-3 text-lg" style="font-variation-settings: 'FILL' 0;">person</span>
+                                My Account
+                            </button>
+</li>
+<li class="">
+<button class="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-primary bg-primary/10 border-l-2 border-primary transition-colors flex items-center shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+<span class="material-symbols-outlined mr-3 text-lg text-primary" style="font-variation-settings: 'FILL' 1;">badge</span>
+                                Profile
+                            </button>
+</li>
+<li class="">
+<button class="w-full text-left px-3 py-2 rounded-lg text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors flex items-center">
+<span class="material-symbols-outlined mr-3 text-lg" style="font-variation-settings: 'FILL' 0;">privacy_tip</span>
+                                Privacy &amp; Safety
+                            </button>
+</li>
+</ul>
+</div>
+<div class="mb-6">
+<h3 class="text-[11px] font-bold text-text-muted uppercase tracking-wider mb-2 px-3">App Settings</h3>
+<ul class="space-y-1">
+<li class="">
+<button class="w-full text-left px-3 py-2 rounded-lg text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors flex items-center">
+<span class="material-symbols-outlined mr-3 text-lg" style="font-variation-settings: 'FILL' 0;">mic</span>
+                                Voice &amp; Video
+                            </button>
+</li>
+<li class="">
+<button class="w-full text-left px-3 py-2 rounded-lg text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors flex items-center">
+<span class="material-symbols-outlined mr-3 text-lg" style="font-variation-settings: 'FILL' 0;">palette</span>
+                                Appearance
+                            </button>
+</li>
+<li class="">
+<button class="w-full text-left px-3 py-2 rounded-lg text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors flex items-center">
+<span class="material-symbols-outlined mr-3 text-lg" style="font-variation-settings: 'FILL' 0;">accessibility</span>
+                                Accessibility
+                            </button>
+</li>
+<li class="">
+<button class="w-full text-left px-3 py-2 rounded-lg text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors flex items-center">
+<span class="material-symbols-outlined mr-3 text-lg" style="font-variation-settings: 'FILL' 0;">notifications</span>
+                                Notifications
+                            </button>
+</li>
+</ul>
+</div>
+</nav>
+<!-- Settings Workspace (Scrollable Content) -->
+<div class="flex-1 overflow-y-auto pb-24 relative">
+<div class="max-w-[1000px] mx-auto p-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
+<!-- Editor Column -->
+<div class="col-span-1 lg:col-span-7 space-y-8">
+<div>
+<div class="flex items-center mb-1">
+<h2 class="text-xl font-bold text-text-primary mr-3">Community Profile</h2>
+<span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-surface-raised border border-border-strong text-text-secondary flex items-center">
+<span class="material-symbols-outlined text-[12px] mr-1" style="font-variation-settings: 'FILL' 1;">home</span>
+                                    Local Profile
+                                </span>
+</div>
+<p class="text-sm text-text-muted">Changes apply only to this self-hosted community.</p>
+</div>
+<!-- Divider -->
+<div class="h-px bg-border-subtle w-full"></div>
+<!-- Banner & Avatar Section -->
+<div class="space-y-6">
+<!-- Banner Edit -->
+<div>
+<label class="block text-xs font-bold text-text-secondary uppercase tracking-wider mb-2">Profile Banner</label>
+<div class="rounded-xl border border-border-strong bg-surface-container overflow-hidden">
+<div class="h-32 w-full relative">
+<div class="absolute inset-0 bg-cover bg-center" data-alt="A wide, horizontal profile banner. The image is an abstract composition of dark navy blue and ice-blue tones, evoking a calm, premium tech aesthetic. Subtle geometric glass-like structures catch light softly. Corporate modern style, distinct and elegant." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuADvv3o5To65camt1C3fZqSZ_Dx9vM2GJq36u3kOlriNwRGjKCRB0QayAjf07LFKk4RNCJ0iWgvlxNTfkxDBlBkbfqhJ_yL3gPwC8u2U29TJ8VsDcJAiwfojdULeSSvR631OoOKsJU3jE-0FDscZcY55taoC2VWw2ENpmGYNoyIC5BVhrMC7pw03eNzAW2FHT-zZgJi_tV6adw8RkjeTjSL9TzeBkKobq3qvSbUhXIZtUI4T3C2COq_kIybbIMxE8LNdLw-2Wigawzp')"></div>
+<div class="absolute inset-0 bg-gradient-to-t from-background/80 to-transparent"></div>
+<div class="absolute bottom-4 right-4 flex space-x-2">
+<button class="px-3 py-1.5 rounded-lg bg-surface/80 backdrop-blur text-sm font-medium text-text-primary border border-border-strong hover:bg-surface transition-colors flex items-center">
+<span class="material-symbols-outlined text-[16px] mr-1.5" style="font-variation-settings: 'FILL' 0;">edit</span>
+                                                Change Banner
+                                            </button>
+</div>
+</div>
+</div>
+</div>
+<!-- Avatar Edit -->
+<div class="flex items-start">
+<div class="mr-6">
+<label class="block text-xs font-bold text-text-secondary uppercase tracking-wider mb-2">Avatar</label>
+<div class="w-24 h-24 rounded-full border-4 border-surface-container-highest relative group cursor-pointer overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="A high-quality avatar portrait of a bearded man in his 30s wearing a dark techwear jacket. He has a calm, professional expression. The background is a very subtle dark graphite gradient. Lighting is soft and cinematic, premium aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDI0PW0IMMfXOQt3uJt8e_kMJn2dPcIfz42R6UmU4515IgS7FQIEqr4W_SDW_nEdsi1rYsqu7n2gXFhyIvRgwqYDoOf5Q7xvgyk-E6F8QBkfU0aTwcxuknaMyCJW03R3Q_mr4TXxMlkAXfZkpBIuQmpbICKpBm0F0hEEKZ78tqZdKX3_uwoHPSx7hOcHNHJ3CUfpozvPn7yrQfHxvSTrUSpNGteMusYW8Eey_ZNqsB9EZAXucwAlcuNABnQpNGG6jUDopdcIk-hHzSB">
+<div class="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+<span class="material-symbols-outlined text-white" style="font-variation-settings: 'FILL' 1;">photo_camera</span>
+</div>
+</div>
+</div>
+<div class="pt-6 space-y-2 flex flex-col justify-center">
+<button class="px-4 py-2 rounded-lg bg-primary-container text-on-primary-container text-sm font-medium hover:brightness-110 transition-all shadow-[0_2px_10px_rgba(143,184,255,0.1)] hover:shadow-[0_4px_12px_rgba(143,184,255,0.2)] w-fit">
+                                        Change Avatar
+                                    </button>
+<button class="text-sm text-text-muted hover:text-danger transition-colors underline decoration-border-strong underline-offset-4 w-fit">
+                                        Remove Avatar
+                                    </button>
+</div>
+</div>
+</div>
+<!-- Accent Color -->
+<div>
+<label class="block text-xs font-bold text-text-secondary uppercase tracking-wider mb-2">Profile Accent</label>
+<div class="flex items-center space-x-4">
+<!-- Color Picker preview -->
+<button class="w-10 h-10 rounded-lg bg-primary-container border-2 border-text-primary shadow-sm flex items-center justify-center"></button>
+<!-- Presets -->
+<div class="flex space-x-2 border-l border-border-strong pl-4">
+<button class="w-6 h-6 rounded-full bg-[#E98282] hover:scale-110 transition-transform"></button>
+<button class="w-6 h-6 rounded-full bg-[#fccb7b] hover:scale-110 transition-transform"></button>
+<button class="w-6 h-6 rounded-full bg-[#7CCFA6] hover:scale-110 transition-transform"></button>
+<button class="w-6 h-6 rounded-full bg-[#bcc7da] hover:scale-110 transition-transform"></button>
+</div>
+<!-- Hex Input -->
+<div class="relative w-24">
+<span class="absolute left-2 top-1/2 -translate-y-1/2 text-text-muted text-sm">#</span>
+<input class="w-full bg-surface-raised border border-border-strong rounded-lg py-1.5 pl-6 pr-2 text-sm text-text-primary focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all font-mono" type="text" value="8FB8FF">
+</div>
+</div>
+</div>
+<!-- Divider -->
+<div class="h-px bg-border-subtle w-full"></div>
+<!-- Identity Fields -->
+<div class="space-y-4">
+<div>
+<label class="block text-xs font-bold text-text-secondary uppercase tracking-wider mb-1.5">Display Name</label>
+<input class="w-full bg-surface-raised border border-border-strong rounded-lg px-3 py-2 text-text-primary focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all shadow-sm" type="text" value="juanka">
+</div>
+<div>
+<label class="block text-xs font-bold text-text-secondary uppercase tracking-wider mb-1.5">Username <span class="text-text-muted normal-case font-normal">(Read-only)</span></label>
+<div class="w-full bg-surface-container border border-border-subtle rounded-lg px-3 py-2 text-text-muted cursor-not-allowed flex items-center">
+                                    @juanka
+                                </div>
+</div>
+<div>
+<label class="block text-xs font-bold text-text-secondary uppercase tracking-wider mb-1.5">Custom Status</label>
+<div class="flex relative">
+<button class="absolute left-1 top-1 w-8 h-8 flex items-center justify-center rounded hover:bg-surface-container text-lg">
+                                        🔨
+                                    </button>
+<input class="w-full bg-surface-raised border border-border-strong rounded-lg pl-10 pr-10 py-2 text-text-primary focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all shadow-sm" type="text" value="Building something new.">
+<button class="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary">
+<span class="material-symbols-outlined text-[20px]" style="font-variation-settings: 'FILL' 0;">schedule</span>
+</button>
+</div>
+</div>
+<div>
+<label class="block text-xs font-bold text-text-secondary uppercase tracking-wider mb-1.5">About Me</label>
+<div class="relative">
+<textarea class="w-full bg-surface-raised border border-border-strong rounded-lg px-3 py-2 text-text-primary focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all shadow-sm resize-none" rows="4">Developer, game builder, and late-night voice chat regular.</textarea>
+<div class="absolute bottom-2 right-2 text-xs text-text-muted font-mono">
+                                        54 / 190
+                                    </div>
+</div>
+</div>
+</div>
+</div>
+<!-- Preview Column -->
+<div class="col-span-1 lg:col-span-5 relative hidden lg:block">
+<div class="sticky top-8">
+<h3 class="text-sm font-bold text-text-secondary uppercase tracking-wider mb-4">Profile Preview</h3>
+<!-- Profile Popover Mockup -->
+<div class="w-full max-w-[340px] rounded-2xl glass-panel rim-light overflow-hidden mx-auto shadow-xl shadow-black/40 border border-border-strong">
+<!-- Banner -->
+<div class="h-24 w-full relative">
+<div class="absolute inset-0 bg-cover bg-center" data-alt="A horizontal profile banner showing an abstract dark navy blue and ice-blue geometric composition. Subtle glass-like refraction effects and soft lighting. Elegant, professional modern aesthetic." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuADblXeVW_czgQ7D2pYjZDGdS5QV-wgwN9_UDn755W70q2qMAdJAi0tZG8csTxuZK5RGy8xdrFIf8MjOUqAjzfzyDzK2rOQ61Uc8lbr23ATxKTQ0Q6bMWu3jzKuROvTTtrqRxGN11CPVLTNQEA8H0xQFIq6EW7-9cBu3u9866POABTbw3zinXvPqMuncA_Y6ZmRxWe2kbWjcvysqK_gKHPXqhq_kZ99u9MiLEw2hK0iJOzLCeLjsMgBj1-E1Fv2wKbJjPvYknPaUtHG')"></div>
+</div>
+<div class="px-4 pb-4 relative bg-surface-dim">
+<!-- Avatar Overflow -->
+<div class="absolute -top-10 left-4">
+<div class="w-20 h-20 rounded-full border-4 border-surface-dim relative">
+<img class="w-full h-full rounded-full object-cover" data-alt="A portrait avatar of a bearded man in his 30s wearing a dark techwear jacket, set against a subtle dark graphite gradient. Calm, professional expression, high-quality rendering." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDPtqMThkCFBpDIwE3zTZ6_1mHtVJJWPA_flMY22sJxIbM4kyhulR7BiWpMSxfruh8XPcBSsenAk3GTzlK8U89ojTL1qSpWIMyTNDdDh2WsUqrpMANmroRDI6-5NNYj6fo2OIXwCD33WsIVwCfR6l5QHVxHgIufEkd_G-6lVL-pSHMtt9R-d-bmAQOMJ3tBCI8aSNet086A4Q-HUNRcKXK5oJQNs7zczaeHZjXvgfwzgN1gKpQI63KZVhtXcoo6VT2APJOzlpHpO56I">
+<div class="absolute bottom-0 right-0 w-5 h-5 bg-success rounded-full border-[3px] border-surface-dim"></div>
+</div>
+</div>
+<!-- Content -->
+<div class="pt-12">
+<div class="mb-4">
+<h2 class="text-xl font-bold text-text-primary leading-none mb-1">juanka</h2>
+<p class="text-sm text-text-muted leading-none">@juanka</p>
+</div>
+<!-- Custom Status badge -->
+<div class="mb-4 inline-flex items-center bg-surface-container rounded-md px-2 py-1.5 border border-border-subtle w-full">
+<span class="mr-2 text-sm">🔨</span>
+<span class="text-sm text-text-primary truncate">Building something new.</span>
+</div>
+<!-- Divider -->
+<div class="h-px bg-border-subtle w-full my-4"></div>
+<!-- Currently in Voice -->
+<div class="mb-4">
+<h4 class="text-[10px] font-bold text-text-secondary uppercase tracking-wider mb-2">Current Activity</h4>
+<div class="flex items-center bg-success/10 rounded-lg p-2 border border-success/20">
+<div class="w-8 h-8 rounded bg-success/20 flex items-center justify-center mr-3 text-success">
+<span class="material-symbols-outlined text-[18px]" style="font-variation-settings: 'FILL' 1;">volume_up</span>
+</div>
+<div>
+<p class="text-xs font-bold text-success">In Voice Channel</p>
+<p class="text-[11px] text-text-primary">Main Lounge</p>
+</div>
+</div>
+</div>
+<!-- About Me -->
+<div class="mb-4">
+<h4 class="text-[10px] font-bold text-text-secondary uppercase tracking-wider mb-1">About Me</h4>
+<p class="text-sm text-text-primary leading-relaxed text-balance">Developer, game builder, and late-night voice chat regular.</p>
+</div>
+<!-- Roles -->
+<div class="mb-5">
+<h4 class="text-[10px] font-bold text-text-secondary uppercase tracking-wider mb-2">Roles</h4>
+<div class="flex flex-wrap gap-1.5">
+<span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-surface-container border border-border-strong text-text-primary">
+<span class="w-2 h-2 rounded-full bg-primary mr-1.5"></span>
+                                                    Member
+                                                </span>
+</div>
+</div>
+<!-- Action -->
+<button class="w-full py-2 rounded-lg bg-surface-raised border border-border-strong text-text-primary text-sm font-medium hover:bg-surface-container-high transition-colors">
+                                            View Full Profile
+                                        </button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Sticky Save Footer -->
+<div class="absolute bottom-0 left-0 right-0 p-4 bg-surface-dim/90 backdrop-blur-md border-t border-border-subtle flex justify-end items-center z-40 transform translate-y-0 transition-transform">
+<div class="max-w-[1000px] w-full mx-auto flex items-center justify-between px-4 lg:px-8">
+<p class="text-sm text-text-secondary">You have unsaved changes.</p>
+<div class="flex space-x-3">
+<button class="px-4 py-2 rounded-lg text-sm font-medium text-text-primary hover:underline underline-offset-4 decoration-border-strong transition-all">
+                            Reset
+                        </button>
+<button class="px-6 py-2 rounded-lg bg-primary-container text-on-primary-container text-sm font-medium hover:brightness-110 transition-all shadow-[0_2px_10px_rgba(143,184,255,0.1)]">
+                            Save Changes
+                        </button>
+</div>
+</div>
+</div>
+<!-- Success Toast Notification (Positioned absolute within workspace) -->
+
+</div>
+</main>
+<style>
+        @keyframes slideDown {
+            from { transform: translate(-50%, -100%); opacity: 0; }
+            to { transform: translate(-50%, 0); opacity: 1; }
+        }
+    </style>
+
+
+</body></html>

@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Community Settings - LobbyForge</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        @import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap');
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "outline": "#8d919b",
+                        "border-subtle": "#263142",
+                        "success": "#7CCFA6",
+                        "on-surface-variant": "#c3c6d2",
+                        "surface-variant": "#32353b",
+                        "inverse-primary": "#325e9f",
+                        "text-muted": "#7F8A99",
+                        "on-primary-container": "#144787",
+                        "primary-container": "#8fb8ff",
+                        "outline-variant": "#434750",
+                        "secondary-fixed-dim": "#bcc7da",
+                        "surface-raised": "#171E2B",
+                        "surface-container-lowest": "#0b0e13",
+                        "tertiary-container": "#deb063",
+                        "bg-soft": "#0B1018",
+                        "text-primary": "#F4F7FB",
+                        "tertiary": "#fccb7b",
+                        "border-strong": "#334155",
+                        "secondary-fixed": "#d8e3f6",
+                        "on-secondary": "#26313f",
+                        "surface-bright": "#36393f",
+                        "secondary": "#bcc7da",
+                        "on-background": "#e0e2ea",
+                        "on-error": "#690005",
+                        "error": "#ffb4ab",
+                        "on-tertiary-container": "#614200",
+                        "surface-floating": "#1D2533",
+                        "surface-tint": "#a9c7ff",
+                        "on-tertiary-fixed": "#281900",
+                        "on-secondary-fixed-variant": "#3d4757",
+                        "surface-container-high": "#272a30",
+                        "on-tertiary-fixed-variant": "#5f4100",
+                        "on-secondary-fixed": "#111c2a",
+                        "surface-container-low": "#181c21",
+                        "on-primary-fixed": "#001b3d",
+                        "surface-container-highest": "#32353b",
+                        "primary-fixed": "#d6e3ff",
+                        "primary": "#bdd3ff",
+                        "error-container": "#93000a",
+                        "surface-dim": "#101419",
+                        "text-secondary": "#B7C0CC",
+                        "secondary-container": "#3d4757",
+                        "on-primary-fixed-variant": "#124686",
+                        "on-error-container": "#ffdad6",
+                        "on-secondary-container": "#abb6c8",
+                        "on-tertiary": "#432c00",
+                        "background": "#101419",
+                        "primary-fixed-dim": "#a9c7ff",
+                        "surface": "#111722",
+                        "tertiary-fixed": "#ffdeac",
+                        "on-surface": "#e0e2ea",
+                        "on-primary": "#003063",
+                        "inverse-on-surface": "#2d3036",
+                        "surface-container": "#1d2025",
+                        "tertiary-fixed-dim": "#efbf70",
+                        "danger": "#E98282",
+                        "inverse-surface": "#e0e2ea"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "margin-desktop": "64px",
+                        "gutter": "24px",
+                        "container-max": "1280px",
+                        "section-gap": "120px",
+                        "margin-mobile": "24px"
+                    },
+                    "fontFamily": {
+                        "body-lg": ["Geist"],
+                        "hero-h1": ["Geist"],
+                        "section-h2-mobile": ["Geist"],
+                        "hero-h1-mobile": ["Geist"],
+                        "body-md": ["Geist"],
+                        "section-h2": ["Geist"],
+                        "label-xs": ["Geist"],
+                        "label-sm": ["Geist"]
+                    },
+                    "fontSize": {
+                        "body-lg": ["18px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                        "hero-h1": ["80px", { "lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "600" }],
+                        "section-h2-mobile": ["32px", { "lineHeight": "1.2", "fontWeight": "600" }],
+                        "hero-h1-mobile": ["40px", { "lineHeight": "1.2", "fontWeight": "600" }],
+                        "body-md": ["16px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                        "section-h2": ["52px", { "lineHeight": "1.2", "fontWeight": "600" }],
+                        "label-xs": ["12px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "500" }],
+                        "label-sm": ["14px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "500" }]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-background text-text-primary min-h-screen font-body-md antialiased flex flex-col items-center">
+<div class="w-full max-w-container-max flex-1 flex flex-col bg-surface shadow-2xl rounded-xl my-8 overflow-hidden border border-border-subtle" style="height: calc(100vh - 64px);">
+<!-- Header -->
+<header class="flex items-center justify-between px-6 py-4 border-b border-border-subtle bg-surface-dim/80 backdrop-blur-md shrink-0">
+<div>
+<div class="flex items-center gap-3">
+<h1 class="text-body-lg font-bold text-primary">Community Settings</h1>
+<span class="px-2 py-0.5 rounded bg-surface-raised border border-border-subtle font-label-xs text-text-secondary text-[10px]">Self-hosted community</span>
+</div>
+<p class="font-label-sm text-text-muted mt-1">Manage Ankara Gaming Voice</p>
+</div>
+<button class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-surface-raised text-text-muted hover:text-text-primary transition-colors">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">close</span>
+</button>
+</header>
+<!-- Main Shell -->
+<div class="flex flex-1 overflow-hidden">
+<!-- Left Navigation Rail -->
+<nav class="w-64 flex-shrink-0 bg-surface-dim border-r border-border-subtle flex flex-col py-6 overflow-y-auto"><div class="px-4 mb-6"><h2 class="font-label-xs text-text-muted uppercase tracking-wider mb-2">Community</h2><ul class="space-y-1"><li><a class="flex items-center px-3 py-2 rounded-lg text-text-primary bg-surface-container-high font-label-sm" href="#"><span class="material-symbols-outlined mr-3 text-[18px]">dashboard</span>Overview</a></li><li><a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container font-label-sm transition-colors" href="#"><span class="material-symbols-outlined mr-3 text-[18px]">badge</span>Community Profile</a></li><li><a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container font-label-sm transition-colors" href="#"><span class="material-symbols-outlined mr-3 text-[18px]">admin_panel_settings</span>Roles &amp; Permissions</a></li><li><a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container font-label-sm transition-colors" href="#"><span class="material-symbols-outlined mr-3 text-[18px]">group</span>Members</a></li><li><a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container font-label-sm transition-colors" href="#"><span class="material-symbols-outlined mr-3 text-[18px]">forum</span>Channels</a></li><li><a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container font-label-sm transition-colors" href="#"><span class="material-symbols-outlined mr-3 text-[18px]">link</span>Invites</a></li></ul></div><div class="px-4 mb-6"><h2 class="font-label-xs text-text-muted uppercase tracking-wider mb-2">Safety</h2><ul class="space-y-1"><li><a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container font-label-sm transition-colors" href="#"><span class="material-symbols-outlined mr-3 text-[18px]">gavel</span>Moderation</a></li><li><a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container font-label-sm transition-colors" href="#"><span class="material-symbols-outlined mr-3 text-[18px]">history</span>Audit Log</a></li></ul></div><div class="px-4 mb-6"><h2 class="font-label-xs text-text-muted uppercase tracking-wider mb-2">Voice &amp; Media</h2><ul class="space-y-1"><li><a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container font-label-sm transition-colors" href="#"><span class="material-symbols-outlined mr-3 text-[18px]">mic</span>Voice &amp; Media</a></li><li><a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container font-label-sm transition-colors" href="#"><span class="material-symbols-outlined mr-3 text-[18px]">database</span>Storage</a></li></ul></div><div class="px-4 mb-6"><h2 class="font-label-xs text-text-muted uppercase tracking-wider mb-2">System</h2><ul class="space-y-1"><li><a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container font-label-sm transition-colors" href="#"><span class="material-symbols-outlined mr-3 text-[18px]">lock</span>Authentication</a></li><li><a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container font-label-sm transition-colors" href="#"><span class="material-symbols-outlined mr-3 text-[18px]">backup</span>Backups</a></li><li><a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container font-label-sm transition-colors" href="#"><span class="material-symbols-outlined mr-3 text-[18px]">update</span>Updates</a></li><li><a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container font-label-sm transition-colors" href="#"><span class="material-symbols-outlined mr-3 text-[18px]">medical_services</span>Doctor &amp; Health</a></li></ul></div></nav>
+<!-- Central Content Area -->
+<main class="flex-1 overflow-y-auto bg-background p-8 lg:p-10">
+<div class="max-w-3xl mx-auto">
+<div class="mb-10">
+<h2 class="font-section-h2-mobile text-text-primary mb-2">Overview</h2>
+<p class="font-body-md text-text-muted">Review the health and basic configuration of Ankara Gaming Voice.</p>
+</div>
+<!-- Section 1: Community Summary -->
+<section class="mb-8"><div class="bg-surface/80 rounded-xl border border-border-subtle p-6 backdrop-blur-sm"><div class="flex items-center justify-between mb-6 border-b border-border-subtle pb-4"><div class="flex items-center gap-4"><div class="w-16 h-16 rounded-lg bg-surface-raised border border-border-subtle flex items-center justify-center overflow-hidden"><span class="material-symbols-outlined text-3xl text-primary" style="font-variation-settings: 'FILL' 0;">sports_esports</span></div><div><h3 class="font-body-lg text-text-primary font-medium">Ankara Gaming Voice</h3><p class="font-label-sm text-text-muted mt-1">Self-hosted • Türkiye</p></div></div><button class="px-4 py-2 rounded-lg border border-border-strong text-text-secondary hover:bg-surface-raised font-label-sm transition-colors">Edit Community Profile</button></div><div class="grid grid-cols-2 md:grid-cols-4 gap-6"><div class="space-y-1"><p class="text-[10px] uppercase tracking-wider text-text-muted">Owner</p><p class="font-label-sm text-text-primary">juanka</p></div><div class="space-y-1"><p class="text-[10px] uppercase tracking-wider text-text-muted">Members</p><p class="font-label-sm text-text-primary">24</p></div><div class="space-y-1"><p class="text-[10px] uppercase tracking-wider text-text-muted">Channels</p><p class="font-label-sm text-text-primary">3 Text / 4 Voice</p></div><div class="space-y-1"><p class="text-[10px] uppercase tracking-wider text-text-muted">Version</p><p class="font-label-sm text-text-primary">LobbyForge v0.1.0</p></div></div></div></section><section class="mb-8"><h3 class="font-label-sm text-text-muted uppercase tracking-wider mb-4">Quick Actions</h3><div class="grid grid-cols-1 md:grid-cols-2 gap-4"><button class="flex flex-col items-start p-4 rounded-xl bg-surface-raised border border-border-subtle hover:bg-surface-container transition-colors text-left"><span class="material-symbols-outlined text-primary mb-2">person_add</span><span class="font-label-sm text-text-primary font-medium">Invite People</span><span class="text-[12px] text-text-muted">Create or copy an invite link.</span></button><button class="flex flex-col items-start p-4 rounded-xl bg-surface-raised border border-border-subtle hover:bg-surface-container transition-colors text-left"><span class="material-symbols-outlined text-primary mb-2">manage_accounts</span><span class="font-label-sm text-text-primary font-medium">Manage Members</span><span class="text-[12px] text-text-muted">Review members and roles.</span></button><button class="flex flex-col items-start p-4 rounded-xl bg-surface-raised border border-border-subtle hover:bg-surface-container transition-colors text-left"><span class="material-symbols-outlined text-primary mb-2">add_circle</span><span class="font-label-sm text-text-primary font-medium">Create Channel</span><span class="text-[12px] text-text-muted">Add a text channel or voice room.</span></button><button class="flex flex-col items-start p-4 rounded-xl bg-surface-raised border border-border-subtle hover:bg-surface-container transition-colors text-left"><span class="material-symbols-outlined text-primary mb-2">history</span><span class="font-label-sm text-text-primary font-medium">View Audit Log</span><span class="text-[12px] text-text-muted">Review recent administrative actions.</span></button></div></section><section class="mb-8"><h3 class="font-label-sm text-text-muted uppercase tracking-wider mb-4">Recent Activity</h3><div class="bg-surface-raised rounded-xl border border-border-subtle overflow-hidden"><div class="divide-y divide-border-subtle"><div class="p-4 flex items-center justify-between"><div class="flex items-center gap-3"><span class="material-symbols-outlined text-text-muted text-[18px]">link</span><p class="font-label-sm text-text-secondary"><span class="text-text-primary font-medium">juanka</span> created an invite link</p></div><span class="text-[12px] text-text-muted">2m ago</span></div><div class="p-4 flex items-center justify-between"><div class="flex items-center gap-3"><span class="material-symbols-outlined text-text-muted text-[18px]">person_add</span><p class="font-label-sm text-text-secondary"><span class="text-text-primary font-medium">Ayşe</span> joined the community</p></div><span class="text-[12px] text-text-muted">18m ago</span></div><div class="p-4 flex items-center justify-between"><div class="flex items-center gap-3"><span class="material-symbols-outlined text-text-muted text-[18px]">mic_off</span><p class="font-label-sm text-text-secondary"><span class="text-text-primary font-medium">Mehmet</span> muted microphone in Main Lounge</p></div><span class="text-[12px] text-text-muted">42m ago</span></div><div class="p-4 flex items-center justify-between"><div class="flex items-center gap-3"><span class="material-symbols-outlined text-text-muted text-[18px]">security</span><p class="font-label-sm text-text-secondary">System updated channel permissions</p></div><span class="text-[12px] text-text-muted">Yesterday</span></div></div></div></section><section class="mb-8"><div class="p-4 rounded-lg bg-surface-container-low border border-border-subtle flex gap-3"><span class="material-symbols-outlined text-text-muted text-[20px]">info</span><p class="text-[12px] text-text-muted leading-relaxed">Community Settings affect this self-hosted instance only. Member profiles, roles, channels, and messages remain stored on this server.</p></div></section>
+</div>
+</main>
+<!-- Right Status Panel -->
+<aside class="w-72 flex-shrink-0 bg-surface border-l border-border-subtle p-6 flex flex-col overflow-y-auto">
+<h3 class="font-label-sm text-text-primary uppercase tracking-wider mb-6">Community Status</h3>
+<div class="space-y-4 flex-1"><div class="flex items-center justify-between"><div class="flex items-center text-text-secondary font-label-sm"><span class="material-symbols-outlined mr-2 text-[18px]">public</span> Instance</div><span class="flex items-center font-label-xs text-success"><span class="w-2 h-2 rounded-full bg-success mr-2"></span> Online</span></div><div class="flex items-center justify-between"><div class="flex items-center text-text-secondary font-label-sm"><span class="material-symbols-outlined mr-2 text-[18px]">settings_voice</span> Voice service</div><span class="font-label-xs text-text-primary">Connected</span></div><div class="flex items-center justify-between"><div class="flex items-center text-text-secondary font-label-sm"><span class="material-symbols-outlined mr-2 text-[18px]">database</span> Database</div><span class="font-label-xs text-text-primary">Connected</span></div><div class="flex items-center justify-between"><div class="flex items-center text-text-secondary font-label-sm"><span class="material-symbols-outlined mr-2 text-[18px]">hard_drive</span> Storage</div><span class="font-label-xs text-success">Healthy</span></div><div class="flex items-center justify-between"><div class="flex items-center text-text-secondary font-label-sm"><span class="material-symbols-outlined mr-2 text-[18px]">history</span> Last backup</div><span class="font-label-xs text-text-muted">3 hours ago</span></div><div class="flex items-center justify-between"><div class="flex items-center text-text-secondary font-label-sm"><span class="material-symbols-outlined mr-2 text-[18px]">system_update</span> Updates</div><span class="font-label-xs text-text-muted">Up to date</span></div></div>
+<div class="mt-8 pt-6 border-t border-border-subtle">
+<button class="w-full px-4 py-2 rounded-lg border border-border-strong text-text-secondary hover:bg-surface-raised font-label-sm transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]">medical_services</span> Run Doctor Check
+                    </button>
+</div>
+</aside>
+</div>
+</div>
+</body></html>

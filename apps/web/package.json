@@ -1,0 +1,63 @@
+{
+  "name": "@lobbyforge/web",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "next build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "lint": "eslint \"src/**/*.{ts,tsx}\" \"app/**/*.{ts,tsx}\" \"lib/**/*.ts\"",
+    "dev": "next dev --port 3000",
+    "start": "next start --port 3000"
+  },
+  "dependencies": {
+    "@lobbyforge/core": "workspace:*",
+    "@lobbyforge/db": "workspace:*",
+    "@lobbyforge/hushle": "workspace:*",
+    "@lobbyforge/i18n": "workspace:*",
+    "@lobbyforge/plugin-sdk": "workspace:*",
+    "@lobbyforge/quiz": "workspace:*",
+    "@lobbyforge/ui": "workspace:*",
+    "clsx": "^2.1.1",
+    "drizzle-orm": "^0.45.2",
+    "ioredis": "^5.11.1",
+    "jose": "^5.9.6",
+    "livekit-client": "^2.5.7",
+    "livekit-server-sdk": "^2.15.4",
+    "next": "^15.0.3",
+    "postgres": "^3.4.9",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwindcss": "^3.4.13",
+    "@tailwindcss/forms": "^0.5.9",
+    "@tailwindcss/container-queries": "^0.1.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@lobbyforge/config": "workspace:*",
+    "@next/eslint-plugin-next": "^15.5.19",
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^22.5.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^9.10.0",
+    "eslint-config-next": "^15.5.19",
+    "happy-dom": "^14.12.0",
+    "postcss": "^8.5.15",
+    "typescript": "^5.4.5",
+    "typescript-eslint": "^8.7.0",
+    "vitest": "^1.6.0"
+  }
+}

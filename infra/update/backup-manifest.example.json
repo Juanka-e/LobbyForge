@@ -1,0 +1,20 @@
+{
+  "formatVersion": 1,
+  "backupId": "local-dev-example",
+  "createdAt": "2026-06-11T00:00:00.000Z",
+  "appVersion": "0.1.0",
+  "completed": true,
+  "databaseDump": {
+    "path": "backups/local-dev-example/postgres.dump",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "sizeBytes": 1024
+  },
+  "includes": {
+    "database": true,
+    "uploads": false,
+    "env": false,
+    "pluginSettings": true,
+    "registryConfig": true
+  },
+  "files": []
+}

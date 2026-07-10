@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Channels Settings - LobbyForge</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap');
+</style>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "on-tertiary": "#432c00",
+                      "inverse-surface": "#e0e2ea",
+                      "primary": "#bdd3ff",
+                      "tertiary-container": "#deb063",
+                      "surface-tint": "#a9c7ff",
+                      "on-primary": "#003063",
+                      "surface-container-lowest": "#0b0e13",
+                      "on-secondary": "#26313f",
+                      "secondary-fixed": "#d8e3f6",
+                      "surface-variant": "#32353b",
+                      "secondary-fixed-dim": "#bcc7da",
+                      "on-error-container": "#ffdad6",
+                      "success": "#7CCFA6",
+                      "on-primary-fixed": "#001b3d",
+                      "text-muted": "#7F8A99",
+                      "surface-bright": "#36393f",
+                      "on-surface": "#e0e2ea",
+                      "text-primary": "#F4F7FB",
+                      "on-tertiary-fixed-variant": "#5f4100",
+                      "border-subtle": "#263142",
+                      "on-error": "#690005",
+                      "tertiary-fixed": "#ffdeac",
+                      "danger": "#E98282",
+                      "on-surface-variant": "#c3c6d2",
+                      "inverse-primary": "#325e9f",
+                      "tertiary": "#fccb7b",
+                      "secondary": "#bcc7da",
+                      "on-secondary-fixed": "#111c2a",
+                      "border-strong": "#334155",
+                      "on-tertiary-container": "#614200",
+                      "on-tertiary-fixed": "#281900",
+                      "secondary-container": "#3d4757",
+                      "tertiary-fixed-dim": "#efbf70",
+                      "primary-fixed-dim": "#a9c7ff",
+                      "on-primary-container": "#144787",
+                      "surface-dim": "#101419",
+                      "bg-soft": "#0B1018",
+                      "text-secondary": "#B7C0CC",
+                      "error-container": "#93000a",
+                      "outline-variant": "#434750",
+                      "outline": "#8d919b",
+                      "surface": "#111722",
+                      "on-secondary-fixed-variant": "#3d4757",
+                      "primary-container": "#8fb8ff",
+                      "on-secondary-container": "#abb6c8",
+                      "surface-container-highest": "#32353b",
+                      "surface-floating": "#1D2533",
+                      "error": "#ffb4ab",
+                      "on-background": "#e0e2ea",
+                      "surface-container": "#1d2025",
+                      "surface-container-low": "#181c21",
+                      "surface-container-high": "#272a30",
+                      "on-primary-fixed-variant": "#124686",
+                      "primary-fixed": "#d6e3ff",
+                      "inverse-on-surface": "#2d3036",
+                      "surface-raised": "#171E2B",
+                      "background": "#101419"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "gutter": "24px",
+                      "margin-desktop": "64px",
+                      "margin-mobile": "24px",
+                      "section-gap": "120px",
+                      "container-max": "1240px"
+              },
+              "fontFamily": {
+                      "label-xs": [
+                              "Geist"
+                      ],
+                      "section-h2": [
+                              "Geist"
+                      ],
+                      "hero-h1-mobile": [
+                              "Geist"
+                      ],
+                      "label-sm": [
+                              "Geist"
+                      ],
+                      "body-lg": [
+                              "Geist"
+                      ],
+                      "hero-h1": [
+                              "Geist"
+                      ],
+                      "body-md": [
+                              "Geist"
+                      ],
+                      "section-h2-mobile": [
+                              "Geist"
+                      ]
+              },
+              "fontSize": {
+                      "label-xs": [
+                              "12px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "section-h2": [
+                              "52px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "hero-h1-mobile": [
+                              "40px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "label-sm": [
+                              "14px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "body-lg": [
+                              "18px",
+                              {
+                                      "lineHeight": "1.6",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "hero-h1": [
+                              "80px",
+                              {
+                                      "lineHeight": "1.1",
+                                      "letterSpacing": "-0.02em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "body-md": [
+                              "16px",
+                              {
+                                      "lineHeight": "1.6",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "section-h2-mobile": [
+                              "32px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "fontWeight": "600"
+                              }
+                      ]
+              }
+      },
+          },
+        }
+    </script>
+</head>
+<body class="bg-[#070A0F] text-text-primary font-body-md h-screen overflow-hidden flex flex-col selection:bg-primary-container selection:text-on-primary-container">
+<!-- Settings Header -->
+<header class="h-16 flex-shrink-0 flex items-center justify-between px-margin-desktop border-b border-border-subtle bg-surface/50 backdrop-blur-md">
+<div class="flex items-center space-x-3">
+<span class="material-symbols-outlined text-text-secondary" style="font-variation-settings: 'FILL' 1;">settings</span>
+<h1 class="font-section-h2-mobile text-body-lg text-text-primary font-semibold tracking-tight">Community Settings</h1>
+<span class="text-text-muted mx-2">/</span>
+<span class="text-text-secondary text-body-md">Manage Ankara Gaming Voice</span>
+<span class="px-2 py-0.5 ml-2 rounded text-[10px] font-semibold bg-surface-variant text-text-muted border border-border-subtle uppercase tracking-wide">Self-hosted community</span>
+</div>
+<button aria-label="Close settings" class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-surface-raised transition-colors group">
+<span class="material-symbols-outlined text-text-muted group-hover:text-text-primary transition-colors">close</span>
+</button>
+</header>
+<!-- Main App Layout -->
+<div class="flex flex-1 overflow-hidden relative">
+<div class="flex flex-1 overflow-hidden">
+<!-- Settings Sidebar -->
+<aside class="w-64 flex-shrink-0 bg-surface border-r border-border-subtle overflow-y-auto hidden md:block py-6 px-4 space-y-8">
+<!-- Group 1 -->
+<div class="space-y-1">
+<h3 class="font-label-xs text-label-xs text-text-muted uppercase tracking-wider px-3 mb-2">Community</h3>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">info</span>
+                    Overview
+                </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">account_circle</span>
+                    Community Profile
+                </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">badge</span>
+                    Roles &amp; Permissions
+                </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]" style="font-variation-settings: 'FILL' 1;">group</span>
+                    Members
+                </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-primary bg-surface-container-high font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">category</span>
+                    Channels
+                </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">person_add</span>
+                    Invites
+                </a>
+</div>
+<!-- Group 2 -->
+<div class="space-y-1">
+<h3 class="font-label-xs text-label-xs text-text-muted uppercase tracking-wider px-3 mb-2">Safety</h3>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">gavel</span>
+                    Moderation
+                </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">history</span>
+                    Audit Log
+                </a>
+</div>
+<!-- Group 3 -->
+<div class="space-y-1">
+<h3 class="font-label-xs text-label-xs text-text-muted uppercase tracking-wider px-3 mb-2">Voice &amp; Media</h3>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">mic</span>
+                    Voice &amp; Media
+                </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">storage</span>
+                    Storage
+                </a>
+</div>
+<!-- Group 4 -->
+<div class="space-y-1">
+<h3 class="font-label-xs text-label-xs text-text-muted uppercase tracking-wider px-3 mb-2">System</h3>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">security</span>
+                    Authentication
+                </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">backup</span>
+                    Backups
+                </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">update</span>
+                    Updates
+                </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">medical_services</span>
+                    Doctor &amp; Health
+                </a>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col min-w-0 bg-[#070A0F] relative">
+<div class="flex-1 overflow-y-auto px-margin-mobile md:px-margin-desktop py-8 pb-32">
+<div class="max-w-[1200px] mx-auto flex gap-8">
+<!-- Left: Channels List -->
+<div class="flex-1 space-y-6">
+<header>
+<h2 class="font-section-h2-mobile text-section-h2-mobile text-text-primary mb-2">Channels</h2>
+<p class="font-body-md text-body-md text-text-muted">Manage text channels, voice rooms, visibility, and order.</p>
+</header>
+<!-- Toolbar -->
+<div class="flex flex-wrap gap-4 items-center bg-surface-raised p-4 rounded-xl border border-border-subtle">
+<div class="relative flex-1 min-w-[200px]">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-[20px]">search</span>
+<input class="w-full bg-surface-container border border-border-strong rounded-lg pl-10 pr-4 py-2 text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container font-body-md text-body-md transition-all" placeholder="Search channels..." type="text"/>
+</div>
+<div class="flex gap-3">
+<select class="bg-surface-container border border-border-strong rounded-lg px-4 py-2 text-text-secondary focus:outline-none focus:border-primary-container font-body-md text-body-md appearance-none transition-all">
+<option>All types</option>
+<option>Text Channels</option>
+<option>Voice Rooms</option>
+</select>
+<select class="bg-surface-container border border-border-strong rounded-lg px-4 py-2 text-text-secondary focus:outline-none focus:border-primary-container font-body-md text-body-md appearance-none transition-all">
+<option>All visibility</option>
+<option>Public</option>
+<option>Private</option>
+</select>
+</div>
+<div class="flex gap-3 ml-auto">
+<button class="px-4 py-2 rounded-lg border border-border-strong text-text-secondary hover:bg-surface-container transition-colors font-label-sm text-label-sm">
+                                    Reorder Channels
+                                </button>
+<button class="px-4 py-2 rounded-lg bg-primary-container text-[#07101E] hover:brightness-110 hover:-translate-y-0.5 transition-all font-label-sm text-label-sm font-semibold shadow-[0_0_10px_rgba(143,184,255,0.2)]">
+                                    Create Channel
+                                </button>
+</div>
+</div>
+<!-- Summary Chips -->
+<div class="flex flex-wrap gap-3">
+<div class="px-3 py-1.5 rounded-full bg-surface border border-border-subtle flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-text-muted">tag</span>
+<span class="font-label-xs text-label-xs text-text-secondary">3 text channels</span>
+</div>
+<div class="px-3 py-1.5 rounded-full bg-surface border border-border-subtle flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-text-muted">volume_up</span>
+<span class="font-label-xs text-label-xs text-text-secondary">4 voice rooms</span>
+</div>
+<div class="px-3 py-1.5 rounded-full bg-surface border border-border-subtle flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-text-muted">lock</span>
+<span class="font-label-xs text-label-xs text-text-secondary">1 private channel</span>
+</div>
+<div class="px-3 py-1.5 rounded-full bg-surface border border-border-subtle flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-success"></span>
+<span class="font-label-xs text-label-xs text-text-secondary">2 active rooms</span>
+</div>
+</div>
+<!-- Categories & Lists -->
+<div class="space-y-6">
+<!-- Text Channels -->
+<div>
+<div class="flex items-center gap-2 mb-3 px-2 text-text-muted hover:text-text-secondary cursor-pointer transition-colors group">
+<span class="material-symbols-outlined text-[20px] transition-transform group-hover:rotate-90">chevron_right</span>
+<h3 class="font-label-xs text-label-xs uppercase tracking-wider font-semibold">Text Channels</h3>
+<div class="h-px bg-border-subtle flex-1 ml-4"></div>
+<span class="material-symbols-outlined text-[18px] opacity-0 group-hover:opacity-100 transition-opacity">add</span>
+</div>
+<div class="space-y-1">
+<!-- Channel Item -->
+<div class="flex items-center gap-4 p-3 rounded-xl hover:bg-surface transition-colors group border border-transparent hover:border-border-subtle">
+<div class="cursor-grab text-border-strong hover:text-text-muted transition-colors px-1">
+<span class="material-symbols-outlined text-[20px]">drag_indicator</span>
+</div>
+<div class="w-8 h-8 rounded bg-surface-container flex items-center justify-center text-text-muted">
+<span class="material-symbols-outlined text-[20px]">tag</span>
+</div>
+<div class="flex-1">
+<div class="flex items-center gap-2">
+<span class="font-label-sm text-label-sm text-text-primary font-medium">announcements</span>
+<span class="px-1.5 py-0.5 rounded text-[10px] bg-primary-container/10 text-primary border border-primary-container/20 font-medium tracking-wide">TEXT</span>
+</div>
+<p class="font-label-xs text-label-xs text-text-muted mt-0.5">Important server updates.</p>
+</div>
+<div class="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+<button class="w-8 h-8 rounded flex items-center justify-center text-text-muted hover:bg-surface-container-high hover:text-text-primary transition-colors" title="Settings">
+<span class="material-symbols-outlined text-[18px]">settings</span>
+</button>
+</div>
+</div>
+<!-- Channel Item (Selected) -->
+<div class="flex items-center gap-4 p-3 rounded-xl bg-surface border border-border-subtle group relative overflow-hidden">
+<div class="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary-container rounded-r-full"></div>
+<div class="cursor-grab text-border-strong hover:text-text-muted transition-colors px-1">
+<span class="material-symbols-outlined text-[20px]">drag_indicator</span>
+</div>
+<div class="w-8 h-8 rounded bg-primary-container/10 flex items-center justify-center text-primary-container">
+<span class="material-symbols-outlined text-[20px]">tag</span>
+</div>
+<div class="flex-1">
+<div class="flex items-center gap-2">
+<span class="font-label-sm text-label-sm text-primary-container font-medium">general</span>
+<span class="px-1.5 py-0.5 rounded text-[10px] bg-primary-container/10 text-primary border border-primary-container/20 font-medium tracking-wide">TEXT</span>
+</div>
+<p class="font-label-xs text-label-xs text-text-muted mt-0.5">Main community chat.</p>
+</div>
+<div class="flex items-center gap-2">
+<button class="w-8 h-8 rounded bg-surface-container flex items-center justify-center text-text-primary hover:bg-surface-container-high transition-colors border border-border-subtle" title="Settings">
+<span class="material-symbols-outlined text-[18px]">settings</span>
+</button>
+</div>
+</div>
+<!-- Channel Item -->
+<div class="flex items-center gap-4 p-3 rounded-xl hover:bg-surface transition-colors group border border-transparent hover:border-border-subtle">
+<div class="cursor-grab text-border-strong hover:text-text-muted transition-colors px-1">
+<span class="material-symbols-outlined text-[20px]">drag_indicator</span>
+</div>
+<div class="w-8 h-8 rounded bg-surface-container flex items-center justify-center text-text-muted">
+<span class="material-symbols-outlined text-[20px]">tag</span>
+</div>
+<div class="flex-1">
+<div class="flex items-center gap-2">
+<span class="font-label-sm text-label-sm text-text-primary font-medium">clips</span>
+<span class="px-1.5 py-0.5 rounded text-[10px] bg-primary-container/10 text-primary border border-primary-container/20 font-medium tracking-wide">TEXT</span>
+</div>
+<p class="font-label-xs text-label-xs text-text-muted mt-0.5">Share highlights.</p>
+</div>
+<div class="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+<button class="w-8 h-8 rounded flex items-center justify-center text-text-muted hover:bg-surface-container-high hover:text-text-primary transition-colors" title="Settings">
+<span class="material-symbols-outlined text-[18px]">settings</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Voice Channels -->
+<div class="pt-4">
+<div class="flex items-center gap-2 mb-3 px-2 text-text-muted hover:text-text-secondary cursor-pointer transition-colors group">
+<span class="material-symbols-outlined text-[20px] transition-transform group-hover:rotate-90">chevron_right</span>
+<h3 class="font-label-xs text-label-xs uppercase tracking-wider font-semibold">Voice Channels</h3>
+<div class="h-px bg-border-subtle flex-1 ml-4"></div>
+<span class="material-symbols-outlined text-[18px] opacity-0 group-hover:opacity-100 transition-opacity">add</span>
+</div>
+<div class="space-y-1">
+<!-- Voice Item -->
+<div class="flex items-center gap-4 p-3 rounded-xl hover:bg-surface transition-colors group border border-transparent hover:border-border-subtle">
+<div class="cursor-grab text-border-strong hover:text-text-muted transition-colors px-1">
+<span class="material-symbols-outlined text-[20px]">drag_indicator</span>
+</div>
+<div class="w-8 h-8 rounded bg-surface-container flex items-center justify-center text-text-muted">
+<span class="material-symbols-outlined text-[20px]">volume_up</span>
+</div>
+<div class="flex-1">
+<div class="flex items-center gap-2">
+<span class="font-label-sm text-label-sm text-text-primary font-medium">Main Lounge</span>
+<span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-bright text-text-secondary border border-border-strong font-medium tracking-wide">VOICE</span>
+</div>
+<div class="flex items-center gap-1.5 mt-1">
+<div class="flex -space-x-1">
+<div class="w-4 h-4 rounded-full bg-border-strong border-2 border-[#070A0F]"></div>
+<div class="w-4 h-4 rounded-full bg-border-strong border-2 border-[#070A0F]"></div>
+<div class="w-4 h-4 rounded-full bg-border-strong border-2 border-[#070A0F]"></div>
+</div>
+<p class="font-label-xs text-label-xs text-success">3 connected</p>
+</div>
+</div>
+<div class="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+<button class="w-8 h-8 rounded flex items-center justify-center text-text-muted hover:bg-surface-container-high hover:text-text-primary transition-colors" title="Settings">
+<span class="material-symbols-outlined text-[18px]">settings</span>
+</button>
+</div>
+</div>
+<!-- Voice Item -->
+<div class="flex items-center gap-4 p-3 rounded-xl hover:bg-surface transition-colors group border border-transparent hover:border-border-subtle">
+<div class="cursor-grab text-border-strong hover:text-text-muted transition-colors px-1">
+<span class="material-symbols-outlined text-[20px]">drag_indicator</span>
+</div>
+<div class="w-8 h-8 rounded bg-surface-container flex items-center justify-center text-text-muted">
+<span class="material-symbols-outlined text-[20px]">volume_up</span>
+</div>
+<div class="flex-1">
+<div class="flex items-center gap-2">
+<span class="font-label-sm text-label-sm text-text-primary font-medium">Game Room 1</span>
+<span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-bright text-text-secondary border border-border-strong font-medium tracking-wide">VOICE</span>
+</div>
+<div class="flex items-center gap-1.5 mt-1">
+<div class="w-1.5 h-1.5 rounded-full bg-tertiary"></div>
+<p class="font-label-xs text-label-xs text-tertiary">Hushle active</p>
+</div>
+</div>
+<div class="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+<button class="w-8 h-8 rounded flex items-center justify-center text-text-muted hover:bg-surface-container-high hover:text-text-primary transition-colors" title="Settings">
+<span class="material-symbols-outlined text-[18px]">settings</span>
+</button>
+</div>
+</div>
+<!-- Voice Item -->
+<div class="flex items-center gap-4 p-3 rounded-xl hover:bg-surface transition-colors group border border-transparent hover:border-border-subtle opacity-60">
+<div class="cursor-grab text-border-strong hover:text-text-muted transition-colors px-1">
+<span class="material-symbols-outlined text-[20px]">drag_indicator</span>
+</div>
+<div class="w-8 h-8 rounded bg-surface-container flex items-center justify-center text-text-muted">
+<span class="material-symbols-outlined text-[20px]">volume_up</span>
+</div>
+<div class="flex-1">
+<div class="flex items-center gap-2">
+<span class="font-label-sm text-label-sm text-text-primary font-medium">Hushle Room</span>
+<span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-bright text-text-secondary border border-border-strong font-medium tracking-wide">VOICE</span>
+</div>
+<p class="font-label-xs text-label-xs text-text-muted mt-0.5">Empty</p>
+</div>
+<div class="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+<button class="w-8 h-8 rounded flex items-center justify-center text-text-muted hover:bg-surface-container-high hover:text-text-primary transition-colors" title="Settings">
+<span class="material-symbols-outlined text-[18px]">settings</span>
+</button>
+</div>
+</div>
+<!-- Voice Item (Private) -->
+<div class="flex items-center gap-4 p-3 rounded-xl hover:bg-surface transition-colors group border border-transparent hover:border-border-subtle opacity-60">
+<div class="cursor-grab text-border-strong hover:text-text-muted transition-colors px-1">
+<span class="material-symbols-outlined text-[20px]">drag_indicator</span>
+</div>
+<div class="w-8 h-8 rounded bg-surface-container flex items-center justify-center text-text-muted relative">
+<span class="material-symbols-outlined text-[20px]">volume_up</span>
+<span class="material-symbols-outlined text-[12px] absolute -right-1 -bottom-1 bg-surface-container rounded-full text-text-muted">lock</span>
+</div>
+<div class="flex-1">
+<div class="flex items-center gap-2">
+<span class="font-label-sm text-label-sm text-text-primary font-medium">Vampire Night</span>
+<span class="px-1.5 py-0.5 rounded text-[10px] bg-surface-bright text-text-secondary border border-border-strong font-medium tracking-wide">VOICE</span>
+</div>
+<div class="flex items-center gap-2 mt-0.5">
+<span class="font-label-xs text-label-xs text-text-muted flex items-center gap-1">
+<span class="material-symbols-outlined text-[12px]">lock</span> Private
+                                                </span>
+<span class="w-1 h-1 rounded-full bg-border-strong"></span>
+<span class="font-label-xs text-label-xs text-text-muted">Empty</span>
+</div>
+</div>
+<div class="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+<button class="w-8 h-8 rounded flex items-center justify-center text-text-muted hover:bg-surface-container-high hover:text-text-primary transition-colors" title="Settings">
+<span class="material-symbols-outlined text-[18px]">settings</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Right: Details Panel -->
+<div class="w-80 flex-shrink-0 hidden lg:block">
+<div class="sticky top-0 bg-surface border border-border-subtle rounded-2xl p-5 flex flex-col gap-6 shadow-sm">
+<!-- Panel Header -->
+<div>
+<div class="flex items-center gap-3 mb-2">
+<div class="w-10 h-10 rounded-lg bg-primary-container/10 flex items-center justify-center text-primary-container">
+<span class="material-symbols-outlined">tag</span>
+</div>
+<div>
+<h3 class="font-label-sm text-label-sm font-semibold text-text-primary">general</h3>
+<p class="font-label-xs text-label-xs text-text-muted mt-0.5">Channel Details</p>
+</div>
+</div>
+</div>
+<div class="h-px w-full bg-border-subtle"></div>
+<!-- Info List -->
+<div class="space-y-4">
+<div class="flex justify-between items-center">
+<span class="font-label-xs text-label-xs text-text-muted">Type</span>
+<span class="font-label-sm text-label-sm text-text-primary">Text Channel</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="font-label-xs text-label-xs text-text-muted">Visibility</span>
+<span class="font-label-sm text-label-sm text-text-primary flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">public</span> Public
+                                    </span>
+</div>
+<div class="flex justify-between items-center">
+<span class="font-label-xs text-label-xs text-text-muted">Category</span>
+<span class="font-label-sm text-label-sm text-text-primary">Text Channels</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="font-label-xs text-label-xs text-text-muted">Slow mode</span>
+<span class="font-label-sm text-label-sm text-text-primary">Off</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="font-label-xs text-label-xs text-text-muted">File uploads</span>
+<span class="font-label-sm text-label-sm text-text-primary">On</span>
+</div>
+<div class="pt-2 border-t border-border-subtle/50 mt-2 space-y-2">
+<div class="flex justify-between items-center">
+<span class="font-label-xs text-label-xs text-text-muted">Created</span>
+<span class="font-label-xs text-label-xs text-text-secondary">May 2026</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="font-label-xs text-label-xs text-text-muted">Last updated</span>
+<span class="font-label-xs text-label-xs text-text-secondary">Today</span>
+</div>
+</div>
+</div>
+<!-- Actions -->
+<div class="space-y-2 pt-2">
+<button class="w-full py-2 px-4 rounded-lg bg-surface-container hover:bg-surface-container-high border border-border-subtle text-text-primary font-label-sm text-label-sm transition-colors text-left flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px] text-text-muted">edit</span>
+                                    Edit Channel
+                                </button>
+<button class="w-full py-2 px-4 rounded-lg bg-surface-container hover:bg-surface-container-high border border-border-subtle text-text-primary font-label-sm text-label-sm transition-colors text-left flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px] text-text-muted">tune</span>
+                                    Permission Overrides
+                                </button>
+<button class="w-full py-2 px-4 rounded-lg border border-danger/30 text-danger hover:bg-danger/10 font-label-sm text-label-sm transition-colors text-left flex items-center gap-2 mt-4">
+<span class="material-symbols-outlined text-[18px]">delete</span>
+                                    Delete Channel
+                                </button>
+</div>
+<div class="bg-surface-container-low p-3 rounded-lg border border-border-subtle">
+<p class="font-label-xs text-label-xs text-text-muted flex gap-2">
+<span class="material-symbols-outlined text-[16px] text-primary-container shrink-0">info</span>
+                                    Channel permission overrides apply on top of role permissions.
+                                </p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Sticky Footer -->
+<div class="absolute bottom-0 left-0 right-0 bg-surface/95 backdrop-blur-md border-t border-border-subtle p-4 px-margin-desktop z-10 shadow-[0_-10px_30px_-10px_rgba(0,0,0,0.5)]">
+<div class="max-w-[1200px] mx-auto flex items-center justify-between">
+<div class="flex items-center gap-2 text-text-muted">
+<span class="material-symbols-outlined text-[20px]">dns</span>
+<p class="font-label-sm text-label-sm">Channel changes affect this self-hosted community.</p>
+</div>
+<div class="flex space-x-3">
+<button class="px-6 py-2 rounded-lg text-text-secondary hover:text-text-primary font-label-sm text-label-sm transition-colors border border-transparent hover:border-border-subtle">
+                            Reset
+                        </button>
+<button class="px-6 py-2 rounded-lg text-[#07101E] hover:brightness-110 hover:-translate-y-0.5 transition-all font-label-sm text-label-sm font-semibold shadow-[0_0_15px_rgba(143,184,255,0.1)] bg-primary-container">
+                            Save Changes
+                        </button>
+</div>
+</div>
+</div>
+</main>
+</div>
+</div>
+</body></html>

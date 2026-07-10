@@ -1,0 +1,20 @@
+{
+  "channel": "stable",
+  "version": "0.1.1",
+  "keyId": "local-dev-example",
+  "minimumVersion": "0.1.0",
+  "releaseNotes": "Example stable update manifest for self-host planning.",
+  "breakingChanges": [],
+  "commands": {
+    "doctor": "lfctl doctor",
+    "backup": "lfctl backup create",
+    "composePull": "docker compose pull",
+    "composeUp": "docker compose up -d --remove-orphans",
+    "healthCheck": "curl -fsS http://localhost:3000/api/health",
+    "rollback": "docker compose up -d --remove-orphans"
+  },
+  "migrations": {
+    "dryRunCommand": "pnpm --filter @lobbyforge/db db:generate -- --dry-run",
+    "applyCommand": "pnpm --filter @lobbyforge/db db:migrate"
+  }
+}

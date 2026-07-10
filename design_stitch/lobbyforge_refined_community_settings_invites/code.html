@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Community Settings - Invites</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "text-primary": "#F4F7FB",
+                        "error": "#ffb4ab",
+                        "success": "#7CCFA6",
+                        "tertiary-fixed-dim": "#efbf70",
+                        "on-tertiary-container": "#614200",
+                        "surface-dim": "#101419",
+                        "secondary": "#bcc7da",
+                        "on-tertiary-fixed": "#281900",
+                        "surface-container-highest": "#32353b",
+                        "inverse-primary": "#325e9f",
+                        "text-secondary": "#B7C0CC",
+                        "error-container": "#93000a",
+                        "primary-container": "#8fb8ff",
+                        "surface-container": "#1d2025",
+                        "tertiary-fixed": "#ffdeac",
+                        "bg-soft": "#0B1018",
+                        "danger": "#E98282",
+                        "on-secondary-fixed": "#111c2a",
+                        "on-tertiary-fixed-variant": "#5f4100",
+                        "border-subtle": "#263142",
+                        "on-secondary": "#26313f",
+                        "surface-variant": "#32353b",
+                        "tertiary-container": "#deb063",
+                        "on-secondary-fixed-variant": "#3d4757",
+                        "surface-container-lowest": "#0b0e13",
+                        "on-surface-variant": "#c3c6d2",
+                        "border-strong": "#334155",
+                        "surface-raised": "#171E2B",
+                        "on-secondary-container": "#abb6c8",
+                        "on-tertiary": "#432c00",
+                        "on-primary-fixed-variant": "#124686",
+                        "surface-floating": "#1D2533",
+                        "on-surface": "#e0e2ea",
+                        "surface-tint": "#a9c7ff",
+                        "on-primary-fixed": "#001b3d",
+                        "text-muted": "#7F8A99",
+                        "secondary-fixed": "#d8e3f6",
+                        "primary-fixed-dim": "#a9c7ff",
+                        "inverse-on-surface": "#2d3036",
+                        "surface-container-low": "#181c21",
+                        "inverse-surface": "#e0e2ea",
+                        "surface-bright": "#36393f",
+                        "surface-container-high": "#272a30",
+                        "primary": "#bdd3ff",
+                        "on-error": "#690005",
+                        "secondary-fixed-dim": "#bcc7da",
+                        "on-background": "#e0e2ea",
+                        "on-error-container": "#ffdad6",
+                        "on-primary-container": "#144787",
+                        "outline-variant": "#434750",
+                        "tertiary": "#fccb7b",
+                        "primary-fixed": "#d6e3ff",
+                        "outline": "#8d919b",
+                        "on-primary": "#003063",
+                        "background": "#101419",
+                        "surface": "#111722",
+                        "secondary-container": "#3d4757"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "container-max": "1240px",
+                        "section-gap": "120px",
+                        "margin-mobile": "24px",
+                        "margin-desktop": "64px",
+                        "gutter": "24px"
+                    },
+                    "fontFamily": {
+                        "section-h2": ["Geist"],
+                        "label-sm": ["Geist"],
+                        "hero-h1": ["Geist"],
+                        "body-md": ["Geist"],
+                        "section-h2-mobile": ["Geist"],
+                        "hero-h1-mobile": ["Geist"],
+                        "label-xs": ["Geist"],
+                        "body-lg": ["Geist"]
+                    },
+                    "fontSize": {
+                        "section-h2": ["52px", { "lineHeight": "1.2", "fontWeight": "600" }],
+                        "label-sm": ["14px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "500" }],
+                        "hero-h1": ["80px", { "lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "600" }],
+                        "body-md": ["16px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                        "section-h2-mobile": ["32px", { "lineHeight": "1.2", "fontWeight": "600" }],
+                        "hero-h1-mobile": ["40px", { "lineHeight": "1.2", "fontWeight": "600" }],
+                        "label-xs": ["12px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "500" }],
+                        "body-lg": ["18px", { "lineHeight": "1.6", "fontWeight": "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { background-color: theme('colors.background'); color: theme('colors.text-primary'); }
+        .glass-panel { background: rgba(17, 23, 34, 0.78); backdrop-filter: blur(12px); border: 1px solid rgba(148, 163, 184, 0.16); }
+        .scroll-hidden::-webkit-scrollbar { display: none; }
+        .scroll-hidden { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="font-body-md text-body-md overflow-hidden selection:bg-primary/30 selection:text-primary">
+<div class="flex h-screen w-full relative">
+<!-- Sidebar Navigation -->
+<aside class="fixed left-0 top-0 h-full overflow-y-auto bg-surface-container dark:bg-surface-container border-r border-border-subtle w-72 flex flex-col z-20 scroll-hidden">
+<div class="p-6 flex flex-col gap-2">
+<div class="flex items-center gap-3 mb-6"><div class="flex flex-col"><span class="font-bold text-text-primary text-lg leading-tight">Community Settings</span><span class="text-text-secondary text-sm">Manage Ankara Gaming Voice</span></div></div>
+</div>
+<nav class="flex-1 px-4 pb-6 space-y-8">
+<div>
+<span class="font-label-sm text-label-sm text-text-muted mb-2 px-3 uppercase block">Community</span>
+<ul class="space-y-1">
+<li><a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">dashboard</span>Overview</a></li>
+<li><a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">settings</span>Community Profile</a></li>
+<li><a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">verified_user</span>Roles &amp; Permissions</a></li>
+<li><a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">groups</span>Members</a></li>
+<li><a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">chat_bubble</span>Channels</a></li>
+<li><a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-primary font-bold bg-primary-container/10 active:scale-[0.98] transition-all" href="#"><span class="material-symbols-outlined text-[20px]">mail</span>Invites</a></li>
+</ul>
+</div>
+<div>
+<span class="font-label-sm text-label-sm text-text-muted mb-2 px-3 uppercase block">Safety</span>
+<ul class="space-y-1">
+<li><a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">security</span>Moderation</a></li>
+<li><a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">history</span>Audit Log</a></li>
+</ul>
+</div>
+<div>
+<span class="font-label-sm text-label-sm text-text-muted mb-2 px-3 uppercase block">Voice &amp; Media</span>
+<ul class="space-y-1">
+<li><a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">mic</span>Voice &amp; Media</a></li>
+<li><a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">storage</span>Storage</a></li>
+</ul>
+</div>
+<div>
+<span class="font-label-sm text-label-sm text-text-muted mb-2 px-3 uppercase block">System</span>
+<ul class="space-y-1">
+<li><a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">lock</span>Authentication</a></li>
+<li><a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">backup</span>Backups</a></li>
+<li><a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">system_update_alt</span>Updates</a></li>
+<li><a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-text-secondary font-normal hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">medical_services</span>Doctor &amp; Health</a></li>
+</ul>
+</div>
+</nav>
+<div class="p-4 mt-auto border-t border-border-subtle">
+<button class="w-full flex items-center justify-center gap-2 bg-surface-raised border border-border-strong text-text-primary px-4 py-2 rounded-lg font-label-sm text-label-sm hover:bg-surface-floating transition-colors">
+                    Manage Server
+                </button>
+</div>
+</aside>
+<!-- Main Workspace Area -->
+<main class="flex-1 ml-72 flex flex-col h-full bg-background relative overflow-hidden">
+<!-- Top App Bar -->
+<header class="flex justify-between items-center w-full px-10 h-20 bg-surface/80 backdrop-blur-md border-b border-border-subtle z-10 shrink-0"><div class="flex items-center gap-4"><h1 class="font-section-h2-mobile text-section-h2-mobile text-text-primary">Invites</h1><div class="flex items-center gap-2 bg-surface-raised px-3 py-1 rounded-full border border-border-subtle"><span class="w-2 h-2 rounded-full bg-success"></span><span class="text-xs font-medium text-text-secondary tracking-wide">Self-hosted community</span></div></div><div class="flex items-center gap-4"><button class="text-text-secondary hover:text-text-primary transition-colors hover:opacity-80"><span class="material-symbols-outlined">close</span></button></div></header>
+<!-- Content Canvas -->
+<div class="flex-1 flex overflow-hidden">
+<!-- Center Column: Invites List -->
+<div class="flex-1 overflow-y-auto px-10 py-10 scroll-hidden border-r border-border-subtle">
+<div class="max-w-4xl mx-auto">
+<!-- Toolbar -->
+<div class="flex flex-wrap items-center justify-between gap-4 mb-8 bg-surface-raised/50 p-4 rounded-xl border border-border-subtle">
+<div class="flex items-center gap-3 flex-1 min-w-[200px]">
+<div class="relative w-full max-w-md">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-text-muted">search</span>
+<input class="w-full bg-surface-floating border border-border-strong rounded-lg pl-10 pr-4 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none transition-all" placeholder="Search invites..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<select class="bg-surface-floating border border-border-strong rounded-lg px-3 py-2 text-sm text-text-primary focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none appearance-none">
+<option>All statuses</option>
+<option>Active</option>
+<option>Expired</option>
+</select>
+<select class="bg-surface-floating border border-border-strong rounded-lg px-3 py-2 text-sm text-text-primary focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none appearance-none">
+<option>All creators</option>
+</select>
+<select class="bg-surface-floating border border-border-strong rounded-lg px-3 py-2 text-sm text-text-primary focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none appearance-none">
+<option>Newest first</option>
+</select>
+<button class="bg-primary text-on-primary font-medium px-4 py-2 rounded-lg text-sm hover:brightness-110 transition-all shadow-[0_0_15px_rgba(143,184,255,0.15)] flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">add</span>
+                                    Create Invite
+                                </button>
+</div>
+</div>
+<!-- Summary Chips -->
+<div class="flex flex-wrap gap-3 mb-8">
+<div class="bg-surface-floating border border-border-subtle px-4 py-2 rounded-full flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-success"></span>
+<span class="text-sm font-medium text-text-primary">4 active invites</span>
+</div>
+<div class="bg-surface-floating border border-border-subtle px-4 py-2 rounded-full flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-danger"></span>
+<span class="text-sm font-medium text-text-primary">1 expired</span>
+</div>
+<div class="bg-surface-floating border border-border-subtle px-4 py-2 rounded-full flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-primary">analytics</span>
+<span class="text-sm font-medium text-text-primary">76 total uses</span>
+</div>
+<div class="bg-surface-floating border border-border-subtle px-4 py-2 rounded-full flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-tertiary">timer</span>
+<span class="text-sm font-medium text-text-primary">2 temporary links</span>
+</div>
+</div>
+<!-- Invites Table -->
+<div class="glass-panel rounded-xl overflow-hidden">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container/50 border-b border-border-subtle text-xs font-semibold text-text-secondary uppercase tracking-wider">
+<th class="px-6 py-4">Invite</th>
+<th class="px-6 py-4">Created by</th>
+<th class="px-6 py-4">Uses</th>
+<th class="px-6 py-4">Expires</th>
+<th class="px-6 py-4">Role on join</th>
+<th class="px-6 py-4">Status</th>
+<th class="px-6 py-4 text-right">Actions</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-border-subtle text-sm">
+<!-- Row 1 (Active) -->
+<tr class="hover:bg-surface-raised/50 transition-colors bg-primary/5 cursor-pointer border-l-2 border-primary">
+<td class="px-6 py-4">
+<div class="flex flex-col">
+<span class="font-medium text-primary">vN8xQ2</span>
+<span class="text-xs text-text-muted font-mono truncate w-32">ankara.../vN8xQ2</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<img class="w-6 h-6 rounded-full object-cover" data-alt="A small circular avatar placeholder for a user profile, minimalist dark style with a subtle generic human silhouette, premium quality." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBH8_fxt6YEkQFY-uPgvwYjSTIAqSbt-LwMAqx1KNBiqK4W7zksYy7Q4_IEWBSzkCGbH1EIziiTGtMt5iIKwprEAsKpsmE3WRCX8YuQ3NgQe4GLvqFqJCuOjE4E7DtAv7stRjpVSulhadEK8RPm7rTqJKcTh0abt1vUzq5FNdP804IXRKqe_rI2XzdHD6KszlPra3hsdDnoCueTRxSx4IUkv2oh8WmzINPA6OUKPgMM2gpoUq8FW3Al5qY9Arc_Ia9s_WioPARxcIc2"/>
+<span class="text-text-primary">juanka</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="flex flex-col gap-1 w-24">
+<span class="text-xs text-text-primary">12 / 25</span>
+<div class="h-1.5 w-full bg-surface-container-high rounded-full overflow-hidden">
+<div class="h-full bg-primary rounded-full" style="width: 48%"></div>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 text-text-secondary">7 days</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-surface-container border border-border-strong text-text-secondary">Member</span>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-1.5">
+<span class="w-2 h-2 rounded-full bg-success"></span>
+<span class="text-text-primary text-xs font-medium">Active</span>
+</div>
+</td>
+<td class="px-6 py-4 text-right">
+<div class="flex items-center justify-end gap-2">
+<button class="p-1.5 text-text-muted hover:text-primary transition-colors rounded-md hover:bg-surface-floating" title="Copy">
+<span class="material-symbols-outlined text-[18px]">content_copy</span>
+</button>
+<button class="p-1.5 text-text-muted hover:text-text-primary transition-colors rounded-md hover:bg-surface-floating" title="Manage">
+<span class="material-symbols-outlined text-[18px]">settings</span>
+</button>
+</div>
+</td>
+</tr>
+<!-- Row 2 -->
+<tr class="hover:bg-surface-raised/50 transition-colors cursor-pointer border-l-2 border-transparent hover:border-border-strong">
+<td class="px-6 py-4">
+<div class="flex flex-col">
+<span class="font-medium text-text-primary">game-night</span>
+<span class="text-xs text-text-muted font-mono truncate w-32">ankara.../game...</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<div class="w-6 h-6 rounded-full bg-tertiary-container flex items-center justify-center text-xs font-bold text-on-tertiary-container">A</div>
+<span class="text-text-primary">Ayşe</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="flex flex-col gap-1 w-24">
+<span class="text-xs text-text-primary">8 / 10</span>
+<div class="h-1.5 w-full bg-surface-container-high rounded-full overflow-hidden">
+<div class="h-full bg-primary rounded-full" style="width: 80%"></div>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 text-text-secondary">2 days</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-surface-container border border-border-strong text-text-secondary">Member</span>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-1.5">
+<span class="w-2 h-2 rounded-full bg-success"></span>
+<span class="text-text-primary text-xs font-medium">Active</span>
+</div>
+</td>
+<td class="px-6 py-4 text-right">
+<div class="flex items-center justify-end gap-2">
+<button class="p-1.5 text-text-muted hover:text-primary transition-colors rounded-md hover:bg-surface-floating" title="Copy">
+<span class="material-symbols-outlined text-[18px]">content_copy</span>
+</button>
+<button class="p-1.5 text-text-muted hover:text-text-primary transition-colors rounded-md hover:bg-surface-floating" title="Manage">
+<span class="material-symbols-outlined text-[18px]">settings</span>
+</button>
+</div>
+</td>
+</tr>
+<!-- Row 3 -->
+<tr class="hover:bg-surface-raised/50 transition-colors cursor-pointer border-l-2 border-transparent hover:border-border-strong">
+<td class="px-6 py-4">
+<div class="flex flex-col">
+<span class="font-medium text-text-primary">guest-week...</span>
+<span class="text-xs text-text-muted font-mono truncate w-32">ankara.../guest...</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<div class="w-6 h-6 rounded-full bg-secondary-container flex items-center justify-center text-xs font-bold text-text-primary">M</div>
+<span class="text-text-primary">Mehmet</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="flex flex-col gap-1 w-24">
+<span class="text-xs text-text-primary">3 / 5</span>
+<div class="h-1.5 w-full bg-surface-container-high rounded-full overflow-hidden">
+<div class="h-full bg-primary rounded-full" style="width: 60%"></div>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 text-tertiary">Tomorrow</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-tertiary-container/10 border border-tertiary/30 text-tertiary">Guest</span>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-1.5">
+<span class="w-2 h-2 rounded-full bg-success"></span>
+<span class="text-text-primary text-xs font-medium">Active</span>
+</div>
+</td>
+<td class="px-6 py-4 text-right">
+<div class="flex items-center justify-end gap-2">
+<button class="p-1.5 text-text-muted hover:text-primary transition-colors rounded-md hover:bg-surface-floating" title="Copy">
+<span class="material-symbols-outlined text-[18px]">content_copy</span>
+</button>
+<button class="p-1.5 text-text-muted hover:text-text-primary transition-colors rounded-md hover:bg-surface-floating" title="Manage">
+<span class="material-symbols-outlined text-[18px]">settings</span>
+</button>
+</div>
+</td>
+</tr>
+<!-- Row 4 (Expired) -->
+<tr class="hover:bg-surface-raised/50 transition-colors opacity-60 cursor-pointer border-l-2 border-transparent">
+<td class="px-6 py-4">
+<div class="flex flex-col">
+<span class="font-medium text-text-secondary line-through">old-link</span>
+<span class="text-xs text-text-muted font-mono truncate w-32">ankara.../old-l...</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<img class="w-6 h-6 rounded-full object-cover grayscale" data-alt="A small circular avatar placeholder for a user profile, minimalist dark style with a subtle generic human silhouette, premium quality." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCsI9oDBEGXlnA-U13lqDT9XmYMzUPkhD66VDyf30vn8JNezNAjum9rjhhAT1O-yFc5eUAFn3pDXPy6gFBH5rcg_QCnBx2Y7Qlag27NowNtDwphNlBqniM51-Q9qnY57LPbZ2ZuP1jppt3SNrC-mrGzNHe3a8fVrXQc7-phHmKQfHYHWfnu7O3clS1-2Du_6ziFMyYq8fVgIZK-nhrVFjPu0-z4QXcN_wPkoo_9yp4UK-g8itJaQG89mfmBqTmF841fNRSWJAhJ1EMX"/>
+<span class="text-text-secondary">juanka</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="flex flex-col gap-1 w-24">
+<span class="text-xs text-text-secondary">25 / 25</span>
+<div class="h-1.5 w-full bg-surface-container-high rounded-full overflow-hidden">
+<div class="h-full bg-danger rounded-full" style="width: 100%"></div>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 text-danger">Expired</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-surface-container border border-border-strong text-text-muted">Member</span>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-1.5">
+<span class="w-2 h-2 rounded-full bg-danger"></span>
+<span class="text-text-secondary text-xs font-medium">Expired</span>
+</div>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="p-1.5 text-text-muted hover:text-text-primary transition-colors rounded-md hover:bg-surface-floating text-sm font-medium">
+                                                View
+                                            </button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Info Note -->
+<div class="mt-8 flex items-start gap-3 bg-surface-floating/50 border border-border-subtle p-4 rounded-xl">
+<span class="material-symbols-outlined text-primary mt-0.5">info</span>
+<p class="text-sm text-text-secondary leading-relaxed">
+                                Invite links can be revoked at any time. Existing members are not removed when an invite is revoked.
+                            </p>
+</div>
+</div>
+</div>
+<!-- Right Column: Contextual Details Panel -->
+<aside class="w-80 lg:w-96 bg-surface shrink-0 overflow-y-auto scroll-hidden border-l border-border-subtle flex flex-col relative">
+<!-- Subtle top highlight for depth -->
+<div class="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-white/5 to-transparent"></div>
+<div class="p-6 border-b border-border-subtle sticky top-0 bg-surface/90 backdrop-blur z-10">
+<h3 class="text-lg font-semibold text-text-primary">Invite Details</h3>
+</div>
+<div class="p-6 flex-1 flex flex-col gap-8">
+<!-- Core Details -->
+<div class="space-y-6">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-success"></span>
+<span class="text-sm font-medium text-text-primary">Active</span>
+</div>
+<span class="bg-surface-container border border-border-strong px-2 py-1 rounded text-xs font-mono text-text-secondary">vN8xQ2</span>
+</div>
+<div class="glass-panel p-4 rounded-xl flex flex-col gap-4">
+<div class="flex flex-col gap-1">
+<span class="text-xs text-text-muted uppercase tracking-wider font-semibold">Invite URL</span>
+<div class="flex items-center gap-2 bg-surface-container-lowest p-2 rounded-lg border border-border-subtle">
+<span class="font-mono text-sm text-text-primary truncate flex-1 select-all">ankara.example.com/invite/vN8xQ2</span>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-4">
+<div class="flex flex-col gap-1">
+<span class="text-xs text-text-muted uppercase tracking-wider font-semibold">Created By</span>
+<div class="flex items-center gap-2">
+<img class="w-5 h-5 rounded-full object-cover" data-alt="A small circular avatar placeholder for a user profile, minimalist dark style with a subtle generic human silhouette, premium quality." src="https://lh3.googleusercontent.com/aida-public/AB6AXuA40ibJ8HWw1mGhPh8IHq3aeIpSojFrGGhvtso098spXCfPxRRVp18dXWQ1taejy8euY-aZ7u_wExWNyZ3vsSIM_g9mmNLpnzqAk8eKkyva3UKny3oyBT2dZxaID7nTD-d_ZiDQSlrI0Af4hIW9rsHE0AfujQ0p_-PlneePd7-OurdXsnmWCAwb0Db5kJcDK2J8BVmliiFIWDn1YxCiuYPGIshxlgA6o5k9XptBzxMB6NivJXi7-SiF7NG4R3NvJ6Utr4ObVXOp3Puj"/>
+<span class="text-sm text-text-primary">juanka</span>
+</div>
+</div>
+<div class="flex flex-col gap-1">
+<span class="text-xs text-text-muted uppercase tracking-wider font-semibold">Created</span>
+<span class="text-sm text-text-primary">Today</span>
+</div>
+</div>
+</div>
+</div>
+<hr class="border-border-subtle"/>
+<!-- Configuration -->
+<div class="space-y-4">
+<h4 class="text-sm font-medium text-text-secondary uppercase tracking-wider">Configuration</h4>
+<div class="flex justify-between items-center py-2">
+<span class="text-sm text-text-muted">Uses</span>
+<div class="flex items-center gap-2 text-sm text-text-primary font-medium">
+                                    12 / 25
+                                    <div class="w-16 h-1.5 bg-surface-container-high rounded-full overflow-hidden">
+<div class="h-full bg-primary rounded-full" style="width: 48%"></div>
+</div>
+</div>
+</div>
+<div class="flex justify-between items-center py-2">
+<span class="text-sm text-text-muted">Expires</span>
+<span class="text-sm text-text-primary font-medium">7 days</span>
+</div>
+<div class="flex justify-between items-center py-2">
+<span class="text-sm text-text-muted">Role</span>
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-surface-container border border-border-strong text-text-secondary">Member</span>
+</div>
+<div class="flex justify-between items-center py-2">
+<span class="text-sm text-text-muted flex items-center gap-1 cursor-help" title="If enabled, users are kicked when they disconnect unless assigned a role.">Temp membership <span class="material-symbols-outlined text-[14px]">help</span></span>
+<span class="text-sm text-text-secondary font-medium">Off</span>
+</div>
+</div>
+<hr class="border-border-subtle mt-auto"/>
+<!-- Actions -->
+<div class="space-y-3 pt-4">
+<button class="w-full bg-primary-container/10 border border-primary/20 text-primary hover:bg-primary-container/20 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]">content_copy</span> Copy Invite Link
+                            </button>
+<div class="grid grid-cols-2 gap-3">
+<button class="bg-surface-floating border border-border-strong text-text-primary hover:bg-surface-raised px-4 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]">qr_code_2</span> QR Code
+                                </button>
+<button class="bg-surface-floating border border-border-strong text-text-primary hover:bg-surface-raised px-4 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]">autorenew</span> Regenerate
+                                </button>
+</div>
+<button class="w-full mt-4 border border-danger/30 text-danger hover:bg-danger/10 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]">block</span> Revoke Invite
+                            </button>
+</div>
+</div>
+</aside>
+</div>
+<!-- Sticky Footer Actions -->
+<div class="flex items-center justify-between px-margin-desktop h-16 bg-surface-container-low dark:bg-surface-container-low border-t border-border-subtle shadow-md shrink-0 z-10 w-full">
+<span class="text-sm text-text-muted">Invite changes affect this self-hosted community.</span>
+<div class="flex items-center gap-4">
+<button class="text-text-muted hover:text-text-secondary font-label-sm text-label-sm transition-colors">Reset</button>
+<button class="bg-surface-variant text-text-muted cursor-not-allowed rounded-lg px-6 py-2 font-label-sm text-label-sm" disabled="">Save Changes</button>
+</div>
+</div>
+</main>
+</div>
+</body></html>

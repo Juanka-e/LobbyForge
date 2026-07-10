@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>LobbyForge - Community Settings</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        @import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap');
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "tertiary-container": "#deb063",
+                        "primary": "#bdd3ff",
+                        "inverse-surface": "#e0e2ea",
+                        "on-tertiary": "#432c00",
+                        "surface-variant": "#32353b",
+                        "secondary-fixed": "#d8e3f6",
+                        "surface-container-lowest": "#0b0e13",
+                        "on-secondary": "#26313f",
+                        "surface-tint": "#a9c7ff",
+                        "on-primary": "#003063",
+                        "text-primary": "#F4F7FB",
+                        "on-tertiary-fixed-variant": "#5f4100",
+                        "surface-bright": "#36393f",
+                        "on-surface": "#e0e2ea",
+                        "border-subtle": "#263142",
+                        "on-error-container": "#ffdad6",
+                        "text-muted": "#7F8A99",
+                        "success": "#7CCFA6",
+                        "on-primary-fixed": "#001b3d",
+                        "secondary-fixed-dim": "#bcc7da",
+                        "on-surface-variant": "#c3c6d2",
+                        "danger": "#E98282",
+                        "on-error": "#690005",
+                        "tertiary-fixed": "#ffdeac",
+                        "secondary": "#bcc7da",
+                        "on-tertiary-container": "#614200",
+                        "on-secondary-fixed": "#111c2a",
+                        "border-strong": "#334155",
+                        "tertiary": "#fccb7b",
+                        "inverse-primary": "#325e9f",
+                        "outline": "#8d919b",
+                        "text-secondary": "#B7C0CC",
+                        "surface-dim": "#101419",
+                        "bg-soft": "#0B1018",
+                        "outline-variant": "#434750",
+                        "error-container": "#93000a",
+                        "secondary-container": "#3d4757",
+                        "on-primary-container": "#144787",
+                        "tertiary-fixed-dim": "#efbf70",
+                        "primary-fixed-dim": "#a9c7ff",
+                        "on-tertiary-fixed": "#281900",
+                        "on-background": "#e0e2ea",
+                        "surface-container-highest": "#32353b",
+                        "surface-floating": "#1D2533",
+                        "error": "#ffb4ab",
+                        "surface-container": "#1d2025",
+                        "on-secondary-container": "#abb6c8",
+                        "primary-container": "#8fb8ff",
+                        "on-secondary-fixed-variant": "#3d4757",
+                        "surface": "#111722",
+                        "background": "#101419",
+                        "inverse-on-surface": "#2d3036",
+                        "surface-raised": "#171E2B",
+                        "primary-fixed": "#d6e3ff",
+                        "surface-container-high": "#272a30",
+                        "on-primary-fixed-variant": "#124686",
+                        "surface-container-low": "#181c21"
+                    },
+                    borderRadius: {
+                        DEFAULT: "0.25rem",
+                        lg: "0.5rem",
+                        xl: "0.75rem",
+                        full: "9999px"
+                    },
+                    spacing: {
+                        gutter: "24px",
+                        "margin-mobile": "24px",
+                        "margin-desktop": "64px",
+                        "section-gap": "120px",
+                        "container-max": "1240px"
+                    },
+                    fontFamily: {
+                        "section-h2": ["Geist"],
+                        "label-xs": ["Geist"],
+                        "hero-h1-mobile": ["Geist"],
+                        "label-sm": ["Geist"],
+                        "body-lg": ["Geist"],
+                        "section-h2-mobile": ["Geist"],
+                        "hero-h1": ["Geist"],
+                        "body-md": ["Geist"]
+                    },
+                    fontSize: {
+                        "section-h2": ["52px", { lineHeight: "1.2", fontWeight: "600" }],
+                        "label-xs": ["12px", { lineHeight: "1.2", letterSpacing: "0.05em", fontWeight: "500" }],
+                        "hero-h1-mobile": ["40px", { lineHeight: "1.2", fontWeight: "600" }],
+                        "label-sm": ["14px", { lineHeight: "1.2", letterSpacing: "0.05em", fontWeight: "500" }],
+                        "body-lg": ["18px", { lineHeight: "1.6", fontWeight: "400" }],
+                        "section-h2-mobile": ["32px", { lineHeight: "1.2", fontWeight: "600" }],
+                        "hero-h1": ["80px", { lineHeight: "1.1", letterSpacing: "-0.02em", fontWeight: "600" }],
+                        "body-md": ["16px", { lineHeight: "1.6", fontWeight: "400" }]
+                    }
+                }
+            }
+        };
+    </script>
+</head>
+<body class="bg-[#070A0F] text-text-primary font-body-md h-screen overflow-hidden flex flex-col selection:bg-primary-container selection:text-on-primary-container">
+<!-- Settings Header -->
+<header class="h-16 flex-shrink-0 flex items-center justify-between px-margin-desktop border-b border-border-subtle bg-surface/50 backdrop-blur-md">
+<div class="flex items-center space-x-3">
+<span class="material-symbols-outlined text-text-secondary" style="font-variation-settings: 'FILL' 1;">settings</span>
+<h1 class="font-section-h2-mobile text-body-lg text-text-primary font-semibold tracking-tight">Community Settings</h1>
+<span class="text-text-muted mx-2">/</span>
+<span class="text-text-secondary text-body-md">Manage Ankara Gaming Voice</span>
+<span class="px-2 py-0.5 ml-2 rounded text-[10px] font-semibold bg-surface-variant text-text-muted border border-border-subtle uppercase tracking-wide">Self-hosted community</span>
+</div>
+<button aria-label="Close settings" class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-surface-raised transition-colors group">
+<span class="material-symbols-outlined text-text-muted group-hover:text-text-primary transition-colors">close</span>
+</button>
+</header>
+<!-- Main App Layout -->
+<div class="flex flex-1 overflow-hidden relative">
+<!-- Settings Layout (Sidebar + Content + Right Panel) -->
+<div class="flex flex-1 overflow-hidden">
+<!-- Settings Sidebar -->
+<aside class="w-64 flex-shrink-0 bg-surface border-r border-border-subtle overflow-y-auto hidden md:block py-6 px-4 space-y-8">
+<!-- Group 1 -->
+<div class="space-y-1">
+<h3 class="font-label-xs text-label-xs text-text-muted uppercase tracking-wider px-3 mb-2">Community</h3>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">info</span>
+                            Overview
+                        </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">account_circle</span>
+                            Community Profile
+                        </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">badge</span>
+                            Roles &amp; Permissions
+                        </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-primary bg-surface-container-high font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]" style="font-variation-settings: 'FILL' 1;">group</span>
+                            Members
+                        </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">category</span>
+                            Channels
+                        </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">person_add</span>
+                            Invites
+                        </a>
+</div>
+<!-- Group 2 -->
+<div class="space-y-1">
+<h3 class="font-label-xs text-label-xs text-text-muted uppercase tracking-wider px-3 mb-2">Safety</h3>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">gavel</span>
+                            Moderation
+                        </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">history</span>
+                            Audit Log
+                        </a>
+</div>
+<!-- Group 3 -->
+<div class="space-y-1">
+<h3 class="font-label-xs text-label-xs text-text-muted uppercase tracking-wider px-3 mb-2">Voice &amp; Media</h3>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">mic</span>
+                            Voice &amp; Media
+                        </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">storage</span>
+                            Storage
+                        </a>
+</div>
+<!-- Group 4 -->
+<div class="space-y-1">
+<h3 class="font-label-xs text-label-xs text-text-muted uppercase tracking-wider px-3 mb-2">System</h3>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">security</span>
+                            Authentication
+                        </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">backup</span>
+                            Backups
+                        </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">update</span>
+                            Updates
+                        </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">medical_services</span>
+                            Doctor &amp; Health
+                        </a>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col min-w-0 bg-[#070A0F] relative">
+<div class="flex-1 overflow-y-auto px-margin-mobile md:px-margin-desktop py-8 pb-32">
+<!-- Header -->
+<div class="max-w-4xl mx-auto">
+<h2 class="font-section-h2-mobile text-section-h2-mobile text-text-primary mb-2">Members</h2>
+<p class="text-text-secondary font-body-md text-body-md mb-8">Review members, roles, and account status in Ankara Gaming Voice.</p>
+<!-- Toolbar -->
+<div class="flex flex-col md:flex-row gap-4 mb-6">
+<div class="relative flex-1">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-[20px]">search</span>
+<input class="w-full bg-surface border border-border-subtle rounded-lg py-2 pl-10 pr-4 text-text-primary placeholder-text-muted focus:outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-all font-body-md text-body-md" placeholder="Search members..." type="text"/>
+</div>
+<div class="flex flex-wrap gap-3">
+<button class="flex items-center px-4 py-2 bg-surface border border-border-subtle rounded-lg text-text-secondary hover:bg-surface-raised transition-colors font-label-sm text-label-sm group">
+                                        All roles <span class="material-symbols-outlined ml-2 text-[18px] group-hover:text-text-primary transition-colors">expand_more</span>
+</button>
+<button class="flex items-center px-4 py-2 bg-surface border border-border-subtle rounded-lg text-text-secondary hover:bg-surface-raised transition-colors font-label-sm text-label-sm group">
+                                        All statuses <span class="material-symbols-outlined ml-2 text-[18px] group-hover:text-text-primary transition-colors">expand_more</span>
+</button>
+<button class="flex items-center px-4 py-2 bg-surface border border-border-subtle rounded-lg text-text-secondary hover:bg-surface-raised transition-colors font-label-sm text-label-sm group">
+                                        Recently active <span class="material-symbols-outlined ml-2 text-[18px] group-hover:text-text-primary transition-colors">sort</span>
+</button>
+<button class="flex items-center px-4 py-2 bg-transparent border border-border-strong rounded-lg text-secondary hover:bg-surface-raised transition-colors font-label-sm text-label-sm ml-auto md:ml-4">
+<span class="material-symbols-outlined mr-2 text-[18px]">download</span> Export CSV
+                                    </button>
+</div>
+</div>
+<!-- Summary Chips -->
+<div class="flex flex-wrap gap-2 mb-8">
+<span class="px-3 py-1 bg-surface-raised border border-border-subtle rounded-full text-text-secondary font-label-xs text-label-xs">24 members</span>
+<span class="px-3 py-1 bg-success/10 border border-success/20 rounded-full text-success font-label-xs text-label-xs flex items-center"><span class="w-2 h-2 rounded-full bg-success mr-2"></span>3 online</span>
+<span class="px-3 py-1 bg-tertiary/10 border border-tertiary/20 rounded-full text-tertiary font-label-xs text-label-xs flex items-center"><span class="material-symbols-outlined text-[14px] mr-1">mic</span>3 in voice</span>
+<span class="px-3 py-1 bg-primary/10 border border-primary/20 rounded-full text-primary font-label-xs text-label-xs">2 moderators</span>
+<span class="px-3 py-1 bg-surface-raised border border-border-subtle rounded-full text-text-muted font-label-xs text-label-xs">1 guest</span>
+</div>
+<!-- Member List Table -->
+<div class="bg-surface rounded-xl border border-border-subtle overflow-hidden">
+<div class="grid grid-cols-[auto_1fr_auto_auto_auto] gap-4 px-6 py-3 border-b border-border-subtle bg-surface-dim/50">
+<div class="font-label-xs text-label-xs text-text-muted uppercase tracking-wider col-span-2">Member</div>
+<div class="font-label-xs text-label-xs text-text-muted uppercase tracking-wider hidden sm:block">Joined</div>
+<div class="font-label-xs text-label-xs text-text-muted uppercase tracking-wider hidden md:block">Activity</div>
+<div class="font-label-xs text-label-xs text-text-muted uppercase tracking-wider text-right">Actions</div>
+</div>
+<div class="divide-y divide-border-subtle">
+<!-- Row 1: juanka -->
+<div class="grid grid-cols-[auto_1fr_auto_auto_auto] gap-4 px-6 py-4 items-center hover:bg-surface-raised/50 transition-colors group">
+<div class="relative w-10 h-10">
+<div class="w-full h-full rounded-full bg-surface-variant overflow-hidden border border-border-strong">
+<img class="w-full h-full object-cover" data-alt="A dark and moody profile picture of a stylized wolf emblem in neon cyan and deep blue, set against a black background. The art style is crisp and modern, resembling a high-end esports or gaming logo. Subtle glowing effects give it depth. 8k, sharp focus." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCBoXvJJZA0G8eIDPBFKdTZ7JObc5_mtDWQp7dgfB8X7tXqcjCLQEvpcI9adz2y6JknTZMi30Jrf0euyYgPPG3AI2u9mpXDxgbEXjRSEix8absiQfFiQWdct9-3p_7EQT6GFsSnGttrMsQLNXveiwWLIoI1RapzVmhb8rKiFgWNKsjZPzy5nWFpYTs_Q5ofg1md8Q_1zQU24lo5Ata9-3q026d1idakugul2j9ui3kz4oRul8DYSLTXW3ne-1RZrji8TElriHwGKQG2"/>
+</div>
+<div class="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-success border-2 border-surface"></div>
+</div>
+<div class="min-w-0">
+<div class="flex items-center space-x-2">
+<span class="font-label-sm text-label-sm text-text-primary truncate font-medium">juanka</span>
+<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-danger/20 text-danger border border-danger/30 uppercase tracking-wide">Owner</span>
+</div>
+<div class="text-text-muted font-body-md text-[13px] truncate">@juankaf</div>
+</div>
+<div class="text-text-secondary font-body-md text-[13px] hidden sm:block whitespace-nowrap">May 2026</div>
+<div class="text-text-secondary font-body-md text-[13px] hidden md:block whitespace-nowrap">Active Now</div>
+<div class="text-right">
+<button class="text-text-muted hover:text-text-primary p-2 rounded-lg hover:bg-surface-variant transition-colors">
+<span class="material-symbols-outlined text-[20px]">more_vert</span>
+</button>
+</div>
+</div>
+<!-- Row 2: Ayşe (Selected) -->
+<div class="grid grid-cols-[auto_1fr_auto_auto_auto] gap-4 px-6 py-4 items-center bg-surface-raised border-l-2 border-primary group">
+<div class="relative w-10 h-10">
+<div class="w-full h-full rounded-full bg-surface-variant overflow-hidden border border-border-strong">
+<img class="w-full h-full object-cover" data-alt="A portrait illustration of a female character with flowing cybernetic hair and glowing amber eyes, wearing dark tactical gear. The background is a soft, out-of-focus cityscape at night. The style is premium sci-fi illustration, highly detailed, with cinematic lighting and a calm expression." src="https://lh3.googleusercontent.com/aida-public/AB6AXuClkSlMxVjfTxWWATdRfoFwLpEE7eg9nXuJoB6MtzHSU_1DE919NlWauEyXDfUPL8HKG8_eLWT6thDpBaslIj6GlsjoAdad8EaW_goC_AKOJq1rHG4Ug-JWECnENSPvWl542ehGKLvJ4x4ZMIuzyusyhW0UJv7U8yoUBKUIYcFx36XjfhqjHMVc4ftr_D3c7Lu3OGknoB_PJIdkwd2kS5df9xOmVb6_S4UjdBUI2Xax3YYcSrHLqQVbqreFa6rrs9iyetpOjKhJH0rl"/>
+</div>
+<div class="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-tertiary border-2 border-surface flex items-center justify-center">
+<span class="material-symbols-outlined text-[8px] text-on-tertiary" style="font-variation-settings: 'FILL' 1;">mic</span>
+</div>
+</div>
+<div class="min-w-0">
+<div class="flex items-center space-x-2">
+<span class="font-label-sm text-label-sm text-text-primary truncate font-medium">Ayşe</span>
+<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-primary/10 text-primary border border-primary/20 uppercase tracking-wide">Member</span>
+</div>
+<div class="text-text-muted font-body-md text-[13px] truncate">@ayse</div>
+</div>
+<div class="text-text-secondary font-body-md text-[13px] hidden sm:block whitespace-nowrap">June 2026</div>
+<div class="text-text-secondary font-body-md text-[13px] hidden md:block whitespace-nowrap">Active Now</div>
+<div class="text-right">
+<button class="bg-surface-variant text-text-primary p-2 rounded-lg hover:bg-surface-bright transition-colors border border-border-subtle shadow-sm">
+<span class="material-symbols-outlined text-[20px]">more_vert</span>
+</button>
+</div>
+</div>
+<!-- Row 3: Mehmet -->
+<div class="grid grid-cols-[auto_1fr_auto_auto_auto] gap-4 px-6 py-4 items-center hover:bg-surface-raised/50 transition-colors group">
+<div class="relative w-10 h-10">
+<div class="w-full h-full rounded-full bg-surface-variant overflow-hidden border border-border-strong">
+<div class="w-full h-full bg-secondary-container flex items-center justify-center text-on-secondary-container font-label-sm">M</div>
+</div>
+<div class="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-surface-variant border-2 border-surface flex items-center justify-center">
+<span class="material-symbols-outlined text-[8px] text-text-muted" style="font-variation-settings: 'FILL' 1;">mic_off</span>
+</div>
+</div>
+<div class="min-w-0">
+<div class="flex items-center space-x-2">
+<span class="font-label-sm text-label-sm text-text-primary truncate font-medium">Mehmet</span>
+<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-success/10 text-success border border-success/20 uppercase tracking-wide">Mod</span>
+</div>
+<div class="text-text-muted font-body-md text-[13px] truncate">@mehmet_tr</div>
+</div>
+<div class="text-text-secondary font-body-md text-[13px] hidden sm:block whitespace-nowrap">June 2026</div>
+<div class="text-text-secondary font-body-md text-[13px] hidden md:block whitespace-nowrap">Active Now</div>
+<div class="text-right">
+<button class="text-text-muted hover:text-text-primary p-2 rounded-lg hover:bg-surface-variant transition-colors">
+<span class="material-symbols-outlined text-[20px]">more_vert</span>
+</button>
+</div>
+</div>
+<!-- Row 4: Lina -->
+<div class="grid grid-cols-[auto_1fr_auto_auto_auto] gap-4 px-6 py-4 items-center hover:bg-surface-raised/50 transition-colors group">
+<div class="relative w-10 h-10">
+<div class="w-full h-full rounded-full bg-surface-variant overflow-hidden border border-border-strong">
+<img class="w-full h-full object-cover" data-alt="An abstract geometric pattern in soft pastel hues of lavender, mint, and peach against a dark slate background. The shapes are gently glowing, reminiscent of a minimalist digital interface or modern generative art. High resolution, clean vectors." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDjbTGuoS5Kjekb4fYbZV2YdenO1A898NY9G_2-4H0j9W90Ng4pabCcX5OEcMNUhUGgf2Q8qau9GkFSuQzSH48coH2NGYoJbzBa2EGJvsn3Uav0r-e49S8OHwebPe5vgCJKFMijozfoNmtfW_sls5Nuk0wyqPX4v2xa-o6H-wEKCNfjarGhZGPHA7L3pcb31mKZG111UbfIcD0vZp_1AftZQrcTAlkhjXxJWZlKdSJvHE-MrRuiEm0GNAzgd3xo-YurPQxQR_ulx8RG"/>
+</div>
+<div class="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-success border-2 border-surface"></div>
+</div>
+<div class="min-w-0">
+<div class="flex items-center space-x-2">
+<span class="font-label-sm text-label-sm text-text-primary truncate font-medium">Lina</span>
+<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-primary/10 text-primary border border-primary/20 uppercase tracking-wide">Member</span>
+</div>
+<div class="text-text-muted font-body-md text-[13px] truncate">@lina_nova</div>
+</div>
+<div class="text-text-secondary font-body-md text-[13px] hidden sm:block whitespace-nowrap">June 2026</div>
+<div class="text-text-muted font-body-md text-[13px] hidden md:block whitespace-nowrap">12m ago</div>
+<div class="text-right">
+<button class="text-text-muted hover:text-text-primary p-2 rounded-lg hover:bg-surface-variant transition-colors">
+<span class="material-symbols-outlined text-[20px]">more_vert</span>
+</button>
+</div>
+</div>
+<!-- Row 5: Ozan_TR -->
+<div class="grid grid-cols-[auto_1fr_auto_auto_auto] gap-4 px-6 py-4 items-center hover:bg-surface-raised/50 transition-colors group opacity-75">
+<div class="relative w-10 h-10">
+<div class="w-full h-full rounded-full bg-surface-variant overflow-hidden border border-border-strong grayscale">
+<div class="w-full h-full bg-surface-container-high flex items-center justify-center text-text-muted font-label-sm">O</div>
+</div>
+<div class="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-surface-variant border-2 border-surface"></div>
+</div>
+<div class="min-w-0">
+<div class="flex items-center space-x-2">
+<span class="font-label-sm text-label-sm text-text-muted truncate font-medium">Ozan_TR</span>
+<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-surface-variant text-text-muted border border-border-subtle uppercase tracking-wide">Guest</span>
+</div>
+<div class="text-text-muted/60 font-body-md text-[13px] truncate">@ozantr</div>
+</div>
+<div class="text-text-muted font-body-md text-[13px] hidden sm:block whitespace-nowrap">June 2026</div>
+<div class="text-text-muted/60 font-body-md text-[13px] hidden md:block whitespace-nowrap">Yesterday</div>
+<div class="text-right">
+<button class="text-text-muted/60 hover:text-text-primary p-2 rounded-lg hover:bg-surface-variant transition-colors">
+<span class="material-symbols-outlined text-[20px]">more_vert</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Sticky Footer -->
+<div class="absolute bottom-0 left-0 right-0 bg-surface/95 backdrop-blur-md border-t border-border-subtle p-4 px-margin-desktop z-10 shadow-[0_-10px_30px_-10px_rgba(0,0,0,0.5)]">
+<div class="max-w-4xl mx-auto flex items-center justify-between">
+<p class="text-text-muted font-label-sm text-label-sm">Member changes affect this self-hosted community.</p>
+<div class="flex space-x-3">
+<button class="px-4 py-2 font-label-sm text-label-sm font-medium text-text-primary hover:bg-surface-raised rounded-lg transition-colors border border-transparent hover:border-border-subtle">Reset</button>
+<button class="px-5 py-2 font-label-sm text-label-sm font-semibold bg-surface-variant text-text-muted rounded-lg cursor-not-allowed transition-colors" disabled="">Save Changes</button>
+</div>
+</div>
+</div>
+</main>
+<!-- Right Panel (Fixed Details) -->
+<aside class="w-80 flex-shrink-0 bg-surface border-l border-border-subtle hidden lg:flex flex-col">
+<div class="h-16 flex items-center px-6 border-b border-border-subtle flex-shrink-0">
+<h3 class="font-label-sm text-label-sm font-semibold text-text-primary">Member Details</h3>
+</div>
+<div class="flex-1 overflow-y-auto p-6 flex flex-col items-center">
+<!-- Large Avatar -->
+<div class="relative w-24 h-24 mb-4">
+<div class="w-full h-full rounded-full bg-surface-variant overflow-hidden border-2 border-border-strong shadow-[0_0_15px_rgba(143,184,255,0.1)]">
+<img class="w-full h-full object-cover" data-alt="A portrait illustration of a female character with flowing cybernetic hair and glowing amber eyes, wearing dark tactical gear. The background is a soft, out-of-focus cityscape at night. The style is premium sci-fi illustration, highly detailed, with cinematic lighting and a calm expression." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAvMNQtjBPMjPRLuwP9w4qJJKXX7QIeOzs9__Fy3PeRlBoQfMvWty_qI2Tj885PFesluwoKU7s7hx6BtT69VNqv_Z7fydwzH0zQPstfnGYmmg4S2UX66M2llf916jGmgtT_2gikZfMCP6A4GcpexLwGhXqbjR360rC6bKd-2rrFbxf9D4arRbSlF3qRoF_ZS2VYqiDHfuYTRXAy97edqMZfuaE4uGEsvKK6qyugz0wBKNwidnGz0zA_4jhhQ5SNKR64k-emf3EtVZH8"/>
+</div>
+<div class="absolute bottom-0 right-2 w-5 h-5 rounded-full bg-tertiary border-[3px] border-surface flex items-center justify-center">
+<span class="material-symbols-outlined text-[12px] text-on-tertiary" style="font-variation-settings: 'FILL' 1;">mic</span>
+</div>
+</div>
+<!-- Info -->
+<h4 class="font-section-h2-mobile text-[20px] text-text-primary mb-1">Ayşe</h4>
+<p class="text-text-muted font-body-md text-body-md mb-4">@ayse</p>
+<div class="w-full px-4 py-3 bg-surface-container-low border border-border-subtle rounded-lg mb-6 flex flex-col space-y-2">
+<div class="flex justify-between items-center">
+<span class="text-text-muted font-label-xs text-label-xs uppercase tracking-wider">Status</span>
+<span class="text-tertiary font-label-sm text-label-sm flex items-center">In Main Lounge</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="text-text-muted font-label-xs text-label-xs uppercase tracking-wider">Role</span>
+<span class="text-primary font-label-sm text-label-sm px-2 py-0.5 bg-primary/10 rounded">Member</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="text-text-muted font-label-xs text-label-xs uppercase tracking-wider">Joined</span>
+<span class="text-text-secondary font-label-sm text-label-sm">June 2026</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="text-text-muted font-label-xs text-label-xs uppercase tracking-wider">Last Active</span>
+<span class="text-text-secondary font-label-sm text-label-sm">Now</span>
+</div>
+</div>
+<!-- Actions -->
+<div class="w-full space-y-3 mt-auto mb-4">
+<button class="w-full py-2.5 px-4 bg-surface border border-border-strong rounded-lg text-secondary hover:bg-surface-raised transition-colors font-label-sm text-label-sm flex items-center justify-center shadow-sm">
+<span class="material-symbols-outlined mr-2 text-[18px]">badge</span> Change Role
+                            </button>
+<button class="w-full py-2.5 px-4 bg-primary-container text-on-primary-container hover:brightness-110 transition-all rounded-lg font-label-sm text-label-sm font-semibold flex items-center justify-center shadow-[0_0_10px_rgba(143,184,255,0.2)]">
+<span class="material-symbols-outlined mr-2 text-[18px]">person</span> View Profile
+                            </button>
+<div class="h-px w-full bg-border-subtle my-4"></div>
+<button class="w-full py-2.5 px-4 bg-transparent border border-danger/30 text-danger hover:bg-danger/10 transition-colors rounded-lg font-label-sm text-label-sm flex items-center justify-center">
+<span class="material-symbols-outlined mr-2 text-[18px]">person_remove</span> Remove from Community
+                            </button>
+</div>
+<p class="text-text-muted/60 font-label-xs text-[10px] text-center mt-2 px-4 leading-relaxed">
+                            Available actions depend on your role hierarchy and permissions.
+                        </p>
+</div>
+</aside>
+</div>
+</div>
+</body></html>

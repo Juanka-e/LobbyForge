@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Channels Settings - LobbyForge</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap');
+</style>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "on-tertiary": "#432c00",
+                      "inverse-surface": "#e0e2ea",
+                      "primary": "#bdd3ff",
+                      "tertiary-container": "#deb063",
+                      "surface-tint": "#a9c7ff",
+                      "on-primary": "#003063",
+                      "surface-container-lowest": "#0b0e13",
+                      "on-secondary": "#26313f",
+                      "secondary-fixed": "#d8e3f6",
+                      "surface-variant": "#32353b",
+                      "secondary-fixed-dim": "#bcc7da",
+                      "on-error-container": "#ffdad6",
+                      "success": "#7CCFA6",
+                      "on-primary-fixed": "#001b3d",
+                      "text-muted": "#7F8A99",
+                      "surface-bright": "#36393f",
+                      "on-surface": "#e0e2ea",
+                      "text-primary": "#F4F7FB",
+                      "on-tertiary-fixed-variant": "#5f4100",
+                      "border-subtle": "#263142",
+                      "on-error": "#690005",
+                      "tertiary-fixed": "#ffdeac",
+                      "danger": "#E98282",
+                      "on-surface-variant": "#c3c6d2",
+                      "inverse-primary": "#325e9f",
+                      "tertiary": "#fccb7b",
+                      "secondary": "#bcc7da",
+                      "on-secondary-fixed": "#111c2a",
+                      "border-strong": "#334155",
+                      "on-tertiary-container": "#614200",
+                      "on-tertiary-fixed": "#281900",
+                      "secondary-container": "#3d4757",
+                      "tertiary-fixed-dim": "#efbf70",
+                      "primary-fixed-dim": "#a9c7ff",
+                      "on-primary-container": "#144787",
+                      "surface-dim": "#101419",
+                      "bg-soft": "#0B1018",
+                      "text-secondary": "#B7C0CC",
+                      "error-container": "#93000a",
+                      "outline-variant": "#434750",
+                      "outline": "#8d919b",
+                      "surface": "#111722",
+                      "on-secondary-fixed-variant": "#3d4757",
+                      "primary-container": "#8fb8ff",
+                      "on-secondary-container": "#abb6c8",
+                      "surface-container-highest": "#32353b",
+                      "surface-floating": "#1D2533",
+                      "error": "#ffb4ab",
+                      "on-background": "#e0e2ea",
+                      "surface-container": "#1d2025",
+                      "surface-container-low": "#181c21",
+                      "surface-container-high": "#272a30",
+                      "on-primary-fixed-variant": "#124686",
+                      "primary-fixed": "#d6e3ff",
+                      "inverse-on-surface": "#2d3036",
+                      "surface-raised": "#171E2B",
+                      "background": "#101419"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "gutter": "24px",
+                      "margin-desktop": "64px",
+                      "margin-mobile": "24px",
+                      "section-gap": "120px",
+                      "container-max": "1240px"
+              },
+              "fontFamily": {
+                      "label-xs": [
+                              "Geist"
+                      ],
+                      "section-h2": [
+                              "Geist"
+                      ],
+                      "hero-h1-mobile": [
+                              "Geist"
+                      ],
+                      "label-sm": [
+                              "Geist"
+                      ],
+                      "body-lg": [
+                              "Geist"
+                      ],
+                      "hero-h1": [
+                              "Geist"
+                      ],
+                      "body-md": [
+                              "Geist"
+                      ],
+                      "section-h2-mobile": [
+                              "Geist"
+                      ]
+              },
+              "fontSize": {
+                      "label-xs": [
+                              "12px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "section-h2": [
+                              "52px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "hero-h1-mobile": [
+                              "40px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "label-sm": [
+                              "14px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "body-lg": [
+                              "18px",
+                              {
+                                      "lineHeight": "1.6",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "hero-h1": [
+                              "80px",
+                              {
+                                      "lineHeight": "1.1",
+                                      "letterSpacing": "-0.02em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "body-md": [
+                              "16px",
+                              {
+                                      "lineHeight": "1.6",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "section-h2-mobile": [
+                              "32px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "fontWeight": "600"
+                              }
+                      ]
+              }
+      },
+          },
+        }
+    </script>
+</head>
+<body class="bg-[#070A0F] text-text-primary font-body-md h-screen overflow-hidden flex flex-col selection:bg-primary-container selection:text-on-primary-container">
+<!-- Settings Header -->
+<header class="h-16 flex-shrink-0 flex items-center justify-between px-margin-desktop border-b border-border-subtle bg-surface/50 backdrop-blur-md">
+<div class="flex items-center space-x-3">
+<span class="material-symbols-outlined text-text-secondary" style="font-variation-settings: 'FILL' 1;">settings</span>
+<h1 class="font-section-h2-mobile text-body-lg text-text-primary font-semibold tracking-tight">Community Settings</h1>
+<span class="text-text-muted mx-2">/</span>
+<span class="text-text-secondary text-body-md">Manage Ankara Gaming Voice</span>
+<span class="px-2 py-0.5 ml-2 rounded text-[10px] font-semibold bg-surface-variant text-text-muted border border-border-subtle uppercase tracking-wide">Self-hosted community</span>
+</div>
+<button aria-label="Close settings" class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-surface-raised transition-colors group">
+<span class="material-symbols-outlined text-text-muted group-hover:text-text-primary transition-colors">close</span>
+</button>
+</header>
+<!-- Main App Layout -->
+<div class="flex flex-1 overflow-hidden relative">
+<div class="flex flex-1 overflow-hidden">
+<!-- Settings Sidebar -->
+<aside class="w-64 flex-shrink-0 bg-surface border-r border-border-subtle overflow-y-auto hidden md:block py-6 px-4 space-y-8">
+<!-- Group 1 -->
+<div class="space-y-1">
+<h3 class="font-label-xs text-label-xs text-text-muted uppercase tracking-wider px-3 mb-2">Community</h3>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">info</span>
+                    Overview
+                </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">account_circle</span>
+                    Community Profile
+                </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">badge</span>
+                    Roles &amp; Permissions
+                </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]" style="font-variation-settings: 'FILL' 1;">group</span>
+                    Members
+                </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#"><span class="material-symbols-outlined mr-3 text-[20px]">category</span>Channels</a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">person_add</span>
+                    Invites
+                </a>
+</div>
+<!-- Group 2 -->
+<div class="space-y-1">
+<h3 class="font-label-xs text-label-xs text-text-muted uppercase tracking-wider px-3 mb-2">Safety</h3>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">gavel</span>
+                    Moderation
+                </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">history</span>
+                    Audit Log
+                </a>
+</div>
+<!-- Group 3 -->
+<div class="space-y-1">
+<h3 class="font-label-xs text-label-xs text-text-muted uppercase tracking-wider px-3 mb-2">Voice &amp; Media</h3>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">mic</span>
+                    Voice &amp; Media
+                </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">storage</span>
+                    Storage
+                </a>
+</div>
+<!-- Group 4 -->
+<div class="space-y-1">
+<h3 class="font-label-xs text-label-xs text-text-muted uppercase tracking-wider px-3 mb-2">System</h3>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-primary bg-surface-container-high font-body-md text-body-md" href="#"><span class="material-symbols-outlined mr-3 text-[20px]">security</span>Authentication</a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">backup</span>
+                    Backups
+                </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">update</span>
+                    Updates
+                </a>
+<a class="flex items-center px-3 py-2 rounded-lg text-text-muted hover:text-text-secondary hover:bg-surface-container transition-colors font-body-md text-body-md" href="#">
+<span class="material-symbols-outlined mr-3 text-[20px]">medical_services</span>
+                    Doctor &amp; Health
+                </a>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col min-w-0 bg-[#070A0F] relative">
+<div class="flex-1 overflow-y-auto px-margin-mobile md:px-margin-desktop py-8 pb-32"><div class="max-w-[1200px] mx-auto flex gap-8"><div class="flex-1 space-y-8"><header><h2 class="font-section-h2-mobile text-section-h2-mobile text-text-primary mb-2">Authentication</h2><p class="font-body-md text-body-md text-text-muted">Manage sign-in methods and account access for Ankara Gaming Voice.</p></header><div class="flex flex-wrap gap-3"><div class="px-3 py-1.5 rounded-full bg-surface border border-border-subtle flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-success"></span><span class="font-label-xs text-label-xs text-text-secondary">Local accounts enabled</span></div><div class="px-3 py-1.5 rounded-full bg-surface border border-border-subtle flex items-center gap-2"><span class="material-symbols-outlined text-[16px] text-text-muted">lock</span><span class="font-label-xs text-label-xs text-text-secondary">Invite required</span></div><div class="px-3 py-1.5 rounded-full bg-surface border border-border-subtle flex items-center gap-2"><span class="material-symbols-outlined text-[16px] text-text-muted">login</span><span class="font-label-xs text-label-xs text-text-secondary">2 sign-in methods</span></div><div class="px-3 py-1.5 rounded-full bg-surface border border-border-subtle flex items-center gap-2"><span class="material-symbols-outlined text-[16px] text-text-muted">group</span><span class="font-label-xs text-label-xs text-text-secondary">24 members</span></div><div class="px-3 py-1.5 rounded-full bg-surface border border-border-subtle flex items-center gap-2"><span class="font-label-xs text-label-xs text-text-muted">0 pending approvals</span></div></div><section class="space-y-4"><div class="flex items-center gap-2 px-2 text-text-muted"><h3 class="font-label-xs text-label-xs uppercase tracking-wider font-semibold">Sign-In Methods</h3><div class="h-px bg-border-subtle flex-1 ml-4"></div></div><div class="space-y-3"><div class="p-4 rounded-xl bg-surface-raised border border-border-subtle flex items-center justify-between"><div class="flex gap-4"><div class="w-10 h-10 rounded-lg bg-surface-container flex items-center justify-center text-text-muted"><span class="material-symbols-outlined">mail</span></div><div><h4 class="font-label-sm text-label-sm text-text-primary font-medium">Local email and password</h4><p class="font-label-xs text-label-xs text-text-muted mt-0.5">Members can sign in with an email address and password stored by this self-hosted community.</p></div></div><div class="w-10 h-5 bg-primary-container rounded-full relative cursor-pointer"><div class="absolute right-1 top-1 w-3 h-3 bg-[#07101E] rounded-full"></div></div></div><div class="p-4 rounded-xl bg-surface-raised border border-border-subtle flex items-center justify-between"><div class="flex gap-4"><div class="w-10 h-10 rounded-lg bg-surface-container flex items-center justify-center text-text-muted"><span class="material-symbols-outlined">google</span></div><div><h4 class="font-label-sm text-label-sm text-text-primary font-medium">Google sign-in</h4><p class="font-label-xs text-label-xs text-text-muted mt-0.5">Allow members to sign in with Google after the owner configures a provider.</p></div></div><div class="w-10 h-5 bg-surface-container-highest rounded-full relative cursor-pointer"><div class="absolute left-1 top-1 w-3 h-3 bg-text-muted rounded-full"></div></div></div><div class="p-4 rounded-xl bg-surface-raised border border-border-subtle flex items-center justify-between"><div class="flex gap-4"><div class="w-10 h-10 rounded-lg bg-surface-container flex items-center justify-center text-text-muted"><span class="material-symbols-outlined">person_outline</span></div><div><h4 class="font-label-sm text-label-sm text-text-primary font-medium">Guest access</h4><p class="font-label-xs text-label-xs text-text-muted mt-0.5">Guests can join temporarily without creating a full account.</p></div></div><div class="w-10 h-5 bg-surface-container-highest rounded-full relative cursor-pointer"><div class="absolute left-1 top-1 w-3 h-3 bg-text-muted rounded-full"></div></div></div></div></section><section class="space-y-4"><div class="flex items-center gap-2 px-2 text-text-muted"><h3 class="font-label-xs text-label-xs uppercase tracking-wider font-semibold">Account Creation</h3><div class="h-px bg-border-subtle flex-1 ml-4"></div></div><div class="bg-surface-raised border border-border-subtle rounded-xl divide-y divide-border-subtle/50"><div class="p-4 flex items-center justify-between"><div><h4 class="font-label-sm text-label-sm text-text-primary">Require invite to join</h4><p class="font-label-xs text-label-xs text-text-muted">Only users with a valid invite link can register.</p></div><div class="w-10 h-5 bg-primary-container rounded-full relative cursor-pointer"><div class="absolute right-1 top-1 w-3 h-3 bg-[#07101E] rounded-full"></div></div></div><div class="p-4 flex items-center justify-between"><div><h4 class="font-label-sm text-label-sm text-text-primary">Allow public registration</h4><p class="font-label-xs text-label-xs text-text-muted">Anyone can create an account without an invite.</p></div><div class="w-10 h-5 bg-surface-container-highest rounded-full relative cursor-pointer"><div class="absolute left-1 top-1 w-3 h-3 bg-text-muted rounded-full"></div></div></div><div class="p-4 flex items-center justify-between"><div><h4 class="font-label-sm text-label-sm text-text-primary">Require email address</h4></div><div class="w-10 h-5 bg-primary-container rounded-full relative cursor-pointer"><div class="absolute right-1 top-1 w-3 h-3 bg-[#07101E] rounded-full"></div></div></div><div class="p-4 flex items-center justify-between"><div><h4 class="font-label-sm text-label-sm text-text-primary">Require email verification</h4></div><div class="w-10 h-5 bg-surface-container-highest rounded-full relative cursor-pointer"><div class="absolute left-1 top-1 w-3 h-3 bg-text-muted rounded-full"></div></div></div><div class="p-4 flex items-center justify-between"><div><h4 class="font-label-sm text-label-sm text-text-primary">Allow username changes</h4></div><div class="w-10 h-5 bg-surface-container-highest rounded-full relative cursor-pointer"><div class="absolute left-1 top-1 w-3 h-3 bg-text-muted rounded-full"></div></div></div></div><div class="bg-surface-container-low p-3 rounded-lg border border-border-subtle flex gap-2"><span class="material-symbols-outlined text-[16px] text-primary-container">info</span><p class="font-label-xs text-label-xs text-text-muted">Invite-only communities reduce unwanted access on self-hosted instances.</p></div></section><section class="space-y-4"><div class="flex items-center gap-2 px-2 text-text-muted"><h3 class="font-label-xs text-label-xs uppercase tracking-wider font-semibold">Password Policy</h3><div class="h-px bg-border-subtle flex-1 ml-4"></div></div><div class="bg-surface-raised border border-border-subtle rounded-xl p-4 space-y-4"><div class="flex items-center justify-between"><span class="font-label-sm text-label-sm text-text-primary">Min length</span><input class="w-16 bg-surface-container border border-border-strong rounded px-2 py-1 text-text-primary text-center" type="number" value="8"/></div><div class="flex items-center justify-between"><span class="font-label-sm text-label-sm text-text-primary">Require number</span><div class="w-10 h-5 bg-primary-container rounded-full relative cursor-pointer"><div class="absolute right-1 top-1 w-3 h-3 bg-[#07101E] rounded-full"></div></div></div><div class="flex items-center justify-between"><span class="font-label-sm text-label-sm text-text-primary">Require special character</span><div class="w-10 h-5 bg-primary-container rounded-full relative cursor-pointer"><div class="absolute right-1 top-1 w-3 h-3 bg-[#07101E] rounded-full"></div></div></div><div class="flex items-center justify-between"><span class="font-label-sm text-label-sm text-text-primary">Prevent reuse</span><div class="w-10 h-5 bg-primary-container rounded-full relative cursor-pointer"><div class="absolute right-1 top-1 w-3 h-3 bg-[#07101E] rounded-full"></div></div></div><div class="flex items-center justify-between"><span class="font-label-sm text-label-sm text-text-primary">Require password again for sensitive actions</span><div class="w-10 h-5 bg-primary-container rounded-full relative cursor-pointer"><div class="absolute right-1 top-1 w-3 h-3 bg-[#07101E] rounded-full"></div></div></div></div></section></div><div class="w-80 flex-shrink-0 hidden lg:block"><div class="sticky top-0 bg-surface border border-border-subtle rounded-2xl p-5 flex flex-col gap-6 shadow-sm"><div><div class="flex items-center gap-3 mb-2"><div class="w-10 h-10 rounded-lg bg-primary-container/10 flex items-center justify-center text-primary-container"><span class="material-symbols-outlined">security</span></div><div><h3 class="font-label-sm text-label-sm font-semibold text-text-primary">Auth Status</h3><p class="font-label-xs text-label-xs text-text-muted mt-0.5">System Overview</p></div></div></div><div class="h-px w-full bg-border-subtle"></div><div class="space-y-4"><div class="flex justify-between items-center"><span class="font-label-xs text-label-xs text-text-muted">Local accounts</span><span class="font-label-sm text-label-sm text-success">Enabled</span></div><div class="flex justify-between items-center"><span class="font-label-xs text-label-xs text-text-muted">Invite required</span><span class="font-label-sm text-label-sm text-text-primary">Enabled</span></div><div class="flex justify-between items-center"><span class="font-label-xs text-label-xs text-text-muted">Public registration</span><span class="font-label-sm text-label-sm text-text-muted">Disabled</span></div><div class="flex justify-between items-center"><span class="font-label-xs text-label-xs text-text-muted">Google sign-in</span><span class="font-label-sm text-label-sm text-text-muted">Not configured</span></div><div class="flex justify-between items-center"><span class="font-label-xs text-label-xs text-text-muted">Guest access</span><span class="font-label-sm text-label-sm text-text-muted">Disabled</span></div><div class="pt-2 border-t border-border-subtle/50 mt-2 space-y-2"><div class="flex justify-between items-center"><span class="font-label-xs text-label-xs text-text-muted">Pending approvals</span><span class="font-label-xs text-label-xs text-text-secondary">0</span></div><div class="flex justify-between items-center"><span class="font-label-xs text-label-xs text-text-muted">Active sessions</span><span class="font-label-xs text-label-xs text-text-secondary">26</span></div></div></div><div class="space-y-2 pt-2"><button class="w-full py-2 px-4 rounded-lg bg-surface-container hover:bg-surface-container-high border border-border-subtle text-text-primary font-label-sm text-label-sm transition-colors text-left flex items-center gap-2"><span class="material-symbols-outlined text-[18px] text-text-muted">visibility</span>View Active Sessions</button><button class="w-full py-2 px-4 rounded-lg bg-surface-container hover:bg-surface-container-high border border-border-subtle text-text-primary font-label-sm text-label-sm transition-colors text-left flex items-center gap-2"><span class="material-symbols-outlined text-[18px] text-text-muted">verified_user</span>Run Auth Check</button></div><div class="bg-surface-container-low p-3 rounded-lg border border-border-subtle"><p class="font-label-xs text-label-xs text-text-muted flex gap-2"><span class="material-symbols-outlined text-[16px] text-primary-container shrink-0">info</span>Sensitive provider keys are configured securely outside this page.</p></div></div></div></div></div>
+<!-- Sticky Footer -->
+<div class="absolute bottom-0 left-0 right-0 bg-surface/95 backdrop-blur-md border-t border-border-subtle p-4 px-margin-desktop z-10 shadow-[0_-10px_30px_-10px_rgba(0,0,0,0.5)]">
+<div class="max-w-[1200px] mx-auto flex items-center justify-between">
+<div class="flex items-center gap-2 text-text-muted">
+<span class="material-symbols-outlined text-[20px]">dns</span>
+<p class="font-label-sm text-label-sm">Authentication changes affect access to this self-hosted community.</p>
+</div>
+<div class="flex space-x-3">
+<button class="px-6 py-2 rounded-lg text-text-secondary hover:text-text-primary font-label-sm text-label-sm transition-colors border border-transparent hover:border-border-subtle">
+                            Reset
+                        </button>
+<button class="px-6 py-2 rounded-lg text-[#07101E] hover:brightness-110 hover:-translate-y-0.5 transition-all font-label-sm text-label-sm font-semibold shadow-[0_0_15px_rgba(143,184,255,0.1)] bg-primary-container opacity-60">
+                            Save Changes
+                        </button>
+</div>
+</div>
+</div>
+</main>
+</div>
+</div>
+</body></html>

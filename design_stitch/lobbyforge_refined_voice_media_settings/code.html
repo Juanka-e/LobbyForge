@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Voice &amp; Media - Community Settings</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "bg-soft": "#0B1018",
+                        "tertiary-fixed-dim": "#efbf70",
+                        "on-secondary-fixed": "#111c2a",
+                        "inverse-surface": "#e0e2ea",
+                        "on-secondary-fixed-variant": "#3d4757",
+                        "primary-fixed-dim": "#a9c7ff",
+                        "on-background": "#e0e2ea",
+                        "text-primary": "#F4F7FB",
+                        "success": "#7CCFA6",
+                        "on-tertiary-fixed": "#281900",
+                        "on-primary-fixed": "#001b3d",
+                        "primary": "#8fb8ff",
+                        "outline": "#8d919b",
+                        "secondary-fixed-dim": "#bcc7da",
+                        "on-tertiary-container": "#614200",
+                        "text-secondary": "#B7C0CC",
+                        "surface-container-high": "#272a30",
+                        "text-muted": "#7F8A99",
+                        "surface-container-low": "#181c21",
+                        "on-secondary-container": "#abb6c8",
+                        "surface": "#111722",
+                        "secondary-container": "#3d4757",
+                        "on-tertiary": "#432c00",
+                        "surface-floating": "#1D2533",
+                        "tertiary": "#fccb7b",
+                        "on-primary": "#003063",
+                        "border-strong": "#334155",
+                        "surface-dim": "#101419",
+                        "error-container": "#93000a",
+                        "outline-variant": "#434750",
+                        "on-primary-container": "#144787",
+                        "error": "#ffb4ab",
+                        "tertiary-container": "#deb063",
+                        "surface-tint": "#a9c7ff",
+                        "inverse-on-surface": "#2d3036",
+                        "surface-raised": "#171E2B",
+                        "surface-container-lowest": "#0b0e13",
+                        "background": "#070A0F",
+                        "on-surface-variant": "#c3c6d2",
+                        "surface-container-highest": "#32353b",
+                        "surface-bright": "#36393f",
+                        "border-subtle": "#263142",
+                        "on-error": "#690005",
+                        "surface-variant": "#32353b",
+                        "on-primary-fixed-variant": "#124686",
+                        "secondary": "#bcc7da",
+                        "on-tertiary-fixed-variant": "#5f4100",
+                        "tertiary-fixed": "#ffdeac",
+                        "on-secondary": "#26313f",
+                        "on-error-container": "#ffdad6",
+                        "on-surface": "#e0e2ea",
+                        "surface-container": "#1d2025",
+                        "secondary-fixed": "#d8e3f6",
+                        "inverse-primary": "#325e9f",
+                        "danger": "#E98282",
+                        "primary-container": "#8fb8ff",
+                        "primary-fixed": "#d6e3ff"
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    spacing: {
+                        "section-gap": "120px",
+                        "container-max": "1240px",
+                        "margin-mobile": "24px",
+                        "margin-desktop": "64px",
+                        "gutter": "24px"
+                    },
+                    fontFamily: {
+                        "label-xs": ["Geist"],
+                        "hero-h1": ["Geist"],
+                        "section-h2-mobile": ["Geist"],
+                        "section-h2": ["Geist"],
+                        "hero-h1-mobile": ["Geist"],
+                        "body-lg": ["Geist"],
+                        "label-sm": ["Geist"],
+                        "body-md": ["Geist"]
+                    },
+                    fontSize: {
+                        "label-xs": ["12px", { lineHeight: "1.2", letterSpacing: "0.05em", fontWeight: "500" }],
+                        "hero-h1": ["80px", { lineHeight: "1.1", letterSpacing: "-0.02em", fontWeight: "600" }],
+                        "section-h2-mobile": ["32px", { lineHeight: "1.2", fontWeight: "600" }],
+                        "section-h2": ["52px", { lineHeight: "1.2", fontWeight: "600" }],
+                        "hero-h1-mobile": ["40px", { lineHeight: "1.2", fontWeight: "600" }],
+                        "body-lg": ["18px", { lineHeight: "1.6", fontWeight: "400" }],
+                        "label-sm": ["14px", { lineHeight: "1.2", letterSpacing: "0.05em", fontWeight: "500" }],
+                        "body-md": ["16px", { lineHeight: "1.6", fontWeight: "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { font-family: 'Geist', sans-serif; }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #263142; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #334155; }
+    </style>
+</head>
+<body class="bg-background text-text-primary h-screen flex overflow-hidden selection:bg-primary-container/30 selection:text-primary">
+<!-- SideNavBar -->
+<nav class="bg-surface border-r border-border-subtle h-screen w-72 flex flex-col flex-shrink-0 z-20">
+<div class="p-6 border-b border-border-subtle">
+<h1 class="font-section-h2-mobile text-section-h2-mobile font-bold text-text-primary">Community Settings</h1>
+<p class="text-text-secondary font-label-sm mt-1">Manage Ankara Gaming Voice</p>
+</div>
+<div class="flex-1 overflow-y-auto py-4 px-3 space-y-6">
+<!-- COMMUNITY -->
+<div>
+<h3 class="font-label-xs text-label-xs text-text-muted uppercase tracking-wider mb-2 px-3">Community</h3>
+<ul class="space-y-1">
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-raised transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">dashboard</span><span class="font-body-md text-body-md">Overview</span></a></li>
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-raised transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">settings</span><span class="font-body-md text-body-md">Community Profile</span></a></li>
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-raised transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">verified_user</span><span class="font-body-md text-body-md">Roles &amp; Permissions</span></a></li>
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-raised transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">groups</span><span class="font-body-md text-body-md">Members</span></a></li>
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-raised transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">chat_bubble</span><span class="font-body-md text-body-md">Channels</span></a></li>
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-raised transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">mail</span><span class="font-body-md text-body-md">Invites</span></a></li>
+</ul>
+</div>
+<!-- SAFETY -->
+<div>
+<h3 class="font-label-xs text-label-xs text-text-muted uppercase tracking-wider mb-2 px-3">Safety</h3>
+<ul class="space-y-1">
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-raised transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">security</span><span class="font-body-md text-body-md">Moderation</span></a></li>
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-raised transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">history</span><span class="font-body-md text-body-md">Audit Log</span></a></li>
+</ul>
+</div>
+<!-- VOICE & MEDIA -->
+<div>
+<h3 class="font-label-xs text-label-xs text-text-muted uppercase tracking-wider mb-2 px-3">Voice &amp; Media</h3>
+<ul class="space-y-1">
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-primary font-bold bg-primary-container/10 hover:bg-surface-raised transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]" style="font-variation-settings: 'FILL' 1;">mic</span><span class="font-body-md text-body-md">Voice &amp; Media</span></a></li>
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-raised transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">storage</span><span class="font-body-md text-body-md">Storage</span></a></li>
+</ul>
+</div>
+<!-- SYSTEM -->
+<div>
+<h3 class="font-label-xs text-label-xs text-text-muted uppercase tracking-wider mb-2 px-3">System</h3>
+<ul class="space-y-1">
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-raised transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">lock</span><span class="font-body-md text-body-md">Authentication</span></a></li>
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-raised transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">backup</span><span class="font-body-md text-body-md">Backups</span></a></li>
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-raised transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">system_update_alt</span><span class="font-body-md text-body-md">Updates</span></a></li>
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-normal hover:bg-surface-raised transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">medical_services</span><span class="font-body-md text-body-md">Doctor &amp; Health</span></a></li>
+</ul>
+</div>
+</div>
+</nav>
+<!-- Main Content Wrapper -->
+<div class="flex-1 flex flex-col relative w-full overflow-hidden">
+<!-- TopNavBar -->
+<header class="bg-background/80 backdrop-blur-md h-20 flex justify-end items-center px-8 z-10 w-full flex-shrink-0">
+<div class="flex items-center">
+<button class="w-10 h-10 rounded-full flex items-center justify-center text-text-secondary hover:text-primary hover:bg-surface-raised transition-colors">
+<span class="material-symbols-outlined">close</span>
+</button>
+</div>
+</header>
+<!-- Scrollable Content Area -->
+<main class="flex-1 overflow-y-auto p-8 lg:p-10 flex flex-col relative pb-32">
+<div class="max-w-7xl mx-auto w-full grid grid-cols-1 xl:grid-cols-12 gap-8 relative">
+<!-- Left Column (Main Settings) -->
+<div class="xl:col-span-8 flex flex-col gap-10">
+<!-- Header Section -->
+<div class="flex flex-col gap-4">
+<h1 class="font-section-h2 text-section-h2 text-text-primary">Voice &amp; Media</h1>
+<p class="font-body-lg text-text-secondary max-w-2xl">Configure voice rooms, camera, screen sharing, and media behavior for Ankara Gaming Voice.</p>
+</div>
+<!-- Section 1: Voice Service -->
+<section class="flex flex-col gap-4">
+<h2 class="font-body-lg font-semibold text-text-primary flex items-center gap-2">
+<span class="material-symbols-outlined text-primary">router</span> Voice Service Status
+                        </h2>
+<div class="bg-surface rounded-xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative overflow-hidden border border-border-subtle">
+<div class="flex flex-col gap-2">
+<div class="flex items-center gap-3">
+<div class="w-3 h-3 rounded-full bg-success"></div>
+<span class="font-label-sm text-text-primary font-semibold">Connected (Local Network)</span>
+</div>
+<p class="font-body-md text-text-secondary">Voice traffic is handled by this self-hosted community.</p>
+<div class="flex items-center gap-6 mt-2">
+<div class="flex flex-col">
+<span class="font-label-xs text-text-muted">Latency</span>
+<span class="font-label-sm text-success">38ms</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-xs text-text-muted">Packet Loss</span>
+<span class="font-label-sm text-success">0.2%</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-xs text-text-muted">Rooms / Users</span>
+<span class="font-label-sm text-text-primary">2 / 6</span>
+</div>
+</div>
+</div>
+<button class="bg-transparent border border-border-strong text-text-primary rounded-lg px-4 py-2 font-label-sm hover:bg-surface-raised transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">speed</span> Run Voice Test
+                            </button>
+</div>
+</section>
+<!-- Section 2: Default Voice Room Settings -->
+<section class="flex flex-col gap-4">
+<h2 class="font-body-lg font-semibold text-text-primary flex items-center gap-2 border-b border-border-subtle pb-2">
+<span class="material-symbols-outlined text-primary">meeting_room</span> Default Voice Room Settings
+                        </h2>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-2">
+<div class="flex flex-col gap-2">
+<label class="font-label-sm text-text-primary">Default User Limit</label>
+<select class="bg-surface-raised border border-border-strong text-text-primary rounded-lg px-4 py-2.5 font-body-md focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-shadow w-full">
+<option>No Limit</option>
+<option>99 Users</option>
+<option>50 Users</option>
+<option>25 Users</option>
+<option>10 Users</option>
+</select>
+<p class="font-label-xs text-text-muted mt-1">Applies to newly created voice channels.</p>
+</div>
+</div>
+<div class="flex flex-col gap-4 mt-4 bg-surface p-5 rounded-xl border border-border-subtle">
+<label class="flex items-start gap-4 cursor-pointer">
+<div class="relative flex items-center mt-1">
+<input class="sr-only peer" type="checkbox"/>
+<div class="w-10 h-5 bg-surface-raised border border-border-strong peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-secondary after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary peer-checked:border-primary peer-checked:after:bg-on-primary"></div>
+</div>
+<div class="flex flex-col">
+<span class="font-label-sm text-text-primary">Require Push-to-Talk Default</span>
+<span class="font-label-xs text-text-muted mt-1">Forces new members to use Push-to-Talk in new channels unless overridden.</span>
+</div>
+</label>
+<label class="flex items-start gap-4 cursor-pointer">
+<div class="relative flex items-center mt-1">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-10 h-5 bg-surface-raised border border-border-strong peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-secondary after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary peer-checked:border-primary peer-checked:after:bg-on-primary"></div>
+</div>
+<div class="flex flex-col">
+<span class="font-label-sm text-text-primary">Start Muted</span>
+<span class="font-label-xs text-text-muted mt-1">Users joining voice channels will be muted by default.</span>
+</div>
+</label>
+<label class="flex items-start gap-4 cursor-pointer">
+<div class="relative flex items-center mt-1">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-10 h-5 bg-surface-raised border border-border-strong peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-secondary after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary peer-checked:border-primary peer-checked:after:bg-on-primary"></div>
+</div>
+<div class="flex flex-col">
+<span class="font-label-sm text-text-primary">Allow members to join public rooms</span>
+<span class="font-label-xs text-text-muted mt-1">Any member can join voice channels without an invite.</span>
+</div>
+</label>
+<label class="flex items-start gap-4 cursor-pointer">
+<div class="relative flex items-center mt-1">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-10 h-5 bg-surface-raised border border-border-strong peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-secondary after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary peer-checked:border-primary peer-checked:after:bg-on-primary"></div>
+</div>
+<div class="flex flex-col">
+<span class="font-label-sm text-text-primary">Show speaking indicators</span>
+<span class="font-label-xs text-text-muted mt-1">Display a visual indicator when a user is speaking.</span>
+</div>
+</label>
+</div>
+</section>
+<!-- Section 3: Camera & Screen Sharing -->
+<section class="flex flex-col gap-4">
+<h2 class="font-body-lg font-semibold text-text-primary flex items-center gap-2 border-b border-border-subtle pb-2">
+<span class="material-symbols-outlined text-primary">videocam</span> Camera &amp; Screen Sharing
+                        </h2>
+<div class="flex flex-col gap-4 mt-2 bg-surface p-5 rounded-xl border border-border-subtle">
+<label class="flex items-start gap-4 cursor-pointer">
+<div class="relative flex items-center mt-1">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-10 h-5 bg-surface-raised border border-border-strong peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-secondary after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary peer-checked:border-primary peer-checked:after:bg-on-primary"></div>
+</div>
+<div class="flex flex-col">
+<span class="font-label-sm text-text-primary">Allow camera</span>
+<span class="font-label-xs text-text-muted mt-1">Users can turn on their video.</span>
+</div>
+</label>
+<label class="flex items-start gap-4 cursor-pointer">
+<div class="relative flex items-center mt-1">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-10 h-5 bg-surface-raised border border-border-strong peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-secondary after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary peer-checked:border-primary peer-checked:after:bg-on-primary"></div>
+</div>
+<div class="flex flex-col">
+<span class="font-label-sm text-text-primary">Allow screen sharing</span>
+<span class="font-label-xs text-text-muted mt-1">Users can share their screen or specific applications.</span>
+</div>
+</label>
+<label class="flex items-start gap-4 cursor-pointer">
+<div class="relative flex items-center mt-1">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-10 h-5 bg-surface-raised border border-border-strong peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-secondary after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary peer-checked:border-primary peer-checked:after:bg-on-primary"></div>
+</div>
+<div class="flex flex-col">
+<span class="font-label-sm text-text-primary">Allow system audio</span>
+<span class="font-label-xs text-text-muted mt-1">Users can share system audio when sharing a screen.</span>
+</div>
+</label>
+<label class="flex items-start gap-4 cursor-pointer">
+<div class="relative flex items-center mt-1">
+<input class="sr-only peer" type="checkbox"/>
+<div class="w-10 h-5 bg-surface-raised border border-border-strong peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-secondary after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary peer-checked:border-primary peer-checked:after:bg-on-primary"></div>
+</div>
+<div class="flex flex-col">
+<span class="font-label-sm text-text-primary">Require permission</span>
+<span class="font-label-xs text-text-muted mt-1">Users must be granted a specific role to use camera or screen share.</span>
+</div>
+</label>
+</div>
+</section>
+<!-- Section 4: Media Quality -->
+<section class="flex flex-col gap-4">
+<h2 class="font-body-lg font-semibold text-text-primary flex items-center gap-2 border-b border-border-subtle pb-2">
+<span class="material-symbols-outlined text-primary">high_quality</span> Media Quality
+                        </h2>
+<div class="flex flex-col gap-4 mt-2 bg-surface p-5 rounded-xl border border-border-subtle">
+<label class="flex items-start gap-4 cursor-pointer">
+<div class="relative flex items-center mt-1">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-10 h-5 bg-surface-raised border border-border-strong peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-secondary after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary peer-checked:border-primary peer-checked:after:bg-on-primary"></div>
+</div>
+<div class="flex flex-col">
+<span class="font-label-sm text-text-primary">Voice/Video quality (Auto)</span>
+<span class="font-label-xs text-text-muted mt-1">Automatically adjust quality based on connection speed.</span>
+</div>
+</label>
+<label class="flex items-start gap-4 cursor-pointer">
+<div class="relative flex items-center mt-1">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-10 h-5 bg-surface-raised border border-border-strong peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-secondary after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary peer-checked:border-primary peer-checked:after:bg-on-primary"></div>
+</div>
+<div class="flex flex-col">
+<span class="font-label-sm text-text-primary">30 FPS</span>
+<span class="font-label-xs text-text-muted mt-1">Cap video streams at 30 frames per second.</span>
+</div>
+</label>
+<label class="flex items-start gap-4 cursor-pointer">
+<div class="relative flex items-center mt-1">
+<input class="sr-only peer" type="checkbox"/>
+<div class="w-10 h-5 bg-surface-raised border border-border-strong peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-secondary after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary peer-checked:border-primary peer-checked:after:bg-on-primary"></div>
+</div>
+<div class="flex flex-col">
+<span class="font-label-sm text-text-primary">Low bandwidth mode</span>
+<span class="font-label-xs text-text-muted mt-1">Optimize media for slow or unstable connections.</span>
+</div>
+</label>
+</div>
+</section>
+<!-- Section 5: Activity Behavior -->
+<section class="flex flex-col gap-4">
+<h2 class="font-body-lg font-semibold text-text-primary flex items-center gap-2 border-b border-border-subtle pb-2">
+<span class="material-symbols-outlined text-primary">sports_esports</span> Activity Behavior
+                        </h2>
+<div class="flex flex-col gap-4 mt-2 bg-surface p-5 rounded-xl border border-border-subtle">
+<label class="flex items-start gap-4 cursor-pointer">
+<div class="relative flex items-center mt-1">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-10 h-5 bg-surface-raised border border-border-strong peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-secondary after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary peer-checked:border-primary peer-checked:after:bg-on-primary"></div>
+</div>
+<div class="flex flex-col">
+<span class="font-label-sm text-text-primary">Allow activities</span>
+<span class="font-label-xs text-text-muted mt-1">Users can launch voice channel activities.</span>
+</div>
+</label>
+<label class="flex items-start gap-4 cursor-pointer">
+<div class="relative flex items-center mt-1">
+<input class="sr-only peer" type="checkbox"/>
+<div class="w-10 h-5 bg-surface-raised border border-border-strong peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-secondary after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary peer-checked:border-primary peer-checked:after:bg-on-primary"></div>
+</div>
+<div class="flex flex-col">
+<span class="font-label-sm text-text-primary">Keep voice connected</span>
+<span class="font-label-xs text-text-muted mt-1">Remain in the voice channel when an activity ends.</span>
+</div>
+</label>
+<label class="flex items-start gap-4 cursor-pointer">
+<div class="relative flex items-center mt-1">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-10 h-5 bg-surface-raised border border-border-strong peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-secondary after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary peer-checked:border-primary peer-checked:after:bg-on-primary"></div>
+</div>
+<div class="flex flex-col">
+<span class="font-label-sm text-text-primary">One foreground activity</span>
+<span class="font-label-xs text-text-muted mt-1">Limit users to one active activity at a time.</span>
+</div>
+</label>
+<label class="flex items-start gap-4 cursor-pointer">
+<div class="relative flex items-center mt-1">
+<input class="sr-only peer" type="checkbox"/>
+<div class="w-10 h-5 bg-surface-raised border border-border-strong peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-secondary after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary peer-checked:border-primary peer-checked:after:bg-on-primary"></div>
+</div>
+<div class="flex flex-col">
+<span class="font-label-sm text-text-primary">Background bots</span>
+<span class="font-label-xs text-text-muted mt-1">Allow bots to run activities in the background.</span>
+</div>
+</label>
+</div>
+</section>
+<!-- Section 6: Connection Experience -->
+<section class="flex flex-col gap-4">
+<h2 class="font-body-lg font-semibold text-text-primary flex items-center gap-2 border-b border-border-subtle pb-2">
+<span class="material-symbols-outlined text-primary">wifi</span> Connection Experience
+                        </h2>
+<div class="flex flex-col gap-4 mt-2 bg-surface p-5 rounded-xl border border-border-subtle">
+<label class="flex items-start gap-4 cursor-pointer">
+<div class="relative flex items-center mt-1">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-10 h-5 bg-surface-raised border border-border-strong peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-secondary after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary peer-checked:border-primary peer-checked:after:bg-on-primary"></div>
+</div>
+<div class="flex flex-col">
+<span class="font-label-sm text-text-primary">Auto-reconnect</span>
+<span class="font-label-xs text-text-muted mt-1">Attempt to automatically reconnect if the connection drops.</span>
+</div>
+</label>
+<label class="flex items-start gap-4 cursor-pointer">
+<div class="relative flex items-center mt-1">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-10 h-5 bg-surface-raised border border-border-strong peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-secondary after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary peer-checked:border-primary peer-checked:after:bg-on-primary"></div>
+</div>
+<div class="flex flex-col">
+<span class="font-label-sm text-text-primary">Quality indicator</span>
+<span class="font-label-xs text-text-muted mt-1">Show network quality indicator in the voice status panel.</span>
+</div>
+</label>
+<label class="flex items-start gap-4 cursor-pointer">
+<div class="relative flex items-center mt-1">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-10 h-5 bg-surface-raised border border-border-strong peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-secondary after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary peer-checked:border-primary peer-checked:after:bg-on-primary"></div>
+</div>
+<div class="flex flex-col">
+<span class="font-label-sm text-text-primary">Warn before disconnect</span>
+<span class="font-label-xs text-text-muted mt-1">Show a warning prompt before leaving a voice channel.</span>
+</div>
+</label>
+<label class="flex items-start gap-4 cursor-pointer">
+<div class="relative flex items-center mt-1">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-10 h-5 bg-surface-raised border border-border-strong peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-secondary after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary peer-checked:border-primary peer-checked:after:bg-on-primary"></div>
+</div>
+<div class="flex flex-col">
+<span class="font-label-sm text-text-primary">Join/Leave sounds</span>
+<span class="font-label-xs text-text-muted mt-1">Play an audio notification when users join or leave.</span>
+</div>
+</label>
+</div>
+</section>
+</div>
+<!-- Right Column (Fixed Panel) -->
+<div class="xl:col-span-4 relative hidden xl:block">
+<div class="sticky top-0 flex flex-col gap-6">
+<div class="bg-surface border border-border-subtle rounded-xl p-5 flex flex-col gap-4 relative overflow-hidden">
+<h3 class="font-label-sm text-text-primary font-semibold flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">monitoring</span> Media Status
+                            </h3>
+<div class="space-y-3">
+<div class="flex justify-between items-center p-3 bg-surface-raised rounded-lg border border-border-subtle">
+<span class="font-label-xs text-text-secondary">Service</span>
+<span class="font-label-xs text-success flex items-center gap-1"><div class="w-1.5 h-1.5 rounded-full bg-success"></div> Active</span>
+</div>
+<div class="flex justify-between items-center p-3 bg-surface-raised rounded-lg border border-border-subtle">
+<span class="font-label-xs text-text-secondary">Connected Users</span>
+<span class="font-label-xs text-text-primary">6</span>
+</div>
+<div class="flex justify-between items-center p-3 bg-surface-raised rounded-lg border border-border-subtle">
+<span class="font-label-xs text-text-secondary">Active Rooms</span>
+<span class="font-label-xs text-text-primary">2</span>
+</div>
+<div class="flex justify-between items-center p-3 bg-surface-raised rounded-lg border border-border-subtle">
+<span class="font-label-xs text-text-secondary">Latency</span>
+<span class="font-label-xs text-success">38ms</span>
+</div>
+<div class="flex justify-between items-center p-3 bg-surface-raised rounded-lg border border-border-subtle">
+<span class="font-label-xs text-text-secondary">Packet Loss</span>
+<span class="font-label-xs text-success">0.2%</span>
+</div>
+</div>
+<div class="flex flex-col gap-2 mt-2">
+<button class="w-full bg-transparent border border-border-strong text-text-primary rounded-lg px-4 py-2 font-label-sm hover:bg-surface-raised transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]">speed</span> Run Voice Test
+                                </button>
+<button class="w-full bg-transparent border border-border-strong text-text-primary rounded-lg px-4 py-2 font-label-sm hover:bg-surface-raised transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]">medical_services</span> View Doctor &amp; Health
+                                </button>
+</div>
+<p class="font-label-xs text-text-muted mt-2 text-center">Detailed diagnostics are available in Doctor &amp; Health.</p>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="bg-surface border-t border-border-subtle fixed bottom-0 right-0 h-16 flex items-center justify-between px-8 w-[calc(100%-18rem)] z-30">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-text-muted text-[18px]">info</span>
+<span class="font-label-sm text-text-secondary">Voice and media changes affect this self-hosted community.</span>
+</div>
+<div class="flex items-center gap-4">
+<button class="font-label-sm text-text-primary hover:text-text-secondary transition-colors px-4 py-2">
+                    Reset
+                </button>
+<button class="bg-primary/50 text-text-primary rounded-lg px-6 py-2 font-label-sm cursor-not-allowed transition-all" disabled="">
+                    Save Changes
+                </button>
+</div>
+</footer>
+</div>
+</body></html>

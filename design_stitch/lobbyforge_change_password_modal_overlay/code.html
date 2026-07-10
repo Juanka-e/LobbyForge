@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Change Password - LobbyForge</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "secondary-fixed": "#d8e3f6",
+                      "on-secondary": "#26313f",
+                      "secondary-container": "#3d4757",
+                      "text-primary": "#F4F7FB",
+                      "on-secondary-container": "#abb6c8",
+                      "surface-container-low": "#181c21",
+                      "surface-bright": "#36393f",
+                      "primary-container": "#8fb8ff",
+                      "inverse-primary": "#325e9f",
+                      "tertiary-fixed": "#ffdeac",
+                      "on-primary-fixed": "#001b3d",
+                      "error": "#ffb4ab",
+                      "on-primary": "#003063",
+                      "on-tertiary-container": "#614200",
+                      "primary-fixed": "#d6e3ff",
+                      "border-subtle": "#263142",
+                      "surface-tint": "#a9c7ff",
+                      "on-error-container": "#ffdad6",
+                      "surface": "#111722",
+                      "inverse-surface": "#e0e2ea",
+                      "outline-variant": "#434750",
+                      "border-strong": "#334155",
+                      "on-secondary-fixed": "#111c2a",
+                      "text-secondary": "#B7C0CC",
+                      "surface-variant": "#32353b",
+                      "primary-fixed-dim": "#a9c7ff",
+                      "tertiary-container": "#deb063",
+                      "background": "#101419",
+                      "on-tertiary-fixed": "#281900",
+                      "on-primary-fixed-variant": "#124686",
+                      "secondary": "#bcc7da",
+                      "on-secondary-fixed-variant": "#3d4757",
+                      "surface-container-lowest": "#0b0e13",
+                      "surface-container": "#1d2025",
+                      "secondary-fixed-dim": "#bcc7da",
+                      "on-surface-variant": "#c3c6d2",
+                      "danger": "#E98282",
+                      "tertiary": "#fccb7b",
+                      "bg-soft": "#0B1018",
+                      "tertiary-fixed-dim": "#efbf70",
+                      "on-primary-container": "#144787",
+                      "surface-container-high": "#272a30",
+                      "text-muted": "#7F8A99",
+                      "inverse-on-surface": "#2d3036",
+                      "on-tertiary": "#432c00",
+                      "error-container": "#93000a",
+                      "primary": "#bdd3ff",
+                      "surface-dim": "#101419",
+                      "on-tertiary-fixed-variant": "#5f4100",
+                      "success": "#7CCFA6",
+                      "surface-raised": "#171E2B",
+                      "surface-container-highest": "#32353b",
+                      "on-surface": "#e0e2ea",
+                      "on-error": "#690005",
+                      "on-background": "#e0e2ea",
+                      "outline": "#8d919b",
+                      "surface-floating": "#1D2533"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px",
+                      "modal": "18px",
+                      "btn": "12px"
+              },
+              "spacing": {
+                      "container-max": "1240px",
+                      "section-gap": "120px",
+                      "gutter": "24px",
+                      "margin-mobile": "24px",
+                      "margin-desktop": "64px"
+              },
+              "fontFamily": {
+                      "hero-h1": ["Geist", "sans-serif"],
+                      "section-h2": ["Geist", "sans-serif"],
+                      "label-xs": ["Geist", "sans-serif"],
+                      "section-h2-mobile": ["Geist", "sans-serif"],
+                      "hero-h1-mobile": ["Geist", "sans-serif"],
+                      "body-lg": ["Geist", "sans-serif"],
+                      "body-md": ["Geist", "sans-serif"],
+                      "label-sm": ["Geist", "sans-serif"]
+              },
+              "fontSize": {
+                      "hero-h1": ["80px", {"lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                      "section-h2": ["52px", {"lineHeight": "1.2", "fontWeight": "600"}],
+                      "label-xs": ["12px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                      "section-h2-mobile": ["32px", {"lineHeight": "1.2", "fontWeight": "600"}],
+                      "hero-h1-mobile": ["40px", {"lineHeight": "1.2", "fontWeight": "600"}],
+                      "body-lg": ["18px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                      "body-md": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                      "label-sm": ["14px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "500"}]
+              }
+            }
+          }
+        }
+    </script>
+<style>
+        body { font-family: 'Geist', sans-serif; background-color: #101419; color: #F4F7FB; }
+        .glass-overlay { background: rgba(11, 14, 19, 0.6); backdrop-filter: blur(4px); }
+        .input-focus:focus-within { border-color: #8fb8ff; }
+    </style>
+</head>
+<body class="relative min-h-screen overflow-hidden">
+<!-- Background Screen Image Injection -->
+<div class="absolute inset-0 z-0">
+<img alt="Background Settings Screen" class="w-full h-full object-cover opacity-50" src="https://lh3.googleusercontent.com/aida-public/AB6AXuACT_0eqz4_GmixTCE4mtBJGvFh1LEQYNRxco3KrVxC7oFCT5_UmqSD5vzs266Hig522hOPMzVe7v61BX4Yio7kXfFIUmB-LtNaN1iyklHmvJh_yEWJ5iupvAN5qWV92MEc7MpWl4-vZC7TqhMWOmF-76fKopwKjn7Xvvz2wpl9vg4dxrVxKt67xafVCSDTlcjtSFlrglUjvWfcyB_Mn-59agcxVaivPPYAvHKQUYWutRnmSWkC1YP6l0kf_K2_PpA_C0u2XcUottlS"/>
+</div>
+<!-- Overlay -->
+<div class="fixed inset-0 z-10 glass-overlay flex items-center justify-center p-4">
+<!-- Modal -->
+<div class="w-full max-w-[480px] bg-surface-raised border border-border-subtle rounded-modal shadow-2xl overflow-hidden flex flex-col relative top-[1px] shadow-[0_20px_40px_-10px_rgba(143,184,255,0.05)]">
+<!-- Highlight Top Inner Edge (Glassmorphism detail) -->
+<div class="absolute top-0 inset-x-0 h-[1px] bg-white/5 z-20"></div>
+<!-- Header -->
+<div class="p-6 pb-4">
+<h2 class="font-section-h2-mobile text-text-primary text-[24px] font-semibold tracking-tight">Change Password</h2>
+<p class="font-body-md text-text-muted mt-1">Update the password for your local account.</p>
+</div>
+<!-- Form Body -->
+<div class="px-6 py-2 space-y-5">
+<!-- Current Password -->
+<div class="space-y-1.5">
+<label class="font-label-sm text-text-secondary block">Current password</label>
+<div class="relative flex items-center border border-border-strong bg-surface-container rounded-lg px-3 py-2.5 transition-colors input-focus">
+<input class="w-full bg-transparent border-none text-text-primary font-body-md focus:ring-0 p-0 placeholder-text-muted" placeholder="Enter current password" type="password" value="********"/>
+<button class="text-text-muted hover:text-text-primary transition-colors ml-2" type="button">
+<span class="material-symbols-outlined text-[20px]" data-icon="visibility_off">visibility_off</span>
+</button>
+</div>
+</div>
+<!-- New Password -->
+<div class="space-y-1.5">
+<label class="font-label-sm text-text-secondary block">New password</label>
+<div class="relative flex items-center border border-border-strong bg-surface-container rounded-lg px-3 py-2.5 transition-colors input-focus">
+<input class="w-full bg-transparent border-none text-text-primary font-body-md focus:ring-0 p-0 placeholder-text-muted" placeholder="Enter new password" type="password" value="Tr0ub4dor&amp;3"/>
+<button class="text-text-muted hover:text-text-primary transition-colors ml-2" type="button">
+<span class="material-symbols-outlined text-[20px]" data-icon="visibility_off">visibility_off</span>
+</button>
+</div>
+<!-- Strength Indicator -->
+<div class="mt-3 bg-surface p-3 rounded-lg border border-border-subtle">
+<div class="flex items-center space-x-2 mb-2">
+<div class="h-1 flex-1 bg-success rounded-full opacity-100"></div>
+<div class="h-1 flex-1 bg-success rounded-full opacity-100"></div>
+<div class="h-1 flex-1 bg-success rounded-full opacity-100"></div>
+<div class="h-1 flex-1 bg-success rounded-full opacity-100"></div>
+<span class="font-label-xs text-success ml-2">Strong password</span>
+</div>
+<ul class="space-y-1.5 font-label-xs text-text-muted">
+<li class="flex items-center">
+<span class="material-symbols-outlined text-[14px] text-success mr-1.5" data-icon="check_circle">check_circle</span> At least 8 characters
+                            </li>
+<li class="flex items-center">
+<span class="material-symbols-outlined text-[14px] text-success mr-1.5" data-icon="check_circle">check_circle</span> Contains a number
+                            </li>
+<li class="flex items-center">
+<span class="material-symbols-outlined text-[14px] text-success mr-1.5" data-icon="check_circle">check_circle</span> Contains a special character
+                            </li>
+<li class="flex items-center">
+<span class="material-symbols-outlined text-[14px] text-success mr-1.5" data-icon="check_circle">check_circle</span> Does not match current password
+                            </li>
+</ul>
+</div>
+</div>
+<!-- Confirm New Password -->
+<div class="space-y-1.5">
+<label class="font-label-sm text-text-secondary block">Confirm new password</label>
+<div class="relative flex items-center border border-border-strong bg-surface-container rounded-lg px-3 py-2.5 transition-colors input-focus">
+<input class="w-full bg-transparent border-none text-text-primary font-body-md focus:ring-0 p-0 placeholder-text-muted" placeholder="Re-enter new password" type="password" value=""/>
+<button class="text-text-muted hover:text-text-primary transition-colors ml-2" type="button">
+<span class="material-symbols-outlined text-[20px]" data-icon="visibility_off">visibility_off</span>
+</button>
+</div>
+</div>
+<!-- Security Note -->
+<div class="flex items-start bg-surface-container-low p-3 rounded-lg border border-border-subtle mt-4">
+<span class="material-symbols-outlined text-primary text-[18px] mr-2 mt-0.5" data-icon="info">info</span>
+<p class="font-label-xs text-text-secondary leading-relaxed">
+                        Changing your password will keep this device signed in, but may require other sessions to sign in again.
+                    </p>
+</div>
+</div>
+<!-- Footer Actions -->
+<div class="p-6 pt-4 flex justify-end items-center space-x-3 bg-surface-raised border-t border-border-subtle mt-2">
+<button class="px-4 py-2.5 rounded-btn font-label-sm text-text-secondary border border-border-strong hover:bg-surface-container hover:text-text-primary transition-colors" type="button">
+                    Cancel
+                </button>
+<!-- Disabled State as requested -->
+<button class="px-5 py-2.5 rounded-btn font-label-sm bg-[#8FB8FF] text-[#07101E] opacity-50 cursor-not-allowed transition-all" disabled="" type="button">
+                    Update Password
+                </button>
+</div>
+</div>
+</div>
+</body></html>

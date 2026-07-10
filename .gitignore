@@ -1,0 +1,49 @@
+# Node / package managers
+node_modules/
+.pnpm-store/
+.npm/
+
+# Build output
+dist/
+build/
+.next/
+out/
+coverage/
+playwright-report/
+test-results/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Turbo / tooling caches
+.turbo/
+.cache/
+
+# Python / misc tooling
+__pycache__/
+*.pyc
+
+# Local runtime data
+tmp/
+.tmp/
+data/
+uploads/
+
+# Docker overrides
+docker-compose.override.yml
+

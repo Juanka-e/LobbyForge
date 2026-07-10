@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>User Profile Drawer Component</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-error": "#690005",
+                        "text-secondary": "#B7C0CC",
+                        "tertiary": "#fccb7b",
+                        "primary-fixed-dim": "#a9c7ff",
+                        "on-tertiary": "#432c00",
+                        "text-muted": "#7F8A99",
+                        "tertiary-container": "#deb063",
+                        "inverse-surface": "#e0e2ea",
+                        "inverse-on-surface": "#2d3036",
+                        "surface-container": "#1d2025",
+                        "inverse-primary": "#325e9f",
+                        "danger": "#E98282",
+                        "surface-bright": "#36393f",
+                        "bg-soft": "#0B1018",
+                        "surface": "#111722",
+                        "success": "#7CCFA6",
+                        "on-secondary": "#26313f",
+                        "on-error-container": "#ffdad6",
+                        "error": "#ffb4ab",
+                        "outline-variant": "#434750",
+                        "on-tertiary-fixed": "#281900",
+                        "on-surface-variant": "#c3c6d2",
+                        "primary": "#bdd3ff",
+                        "surface-variant": "#32353b",
+                        "surface-dim": "#101419",
+                        "surface-container-high": "#272a30",
+                        "on-tertiary-fixed-variant": "#5f4100",
+                        "secondary-container": "#3d4757",
+                        "on-primary-fixed": "#001b3d",
+                        "secondary-fixed-dim": "#bcc7da",
+                        "on-primary": "#003063",
+                        "surface-floating": "#1D2533",
+                        "border-strong": "#334155",
+                        "on-secondary-fixed-variant": "#3d4757",
+                        "surface-container-lowest": "#0b0e13",
+                        "on-secondary-container": "#abb6c8",
+                        "primary-container": "#8fb8ff",
+                        "on-primary-fixed-variant": "#124686",
+                        "surface-container-highest": "#32353b",
+                        "secondary-fixed": "#d8e3f6",
+                        "tertiary-fixed-dim": "#efbf70",
+                        "on-background": "#e0e2ea",
+                        "outline": "#8d919b",
+                        "on-primary-container": "#144787",
+                        "surface-raised": "#171E2B",
+                        "on-surface": "#e0e2ea",
+                        "on-tertiary-container": "#614200",
+                        "error-container": "#93000a",
+                        "on-secondary-fixed": "#111c2a",
+                        "surface-container-low": "#181c21",
+                        "text-primary": "#F4F7FB",
+                        "tertiary-fixed": "#ffdeac",
+                        "border-subtle": "#263142",
+                        "background": "#101419",
+                        "secondary": "#bcc7da",
+                        "primary-fixed": "#d6e3ff",
+                        "surface-tint": "#a9c7ff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "gutter": "24px",
+                        "container-max": "1240px",
+                        "margin-desktop": "64px",
+                        "margin-mobile": "24px",
+                        "section-gap": "120px"
+                    },
+                    "fontFamily": {
+                        "label-xs": ["Geist"],
+                        "body-lg": ["Geist"],
+                        "hero-h1-mobile": ["Geist"],
+                        "body-md": ["Geist"],
+                        "section-h2": ["Geist"],
+                        "hero-h1": ["Geist"],
+                        "section-h2-mobile": ["Geist"],
+                        "label-sm": ["Geist"]
+                    },
+                    "fontSize": {
+                        "label-xs": ["12px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "500" }],
+                        "body-lg": ["18px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                        "hero-h1-mobile": ["40px", { "lineHeight": "1.2", "fontWeight": "600" }],
+                        "body-md": ["16px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                        "section-h2": ["52px", { "lineHeight": "1.2", "fontWeight": "600" }],
+                        "hero-h1": ["80px", { "lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "600" }],
+                        "section-h2-mobile": ["32px", { "lineHeight": "1.2", "fontWeight": "600" }],
+                        "label-sm": ["14px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "500" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        @font-face {
+            font-family: 'Geist';
+            src: url('https://cdn.jsdelivr.net/fontsource/fonts/geist-sans@latest/latin-400-normal.woff2') format('woff2');
+            font-weight: 400;
+            font-style: normal;
+            font-display: swap;
+        }
+        @font-face {
+            font-family: 'Geist';
+            src: url('https://cdn.jsdelivr.net/fontsource/fonts/geist-sans@latest/latin-500-normal.woff2') format('woff2');
+            font-weight: 500;
+            font-style: normal;
+            font-display: swap;
+        }
+        @font-face {
+            font-family: 'Geist';
+            src: url('https://cdn.jsdelivr.net/fontsource/fonts/geist-sans@latest/latin-600-normal.woff2') format('woff2');
+            font-weight: 600;
+            font-style: normal;
+            font-display: swap;
+        }
+        
+        .glass-panel {
+            background: rgba(17, 23, 34, 0.78);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(148, 163, 184, 0.16);
+            box-shadow: 0 8px 32px rgba(143, 184, 255, 0.05);
+        }
+        
+        .mockup-highlight {
+            box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+        }
+
+        /* Custom Scrollbar for Drawer Content */
+        .drawer-scroll::-webkit-scrollbar {
+            width: 6px;
+        }
+        .drawer-scroll::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .drawer-scroll::-webkit-scrollbar-thumb {
+            background: theme('colors.border-strong');
+            border-radius: theme('borderRadius.full');
+        }
+        .drawer-scroll::-webkit-scrollbar-thumb:hover {
+            background: theme('colors.outline');
+        }
+        
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 16px;
+            width: 16px;
+            border-radius: 50%;
+            background: theme('colors.primary');
+            cursor: pointer;
+            margin-top: -6px;
+            box-shadow: 0 0 10px rgba(143, 184, 255, 0.3);
+        }
+        input[type="range"]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: theme('colors.border-strong');
+            border-radius: 2px;
+        }
+        input[type="range"]:focus {
+            outline: none;
+        }
+    </style>
+</head>
+<body class="bg-[#070A0F] min-h-screen flex items-center justify-center p-4 font-body-md text-text-primary antialiased">
+<!-- Drawer Container -->
+<div class="w-[460px] h-[85vh] max-h-[900px] min-h-[600px] bg-surface-raised glass-panel rounded-xl mockup-highlight flex flex-col relative overflow-hidden flex-shrink-0 border-l border-border-subtle shadow-2xl">
+<!-- Top Bar Actions -->
+<div class="absolute top-4 right-4 z-20 flex gap-2">
+<button class="h-8 w-8 rounded-full bg-surface-dim/50 backdrop-blur-sm border border-border-subtle flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-surface-variant transition-colors group">
+<span class="material-symbols-outlined text-[20px]">more_horiz</span>
+</button>
+<button class="h-8 w-8 rounded-full bg-surface-dim/50 backdrop-blur-sm border border-border-subtle flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-surface-variant transition-colors group">
+<span class="material-symbols-outlined text-[20px]">close</span>
+</button>
+</div>
+<!-- Banner Image -->
+<div class="h-[160px] w-full relative flex-shrink-0">
+<div class="absolute inset-0 bg-cover bg-center" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuA-pQepZERzJBtI-Ox2-vk7wc6JxymMHnmIw36AsTD0ikU18634UTss5UdLeMb7WoaSrzEMpisxkJX-f6WRkC4mK_bNcbGZWM_X8H4NvvYxeX-1rXbM5mzH18XdqNm_DGNpR6XEp94mSO-ASSuQQy7giJlI14eu8S8-IzDSMdWzxqUPkbC6BFUXCh33YAlw2zNPiS0u1o_jsSsiEXm1nJc5oC3pc8Tknr-vLcFruHSG4y7UNK1NMh64vecfklN90v44Fp2FtC20s00L');"></div>
+<div class="absolute inset-0 bg-gradient-to-t from-surface-raised via-transparent to-transparent opacity-80"></div>
+</div>
+<!-- Scrollable Content Area -->
+<div class="flex-1 overflow-y-auto drawer-scroll px-6 pb-6 relative z-10 -mt-[48px]">
+<!-- Avatar & Header -->
+<div class="flex justify-between items-end mb-4">
+<div class="relative">
+<div class="h-24 w-24 rounded-full bg-surface-dim p-1.5 shadow-lg border border-border-subtle relative z-10">
+<img class="w-full h-full rounded-full object-cover" data-alt="A close-up portrait of a young woman with a calm, focused expression, lit by soft, premium studio lighting. The background is a muted dark grey. The style is highly professional and photorealistic, suitable for a high-end corporate gaming platform avatar. The overall mood is quiet and confident." src="https://lh3.googleusercontent.com/aida-public/AB6AXuANU_HvlqBMZp8TOoV3a5Jg3qYeORYrh82mwWBJQY1F9fcGFBeF1s3m23xA9HQShO0ML24HOQo6QvcZ3DqcCghslVIULWjIlhYOWKfOMKDZZf9jXKchkj7-iE_rQ3hv0of1RICdrga2bjErMBnCXWHN6zA5iqrhqpNhBy0WWzquBDo_tHezOBpW1zcMzTT2N4svOSmBDa-JPWSBIidu_77e7AxzD2sa3XjUG95zU-ZZN8mbFghodpNk1OniZliAgZmmFBKNQCK_nCG7"/>
+</div>
+<!-- Online Status Badge -->
+<div class="absolute bottom-1.5 right-1.5 h-5 w-5 bg-success rounded-full border-2 border-surface-raised z-20 shadow-[0_0_8px_rgba(124,207,166,0.4)]"></div>
+</div>
+<div class="flex gap-2 mb-2">
+</div>
+</div>
+<!-- Identity Info -->
+<div class="mb-6">
+<h1 class="font-section-h2-mobile text-text-primary mb-1">Ayşe</h1>
+<p class="font-body-md text-text-secondary mb-3">@ayse</p>
+<div class="flex flex-col gap-2">
+<!-- Custom Status -->
+<div class="flex items-center gap-2 text-text-primary bg-surface-container-high/50 w-fit px-3 py-1.5 rounded-full border border-border-subtle">
+<span class="material-symbols-outlined text-[16px] text-tertiary">sports_esports</span>
+<span class="font-label-sm">Ready for game night</span>
+</div>
+<!-- Current Channel -->
+<div class="flex items-center gap-2 text-primary font-label-sm">
+<span class="material-symbols-outlined text-[16px]">volume_up</span>
+                        Main Lounge
+                    </div>
+</div>
+</div>
+<div class="w-full h-px bg-border-subtle mb-6"></div>
+<!-- About Me -->
+<div class="mb-6">
+<h3 class="font-label-xs text-text-muted uppercase tracking-wider mb-2">About Me</h3>
+<p class="font-body-md text-text-secondary leading-relaxed bg-surface-container/30 p-4 rounded-lg border border-border-subtle/50">
+                    Strategy games, late-night voice chats, and questionable team decisions.
+                </p>
+</div>
+<!-- Roles -->
+<div class="mb-6">
+<h3 class="font-label-xs text-text-muted uppercase tracking-wider mb-2">Roles</h3>
+<div class="flex flex-wrap gap-2">
+<div class="px-3 py-1 bg-surface-container-high border border-border-strong rounded-md flex items-center gap-1.5">
+<div class="h-2 w-2 rounded-full bg-secondary"></div>
+<span class="font-label-sm text-text-secondary">Member</span>
+</div>
+</div>
+</div>
+<!-- Current Activity -->
+<div class="mb-6">
+<h3 class="font-label-xs text-text-muted uppercase tracking-wider mb-2">Current Activity</h3>
+<div class="bg-surface-floating rounded-lg border border-border-subtle p-4 flex items-center gap-4">
+<div class="h-12 w-12 rounded-lg bg-surface-container-high flex items-center justify-center border border-border-strong flex-shrink-0">
+<span class="material-symbols-outlined text-primary text-[24px]">graphic_eq</span>
+</div>
+<div>
+<h4 class="font-label-sm text-text-primary mb-1">Main Lounge</h4>
+<div class="flex items-center gap-3 font-label-xs text-text-muted">
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">headset_mic</span> Voice connected</span>
+<span class="flex items-center gap-1 text-success"><span class="material-symbols-outlined text-[14px]">mic</span> Microphone active</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Community Info -->
+<div class="mb-6">
+<h3 class="font-label-xs text-text-muted uppercase tracking-wider mb-2">Community</h3>
+<div class="space-y-3"><div class="flex justify-between items-center py-2 border-b border-border-subtle/50"><span class="font-label-sm text-text-secondary">Community</span><span class="font-label-sm text-text-primary">Ankara Gaming Voice</span></div><div class="flex justify-between items-center py-2 border-b border-border-subtle/50"><span class="font-label-sm text-text-secondary">Member since</span><span class="font-label-sm text-text-primary">June 2026</span></div><div class="flex flex-col py-2"><div class="flex justify-between items-center"><span class="font-label-sm text-text-secondary">Account</span><span class="font-label-sm text-text-primary">Local profile</span></div><span class="font-label-xs text-text-muted mt-1">This profile belongs to this self-hosted community.</span></div></div>
+</div>
+<!-- Local Voice Control -->
+<div class="bg-surface-container/50 rounded-xl border border-border-subtle p-5 mt-8">
+<h3 class="font-label-xs text-text-muted uppercase tracking-wider mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">tune</span>
+                    Local Voice Control
+                </h3>
+<div class="flex items-center gap-4 mb-4">
+<span class="material-symbols-outlined text-text-muted">volume_down</span>
+<input class="flex-1" max="200" min="0" type="range" value="100"/>
+<span class="font-label-sm text-primary w-12 text-right">100%</span>
+</div>
+<div class="flex items-center justify-between mt-4 pt-4 border-t border-border-subtle/50">
+<div>
+<button class="flex items-center gap-2 font-label-sm text-danger hover:text-error transition-colors px-3 py-1.5 rounded-md bg-danger/10 hover:bg-danger/20 border border-danger/20">
+<span class="material-symbols-outlined text-[18px]">mic_off</span>
+                            Mute locally
+                        </button>
+</div>
+<p class="font-label-xs text-text-muted max-w-[140px] text-right">
+                        Only affects audio on your device.
+                    </p>
+</div>
+</div>
+</div>
+</div>
+</body></html>

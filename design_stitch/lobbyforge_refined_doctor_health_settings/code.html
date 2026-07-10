@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Ankara Gaming Voice - Doctor &amp; Health</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "surface-variant": "#32353b",
+                    "secondary-fixed": "#d8e3f6",
+                    "surface-container-lowest": "#0b0e13",
+                    "on-secondary": "#26313f",
+                    "surface-tint": "#a9c7ff",
+                    "on-primary": "#003063",
+                    "tertiary-container": "#deb063",
+                    "primary": "#bdd3ff",
+                    "inverse-surface": "#e0e2ea",
+                    "on-tertiary": "#432c00",
+                    "on-surface-variant": "#c3c6d2",
+                    "danger": "#E98282",
+                    "on-error": "#690005",
+                    "tertiary-fixed": "#ffdeac",
+                    "text-primary": "#F4F7FB",
+                    "on-tertiary-fixed-variant": "#5f4100",
+                    "surface-bright": "#36393f",
+                    "on-surface": "#e0e2ea",
+                    "border-subtle": "#263142",
+                    "on-error-container": "#ffdad6",
+                    "text-muted": "#7F8A99",
+                    "success": "#7CCFA6",
+                    "on-primary-fixed": "#001b3d",
+                    "secondary-fixed-dim": "#bcc7da",
+                    "outline": "#8d919b",
+                    "text-secondary": "#B7C0CC",
+                    "surface-dim": "#101419",
+                    "bg-soft": "#0B1018",
+                    "outline-variant": "#434750",
+                    "error-container": "#93000a",
+                    "secondary-container": "#3d4757",
+                    "on-primary-container": "#144787",
+                    "tertiary-fixed-dim": "#efbf70",
+                    "primary-fixed-dim": "#a9c7ff",
+                    "on-tertiary-fixed": "#281900",
+                    "secondary": "#bcc7da",
+                    "on-tertiary-container": "#614200",
+                    "on-secondary-fixed": "#111c2a",
+                    "border-strong": "#334155",
+                    "tertiary": "#fccb7b",
+                    "inverse-primary": "#325e9f",
+                    "background": "#101419",
+                    "inverse-on-surface": "#2d3036",
+                    "surface-raised": "#171E2B",
+                    "primary-fixed": "#d6e3ff",
+                    "surface-container-high": "#272a30",
+                    "on-primary-fixed-variant": "#124686",
+                    "surface-container-low": "#181c21",
+                    "on-background": "#e0e2ea",
+                    "surface-container-highest": "#32353b",
+                    "surface-floating": "#1D2533",
+                    "error": "#ffb4ab",
+                    "surface-container": "#1d2025",
+                    "on-secondary-container": "#abb6c8",
+                    "primary-container": "#8fb8ff",
+                    "on-secondary-fixed-variant": "#3d4757",
+                    "surface": "#111722"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "margin-mobile": "24px",
+                    "margin-desktop": "64px",
+                    "gutter": "24px",
+                    "container-max": "1240px",
+                    "section-gap": "120px"
+            },
+            "fontFamily": {
+                    "label-sm": ["Geist"],
+                    "body-lg": ["Geist"],
+                    "hero-h1": ["Geist"],
+                    "body-md": ["Geist"],
+                    "section-h2-mobile": ["Geist"],
+                    "label-xs": ["Geist"],
+                    "section-h2": ["Geist"],
+                    "hero-h1-mobile": ["Geist"]
+            },
+            "fontSize": {
+                    "label-sm": ["14px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                    "body-lg": ["18px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                    "hero-h1": ["80px", {"lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                    "body-md": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                    "section-h2-mobile": ["32px", {"lineHeight": "1.2", "fontWeight": "600"}],
+                    "label-xs": ["12px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                    "section-h2": ["52px", {"lineHeight": "1.2", "fontWeight": "600"}],
+                    "hero-h1-mobile": ["40px", {"lineHeight": "1.2", "fontWeight": "600"}]
+            }
+          }
+        }
+      }
+    </script>
+<style>
+        body { font-family: 'Geist', sans-serif; }
+    </style>
+</head>
+<body class="bg-background text-text-primary overflow-hidden min-h-screen">
+<!-- SideNavBar -->
+<nav class="fixed left-0 top-0 h-screen w-72 flex flex-col bg-surface-container border-r border-border-subtle overflow-y-auto z-20 hidden md:flex">
+<div class="p-6 pb-2">
+<h1 class="font-section-h2-mobile text-[24px] font-bold text-text-primary">Community Settings</h1>
+<div class="flex items-center gap-2 mt-2">
+<span class="font-label-sm text-text-secondary">Manage Ankara Gaming Voice</span>
+</div>
+<div class="mt-3">
+<span class="inline-block px-2 py-1 rounded text-[10px] uppercase tracking-wider bg-surface-variant text-text-muted border border-border-subtle">Self-hosted community</span>
+</div>
+</div>
+<div class="px-4 pb-20 mt-4 space-y-6">
+<div>
+<h3 class="font-label-xs text-label-xs text-text-muted uppercase mb-2 px-3 tracking-wider">Community</h3>
+<ul class="space-y-1">
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">dashboard</span> Overview</a></li>
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">settings</span> Community Profile</a></li>
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">verified_user</span> Roles &amp; Permissions</a></li>
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">groups</span> Members</a></li>
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">chat_bubble</span> Channels</a></li>
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">mail</span> Invites</a></li>
+</ul>
+</div>
+<div>
+<h3 class="font-label-xs text-label-xs text-text-muted uppercase mb-2 px-3 tracking-wider">Safety</h3>
+<ul class="space-y-1">
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">security</span> Moderation</a></li>
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">history</span> Audit Log</a></li>
+</ul>
+</div>
+<div>
+<h3 class="font-label-xs text-label-xs text-text-muted uppercase mb-2 px-3 tracking-wider">Voice &amp; Media</h3>
+<ul class="space-y-1">
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">mic</span> Voice &amp; Media</a></li>
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">storage</span> Storage</a></li>
+</ul>
+</div>
+<div>
+<h3 class="font-label-xs text-label-xs text-text-muted uppercase mb-2 px-3 tracking-wider">System</h3>
+<ul class="space-y-1">
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">lock</span> Authentication</a></li>
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">backup</span> Backups</a></li>
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]">system_update_alt</span> Updates</a></li>
+<li><a class="flex items-center gap-3 px-3 py-2 rounded-lg text-primary font-bold bg-primary-container/10 font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#"><span class="material-symbols-outlined text-[20px]" style="font-variation-settings: 'FILL' 1;">medical_services</span> Doctor &amp; Health</a></li>
+</ul>
+</div>
+</div>
+</nav>
+<!-- Main Application Canvas -->
+<div class="md:ml-72 flex flex-col h-screen">
+<!-- TopNavBar -->
+<header class="flex justify-end items-center w-full px-margin-desktop h-20 bg-surface/80 backdrop-blur-md border-b border-border-subtle shrink-0 z-10">
+<button class="p-2 text-text-secondary hover:text-primary transition-colors hover:opacity-80 rounded-full hover:bg-surface-variant">
+<span class="material-symbols-outlined">close</span>
+</button>
+</header>
+<!-- Scrollable Content Area -->
+<main class="flex-1 overflow-y-auto overflow-x-hidden p-6 md:p-margin-desktop relative">
+<div class="max-w-container-max mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 pb-32">
+<!-- Main Column -->
+<div class="lg:col-span-8 space-y-section-gap">
+<!-- Header Section -->
+<section>
+<div class="flex items-start gap-4 mb-4">
+<div class="p-3 bg-surface-variant rounded-xl border border-border-subtle text-primary">
+<span class="material-symbols-outlined text-[32px]">medical_services</span>
+</div>
+<div>
+<h1 class="font-section-h2-mobile text-[40px] text-text-primary mb-2 font-bold">Doctor &amp; Health</h1>
+<p class="font-body-lg text-body-lg text-text-secondary">Check the health of Ankara Gaming Voice and review recommended fixes.</p>
+</div>
+</div>
+<div class="flex flex-wrap gap-3 mt-8">
+<div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-variant border border-border-subtle font-label-sm text-label-sm">
+<span class="w-2 h-2 rounded-full bg-success shadow-[0_0_8px_rgba(124,207,166,0.4)]"></span>
+<span class="text-text-primary">Overall health: Good</span>
+</div>
+<div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-variant border border-border-subtle font-label-sm text-label-sm text-text-secondary">
+<span class="material-symbols-outlined text-[16px] text-success">check_circle</span>
+                                8 checks passed
+                            </div>
+<div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-variant border border-border-subtle font-label-sm text-label-sm text-tertiary">
+<span class="material-symbols-outlined text-[16px]">warning</span>
+                                1 warning
+                            </div>
+<div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-variant border border-border-subtle font-label-sm text-label-sm text-text-muted">
+<span class="material-symbols-outlined text-[16px]">schedule</span>
+                                Last checked: 4 minutes ago
+                            </div>
+<div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-variant border border-border-subtle font-label-sm text-label-sm text-text-secondary">
+<span class="material-symbols-outlined text-[16px] text-text-muted">verified</span>
+                                No critical issues
+                            </div>
+</div>
+</section>
+<!-- Service Checks -->
+<section>
+<h3 class="font-body-lg text-body-lg text-text-primary mb-6 flex items-center gap-2 border-b border-border-subtle pb-2">
+<span class="material-symbols-outlined text-text-muted text-[20px]">fact_check</span> Diagnostic Results
+                        </h3>
+<div class="bg-surface/78 backdrop-blur-md rounded-xl border border-[rgba(148,163,184,0.16)] overflow-hidden shadow-[0_4px_24px_rgba(143,184,255,0.02)]">
+<!-- Rows -->
+<div class="divide-y divide-border-subtle">
+<div class="flex items-center justify-between p-4 hover:bg-surface-variant/50 transition-colors">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-success text-[20px]">check_circle</span>
+<span class="font-body-md text-body-md text-text-primary">Web app</span>
+</div>
+<span class="font-label-sm text-label-sm text-text-muted">Healthy</span>
+</div>
+<div class="flex items-center justify-between p-4 hover:bg-surface-variant/50 transition-colors">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-success text-[20px]">check_circle</span>
+<span class="font-body-md text-body-md text-text-primary">Voice service</span>
+</div>
+<span class="font-label-sm text-label-sm text-text-muted">Connected</span>
+</div>
+<div class="flex items-center justify-between p-4 hover:bg-surface-variant/50 transition-colors">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-success text-[20px]">check_circle</span>
+<span class="font-body-md text-body-md text-text-primary">Database</span>
+</div>
+<span class="font-label-sm text-label-sm text-text-muted">Connected</span>
+</div>
+<div class="flex items-center justify-between p-4 hover:bg-surface-variant/50 transition-colors">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-success text-[20px]">check_circle</span>
+<span class="font-body-md text-body-md text-text-primary">Redis cache</span>
+</div>
+<span class="font-label-sm text-label-sm text-text-muted">Connected</span>
+</div>
+<div class="flex items-center justify-between p-4 hover:bg-surface-variant/50 transition-colors">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-success text-[20px]">check_circle</span>
+<span class="font-body-md text-body-md text-text-primary">Storage</span>
+</div>
+<span class="font-label-sm text-label-sm text-text-muted">Healthy</span>
+</div>
+<div class="flex items-center justify-between p-4 hover:bg-surface-variant/50 transition-colors">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-success text-[20px]">check_circle</span>
+<span class="font-body-md text-body-md text-text-primary">Authentication</span>
+</div>
+<span class="font-label-sm text-label-sm text-text-muted">Healthy</span>
+</div>
+<div class="flex items-center justify-between p-4 bg-tertiary/5 border-l-2 border-l-tertiary">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-tertiary text-[20px]">warning</span>
+<span class="font-body-md text-body-md text-text-primary">Backups</span>
+</div>
+<span class="font-label-sm text-label-sm text-tertiary">Warning</span>
+</div>
+<div class="flex items-center justify-between p-4 hover:bg-surface-variant/50 transition-colors">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-success text-[20px]">check_circle</span>
+<span class="font-body-md text-body-md text-text-primary">Updates</span>
+</div>
+<span class="font-label-sm text-label-sm text-text-muted">Up to date</span>
+</div>
+<div class="flex items-center justify-between p-4 hover:bg-surface-variant/50 transition-colors">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-success text-[20px]">check_circle</span>
+<span class="font-body-md text-body-md text-text-primary">Permissions</span>
+</div>
+<span class="font-label-sm text-label-sm text-text-muted">Healthy</span>
+</div>
+</div>
+</div>
+</section>
+<!-- Recommended Attention -->
+<section>
+<h3 class="font-body-lg text-body-lg text-text-primary mb-6 flex items-center gap-2 border-b border-border-subtle pb-2">
+<span class="material-symbols-outlined text-tertiary text-[20px]">priority_high</span> Recommended Attention
+                        </h3>
+<div class="bg-surface/78 backdrop-blur-md rounded-xl border border-[rgba(148,163,184,0.16)] p-6 relative overflow-hidden">
+<div class="absolute top-0 left-0 w-1 h-full bg-tertiary"></div>
+<div class="flex items-start justify-between">
+<div>
+<div class="flex items-center gap-2 mb-2">
+<h4 class="font-body-md text-body-md text-text-primary font-medium">Backup schedule delayed</h4>
+<span class="px-2 py-0.5 rounded text-[10px] uppercase tracking-wider bg-surface-variant text-text-muted border border-border-subtle">Impact: Low</span>
+</div>
+<p class="font-body-md text-body-md text-text-secondary mb-4 max-w-xl">The scheduled automated backup did not complete during the last window. Ensure storage quotas are not exceeded or run a manual backup to verify.</p>
+<div class="flex gap-3">
+<button class="px-4 py-2 rounded-lg bg-surface-raised border border-border-strong text-secondary font-label-sm text-label-sm hover:bg-surface-variant transition-colors">View Backups</button>
+<button class="px-4 py-2 rounded-lg bg-surface-raised border border-border-strong text-secondary font-label-sm text-label-sm hover:bg-surface-variant transition-colors">Run Backup Now</button>
+</div>
+</div>
+<span class="material-symbols-outlined text-tertiary/20 text-[48px]">backup</span>
+</div>
+</div>
+</section>
+</div>
+<!-- Right Side Panel -->
+<div class="lg:col-span-4 space-y-8">
+<!-- Health Summary Card -->
+<div class="bg-surface/78 backdrop-blur-md rounded-xl border border-[rgba(148,163,184,0.16)] p-6 sticky top-8 shadow-[0_4px_24px_rgba(143,184,255,0.02)]">
+<div class="flex items-center justify-between mb-6">
+<h3 class="font-body-lg text-body-lg text-text-primary font-medium">Health Summary</h3>
+<span class="material-symbols-outlined text-text-muted">monitor_heart</span>
+</div>
+<div class="space-y-4 mb-8">
+<div class="flex justify-between items-center">
+<span class="font-label-sm text-label-sm text-text-secondary">Total Checks</span>
+<span class="font-label-sm text-label-sm text-text-primary font-medium">9</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="font-label-sm text-label-sm text-success">Passed</span>
+<span class="font-label-sm text-label-sm text-text-primary font-medium">8</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="font-label-sm text-label-sm text-tertiary">Warnings</span>
+<span class="font-label-sm text-label-sm text-text-primary font-medium">1</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="font-label-sm text-label-sm text-danger">Critical</span>
+<span class="font-label-sm text-label-sm text-text-primary font-medium">0</span>
+</div>
+</div>
+<div class="space-y-3">
+<button class="w-full py-2.5 rounded-lg bg-primary text-on-primary font-label-sm text-label-sm hover:brightness-110 hover:-translate-y-0.5 transition-all duration-200 shadow-[0_4px_12px_rgba(143,184,255,0.15)] flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]">play_arrow</span> Run Full Check
+                            </button>
+<button class="w-full py-2.5 rounded-lg bg-surface-raised border border-border-strong text-secondary font-label-sm text-label-sm hover:bg-surface-variant transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]">content_copy</span> Copy Health Summary
+                            </button>
+</div>
+<div class="mt-6 pt-4 border-t border-border-subtle">
+<p class="font-label-xs text-label-xs text-text-muted flex items-start gap-2">
+<span class="material-symbols-outlined text-[14px]">info</span>
+                                Doctor &amp; Health shows safe diagnostics only. Running checks will not affect active voice sessions.
+                            </p>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Footer Nav / Action Bar -->
+<footer class="fixed bottom-0 right-0 h-16 w-full md:w-[calc(100%-18rem)] bg-surface-container-low border-t border-border-subtle shadow-md flex items-center justify-between px-6 md:px-margin-desktop z-10">
+<p class="font-label-sm text-label-sm text-text-muted">Health checks do not change community settings.</p>
+<div class="flex items-center gap-4">
+<button class="bg-primary text-on-primary rounded-lg px-6 py-2 font-label-sm text-label-sm hover:bg-primary-container transition-all active:scale-95 shadow-[0_2px_8px_rgba(143,184,255,0.1)]">Run Full Check</button>
+</div>
+</footer>
+</div>
+</body></html>

@@ -1,0 +1,6 @@
+{
+  "voice.join": "Sese katıl",
+  "voice.leave": "Sesten ayrıl",
+  "activity.start": "Aktiviteyi başlat",
+  "welcome.user": "Hoş geldin, {username}!"
+}

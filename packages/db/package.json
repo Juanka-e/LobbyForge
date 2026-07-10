@@ -1,0 +1,35 @@
+{
+  "name": "@lobbyforge/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint \"src/**/*.ts\"",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push",
+    "db:migrate": "node dist/migrate.js",
+    "db:migrate:src": "tsx src/migrate.ts"
+  },
+  "dependencies": {
+    "@lobbyforge/config": "workspace:*",
+    "@lobbyforge/core": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "postgres": "^3.4.4"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.10",
+    "typescript": "^5.4.5",
+    "vitest": "^1.6.0"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "voice.join": "Join voice",
+  "voice.leave": "Leave voice",
+  "activity.start": "Start activity",
+  "welcome.user": "Welcome, {username}!"
+}

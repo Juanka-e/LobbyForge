@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Audit Log - LobbyForge</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "surface-bright": "#36393f",
+                      "danger": "#E98282",
+                      "surface-container-highest": "#32353b",
+                      "surface-container": "#1d2025",
+                      "tertiary-fixed-dim": "#efbf70",
+                      "on-tertiary": "#432c00",
+                      "on-secondary": "#26313f",
+                      "on-primary": "#003063",
+                      "text-secondary": "#B7C0CC",
+                      "surface-raised": "#171E2B",
+                      "error": "#ffb4ab",
+                      "inverse-primary": "#325e9f",
+                      "secondary-container": "#3d4757",
+                      "on-tertiary-container": "#614200",
+                      "primary-fixed-dim": "#a9c7ff",
+                      "surface-dim": "#101419",
+                      "success": "#7CCFA6",
+                      "border-subtle": "#263142",
+                      "secondary-fixed": "#d8e3f6",
+                      "border-strong": "#334155",
+                      "outline": "#8d919b",
+                      "error-container": "#93000a",
+                      "text-primary": "#F4F7FB",
+                      "tertiary-fixed": "#ffdeac",
+                      "on-surface-variant": "#c3c6d2",
+                      "surface-container-low": "#181c21",
+                      "primary": "#bdd3ff",
+                      "surface-container-lowest": "#0b0e13",
+                      "outline-variant": "#434750",
+                      "surface-container-high": "#272a30",
+                      "on-surface": "#e0e2ea",
+                      "text-muted": "#7F8A99",
+                      "on-secondary-fixed-variant": "#3d4757",
+                      "primary-fixed": "#d6e3ff",
+                      "background": "#101419",
+                      "bg-soft": "#0B1018",
+                      "secondary": "#bcc7da",
+                      "surface-variant": "#32353b",
+                      "on-secondary-fixed": "#111c2a",
+                      "surface-tint": "#a9c7ff",
+                      "inverse-on-surface": "#2d3036",
+                      "on-secondary-container": "#abb6c8",
+                      "surface-floating": "#1D2533",
+                      "on-primary-fixed": "#001b3d",
+                      "tertiary": "#fccb7b",
+                      "tertiary-container": "#deb063",
+                      "surface": "#111722",
+                      "inverse-surface": "#e0e2ea",
+                      "on-error-container": "#ffdad6",
+                      "on-background": "#e0e2ea",
+                      "on-tertiary-fixed": "#281900",
+                      "on-tertiary-fixed-variant": "#5f4100",
+                      "on-error": "#690005",
+                      "on-primary-container": "#144787",
+                      "primary-container": "#8fb8ff",
+                      "secondary-fixed-dim": "#bcc7da",
+                      "on-primary-fixed-variant": "#124686"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "section-gap": "120px",
+                      "container-max": "1240px",
+                      "margin-desktop": "64px",
+                      "gutter": "24px",
+                      "margin-mobile": "24px"
+              },
+              "fontFamily": {
+                      "hero-h1": [
+                              "Geist"
+                      ],
+                      "section-h2": [
+                              "Geist"
+                      ],
+                      "body-lg": [
+                              "Geist"
+                      ],
+                      "label-xs": [
+                              "Geist"
+                      ],
+                      "hero-h1-mobile": [
+                              "Geist"
+                      ],
+                      "body-md": [
+                              "Geist"
+                      ],
+                      "label-sm": [
+                              "Geist"
+                      ],
+                      "section-h2-mobile": [
+                              "Geist"
+                      ]
+              },
+              "fontSize": {
+                      "hero-h1": [
+                              "80px",
+                              {
+                                      "lineHeight": "1.1",
+                                      "letterSpacing": "-0.02em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "section-h2": [
+                              "52px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "body-lg": [
+                              "18px",
+                              {
+                                      "lineHeight": "1.6",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "label-xs": [
+                              "12px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "hero-h1-mobile": [
+                              "40px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "body-md": [
+                              "16px",
+                              {
+                                      "lineHeight": "1.6",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "label-sm": [
+                              "14px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "section-h2-mobile": [
+                              "32px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "fontWeight": "600"
+                              }
+                      ]
+              }
+      },
+          },
+        }
+    </script>
+<style>
+        body { font-family: 'Geist', sans-serif; background-color: #070A0F; color: #F4F7FB; }
+        .glass-panel { background: rgba(17, 23, 34, 0.78); backdrop-filter: blur(12px); border: 1px solid rgba(148, 163, 184, 0.16); }
+        .inner-highlight { box-shadow: inset 0 1px 0 0 rgba(255,255,255,0.05); }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #263142; border-radius: 10px; }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden antialiased selection:bg-primary-container selection:text-on-primary-container">
+<!-- SideNavBar -->
+<nav class="bg-surface-container dark:bg-surface-container border-r border-border-subtle h-screen w-72 flex flex-col fixed left-0 top-0 overflow-y-auto shrink-0 z-40">
+<div class="flex-1 px-4 py-2 space-y-6">
+<!-- COMMUNITY -->
+<div>
+<p class="px-4 mb-2 font-label-xs text-label-xs text-text-muted uppercase tracking-wider">Community</p>
+<div class="space-y-1">
+<a class="flex items-center gap-3 px-4 py-2 rounded-lg text-text-secondary font-normal font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#">
+<span class="material-symbols-outlined text-lg">dashboard</span> Overview
+                    </a>
+<a class="flex items-center gap-3 px-4 py-2 rounded-lg text-text-secondary font-normal font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#">
+<span class="material-symbols-outlined text-lg">settings</span> Community Profile
+                    </a>
+<a class="flex items-center gap-3 px-4 py-2 rounded-lg text-text-secondary font-normal font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#">
+<span class="material-symbols-outlined text-lg">verified_user</span> Roles &amp; Permissions
+                    </a>
+<a class="flex items-center gap-3 px-4 py-2 rounded-lg text-text-secondary font-normal font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#">
+<span class="material-symbols-outlined text-lg">groups</span> Members
+                    </a>
+<a class="flex items-center gap-3 px-4 py-2 rounded-lg text-text-secondary font-normal font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#">
+<span class="material-symbols-outlined text-lg">chat_bubble</span> Channels
+                    </a>
+<a class="flex items-center gap-3 px-4 py-2 rounded-lg text-text-secondary font-normal font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#">
+<span class="material-symbols-outlined text-lg">mail</span> Invites
+                    </a>
+</div>
+</div>
+<!-- SAFETY -->
+<div>
+<p class="px-4 mb-2 font-label-xs text-label-xs text-text-muted uppercase tracking-wider">Safety</p>
+<div class="space-y-1">
+<a class="flex items-center gap-3 px-4 py-2 rounded-lg text-text-secondary font-normal font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#">
+<span class="material-symbols-outlined text-lg">security</span> Moderation
+                    </a>
+<a class="flex items-center gap-3 px-4 py-2 rounded-lg text-primary font-bold bg-primary-container/10 font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200 scale-[0.98]" href="#">
+<span class="material-symbols-outlined text-lg">history</span> Audit Log
+                    </a>
+</div>
+</div>
+<!-- VOICE & MEDIA -->
+<div>
+<p class="px-4 mb-2 font-label-xs text-label-xs text-text-muted uppercase tracking-wider">Voice &amp; Media</p>
+<div class="space-y-1">
+<a class="flex items-center gap-3 px-4 py-2 rounded-lg text-text-secondary font-normal font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#">
+<span class="material-symbols-outlined text-lg">mic</span> Voice &amp; Media
+                    </a>
+<a class="flex items-center gap-3 px-4 py-2 rounded-lg text-text-secondary font-normal font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#">
+<span class="material-symbols-outlined text-lg">storage</span> Storage
+                    </a>
+</div>
+</div>
+<!-- SYSTEM -->
+<div>
+<p class="px-4 mb-2 font-label-xs text-label-xs text-text-muted uppercase tracking-wider">System</p>
+<div class="space-y-1">
+<a class="flex items-center gap-3 px-4 py-2 rounded-lg text-text-secondary font-normal font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#">
+<span class="material-symbols-outlined text-lg">lock</span> Authentication
+                    </a>
+<a class="flex items-center gap-3 px-4 py-2 rounded-lg text-text-secondary font-normal font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#">
+<span class="material-symbols-outlined text-lg">backup</span> Backups
+                    </a>
+<a class="flex items-center gap-3 px-4 py-2 rounded-lg text-text-secondary font-normal font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#">
+<span class="material-symbols-outlined text-lg">system_update_alt</span> Updates
+                    </a>
+<a class="flex items-center gap-3 px-4 py-2 rounded-lg text-text-secondary font-normal font-body-md text-body-md hover:bg-surface-container-high transition-colors duration-200" href="#">
+<span class="material-symbols-outlined text-lg" style="font-variation-settings: 'FILL' 1;">medical_services</span> Doctor &amp; Health
+                    </a>
+</div>
+</div>
+</div>
+</nav>
+<!-- Main Content Area -->
+<main class="ml-72 flex-1 flex flex-col h-full bg-background relative z-10 overflow-hidden">
+<!-- TopNavBar -->
+<header class="bg-surface/80 backdrop-blur-md border-b border-border-subtle docked full-width top-0 h-20 flex justify-between items-center w-full px-margin-desktop shrink-0 z-30">
+<div class="flex items-center gap-6">
+<button class="text-text-secondary hover:text-primary transition-colors opacity-80 hover:opacity-100 flex items-center justify-center w-10 h-10 rounded-full hover:bg-surface-container">
+<span class="material-symbols-outlined text-2xl">close</span>
+</button>
+</div>
+</header>
+<!-- Content Canvas -->
+<div class="flex-1 overflow-hidden flex flex-row">
+<!-- Left Scrollable Area (List) -->
+<div class="flex-1 overflow-y-auto custom-scrollbar p-10 flex flex-col gap-8 pb-32 pb-40">
+<!-- Header -->
+<div class="flex flex-col gap-2 max-w-3xl">
+<h1 class="font-section-h2 text-section-h2 text-text-primary tracking-tight">Audit Log</h1>
+<p class="font-body-lg text-body-lg text-text-secondary">Review administrative and moderation actions in Ankara Gaming Voice.</p>
+</div>
+<!-- Controls & Filters -->
+<div class="glass-panel inner-highlight rounded-xl p-4 flex flex-wrap items-center gap-4">
+<div class="flex-1 min-w-[200px] relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-lg">search</span>
+<input class="w-full bg-surface-dim border border-border-subtle rounded-lg pl-10 pr-4 py-2 text-sm text-text-primary focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-all outline-none placeholder:text-text-muted" placeholder="Search audit log..." type="text"/>
+</div>
+<div class="flex items-center gap-3">
+<select class="bg-surface-dim border border-border-subtle rounded-lg px-3 py-2 text-sm text-text-primary focus:border-primary-container focus:ring-1 focus:ring-primary-container outline-none appearance-none pr-8 relative cursor-pointer">
+<option>All actors</option>
+</select>
+<select class="bg-surface-dim border border-border-subtle rounded-lg px-3 py-2 text-sm text-text-primary focus:border-primary-container focus:ring-1 focus:ring-primary-container outline-none appearance-none pr-8 cursor-pointer">
+<option>All actions</option>
+</select>
+<select class="bg-surface-dim border border-border-subtle rounded-lg px-3 py-2 text-sm text-text-primary focus:border-primary-container focus:ring-1 focus:ring-primary-container outline-none appearance-none pr-8 cursor-pointer">
+<option>Last 7 days</option>
+</select>
+<button class="px-4 py-2 bg-surface-raised border border-border-strong rounded-lg text-text-primary text-sm hover:bg-surface-bright transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">download</span> Export CSV
+                        </button>
+</div>
+</div>
+<!-- Summary Chips -->
+<div class="flex flex-wrap gap-2">
+<div class="px-3 py-1.5 bg-surface-container rounded-full border border-border-subtle flex items-center gap-2 font-label-sm text-label-sm text-text-secondary">
+<span class="w-2 h-2 rounded-full bg-primary-container"></span> 48 events
+                    </div>
+<div class="px-3 py-1.5 bg-surface-container rounded-full border border-border-subtle flex items-center gap-2 font-label-sm text-label-sm text-text-secondary">
+<span class="w-2 h-2 rounded-full bg-danger"></span> 6 moderation actions
+                    </div>
+<div class="px-3 py-1.5 bg-surface-container rounded-full border border-border-subtle flex items-center gap-2 font-label-sm text-label-sm text-text-secondary">
+<span class="w-2 h-2 rounded-full bg-tertiary"></span> 9 role changes
+                    </div>
+<div class="px-3 py-1.5 bg-surface-container rounded-full border border-border-subtle flex items-center gap-2 font-label-sm text-label-sm text-text-secondary">
+<span class="w-2 h-2 rounded-full bg-secondary"></span> 3 invite changes
+                    </div>
+<div class="px-3 py-1.5 bg-surface-container rounded-full border border-border-subtle flex items-center gap-2 font-label-sm text-label-sm text-text-secondary opacity-70">
+<span class="w-2 h-2 rounded-full bg-text-muted"></span> 0 failed admin actions
+                    </div>
+</div>
+<!-- Log List -->
+<div class="flex flex-col gap-2">
+<!-- Item 1 (Selected) -->
+<div class="glass-panel inner-highlight rounded-xl p-4 flex items-center gap-4 bg-primary-container/5 border-primary/30 cursor-pointer transition-all hover:bg-primary-container/10">
+<div class="w-10 h-10 rounded-full bg-surface-raised flex items-center justify-center shrink-0 border border-border-subtle">
+<span class="material-symbols-outlined text-secondary">mail</span>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex items-baseline gap-2">
+<span class="font-body-md text-body-md font-medium text-text-primary">juanka</span>
+<span class="font-body-md text-body-md text-text-secondary">created an invite link</span>
+</div>
+<div class="flex items-center gap-3 mt-1 text-sm text-text-muted">
+<span class="px-2 py-0.5 rounded bg-surface-container border border-border-subtle text-xs">Invites</span>
+<span>Target: vN8xQ2</span>
+</div>
+</div>
+<div class="text-right shrink-0 flex flex-col items-end gap-2">
+<span class="text-sm text-text-muted">2 minutes ago</span>
+<button class="text-primary text-sm hover:underline opacity-0 group-hover:opacity-100 transition-opacity">View Details</button>
+</div>
+</div>
+<!-- Item 2 -->
+<div class="glass-panel rounded-xl p-4 flex items-center gap-4 cursor-pointer transition-all hover:bg-surface-container-high border border-transparent">
+<div class="w-10 h-10 rounded-full bg-error-container/20 flex items-center justify-center shrink-0 border border-error-container/30">
+<span class="material-symbols-outlined text-danger">security</span>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex items-baseline gap-2">
+<span class="font-body-md text-body-md font-medium text-text-primary">Mehmet</span>
+<span class="font-body-md text-body-md text-text-secondary">timed out</span>
+<span class="font-body-md text-body-md font-medium text-text-primary">Ozan_TR</span>
+</div>
+<div class="flex items-center gap-3 mt-1 text-sm text-text-muted">
+<span class="px-2 py-0.5 rounded bg-surface-container border border-border-subtle text-xs">Moderation</span>
+<span>Target: Ozan_TR</span>
+</div>
+</div>
+<div class="text-right shrink-0 flex flex-col items-end gap-2">
+<span class="text-sm text-text-muted">1 hour ago</span>
+<button class="text-primary text-sm hover:underline opacity-0 group-hover:opacity-100 transition-opacity">View Details</button>
+</div>
+</div>
+<!-- Item 3 -->
+<div class="glass-panel rounded-xl p-4 flex items-center gap-4 cursor-pointer transition-all hover:bg-surface-container-high border border-transparent">
+<div class="w-10 h-10 rounded-full bg-error-container/20 flex items-center justify-center shrink-0 border border-error-container/30">
+<span class="material-symbols-outlined text-danger">delete</span>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex items-baseline gap-2">
+<span class="font-body-md text-body-md font-medium text-text-primary">juanka</span>
+<span class="font-body-md text-body-md text-text-secondary">removed an unsafe attachment</span>
+</div>
+<div class="flex items-center gap-3 mt-1 text-sm text-text-muted">
+<span class="px-2 py-0.5 rounded bg-surface-container border border-border-subtle text-xs">Moderation</span>
+<span>Target: #clips</span>
+</div>
+</div>
+<div class="text-right shrink-0 flex flex-col items-end gap-2">
+<span class="text-sm text-text-muted">3 hours ago</span>
+</div>
+</div>
+<!-- Item 4 -->
+<div class="glass-panel rounded-xl p-4 flex items-center gap-4 cursor-pointer transition-all hover:bg-surface-container-high border border-transparent">
+<div class="w-10 h-10 rounded-full bg-surface-raised flex items-center justify-center shrink-0 border border-border-subtle">
+<span class="material-symbols-outlined text-primary-container">settings</span>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex items-baseline gap-2">
+<span class="font-body-md text-body-md font-medium text-text-primary">System</span>
+<span class="font-body-md text-body-md text-text-secondary">updated channel permissions</span>
+</div>
+<div class="flex items-center gap-3 mt-1 text-sm text-text-muted">
+<span class="px-2 py-0.5 rounded bg-surface-container border border-border-subtle text-xs">Channels</span>
+<span>Target: #general</span>
+</div>
+</div>
+<div class="text-right shrink-0 flex flex-col items-end gap-2">
+<span class="text-sm text-text-muted">Yesterday</span>
+</div>
+</div>
+<!-- Item 5 -->
+<div class="glass-panel rounded-xl p-4 flex items-center gap-4 cursor-pointer transition-all hover:bg-surface-container-high border border-transparent">
+<div class="w-10 h-10 rounded-full bg-surface-raised flex items-center justify-center shrink-0 border border-border-subtle">
+<span class="material-symbols-outlined text-tertiary">person</span>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex items-baseline gap-2">
+<span class="font-body-md text-body-md font-medium text-text-primary">Ayşe</span>
+<span class="font-body-md text-body-md text-text-secondary">changed member role</span>
+</div>
+<div class="flex items-center gap-3 mt-1 text-sm text-text-muted">
+<span class="px-2 py-0.5 rounded bg-surface-container border border-border-subtle text-xs">Roles</span>
+<span>Target: Lina → Member</span>
+</div>
+</div>
+<div class="text-right shrink-0 flex flex-col items-end gap-2">
+<span class="text-sm text-text-muted">Yesterday</span>
+</div>
+</div>
+<!-- Item 6 -->
+<div class="glass-panel rounded-xl p-4 flex items-center gap-4 cursor-pointer transition-all hover:bg-surface-container-high border border-transparent">
+<div class="w-10 h-10 rounded-full bg-surface-raised flex items-center justify-center shrink-0 border border-border-subtle">
+<span class="material-symbols-outlined text-primary">image</span>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex items-baseline gap-2">
+<span class="font-body-md text-body-md font-medium text-text-primary">juanka</span>
+<span class="font-body-md text-body-md text-text-secondary">changed community banner</span>
+</div>
+<div class="flex items-center gap-3 mt-1 text-sm text-text-muted">
+<span class="px-2 py-0.5 rounded bg-surface-container border border-border-subtle text-xs">Community Profile</span>
+<span>Target: Ankara Gaming Voice</span>
+</div>
+</div>
+<div class="text-right shrink-0 flex flex-col items-end gap-2">
+<span class="text-sm text-text-muted">2 days ago</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Right Fixed Panel (Details) -->
+<div class="w-96 border-l border-border-subtle bg-surface-container-lowest flex flex-col shrink-0 overflow-y-auto custom-scrollbar">
+<div class="p-6 border-b border-border-subtle sticky top-0 bg-surface-container-lowest/90 backdrop-blur-md z-10">
+<h3 class="font-body-lg text-body-lg font-medium text-text-primary">Event Details</h3>
+</div>
+<div class="p-6 flex flex-col gap-6">
+<div class="flex flex-col gap-4">
+<div class="flex items-center gap-4 pb-4 border-b border-border-subtle">
+<div class="w-12 h-12 rounded-full bg-surface-raised flex items-center justify-center border border-border-subtle">
+<span class="material-symbols-outlined text-secondary text-2xl">mail</span>
+</div>
+<div>
+<div class="font-body-md text-body-md font-medium text-text-primary">Invite link created</div>
+<div class="text-sm text-text-muted mt-0.5">Today at 10:42</div>
+</div>
+</div>
+<div class="grid grid-cols-3 gap-y-4 gap-x-2 text-sm">
+<div class="text-text-muted col-span-1">Actor</div>
+<div class="text-text-primary col-span-2 font-medium">juanka</div>
+<div class="text-text-muted col-span-1">Category</div>
+<div class="text-text-primary col-span-2">
+<span class="px-2 py-0.5 rounded bg-surface-container border border-border-subtle text-xs inline-flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">mail</span> Invites
+                                </span>
+</div>
+<div class="text-text-muted col-span-1">Target</div>
+<div class="text-text-primary col-span-2 font-mono text-xs p-1 bg-surface-dim rounded border border-border-subtle inline-block w-fit">vN8xQ2</div>
+<div class="text-text-muted col-span-1">Result</div>
+<div class="text-success col-span-2 flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px]">check_circle</span> Success
+                            </div>
+<div class="text-text-muted col-span-1">IP Address</div>
+<div class="text-text-primary col-span-2 font-mono text-xs">192.168.1.24</div>
+<div class="text-text-muted col-span-1">Device</div>
+<div class="text-text-primary col-span-2">LobbyForge Desktop</div>
+</div>
+</div>
+<div class="bg-surface-dim rounded-lg p-4 border border-border-subtle">
+<p class="text-sm text-text-secondary leading-relaxed">
+                            "Created an invite link that expires in 7 days with a maximum of 25 uses."
+                        </p>
+</div>
+<div class="flex flex-col gap-3 pt-2">
+<button class="w-full py-2.5 bg-surface-raised border border-border-strong rounded-lg text-text-primary text-sm hover:bg-surface-bright transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]">content_copy</span> Copy Event ID
+                        </button>
+<button class="w-full py-2.5 bg-transparent border border-border-subtle rounded-lg text-text-secondary text-sm hover:bg-surface-container hover:text-text-primary transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]">open_in_new</span> View Related Invite
+                        </button>
+</div>
+<div class="mt-8 glass-panel rounded-xl p-4 flex gap-3 border-l-2 border-l-primary/50">
+<span class="material-symbols-outlined text-primary text-xl shrink-0 mt-0.5">info</span>
+<p class="text-xs text-text-muted leading-relaxed">
+                            Audit log entries are stored on this self-hosted instance and help community owners review administrative activity.
+                        </p>
+</div>
+</div>
+</div>
+</div>
+<!-- Footer (Read-only) -->
+<footer class="bg-surface-container-low dark:bg-surface-container-low border-t border-border-subtle fixed bottom-0 right-0 h-16 flex items-center px-margin-desktop w-[calc(100%-18rem)] ml-72 shadow-md z-30 justify-center">
+<div class="text-text-muted font-label-sm text-label-sm flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">lock</span>
+                Audit log entries are read-only.
+            </div>
+</footer>
+</main>
+</body></html>
