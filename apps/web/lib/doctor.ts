@@ -49,13 +49,25 @@ export async function collectSystemStats(): Promise<SystemStats> {
   const freeMem = os.freemem();
   const loadAvg = os.loadavg();
 
-  // Best-effort disk snapshot. We don't pull in a native dep just for this —
-  // a future iteration can read /proc or call `df` via child_process.
-  // For now, only the ratio matters; if the env doesn't provide one, we
-  // assume a healthy 0.5 (50% used) so capacity math stays sensible.
-  const diskUsageRatio = readDiskUsageRatioFromEnv() ?? 0.5;
-  const totalDisk = 100 * 1024 * 1024 * 1024;
-  const freeDisk = totalDisk * (1 - diskUsageRatio);
+  // Best-effort disk snapshot. Resolution order:
+  //   1. LOBBYFORGE_DISK_USAGE_RATIO env override (explicit operator input)
+  //   2. fs.statfs(process.cwd()) — real filesystem stats on Linux/macOS
+  //      (Node 18.15+). Throws ENOSYS on Windows, caught below.
+  //   3. Fallback: assume 0.5 (50% used) so capacity math stays sensible.
+  const envRatio = readDiskUsageRatioFromEnv();
+  let diskUsageRatio: number;
+  let totalDisk: number;
+  let freeDisk: number;
+  if (envRatio != null) {
+    diskUsageRatio = envRatio;
+    totalDisk = 100 * 1024 * 1024 * 1024;
+    freeDisk = totalDisk * (1 - diskUsageRatio);
+  } else {
+    const disk = await readDiskUsageFromFilesystem();
+    diskUsageRatio = disk.ratio;
+    totalDisk = disk.totalBytes;
+    freeDisk = disk.freeBytes;
+  }
 
   return {
     cpuCount: cpus.length || 1,
@@ -74,6 +86,26 @@ export async function collectSystemStats(): Promise<SystemStats> {
     turnConfigured: hasTurnEnv(),
     startedAt: PROCESS_STARTED_AT,
   };
+}
+
+/**
+ * Read real disk usage via fs.statfs. Works on Linux/macOS (Node 18.15+);
+ * throws ENOSYS on Windows. On any error, falls back to the 100GB/50%
+ * placeholder so Doctor never crashes just because it can't read the disk.
+ */
+async function readDiskUsageFromFilesystem(): Promise<{ ratio: number; totalBytes: number; freeBytes: number }> {
+  const fallback = { ratio: 0.5, totalBytes: 100 * 1024 * 1024 * 1024, freeBytes: 50 * 1024 * 1024 * 1024 };
+  try {
+    const { statfs } = await import('node:fs/promises');
+    const stats = await statfs(process.cwd());
+    const totalBytes = stats.bsize * stats.blocks;
+    const freeBytes = stats.bsize * stats.bfree;
+    if (totalBytes <= 0) return fallback;
+    return { ratio: 1 - freeBytes / totalBytes, totalBytes, freeBytes };
+  } catch {
+    // ENOSYS on Windows, or any other filesystem error — use the fallback.
+    return fallback;
+  }
 }
 
 function readDiskUsageRatioFromEnv(): number | null {
@@ -118,7 +150,11 @@ export async function collectDoctorReport(): Promise<{ report: DoctorReport; sta
   stats.postgresReachable = postgresOk;
   stats.redisReachable = redisOk;
   stats.httpsReachable = httpsOk;
-  stats.udpLikelyOpen = null; // Always best-effort; leave null until a real probe exists.
+  // UDP reachability can't be reliably self-tested from the host (it checks
+  // inbound reachability for external peers). Leave null and rely on the
+  // turn_configured check below, which warns when TURN is missing AND UDP
+  // is reported closed. A real STUN-based probe is a deferred item.
+  stats.udpLikelyOpen = null;
 
   const checks = buildChecksFromStats(stats);
   const report = buildDoctorReport(checks, stats);
@@ -138,8 +174,24 @@ async function probePostgres(url: string): Promise<boolean> {
   }
 }
 
+/**
+ * Probe the app's configured Redis instance via the shared ioredis singleton.
+ * A self-health check should test the same connection the app uses, not an
+ * arbitrary URL — so we ignore the URL argument and ping the singleton.
+ * Times out after 2s so a hung Redis can't stall the whole Doctor report.
+ */
 async function probeRedis(_url: string): Promise<boolean> {
-  return true;
+  try {
+    const { redis } = await import('@/lib/redis');
+    const result = await Promise.race([
+      redis.ping(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000)),
+    ]);
+    return result === 'PONG';
+  } catch (err) {
+    console.error('[doctor] redis probe failed:', err);
+    return false;
+  }
 }
 
 /**

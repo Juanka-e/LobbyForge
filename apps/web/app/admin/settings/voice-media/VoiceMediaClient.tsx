@@ -94,7 +94,7 @@ export default function VoiceMediaClient({
         />
         <ToggleRow
           label="Require Push-to-Talk"
-          description="Members must use hold-to-talk behavior in voice rooms. Full client enforcement is staged after this settings pass."
+          description="Members must use hold-to-talk behavior in voice rooms. Enforced in the lobby client on every voice connection."
           checked={draft.requirePushToTalk}
           onChange={(value) => setDraft((current) => ({ ...current, requirePushToTalk: value }))}
         />

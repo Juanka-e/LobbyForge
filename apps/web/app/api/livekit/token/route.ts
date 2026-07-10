@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { TrackSource } from 'livekit-server-sdk';
 import {
+  getRoomServiceClient,
   issueLiveKitToken,
   LIVEKIT_TOKEN_TTL_SECONDS,
   requireLiveKitCredentials,
@@ -70,7 +72,52 @@ async function handler(req: Request): Promise<NextResponse> {
   }
 
   const room = liveKitRoomName(body.serverId, body.channelId);
-  const allowedPublishSources = buildAllowedPublishSources(voiceSettings, body.canPublishSources);
+
+  // Enforce per-room limits (defaultUserLimit, maxCameraUsersPerRoom,
+  // maxScreenShareUsersPerRoom). These require a LiveKit participant list,
+  // so only fetch it when at least one limit is configured. Fail open on
+  // error — a transient LiveKit outage should not lock users out of voice;
+  // the connection itself will fail loudly if LiveKit is truly down.
+  let effectiveAllowCamera = voiceSettings.allowCamera;
+  let effectiveAllowScreenShare = voiceSettings.allowScreenShare;
+  const hasLimitConfig =
+    voiceSettings.defaultUserLimit != null ||
+    voiceSettings.maxCameraUsersPerRoom != null ||
+    voiceSettings.maxScreenShareUsersPerRoom != null;
+  if (hasLimitConfig) {
+    try {
+      const participants = await getRoomServiceClient().listParticipants(room);
+      if (
+        voiceSettings.defaultUserLimit != null &&
+        participants.length >= voiceSettings.defaultUserLimit
+      ) {
+        return NextResponse.json({ error: 'Voice room is full' }, { status: 409 });
+      }
+      if (voiceSettings.maxCameraUsersPerRoom != null && effectiveAllowCamera) {
+        const cameraPublishers = participants.filter((p) =>
+          p.tracks.some((t) => t.source === TrackSource.CAMERA)
+        ).length;
+        if (cameraPublishers >= voiceSettings.maxCameraUsersPerRoom) {
+          effectiveAllowCamera = false;
+        }
+      }
+      if (voiceSettings.maxScreenShareUsersPerRoom != null && effectiveAllowScreenShare) {
+        const screenSharePublishers = participants.filter((p) =>
+          p.tracks.some((t) => t.source === TrackSource.SCREEN_SHARE)
+        ).length;
+        if (screenSharePublishers >= voiceSettings.maxScreenShareUsersPerRoom) {
+          effectiveAllowScreenShare = false;
+        }
+      }
+    } catch {
+      // Fail open — see comment above.
+    }
+  }
+
+  const allowedPublishSources = buildAllowedPublishSources(
+    { allowCamera: effectiveAllowCamera, allowScreenShare: effectiveAllowScreenShare },
+    body.canPublishSources
+  );
   const grants: LiveKitGrants = {
     room,
     canPublishSources: allowedPublishSources,
@@ -96,6 +143,14 @@ async function handler(req: Request): Promise<NextResponse> {
         channelId: body.channelId,
         ttlSeconds: LIVEKIT_TOKEN_TTL_SECONDS,
         expiresAt: session.exp,
+        // Client-side voice policy (honor-system). The client uses these to
+        // force push-to-talk mode and/or start muted, overriding the user's
+        // own preferences. Hard limits (user/camera/screen-share caps) are
+        // enforced above at token-mint time.
+        serverVoiceSettings: {
+          requirePushToTalk: voiceSettings.requirePushToTalk,
+          startMuted: voiceSettings.startMuted,
+        },
       },
       { headers: { 'Cache-Control': 'no-store' } }
     );

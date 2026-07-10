@@ -20,6 +20,12 @@ describe('lobby voice client integration', () => {
     expect(source).not.toContain('room.getStats()');
   });
 
+  it('samples RTC stats via the public getRTCStatsReport API and reports a delta on the heartbeat', () => {
+    expect(source).toContain('getRTCStatsReport');
+    expect(source).toContain('lastBandwidthBytesRef');
+    expect(source).toContain('bandwidthDeltaBytes');
+  });
+
   it('applies saved media-device preferences when publishing local tracks', () => {
     expect(source).toContain("fetch('/api/settings/me'");
     expect(source).toContain('setMicrophoneEnabled(next, audioCaptureOptions(prefs))');
@@ -28,9 +34,15 @@ describe('lobby voice client integration', () => {
   });
 
   it('implements push-to-talk from saved voice preferences', () => {
-    expect(source).toContain("prefs.inputMode !== 'push_to_talk'");
+    expect(source).toContain("effectiveInputModeRef.current !== 'push_to_talk'");
     expect(source).toContain('keybindPrefsRef.current.pushToTalk.code');
     expect(source).toContain('isEditableTarget(event.target)');
+  });
+
+  it('applies server-side voice policy (requirePushToTalk / startMuted) from the token response', () => {
+    expect(source).toContain('serverVoiceSettings');
+    expect(source).toContain('serverRequiresPTT');
+    expect(source).toContain('serverStartMuted');
   });
 
   it('switches the lobby into voice view when video or screen share becomes active', () => {

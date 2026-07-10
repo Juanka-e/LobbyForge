@@ -15,6 +15,7 @@ import {
   RoomEvent,
   ConnectionState,
   Track,
+  type LocalTrack,
   type Participant,
   type RemoteTrack,
   type AudioCaptureOptions,
@@ -112,6 +113,10 @@ interface TokenResponse {
   identity: string;
   room: string;
   expiresAt: number;
+  serverVoiceSettings?: {
+    requirePushToTalk: boolean;
+    startMuted: boolean;
+  };
 }
 
 type SettingsResponse = {
@@ -230,8 +235,16 @@ export function LobbyVoiceProvider({
   const remoteAudioContainerRef = useRef<HTMLDivElement | null>(null);
   const remoteAudioElementsRef = useRef<Map<string, HTMLMediaElement>>(new Map());
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Cumulative bytes observed at the previous bandwidth sample. 0 means
+  // "no baseline yet" — the first sample establishes the baseline and
+  // reports no delta.
+  const lastBandwidthBytesRef = useRef(0);
   const voicePrefsRef = useRef<VoiceVideoPreferences>(mergeVoiceVideoPreferences({}));
   const keybindPrefsRef = useRef<KeybindPreferences>(mergeKeybindPreferences({}));
+  // Effective input mode after applying the server's requirePushToTalk
+  // policy. Read by the push-to-talk keybind effect so the handler stays
+  // active even when the server forces PTT over the user's preference.
+  const effectiveInputModeRef = useRef<'voice_activity' | 'push_to_talk'>('voice_activity');
   // Live copy for event handlers (avoid re-subscribing on every render).
   const knownNamesRef = useRef<Record<string, string>>(knownNames);
   knownNamesRef.current = knownNames;
@@ -338,6 +351,64 @@ export function LobbyVoiceProvider({
       clearInterval(heartbeatRef.current);
       heartbeatRef.current = null;
     }
+    lastBandwidthBytesRef.current = 0;
+  }, []);
+
+  /**
+   * Samples RTC stats from all local + remote audio/video tracks and
+   * returns the byte delta since the previous call. Uses the public
+   * `getRTCStatsReport()` API (the legacy `Room.getStats()` never existed
+   * in livekit-client and failed typecheck). The first call establishes
+   * a baseline and returns 0.
+   */
+  const sampleBandwidth = useCallback(async (): Promise<number> => {
+    const room = roomRef.current;
+    if (!room) return 0;
+
+    let totalBytes = 0;
+    const tracks: Array<LocalTrack | RemoteTrack> = [];
+
+    // Local published tracks → outbound-rtp (bytesSent).
+    for (const pub of room.localParticipant.audioTrackPublications.values()) {
+      if (pub.track) tracks.push(pub.track as LocalTrack);
+    }
+    for (const pub of room.localParticipant.videoTrackPublications.values()) {
+      if (pub.track) tracks.push(pub.track as LocalTrack);
+    }
+    // Remote subscribed tracks → inbound-rtp (bytesReceived).
+    for (const participant of room.remoteParticipants.values()) {
+      for (const pub of participant.audioTrackPublications.values()) {
+        if (pub.track) tracks.push(pub.track);
+      }
+      for (const pub of participant.videoTrackPublications.values()) {
+        if (pub.track) tracks.push(pub.track);
+      }
+    }
+
+    for (const track of tracks) {
+      try {
+        const report = await track.getRTCStatsReport();
+        if (!report) continue;
+        for (const stats of report.values()) {
+          const record = stats as Record<string, unknown>;
+          // outbound-rtp carries bytesSent (local publishers);
+          // inbound-rtp carries bytesReceived (remote subscribers).
+          if (typeof record.bytesSent === 'number') {
+            totalBytes += record.bytesSent;
+          } else if (typeof record.bytesReceived === 'number') {
+            totalBytes += record.bytesReceived;
+          }
+        }
+      } catch {
+        // A single track failing to report is non-fatal.
+      }
+    }
+
+    const previous = lastBandwidthBytesRef.current;
+    lastBandwidthBytesRef.current = totalBytes;
+    // First sample (previous === 0) establishes the baseline → no delta.
+    // A counter reset (totalBytes < previous, e.g. reconnect) → no delta.
+    return previous > 0 && totalBytes > previous ? totalBytes - previous : 0;
   }, []);
 
   const startHeartbeat = useCallback(
@@ -350,6 +421,13 @@ export function LobbyVoiceProvider({
             channelId,
             status: 'online',
           };
+          // Piggyback the bandwidth delta on the heartbeat. The first
+          // heartbeat after connect establishes the RTC stats baseline
+          // and sends no delta; subsequent ones report real deltas.
+          const bandwidthDelta = await sampleBandwidth();
+          if (bandwidthDelta > 0) {
+            body.bandwidthDeltaBytes = bandwidthDelta;
+          }
           const response = await fetch('/api/presence', {
             method: 'POST',
             credentials: 'same-origin',
@@ -365,7 +443,7 @@ export function LobbyVoiceProvider({
       void post();
       heartbeatRef.current = setInterval(post, HEARTBEAT_INTERVAL_MS);
     },
-    [serverId, stopHeartbeat]
+    [serverId, stopHeartbeat, sampleBandwidth]
   );
 
 
@@ -469,7 +547,15 @@ export function LobbyVoiceProvider({
             if (publication.track) attachRemoteAudio(publication.track, participant);
           }
         }
-        const shouldStartMic = voicePrefs.inputMode === 'voice_activity';
+        // Apply server-side voice policy on top of the user preference.
+        // requirePushToTalk forces PTT regardless of the user's inputMode;
+        // startMuted forces the mic off on join. Both compose naturally
+        // (PTT also starts muted until the key is held).
+        const serverRequiresPTT = token.serverVoiceSettings?.requirePushToTalk ?? false;
+        const serverStartMuted = token.serverVoiceSettings?.startMuted ?? false;
+        const effectiveInputMode = serverRequiresPTT ? 'push_to_talk' : voicePrefs.inputMode;
+        effectiveInputModeRef.current = effectiveInputMode;
+        const shouldStartMic = !serverStartMuted && effectiveInputMode === 'voice_activity';
         await room.localParticipant.setMicrophoneEnabled(shouldStartMic, audioCaptureOptions(voicePrefs));
         voicePrefsRef.current = voicePrefs;
         setMicEnabled(shouldStartMic);
@@ -584,7 +670,9 @@ export function LobbyVoiceProvider({
     const setPushToTalkMic = async (next: boolean) => {
       const r = roomRef.current;
       const prefs = voicePrefsRef.current;
-      if (!r || prefs.inputMode !== 'push_to_talk') return;
+      // Honor the effective input mode — which may be forced to
+      // push_to_talk by the server's requirePushToTalk policy.
+      if (!r || effectiveInputModeRef.current !== 'push_to_talk') return;
       try {
         await r.localParticipant.setMicrophoneEnabled(next, audioCaptureOptions(prefs));
         setMicEnabled(next);

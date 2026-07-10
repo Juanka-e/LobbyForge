@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import { AlertLevel, DoctorCategory, type SystemStats } from '@lobbyforge/core';
-import { buildChecksFromStats } from '../doctor.js';
+import { buildChecksFromStats, collectSystemStats } from '../doctor.js';
 
 const healthyStats: SystemStats = {
   cpuCount: 4,
@@ -125,5 +125,72 @@ describe('buildChecksFromStats', () => {
     expect(ids.has(DoctorCategory.NETWORK)).toBe(true);
     expect(ids.has(DoctorCategory.SERVICES)).toBe(true);
     expect(ids.has(DoctorCategory.MEDIA)).toBe(true);
+  });
+});
+
+describe('collectSystemStats disk resolution', () => {
+  const originalEnv = process.env.LOBBYFORGE_DISK_USAGE_RATIO;
+
+  beforeEach(() => {
+    vi.resetModules();
+    delete process.env.LOBBYFORGE_DISK_USAGE_RATIO;
+  });
+
+  it('honors the LOBBYFORGE_DISK_USAGE_RATIO env override when set', async () => {
+    process.env.LOBBYFORGE_DISK_USAGE_RATIO = '0.75';
+    const stats = await collectSystemStats();
+    expect(stats.diskUsageRatio).toBe(0.75);
+  });
+
+  it('falls back to a real fs.statfs ratio when env is unset and statfs succeeds', async () => {
+    vi.doMock('node:fs/promises', () => ({
+      statfs: vi.fn().mockResolvedValue({ bsize: 4096, blocks: 1000, bfree: 400 }),
+    }));
+    const stats = await collectSystemStats();
+    // 400/1000 free → 60% used
+    expect(stats.diskUsageRatio).toBeCloseTo(0.6, 2);
+    expect(stats.totalDiskBytes).toBe(4096 * 1000);
+  });
+
+  it('falls back to 0.5 when fs.statfs throws (e.g. Windows ENOSYS)', async () => {
+    vi.doMock('node:fs/promises', () => ({
+      statfs: vi.fn().mockRejectedValue(Object.assign(new Error('ENOSYS'), { code: 'ENOSYS' })),
+    }));
+    const stats = await collectSystemStats();
+    expect(stats.diskUsageRatio).toBe(0.5);
+  });
+
+  // Restore env after the suite so other tests are unaffected.
+  afterAll(() => {
+    if (originalEnv !== undefined) process.env.LOBBYFORGE_DISK_USAGE_RATIO = originalEnv;
+  });
+});
+
+describe('probeRedis (via collectDoctorReport integration)', () => {
+  // probeRedis is not exported directly; we exercise it through the Redis
+  // check by mocking the shared ioredis singleton it imports.
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('reports redis reachable when ping returns PONG', async () => {
+    vi.doMock('@/lib/redis', () => ({
+      redis: { ping: vi.fn().mockResolvedValue('PONG') },
+    }));
+    const { collectDoctorReport } = await import('../doctor.js');
+    const { report } = await collectDoctorReport();
+    const redis = report.checks.find((c) => c.id === 'redis');
+    expect(redis?.ok).toBe(true);
+  });
+
+  it('reports redis unreachable when ping throws', async () => {
+    vi.doMock('@/lib/redis', () => ({
+      redis: { ping: vi.fn().mockRejectedValue(new Error('ECONNREFUSED')) },
+    }));
+    const { collectDoctorReport } = await import('../doctor.js');
+    const { report } = await collectDoctorReport();
+    const redis = report.checks.find((c) => c.id === 'redis');
+    expect(redis?.ok).toBe(false);
+    expect(redis?.level).toBe(AlertLevel.CRITICAL);
   });
 });

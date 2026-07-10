@@ -6,6 +6,7 @@ import { getDb } from '@/lib/db';
 import { getInstanceSetupStatus, listServersForUser } from '@lobbyforge/db';
 import { getServerBandwidthTotals } from '@/lib/redis';
 import SettingsShell from '@/app/SettingsShell';
+import HealthActions from './HealthActions';
 
 // Server component — re-fetch on each request so admins see live data.
 export const dynamic = 'force-dynamic';
@@ -212,20 +213,7 @@ function DoctorBody({
             <SummaryRow label="Fatal" value={report.summary.fatal} tone="danger" />
           </div>
           <div className="space-y-2">
-            <button
-              type="button"
-              className="w-full py-2.5 rounded-lg bg-primary text-on-primary font-label-sm hover:brightness-110 transition-all flex items-center justify-center gap-2"
-            >
-              <span className="material-symbols-outlined text-[18px]">play_arrow</span>
-              Run Full Check
-            </button>
-            <button
-              type="button"
-              className="w-full py-2.5 rounded-lg bg-surface-raised border border-border-strong text-text-secondary font-label-sm hover:bg-surface-variant transition-colors flex items-center justify-center gap-2"
-            >
-              <span className="material-symbols-outlined text-[18px]">content_copy</span>
-              Copy Health Summary
-            </button>
+            <HealthActions report={report} />
           </div>
           <p className="text-xs text-text-muted flex items-start gap-2 pt-4 border-t border-border-subtle">
             <span className="material-symbols-outlined text-[14px] shrink-0">info</span>
