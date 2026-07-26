@@ -1,0 +1,9 @@
+import '@testing-library/jest-dom/vitest';
+import { cleanup } from '@testing-library/react';
+import { afterEach } from 'vitest';
+
+// Unmount React trees between tests so each test starts with a clean DOM
+// (prevents "multiple elements with role/title" errors from prior renders).
+afterEach(() => {
+  cleanup();
+});

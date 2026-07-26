@@ -15,9 +15,17 @@ The End-to-End (E2E) testing track infrastructure has been successfully implemen
   - `auth.spec.ts`: Guest creation API flows.
   - `dashboard.spec.ts`: Dashboard layout integration testing and component visibility checks.
   - `voice.spec.ts`: Real-time voice connectivity validation, ensuring multiple browsers can mint LiveKit tokens for the same room.
-- [ ] **Tier 2: Boundary & Corner Cases**: (To be filled in M3/M4 implementations)
-- [ ] **Tier 3: Cross-Feature Combinations**: (To be filled in M3/M4 implementations)
-- [ ] **Tier 4: Real-World Scenarios**: (To be filled in M5 implementations)
+- [x] **Tier 2: Boundary & Corner Cases**:
+  - `guest-auth-boundaries.spec.ts`: Guest auth input validation — overlong displayNameSeed (400), unknown body field via `.strict()` (400), GET without cookie (401), session round-trip after creation, non-member presence write rejected.
+  - `chat-and-presence-api.spec.ts`: Chat/typing/presence/invite REST boundaries — non-member message POST rejected, typing POST rejected, channel-presence GET rejected, invite creation without permission rejected, public invite metadata 404, redeem without session gated.
+- [x] **Tier 3: Cross-Feature Combinations**:
+  - `chat-and-presence-api.spec.ts` (cross-cutting): Auth → membership → chat/typing/presence contract enforcement across multiple endpoints in a single session.
+  - `voice.spec.ts`: Two browser contexts mint distinct sessions and enforce membership on token + presence endpoints.
+- [ ] **Tier 4: Real-World Scenarios**: (Requires full docker stack: Postgres + Redis + LiveKit + ws-gateway)
+  - Two-client real-time chat delivery (send in one lobby, receive in another via ws-gateway)
+  - Member presence online/offline transitions across contexts
+  - Typing indicator fanout to a second client
+  - Full voice session with two fake-media browsers
 
 ## How to Run Tests
 To run the automated E2E test suite locally:

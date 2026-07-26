@@ -18,18 +18,22 @@ import {
   type LocalTrack,
   type Participant,
   type RemoteTrack,
+  type RemoteTrackPublication,
   type AudioCaptureOptions,
   type VideoCaptureOptions,
   type ScreenShareCaptureOptions,
 } from 'livekit-client';
 import {
   mergeVoiceVideoPreferences,
+  type ScreenFps,
+  type ScreenQuality,
   type VoiceVideoPreferences,
 } from '@/lib/voice-video-preferences';
 import {
   mergeKeybindPreferences,
   type KeybindPreferences,
 } from '@/lib/keybind-preferences';
+import { VOICE_TEST_STATE_EVENT, type VoiceTestKind } from '@/lib/voice-test-events';
 
 /**
  * M21.4a - LiveKit voice connection scoped to the standalone lobby.
@@ -64,7 +68,7 @@ export interface LobbyVoiceParticipant {
   hasScreenShare: boolean;
 }
 
-interface LobbyVoiceContextValue {
+export interface LobbyVoiceContextValue {
   serverId: string;
   livekitUrl: string;
   activeChannelId: string | null;
@@ -74,6 +78,8 @@ interface LobbyVoiceContextValue {
   micEnabled: boolean;
   cameraEnabled: boolean;
   screenShareEnabled: boolean;
+  screenSharePolicy: { maxHeight: number; maxFps: number };
+  screenSharePreference: { quality: ScreenQuality; fps: ScreenFps };
   deafenEnabled: boolean;
   participants: LobbyVoiceParticipant[];
   /** 'chat' = text channel visible; 'voice' = full-screen video grid. */
@@ -87,20 +93,27 @@ interface LobbyVoiceContextValue {
   toggleMic: () => Promise<void>;
   toggleCamera: () => Promise<void>;
   toggleScreenShare: () => Promise<void>;
+  setScreenSharePreference: (quality: ScreenQuality, fps: ScreenFps) => Promise<void>;
   toggleDeafen: () => void;
   setMainViewMode: (mode: 'chat' | 'voice') => void;
   setActiveTextChannel: (channelId: string, channelName: string) => void;
   getParticipantCameraTrack: (identity: string) => MediaStreamTrack | null;
   getParticipantScreenShareTrack: (identity: string) => MediaStreamTrack | null;
+  isScreenShareJoined: (identity: string) => boolean;
+  joinScreenShare: (identity: string) => Promise<void>;
+  leaveScreenShare: (identity: string) => Promise<void>;
   /** Set the local playback volume (0..1) for a remote participant's audio. */
   setRemoteVolume: (identity: string, volume: number) => void;
   /** Get the current local playback volume for a remote participant. */
   getRemoteVolume: (identity: string) => number;
 }
 
-const LobbyVoiceContext = createContext<LobbyVoiceContextValue | null>(null);
+// Exported so component tests can wrap consumers (e.g. LobbyVoiceFooter) in
+// a mocked context provider without mounting the full LiveKit provider.
+export const LobbyVoiceContext = createContext<LobbyVoiceContextValue | null>(null);
 
 const HEARTBEAT_INTERVAL_MS = 5_000;
+const ONLINE_HEARTBEAT_INTERVAL_MS = 30_000;
 
 interface Guest {
   gid: string;
@@ -116,6 +129,8 @@ interface TokenResponse {
   serverVoiceSettings?: {
     requirePushToTalk: boolean;
     startMuted: boolean;
+    maxScreenShareHeight: number;
+    maxScreenShareFps: number;
   };
 }
 
@@ -142,23 +157,51 @@ function cameraCaptureOptions(prefs: VoiceVideoPreferences): VideoCaptureOptions
     deviceId: prefs.cameraDeviceId && prefs.cameraDeviceId !== 'default'
       ? { exact: prefs.cameraDeviceId }
       : undefined,
-    frameRate: Number(prefs.screenFps),
   };
 }
 
-function screenShareOptions(prefs: VoiceVideoPreferences): ScreenShareCaptureOptions {
-  const resolution =
-    prefs.screenQuality === 'low'
-      ? { width: 854, height: 480 }
-      : prefs.screenQuality === 'standard'
-        ? { width: 1280, height: 720 }
-        : prefs.screenQuality === 'high'
-          ? { width: 1920, height: 1080 }
-          : undefined;
+function mediaErrorMessage(error: unknown, kind: 'camera' | 'screen'): string {
+  const name = error instanceof DOMException ? error.name : '';
+  if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+    return kind === 'camera'
+      ? 'Camera permission was denied. Allow camera access in the browser and try again.'
+      : 'Screen sharing was cancelled or denied.';
+  }
+  if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+    return kind === 'camera'
+      ? 'The selected camera is unavailable. Choose another camera in Voice & Video settings.'
+      : 'No shareable screen or window is available.';
+  }
+  if (name === 'NotReadableError') {
+    return kind === 'camera'
+      ? 'The camera is already in use by another application.'
+      : 'The selected screen could not be captured.';
+  }
+  return kind === 'camera' ? 'Camera could not be started.' : 'Screen sharing could not be started.';
+}
+
+function screenShareOptions(
+  prefs: VoiceVideoPreferences,
+  policy: { maxHeight: number; maxFps: number }
+): ScreenShareCaptureOptions {
+  const requestedHeight = prefs.screenQuality === 'low'
+    ? 480
+    : prefs.screenQuality === 'standard'
+      ? 720
+      : prefs.screenQuality === 'high'
+        ? 1080
+        : prefs.screenQuality === 'q1440'
+          ? 1440
+          : prefs.screenQuality === 'q2160'
+            ? 2160
+        : policy.maxHeight;
+  const height = Math.min(requestedHeight, policy.maxHeight);
+  const width = Math.round((height * 16) / 9);
+  const frameRate = Math.min(Number(prefs.screenFps), policy.maxFps);
   return {
     audio: prefs.shareSystemAudio,
     systemAudio: prefs.shareSystemAudio ? 'include' : 'exclude',
-    resolution,
+    resolution: { width, height, frameRate },
   };
 }
 
@@ -173,8 +216,16 @@ function participantToView(
   const micEnabled = isLocal
     ? !!audioPub?.track
     : !!audioPub?.track && !audioPub.track.isMuted;
-  const cameraEnabled = pubs.some((pub) => pub.source === 'camera' && !!pub.track);
-  const hasScreenShare = pubs.some((pub) => pub.source === 'screen_share' && !!pub.track);
+  const cameraEnabled = pubs.some((pub) =>
+    pub.source === Track.Source.Camera
+    && !pub.isMuted
+    && pub.track?.mediaStreamTrack.readyState === 'live'
+  );
+  const hasScreenShare = pubs.some((pub) =>
+    pub.source === Track.Source.ScreenShare
+    && !pub.isMuted
+    && (!isLocal || pub.track?.mediaStreamTrack.readyState === 'live')
+  );
   return {
     id: identity,
     identity,
@@ -218,6 +269,9 @@ export function LobbyVoiceProvider({
   const [micEnabled, setMicEnabled] = useState(false);
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [screenShareEnabled, setScreenShareEnabled] = useState(false);
+  const [screenSharePolicy, setScreenSharePolicy] = useState({ maxHeight: 1080, maxFps: 30 });
+  const [screenSharePreference, setScreenSharePreferenceState] = useState<{ quality: ScreenQuality; fps: ScreenFps }>({ quality: 'auto', fps: '30' });
+  const [joinedScreenShares, setJoinedScreenShares] = useState<Set<string>>(() => new Set());
   const [deafenEnabled, setDeafenEnabled] = useState(false);
   const [participants, setParticipants] = useState<LobbyVoiceParticipant[]>([]);
   const [mainViewMode, setMainViewMode] = useState<'chat' | 'voice'>('chat');
@@ -240,7 +294,9 @@ export function LobbyVoiceProvider({
   // reports no delta.
   const lastBandwidthBytesRef = useRef(0);
   const voicePrefsRef = useRef<VoiceVideoPreferences>(mergeVoiceVideoPreferences({}));
+  const screenSharePolicyRef = useRef({ maxHeight: 1080, maxFps: 30 });
   const keybindPrefsRef = useRef<KeybindPreferences>(mergeKeybindPreferences({}));
+  const voiceTestRestoreRef = useRef<{ kind: VoiceTestKind; micEnabled: boolean; deafenEnabled: boolean } | null>(null);
   // Effective input mode after applying the server's requirePushToTalk
   // policy. Read by the push-to-talk keybind effect so the handler stays
   // active even when the server forces PTT over the user's preference.
@@ -257,10 +313,12 @@ export function LobbyVoiceProvider({
       const prefs = mergeVoiceVideoPreferences(data.settings.audio);
       keybindPrefsRef.current = mergeKeybindPreferences(data.settings.keybinds);
       voicePrefsRef.current = prefs;
+      setScreenSharePreferenceState({ quality: prefs.screenQuality, fps: prefs.screenFps });
       return prefs;
     } catch {
       const prefs = mergeVoiceVideoPreferences({});
       voicePrefsRef.current = prefs;
+      setScreenSharePreferenceState({ quality: prefs.screenQuality, fps: prefs.screenFps });
       return prefs;
     }
   }, []);
@@ -340,6 +398,37 @@ export function LobbyVoiceProvider({
       cancelled = true;
     };
   }, [localDisplayName]);
+
+  // Keep text-only lobby sessions present in Redis. The server render writes
+  // an initial snapshot, but without a client heartbeat it expires after 90s.
+  useEffect(() => {
+    if (!guest?.uid || activeChannelId || !activeTextChannelId) return;
+    let cancelled = false;
+    const postOnline = async () => {
+      if (cancelled) return;
+      try {
+        await fetch('/api/presence', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ serverId, channelId: activeTextChannelId, status: 'online' }),
+        });
+      } catch {
+        // The next heartbeat retries; Redis TTL handles abandoned tabs.
+      }
+    };
+    const onVisible = () => { if (document.visibilityState === 'visible') void postOnline(); };
+    void postOnline();
+    const interval = window.setInterval(postOnline, ONLINE_HEARTBEAT_INTERVAL_MS);
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', postOnline);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', postOnline);
+    };
+  }, [activeChannelId, activeTextChannelId, guest?.uid, serverId]);
 
   const collectParticipants = useCallback((room: Room) => {
     const list = [room.localParticipant, ...Array.from(room.remoteParticipants.values())];
@@ -503,6 +592,13 @@ export function LobbyVoiceProvider({
         const room = new Room({ adaptiveStream: true, dynacast: true });
         roomRef.current = room;
 
+        const applyDefaultSubscription = (publication: RemoteTrackPublication) => {
+          const isScreenShare =
+            publication.source === Track.Source.ScreenShare ||
+            publication.source === Track.Source.ScreenShareAudio;
+          publication.setSubscribed(!isScreenShare);
+        };
+
         room.on(RoomEvent.ConnectionStateChanged, (state: ConnectionState) => {
           if (connectTokenRef.current !== myToken) return;
           setConnectionState(state);
@@ -517,6 +613,7 @@ export function LobbyVoiceProvider({
           setMicEnabled(false);
           setCameraEnabled(false);
           setScreenShareEnabled(false);
+          setJoinedScreenShares(new Set());
           setDeafenEnabled(false);
           setConnectionState(ConnectionState.Disconnected);
         });
@@ -527,24 +624,66 @@ export function LobbyVoiceProvider({
         room.on(RoomEvent.TrackUnmuted, () => collectParticipants(room));
         room.on(RoomEvent.TrackSubscribed, (track, _publication, participant) => {
           attachRemoteAudio(track, participant);
-          collectParticipants(room);
+          queueMicrotask(() => {
+            if (roomRef.current === room) collectParticipants(room);
+          });
         });
         room.on(RoomEvent.TrackUnsubscribed, (track) => {
           detachRemoteAudio(track);
           collectParticipants(room);
         });
-        room.on(RoomEvent.LocalTrackPublished, () => collectParticipants(room));
-        room.on(RoomEvent.LocalTrackUnpublished, () => collectParticipants(room));
+        room.on(RoomEvent.TrackPublished, (publication) => {
+          applyDefaultSubscription(publication);
+          collectParticipants(room);
+        });
+        room.on(RoomEvent.TrackUnpublished, (publication, participant) => {
+          if (publication.source !== Track.Source.ScreenShare) {
+            queueMicrotask(() => {
+              if (roomRef.current === room) collectParticipants(room);
+            });
+            return;
+          }
+          setJoinedScreenShares((current) => {
+            if (!current.has(participant.identity)) return current;
+            const next = new Set(current);
+            next.delete(participant.identity);
+            return next;
+          });
+          queueMicrotask(() => {
+            if (roomRef.current === room) collectParticipants(room);
+          });
+        });
+        room.on(RoomEvent.LocalTrackPublished, (publication) => {
+          if (publication.source === Track.Source.Camera) setCameraEnabled(true);
+          if (publication.source === Track.Source.ScreenShare) setScreenShareEnabled(true);
+          queueMicrotask(() => {
+            if (roomRef.current === room) collectParticipants(room);
+          });
+        });
+        room.on(RoomEvent.LocalTrackUnpublished, (publication) => {
+          if (publication.source === Track.Source.Camera) setCameraEnabled(false);
+          if (publication.source === Track.Source.ScreenShare) {
+            setScreenShareEnabled(false);
+            setJoinedScreenShares((current) => {
+              const next = new Set(current);
+              next.delete(room.localParticipant.identity);
+              return next;
+            });
+          }
+          queueMicrotask(() => {
+            if (roomRef.current === room) collectParticipants(room);
+          });
+        });
 
-        await room.connect(livekitUrl, token.token);
+        await room.connect(livekitUrl, token.token, { autoSubscribe: false });
         if (connectTokenRef.current !== myToken) {
           // Superseded — clean up the room we just connected.
           void room.disconnect();
           return;
         }
         for (const participant of room.remoteParticipants.values()) {
-          for (const publication of participant.audioTrackPublications.values()) {
-            if (publication.track) attachRemoteAudio(publication.track, participant);
+          for (const publication of participant.trackPublications.values()) {
+            applyDefaultSubscription(publication);
           }
         }
         // Apply server-side voice policy on top of the user preference.
@@ -553,6 +692,11 @@ export function LobbyVoiceProvider({
         // (PTT also starts muted until the key is held).
         const serverRequiresPTT = token.serverVoiceSettings?.requirePushToTalk ?? false;
         const serverStartMuted = token.serverVoiceSettings?.startMuted ?? false;
+        screenSharePolicyRef.current = {
+          maxHeight: token.serverVoiceSettings?.maxScreenShareHeight ?? 1080,
+          maxFps: token.serverVoiceSettings?.maxScreenShareFps ?? 30,
+        };
+        setScreenSharePolicy(screenSharePolicyRef.current);
         const effectiveInputMode = serverRequiresPTT ? 'push_to_talk' : voicePrefs.inputMode;
         effectiveInputModeRef.current = effectiveInputMode;
         const shouldStartMic = !serverStartMuted && effectiveInputMode === 'voice_activity';
@@ -592,18 +736,25 @@ export function LobbyVoiceProvider({
 
   const disconnect = useCallback(async () => {
     const r = roomRef.current;
+    ++connectTokenRef.current;
+    roomRef.current = null;
+    stopHeartbeat();
+    setActiveChannelId(null);
+    setParticipants([]);
+    setJoinedScreenShares(new Set());
+    setMicEnabled(false);
+    setCameraEnabled(false);
+    setScreenShareEnabled(false);
+    setDeafenEnabled(false);
+    setMainViewMode('chat');
+    setConnectionState(ConnectionState.Disconnected);
+    setError(null);
     if (!r) return;
     try {
       await r.disconnect();
     } catch {
       /* swallow */
     }
-    roomRef.current = null;
-    stopHeartbeat();
-    setActiveChannelId(null);
-    setParticipants([]);
-    setMicEnabled(false);
-    setConnectionState(ConnectionState.Disconnected);
   }, [stopHeartbeat]);
 
   const toggleMic = useCallback(async () => {
@@ -628,10 +779,11 @@ export function LobbyVoiceProvider({
       const prefs = await loadVoicePreferences();
       await r.localParticipant.setCameraEnabled(next, cameraCaptureOptions(prefs));
       setCameraEnabled(next);
+      setError(null);
       if (next) setMainViewMode('voice');
       collectParticipants(r);
     } catch (err) {
-      setError((err instanceof Error ? err.message : String(err)));
+      setError(mediaErrorMessage(err, 'camera'));
     }
   }, [cameraEnabled, collectParticipants, loadVoicePreferences]);
 
@@ -641,14 +793,28 @@ export function LobbyVoiceProvider({
     const next = !screenShareEnabled;
     try {
       const prefs = await loadVoicePreferences();
-      await r.localParticipant.setScreenShareEnabled(next, screenShareOptions(prefs));
+      await r.localParticipant.setScreenShareEnabled(next, screenShareOptions(prefs, screenSharePolicyRef.current));
       setScreenShareEnabled(next);
+      setError(null);
       if (next) setMainViewMode('voice');
       collectParticipants(r);
     } catch (err) {
-      setError((err instanceof Error ? err.message : String(err)));
+      setError(mediaErrorMessage(err, 'screen'));
     }
   }, [screenShareEnabled, collectParticipants, loadVoicePreferences]);
+
+  const setScreenSharePreference = useCallback(async (quality: ScreenQuality, fps: ScreenFps) => {
+    const next = { ...voicePrefsRef.current, screenQuality: quality, screenFps: fps };
+    voicePrefsRef.current = next;
+    setScreenSharePreferenceState({ quality, fps });
+    const response = await fetch('/api/settings/me', {
+      method: 'PATCH',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audio: next }),
+    });
+    if (!response.ok) throw new Error('Could not save stream quality preference.');
+  }, []);
 
   const toggleDeafen = useCallback(() => {
     const r = roomRef.current;
@@ -657,6 +823,46 @@ export function LobbyVoiceProvider({
     applyRemoteAudio(r, !next);
     setDeafenEnabled(next);
   }, [applyRemoteAudio, deafenEnabled]);
+
+  useEffect(() => {
+    const handleVoiceTest = (event: Event) => {
+      const detail = (event as CustomEvent<{ kind: VoiceTestKind; active: boolean }>).detail;
+      const room = roomRef.current;
+      if (!room || !detail) return;
+
+      if (detail.active) {
+        if (voiceTestRestoreRef.current) return;
+        voiceTestRestoreRef.current = { kind: detail.kind, micEnabled, deafenEnabled };
+        applyRemoteAudio(room, false);
+        setDeafenEnabled(true);
+        if (detail.kind === 'microphone') {
+          void room.localParticipant.setMicrophoneEnabled(false).then(() => {
+            setMicEnabled(false);
+            collectParticipants(room);
+          }).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+        }
+        return;
+      }
+
+      const restore = voiceTestRestoreRef.current;
+      if (!restore || restore.kind !== detail.kind) return;
+      voiceTestRestoreRef.current = null;
+      applyRemoteAudio(room, !restore.deafenEnabled);
+      setDeafenEnabled(restore.deafenEnabled);
+      if (restore.kind === 'microphone') {
+        void room.localParticipant.setMicrophoneEnabled(
+          restore.micEnabled,
+          audioCaptureOptions(voicePrefsRef.current)
+        ).then(() => {
+          setMicEnabled(restore.micEnabled);
+          collectParticipants(room);
+        }).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+      }
+    };
+
+    window.addEventListener(VOICE_TEST_STATE_EVENT, handleVoiceTest);
+    return () => window.removeEventListener(VOICE_TEST_STATE_EVENT, handleVoiceTest);
+  }, [applyRemoteAudio, collectParticipants, deafenEnabled, micEnabled]);
 
   useEffect(() => {
     if (connectionState !== ConnectionState.Connected || !activeChannelId) return;
@@ -682,10 +888,25 @@ export function LobbyVoiceProvider({
       }
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.code !== keybindPrefsRef.current.pushToTalk.code || event.repeat || isEditableTarget(event.target)) return;
-      held = true;
+      if (event.repeat || isEditableTarget(event.target)) return;
+      const binds = keybindPrefsRef.current;
+      if (event.code === binds.pushToTalk.code && effectiveInputModeRef.current === 'push_to_talk') {
+        held = true;
+        event.preventDefault();
+        void setPushToTalkMic(true);
+        return;
+      }
+      const action = (
+        [
+          ['toggleMute', toggleMic],
+          ['toggleDeafen', toggleDeafen],
+          ['toggleCamera', toggleCamera],
+          ['toggleScreenShare', toggleScreenShare],
+        ] as const
+      ).find(([name]) => event.code === binds[name].code);
+      if (!action) return;
       event.preventDefault();
-      void setPushToTalkMic(true);
+      void action[1]();
     };
     const onKeyUp = (event: KeyboardEvent) => {
       if (event.code !== keybindPrefsRef.current.pushToTalk.code || isEditableTarget(event.target)) return;
@@ -701,7 +922,7 @@ export function LobbyVoiceProvider({
       window.removeEventListener('keyup', onKeyUp);
       if (held) void setPushToTalkMic(false);
     };
-  }, [activeChannelId, collectParticipants, connectionState]);
+  }, [activeChannelId, collectParticipants, connectionState, toggleCamera, toggleDeafen, toggleMic, toggleScreenShare]);
 
   /**
    * Look up a remote participant's camera track. Used by the video tile
@@ -713,14 +934,14 @@ export function LobbyVoiceProvider({
     if (!r) return null;
     if (identity === r.localParticipant.identity) {
       for (const pub of r.localParticipant.videoTrackPublications.values()) {
-        if (pub.track && pub.source === 'camera') return pub.track.mediaStreamTrack;
+        if (pub.track && pub.source === Track.Source.Camera) return pub.track.mediaStreamTrack;
       }
       return null;
     }
     const p = r.remoteParticipants.get(identity);
     if (!p) return null;
     for (const pub of p.videoTrackPublications.values()) {
-      if (pub.track && pub.source === 'camera') return pub.track.mediaStreamTrack;
+      if (pub.track && pub.source === Track.Source.Camera) return pub.track.mediaStreamTrack;
     }
     return null;
   }, []);
@@ -734,17 +955,73 @@ export function LobbyVoiceProvider({
     if (!r) return null;
     if (identity === r.localParticipant.identity) {
       for (const pub of r.localParticipant.videoTrackPublications.values()) {
-        if (pub.track && pub.source === 'screen_share') return pub.track.mediaStreamTrack;
+        if (pub.track && pub.source === Track.Source.ScreenShare) return pub.track.mediaStreamTrack;
       }
       return null;
     }
     const p = r.remoteParticipants.get(identity);
     if (!p) return null;
     for (const pub of p.videoTrackPublications.values()) {
-      if (pub.track && pub.source === 'screen_share') return pub.track.mediaStreamTrack;
+      if (pub.track && pub.source === Track.Source.ScreenShare) return pub.track.mediaStreamTrack;
     }
     return null;
   }, []);
+
+  const isScreenShareJoined = useCallback((identity: string): boolean => {
+    return joinedScreenShares.has(identity);
+  }, [joinedScreenShares]);
+
+  const joinScreenShare = useCallback(async (identity: string) => {
+    const room = roomRef.current;
+    if (!room) return;
+    if (identity === room.localParticipant.identity) {
+      setJoinedScreenShares((current) => new Set(current).add(identity));
+      collectParticipants(room);
+      return;
+    }
+    const participant = room.remoteParticipants.get(identity);
+    if (!participant) return;
+    for (const publication of participant.trackPublications.values()) {
+      if (
+        publication.source === Track.Source.ScreenShare ||
+        publication.source === Track.Source.ScreenShareAudio
+      ) {
+        publication.setSubscribed(true);
+      }
+    }
+    setJoinedScreenShares((current) => new Set(current).add(identity));
+    collectParticipants(roomRef.current!);
+  }, [collectParticipants]);
+
+  const leaveScreenShare = useCallback(async (identity: string) => {
+    const room = roomRef.current;
+    if (!room) return;
+    if (identity === room.localParticipant.identity) {
+      setJoinedScreenShares((current) => {
+        const next = new Set(current);
+        next.delete(identity);
+        return next;
+      });
+      collectParticipants(room);
+      return;
+    }
+    const participant = room.remoteParticipants.get(identity);
+    if (!participant) return;
+    for (const publication of participant.trackPublications.values()) {
+      if (
+        publication.source === Track.Source.ScreenShare ||
+        publication.source === Track.Source.ScreenShareAudio
+      ) {
+        publication.setSubscribed(false);
+      }
+    }
+    setJoinedScreenShares((current) => {
+      const next = new Set(current);
+      next.delete(identity);
+      return next;
+    });
+    collectParticipants(roomRef.current!);
+  }, [collectParticipants]);
 
   /**
    * Per-user volume control (Discord-style). Each remote participant's
@@ -808,12 +1085,6 @@ export function LobbyVoiceProvider({
     applyRemoteAudio(r, !deafenEnabled);
   }, [deafenEnabled, applyRemoteAudio]);
 
-  useEffect(() => {
-    if (activeChannelId && participants.some((participant) => participant.hasScreenShare)) {
-      setMainViewMode('voice');
-    }
-  }, [activeChannelId, participants]);
-
   const value = useMemo<LobbyVoiceContextValue>(
     () => ({
       serverId,
@@ -825,6 +1096,8 @@ export function LobbyVoiceProvider({
       micEnabled,
       cameraEnabled,
       screenShareEnabled,
+      screenSharePolicy,
+      screenSharePreference,
       deafenEnabled,
       participants,
       mainViewMode,
@@ -835,11 +1108,15 @@ export function LobbyVoiceProvider({
       toggleMic,
       toggleCamera,
       toggleScreenShare,
+      setScreenSharePreference,
       toggleDeafen,
       setMainViewMode,
       setActiveTextChannel,
       getParticipantCameraTrack,
       getParticipantScreenShareTrack,
+      isScreenShareJoined,
+      joinScreenShare,
+      leaveScreenShare,
       setRemoteVolume,
       getRemoteVolume,
     }),
@@ -853,6 +1130,8 @@ export function LobbyVoiceProvider({
       micEnabled,
       cameraEnabled,
       screenShareEnabled,
+      screenSharePolicy,
+      screenSharePreference,
       deafenEnabled,
       participants,
       mainViewMode,
@@ -863,11 +1142,15 @@ export function LobbyVoiceProvider({
       toggleMic,
       toggleCamera,
       toggleScreenShare,
+      setScreenSharePreference,
       toggleDeafen,
       setMainViewMode,
       setActiveTextChannel,
       getParticipantCameraTrack,
       getParticipantScreenShareTrack,
+      isScreenShareJoined,
+      joinScreenShare,
+      leaveScreenShare,
       setRemoteVolume,
       getRemoteVolume,
     ]
@@ -891,6 +1174,3 @@ export function useLobbyVoice(): LobbyVoiceContextValue {
 
 export { ConnectionState };
 export type { Participant };
-
-
-
