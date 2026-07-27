@@ -691,6 +691,15 @@ function ServerRail({
         ) : null}
       </div>
       <div className="mt-auto space-y-2 flex flex-col items-center">
+        {isOfficial ? (
+          <Link
+            href="/discover"
+            className="w-12 h-12 rounded-full flex items-center justify-center text-text-secondary hover:bg-surface-container hover:text-text-primary transition-all duration-300"
+            title="Discover communities"
+          >
+            <span className="material-symbols-outlined">explore</span>
+          </Link>
+        ) : null}
         <Link
           href="/settings"
           className="w-12 h-12 rounded-full flex items-center justify-center text-text-secondary hover:bg-surface-container hover:text-text-primary transition-all duration-300"

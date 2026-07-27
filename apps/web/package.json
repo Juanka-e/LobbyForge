@@ -28,6 +28,7 @@
     "@lobbyforge/i18n": "workspace:*",
     "@lobbyforge/plugin-sdk": "workspace:*",
     "@lobbyforge/quiz": "workspace:*",
+    "@lobbyforge/registry": "workspace:*",
     "@lobbyforge/ui": "workspace:*",
     "@tailwindcss/container-queries": "^0.1.1",
     "@tailwindcss/forms": "^0.5.9",
