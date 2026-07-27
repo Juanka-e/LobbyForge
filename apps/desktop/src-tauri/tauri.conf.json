@@ -1,0 +1,50 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "LobbyForge",
+  "version": "0.1.0",
+  "identifier": "dev.lobbyforge.desktop",
+  "build": {
+    "frontendDist": "../dist-shell",
+    "devUrl": null
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "LobbyForge",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true,
+        "url": "index.html"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' tauri: https://ipc.localhost; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://* wss://* ws://*; media-src 'self' blob: https:; frame-src 'none'; object-src 'none'"
+    },
+    "trayIcon": {
+      "id": "main",
+      "iconPath": "icons/icon.png",
+      "iconAsTemplate": false,
+      "tooltip": "LobbyForge"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "publisher": "LobbyForge",
+    "category": "SocialNetworking",
+    "shortDescription": "Self-hostable voice-first community platform",
+    "longDescription": "LobbyForge desktop shell — connect to your self-hosted LobbyForge instance for voice-first community with live activities."
+  }
+}

@@ -12,17 +12,20 @@
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build:ts": "tsc",
+    "build": "tsc && tauri build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint \"src/**/*.ts\"",
-    "dev": "echo desktop dev: Electron not yet wired in scaffold stage"
+    "dev": "tauri dev",
+    "tauri": "tauri"
   },
   "dependencies": {
     "@lobbyforge/core": "workspace:*"
   },
   "devDependencies": {
     "@lobbyforge/config": "workspace:*",
+    "@tauri-apps/cli": "^2.11.4",
     "typescript": "^5.4.5",
     "vitest": "^1.6.0"
   }
