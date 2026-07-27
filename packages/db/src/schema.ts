@@ -610,3 +610,39 @@ export const dmMessages = pgTable('dm_messages', {
   channelCreatedIdx: index('idx_dm_messages_channel_created').on(table.dmChannelId, table.createdAt),
   replyIdx: index('idx_dm_messages_reply').on(table.replyToId).where(sql`reply_to_id IS NOT NULL`),
 }));
+
+// ── Plugin Catalog (marketplace) ────────────────────────────────────────
+// Community-submitted plugins awaiting review or approved for the
+// marketplace. Mirrors PluginCatalogMetadata from the SDK + adds review
+// workflow fields. Approved entries are surfaced via listPluginSummaries().
+
+export const pluginCatalog = pgTable('plugin_catalog', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  pluginId: text('plugin_id').notNull(),
+  name: text('name').notNull(),
+  version: text('version').notNull(),
+  type: text('type').notNull(), // game | activity | utility
+  summary: text('summary'),
+  description: text('description'),
+  publisher: text('publisher').notNull(),
+  publisherUserId: uuid('publisher_user_id').references(() => users.id, { onDelete: 'set null' }),
+  trustLevel: text('trust_level').default('unverified').notNull(), // official | verified-community | unverified
+  category: text('category'), // game | bot | integration | utility
+  tags: jsonb('tags').default([]).notNull(),
+  permissions: jsonb('permissions').default([]).notNull(),
+  playerConfig: jsonb('player_config'),
+  manifestUrl: text('manifest_url'),
+  iconUrl: text('icon_url'),
+  reviewStatus: text('review_status').default('pending').notNull(), // pending | approved | rejected | delisted
+  reviewerUserId: uuid('reviewer_user_id').references(() => users.id, { onDelete: 'set null' }),
+  reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+  reviewNote: text('review_note'),
+  requiresVoiceRoom: boolean('requires_voice_room').default(false).notNull(),
+  downloadCount: integer('download_count').default(0).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  uniquePluginId: unique('plugin_catalog_plugin_id_unique').on(table.pluginId),
+  statusIdx: index('idx_plugin_catalog_status').on(table.reviewStatus, table.trustLevel),
+  categoryIdx: index('idx_plugin_catalog_category').on(table.category),
+}));

@@ -21,6 +21,7 @@ export { updateUserKeybinds } from './queries/userSettings.js';
 export * from './queries/userBlocks.js';
 export * from './queries/dmChannels.js';
 export * from './queries/registryInstances.js';
+export * from './queries/pluginCatalog.js';
 export * from './queries/instanceSettings.js';
 export * from './queries/systemUpdates.js';
 export * from './queries/cardPacks.js';
