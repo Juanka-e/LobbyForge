@@ -9,6 +9,7 @@ import {
 import { requireMaterializedSession } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
 import { withApiSecurity } from '@/lib/security-headers';
+import { publishDmMessage } from '@/lib/dm-bus';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -92,6 +93,18 @@ async function handlePost(
 
   try {
     const message = await sendDmMessage(db, channelId, uid, body.content, body.replyToId ?? null);
+    // Fire-and-forget realtime publish (WS-gateway picks this up when the
+    // `dm` topic kind is wired; polling fallback works today).
+    publishDmMessage({
+      channelId,
+      message: {
+        id: message.id,
+        dmChannelId: channelId,
+        authorId: message.authorId,
+        content: message.content,
+        createdAt: message.createdAt.toISOString(),
+      },
+    });
     return NextResponse.json(
       {
         message: {
