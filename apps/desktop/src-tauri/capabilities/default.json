@@ -10,7 +10,6 @@
     "core:window:allow-set-title",
     "core:webview:allow-create-webview-window",
     "core:app:allow-version",
-    "single-instance:default",
     "store:default",
     "global-shortcut:allow-register",
     "global-shortcut:allow-unregister",

@@ -10,8 +10,9 @@ use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    Manager, WebviewWindow,
+    Emitter, Manager, WebviewWindow,
 };
+use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri_plugin_store::StoreExt;
 
 const STORE_FILE: &str = "settings.json";
