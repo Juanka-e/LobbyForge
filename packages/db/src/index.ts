@@ -1,6 +1,7 @@
 export * from './schema.js';
 export * from './client.js';
 export * from './queries/users.js';
+export * from './queries/userIdentityLinks.js';
 export * from './queries/servers.js';
 export * from './queries/memberships.js';
 export * from './queries/channels.js';
@@ -18,12 +19,13 @@ export * from './queries/userSettings.js';
 export { updateMemberNickname } from './queries/memberships.js';
 export { updateUserKeybinds } from './queries/userSettings.js';
 export * from './queries/userBlocks.js';
+export * from './queries/dmChannels.js';
 export * from './queries/instanceSettings.js';
 export * from './queries/systemUpdates.js';
 export * from './queries/cardPacks.js';
 export * from './queries/serverLocalCards.js';
 export * from './queries/componentMigrations.js';
-export * from './queries/userBlocks.js';
+export * from './queries/dmChannels.js';
 export { sql, eq, and, or, desc, asc } from 'drizzle-orm';
 
 export interface DatabaseConfig {

@@ -127,6 +127,34 @@
       "when": 1782408000000,
       "tag": "0017_registration_default_invite_only",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1784152312430,
+      "tag": "0018_user_identity_links",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1784666794303,
+      "tag": "0019_windy_gauntlet",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1784693907859,
+      "tag": "0020_nasty_luminals",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1784780800000,
+      "tag": "0021_direct_messages",
+      "breakpoints": true
     }
   ]
 }

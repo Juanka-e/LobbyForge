@@ -168,9 +168,17 @@ describe('collectSystemStats disk resolution', () => {
 
 describe('probeRedis (via collectDoctorReport integration)', () => {
   // probeRedis is not exported directly; we exercise it through the Redis
-  // check by mocking the shared ioredis singleton it imports.
+  // check by mocking the shared ioredis singleton it imports. We also
+  // mock postgres + fetch so the parallel probes return instantly
+  // instead of timing out against a real DB / HTTP server.
   beforeEach(() => {
     vi.resetModules();
+    vi.doMock('postgres', () => {
+      const sql = vi.fn(async () => [{ ok: 1 }]);
+      (sql as unknown as { end: () => Promise<void> }).end = async () => {};
+      return { default: vi.fn(() => sql) };
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status: 200 }));
   });
 
   it('reports redis reachable when ping returns PONG', async () => {
@@ -181,7 +189,7 @@ describe('probeRedis (via collectDoctorReport integration)', () => {
     const { report } = await collectDoctorReport();
     const redis = report.checks.find((c) => c.id === 'redis');
     expect(redis?.ok).toBe(true);
-  });
+  }, 15000);
 
   it('reports redis unreachable when ping throws', async () => {
     vi.doMock('@/lib/redis', () => ({
@@ -192,5 +200,5 @@ describe('probeRedis (via collectDoctorReport integration)', () => {
     const redis = report.checks.find((c) => c.id === 'redis');
     expect(redis?.ok).toBe(false);
     expect(redis?.level).toBe(AlertLevel.CRITICAL);
-  });
+  }, 15000);
 });

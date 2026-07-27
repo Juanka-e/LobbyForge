@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, integer, boolean, jsonb, varchar, customType, index, bigint, unique, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, integer, boolean, jsonb, varchar, customType, index, bigint, unique, uniqueIndex, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
 // Custom INET type wrapper
@@ -23,12 +23,38 @@ export const users = pgTable('users', {
   // user row from the lf_guest cookie.
   guestKey: text('guest_key').unique(),
   statusText: varchar('status_text', { length: 128 }),
+  bio: varchar('bio', { length: 190 }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 }, (table) => ({
   deletedIdx: index('idx_users_deleted').on(table.deletedAt).where(sql`deleted_at IS NOT NULL`),
   guestKeyIdx: index('idx_users_guest_key').on(table.guestKey).where(sql`guest_key IS NOT NULL`),
+}));
+
+// External identities are references to an upstream account, never upstream
+// access/refresh tokens. Local roles, bans, messages, and ownership continue
+// to reference users.id inside this instance.
+export const userIdentityLinks = pgTable('user_identity_links', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  provider: varchar('provider', { length: 64 }).notNull(),
+  providerSubject: varchar('provider_subject', { length: 255 }).notNull(),
+  providerEmail: varchar('provider_email', { length: 254 }),
+  emailVerified: boolean('email_verified').default(false).notNull(),
+  claims: jsonb('claims').default({}).notNull(),
+  linkedAt: timestamp('linked_at', { withTimezone: true }).defaultNow().notNull(),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  uniqueProviderSubject: unique('user_identity_links_provider_subject_unique').on(
+    table.provider,
+    table.providerSubject
+  ),
+  uniqueUserProvider: unique('user_identity_links_user_provider_unique').on(
+    table.userId,
+    table.provider
+  ),
+  userIdx: index('idx_user_identity_links_user').on(table.userId),
 }));
 
 // SERVERS TABLE
@@ -81,6 +107,8 @@ export const serverVoiceSettings = pgTable('server_voice_settings', {
   allowScreenShare: boolean('allow_screen_share').default(true).notNull(),
   maxCameraUsersPerRoom: integer('max_camera_users_per_room'),
   maxScreenShareUsersPerRoom: integer('max_screen_share_users_per_room'),
+  maxScreenShareHeight: integer('max_screen_share_height').default(1080).notNull(),
+  maxScreenShareFps: integer('max_screen_share_fps').default(30).notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
   uniqueServerVoiceSettings: unique('server_voice_settings_server_id_unique').on(table.serverId),
@@ -92,6 +120,8 @@ export const roles = pgTable('roles', {
   serverId: uuid('server_id').notNull().references(() => servers.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
   color: text('color'),
+  icon: varchar('icon', { length: 32 }),
+  displaySeparately: boolean('display_separately').default(false).notNull(),
   position: integer('position').default(0).notNull(),
   permissions: jsonb('permissions').default({}).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -541,4 +571,42 @@ export const userBlocks = pgTable('user_blocks', {
     table.blockedUserId
   ),
   blockerIdx: index('idx_user_blocks_blocker').on(table.blockerUserId),
+}));
+
+// ── Direct Messages (instance-local, server-independent) ────────────────
+// A DM channel is a 1:1 conversation between two users on the same instance.
+// It does NOT belong to any server — it lives at the instance level so a user
+// can DM anyone they share the instance with, regardless of server membership.
+
+export const dmChannels = pgTable('dm_channels', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userAId: uuid('user_a_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  userBId: uuid('user_b_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  // Who created the channel (for audit / first-message attribution).
+  createdBy: uuid('created_by').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  // Last message timestamp — drives the sidebar ordering without a join.
+  lastMessageAt: timestamp('last_message_at', { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  // A DM channel between two users is unique regardless of order.
+  // Enforced via a CHECK that userAId < userBId + a unique index.
+  uniquePair: uniqueIndex('dm_channels_pair_unique')
+    .on(table.userAId, table.userBId),
+  userAIdx: index('idx_dm_channels_user_a').on(table.userAId),
+  userBIdx: index('idx_dm_channels_user_b').on(table.userBId),
+}));
+
+export const dmMessages = pgTable('dm_messages', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  dmChannelId: uuid('dm_channel_id').notNull().references(() => dmChannels.id, { onDelete: 'cascade' }),
+  authorId: uuid('author_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  content: text('content').notNull(),
+  // Optional reply reference within the same DM channel.
+  replyToId: uuid('reply_to_id').references((): AnyPgColumn => dmMessages.id, { onDelete: 'set null' }),
+  // Soft-delete: the author can delete their own message.
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  channelCreatedIdx: index('idx_dm_messages_channel_created').on(table.dmChannelId, table.createdAt),
+  replyIdx: index('idx_dm_messages_reply').on(table.replyToId).where(sql`reply_to_id IS NOT NULL`),
 }));

@@ -11,6 +11,7 @@ import {
   seedDefaultRoles,
 } from '@lobbyforge/db';
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
 import {
   listChannelsForServer,
   createChannel,
@@ -18,11 +19,13 @@ import {
   listMessagesForChannel,
   getUserById,
   getBlockedUserIds,
+  getUserPermissions,
   type ChannelRow,
   type ChannelType,
   type MemberSummary,
   type MessageRow,
 } from '@lobbyforge/db';
+import { CorePermission, hasPermission } from '@lobbyforge/core';
 import { getUserPresenceInChannel, getUserPresenceInServer, setUserPresence } from '@/lib/redis';
 import { LobbyVoiceProvider } from './LobbyVoiceProvider';
 import { LobbyVoiceChannels } from './LobbyVoiceChannels';
@@ -62,8 +65,13 @@ interface Member {
   grayscale?: boolean;
   roleName?: string | null;
   roleColor?: string | null;
+  roleIcon?: string | null;
+  statusText?: string | null;
+  bio?: string | null;
+  roles?: Array<{ id: string; name: string; color: string | null; icon: string | null; position: number; displaySeparately: boolean }>;
   isGuest?: boolean;
   avatarUrl?: string | null;
+  bannerUrl?: string | null;
 }
 interface ChatMessage {
   id: string;
@@ -74,10 +82,14 @@ interface ChatMessage {
   body: string;
   attachment?: { name: string; size: string };
   blocked?: boolean;
+  pinned?: boolean;
 }
 interface LobbyData {
   serverName: string;
   serverId: string | null;
+  /** All servers the user has joined — drives the ServerRail switcher.
+   * Empty in demo mode. */
+  joinedServers: Array<{ id: string; name: string }>;
   textChannels: Channel[];
   voiceChannels: Channel[];
   activeTextChannel: Channel | null;
@@ -94,6 +106,7 @@ interface LobbyData {
   currentDisplayName: string;
   /** True when this view is backed by live DB/Redis data. */
   isLive: boolean;
+  canManageMessages: boolean;
 }
 
 // ---- Demo fallback (preserves the M19 standalone lobby visual reference) ----
@@ -180,15 +193,21 @@ function buildMembers(
       if (p) {
         status = p.channelId && voiceChannelIds.has(p.channelId) ? 'in-voice' : 'online';
       }
+      const highestRole = s.roles.find((role) => role.name !== '@everyone');
       return {
         id: s.userId,
         name: s.displayName,
         status,
         grayscale: status === 'offline' || undefined,
-        roleName: s.roleName,
-        roleColor: s.roleColor,
+        roleName: highestRole?.name ?? (s.roleName === '@everyone' ? null : s.roleName),
+        roleColor: highestRole?.color ?? s.roleColor,
+        roleIcon: highestRole?.icon ?? s.roleIcon,
+        statusText: s.statusText,
+        bio: s.bio,
+        roles: s.roles,
         isGuest: s.isGuest,
         avatarUrl: s.avatarUrl,
+        bannerUrl: s.bannerUrl,
       } satisfies Member;
     })
     .sort((a, b) => {
@@ -258,6 +277,7 @@ function buildMessages(
       authorColor: m.userId && m.userId === currentUserId ? 'primary' : 'default',
       timestamp: formatTimestamp(m.createdAt),
       body: m.content,
+      pinned: typeof m.metadata.$pinnedAt === 'string',
     } satisfies ChatMessage;
   });
 }
@@ -347,6 +367,9 @@ async function loadLiveData(
   // masked at the server level - the content never reaches the client.
   const blockedIds = currentUserId ? await getBlockedUserIds(db, currentUserId) : new Set<string>();
   const messages = buildMessages(messageRows, authorMap, currentUserId, blockedIds);
+  const canManageMessages = currentUserId
+    ? hasPermission(await getUserPermissions(db, currentUserId, serverId), CorePermission.MANAGE_MESSAGES)
+    : false;
 
   // Resolve the local user's display name so the LiveKit voice provider
   // can send it as the participant `name` AND so the sidebar voice roster
@@ -361,6 +384,7 @@ async function loadLiveData(
   return {
     serverName: '', // filled in by caller
     serverId,
+    joinedServers: [], // filled in by the caller after listing all servers
     textChannels,
     voiceChannels,
     activeTextChannel,
@@ -372,12 +396,17 @@ async function loadLiveData(
     currentUserId,
     currentDisplayName,
     isLive: true,
+    canManageMessages,
   };
 }
 
 // ---- Page entry ----
 
-export default async function LobbyPage() {
+export default async function LobbyPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ server?: string }>;
+}) {
   // Force first-run visitors through the /setup wizard before the
   // lobby tries to read instance / server data. On the official host
   // the central team runs setup out-of-band, so this redirect is
@@ -405,10 +434,11 @@ export default async function LobbyPage() {
     : process.env.LOBBYFORGE_INSTANCE_NAME?.trim() || 'LobbyForge Community';
   let liveData: LobbyData | null = null;
   let liveDataFailed = false;
+  const joinedServerList: Array<{ id: string; name: string }> = [];
   if (hasUser) {
     try {
       const db = getDb();
-      let servers = await listServersForUser(db, userId, { limit: 1 });
+      let servers = await listServersForUser(db, userId, { limit: 50 });
       if (servers.length === 0 && setupStatus?.firstServerId) {
         const access = await getEffectiveInstanceAccessSettings(db);
         const currentUser = await getUserById(db, userId);
@@ -423,13 +453,24 @@ export default async function LobbyPage() {
         if (setupStatus.ownerUserId === userId) {
           await seedDefaultRoles(db, setupStatus.firstServerId, userId);
         }
-        servers = await listServersForUser(db, userId, { limit: 1 });
+        servers = await listServersForUser(db, userId, { limit: 50 });
       }
-      const srv = servers[0];
+      for (const s of servers) {
+        joinedServerList.push({ id: s.id, name: s.name });
+      }
+      // Honor a ?server=<id> selection so the rail can switch communities
+      // without client-side state. Falls back to the first (most recent).
+      const params = await searchParams;
+      const requested = params.server;
+      const srv =
+        (requested && servers.find((s) => s.id === requested)) || servers[0];
       if (srv?.name) serverName = srv.name;
       if (srv?.id) {
         liveData = await loadLiveData(db, srv.id, userId);
-        if (liveData) liveData.serverName = serverName;
+        if (liveData) {
+          liveData.serverName = serverName;
+          liveData.joinedServers = joinedServerList;
+        }
       }
     } catch (error) {
       console.error('[lobby] live data load failed:', (error as Error).name || 'UnknownError');
@@ -444,6 +485,7 @@ export default async function LobbyPage() {
   const data: LobbyData = liveData ?? {
     serverName,
     serverId: null,
+    joinedServers: [],
     textChannels: DEMO_CHANNELS.filter((c) => c.category === 'text'),
     voiceChannels: DEMO_CHANNELS.filter((c) => c.category === 'voice'),
     activeTextChannel: DEMO_CHANNELS.find((c) => c.category === 'text') ?? null,
@@ -457,6 +499,7 @@ export default async function LobbyPage() {
     currentUserId: userId,
     currentDisplayName: 'Guest',
     isLive: false,
+    canManageMessages: false,
   };
 
   return (
@@ -480,10 +523,10 @@ function LobbyUnavailable({ reason }: { reason: 'data_unavailable' | 'server_mis
             ? 'LobbyForge could not load the community data. No demo members or messages were substituted.'
             : 'This account has no accessible community. An authenticated administrator must repair the server assignment.'}
         </p>
-        <a href="/admin/health" className="mt-5 inline-flex items-center gap-2 rounded-md border border-border-strong px-4 py-2 text-sm text-text-secondary hover:bg-surface-container">
+        <Link href="/admin/health" className="mt-5 inline-flex items-center gap-2 rounded-md border border-border-strong px-4 py-2 text-sm text-text-secondary hover:bg-surface-container">
           <span className="material-symbols-outlined text-lg" aria-hidden>health_and_safety</span>
           Open system health
-        </a>
+        </Link>
       </section>
     </div>
   );
@@ -508,7 +551,12 @@ function LobbyShell({
 
   const shell = (
     <>
-      <ServerRail serverName={serverName} isOfficial={isOfficial} />
+      <ServerRail
+        serverName={serverName}
+        isOfficial={isOfficial}
+        activeServerId={data.serverId}
+        joinedServers={data.joinedServers}
+      />
       <Sidebar
         serverName={serverName}
         isOfficial={isOfficial}
@@ -553,14 +601,23 @@ function LobbyShell({
 }
 
 /**
- * Server rail - the 72px left navigation bar from Stitch's
- * `animated_desktop_shell`. Shows the LobbyForge home button, the
- * active community, an "add community" affordance, and a settings
- * shortcut at the bottom. For now the rail only navigates to `/lobby`
- * (the active community) - multi-server switching lands with the
- * `/servers/[id]` page in M21.5.
+ * Server rail - the 72px left navigation bar. Lists every community the
+ * user has joined so they can switch between them via `?server=<id>`.
+ * The active community is highlighted; the rest are muted tiles. An
+ * "add community" affordance is shown only on the official deployment
+ * (self-host is single-server by design).
  */
-function ServerRail({ serverName, isOfficial }: { serverName: string; isOfficial: boolean }) {
+function ServerRail({
+  serverName,
+  isOfficial,
+  activeServerId,
+  joinedServers,
+}: {
+  serverName: string;
+  isOfficial: boolean;
+  activeServerId: string | null;
+  joinedServers: Array<{ id: string; name: string }>;
+}) {
   return (
     <nav className="w-[72px] h-full bg-background border-r border-border-subtle flex flex-col items-center py-3 flex-shrink-0 z-50 animate-fade-in-right">
       <div className="mb-4">
@@ -573,21 +630,51 @@ function ServerRail({ serverName, isOfficial }: { serverName: string; isOfficial
         </a>
       </div>
       <div className="w-8 h-[2px] bg-border-subtle mb-4" />
-      <div className="flex-1 space-y-2 w-full flex flex-col items-center">
-        <div className="relative group">
-          <div className="absolute -left-1 top-1 w-1 h-10 bg-text-primary rounded-r-full" />
-          <button
-            className="w-12 h-12 rounded-xl flex items-center justify-center bg-primary text-on-primary hover:scale-105 transition-all duration-300"
-            title={serverName}
-          >
-            <span className="text-sm font-bold">
-              {serverName.charAt(0).toUpperCase()}
-            </span>
-          </button>
-          <div className="absolute left-16 top-1/2 -translate-y-1/2 px-2 py-1 bg-surface-container-high text-xs rounded opacity-0 rail-tooltip whitespace-nowrap z-[60] border border-border-subtle">
-            {serverName}
+      <div className="flex-1 space-y-2 w-full flex flex-col items-center overflow-y-auto">
+        {joinedServers.length > 0 ? (
+          joinedServers.map((s) => {
+            const active = s.id === activeServerId;
+            return (
+              <div key={s.id} className="relative group">
+                {active ? (
+                  <div className="absolute -left-1 top-1 w-1 h-10 bg-text-primary rounded-r-full" />
+                ) : null}
+                <a
+                  href={`/lobby?server=${encodeURIComponent(s.id)}`}
+                  className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all duration-300 ${
+                    active
+                      ? 'bg-primary text-on-primary hover:scale-105'
+                      : 'bg-surface-container text-text-secondary hover:bg-surface-container-high hover:text-text-primary hover:rounded-2xl'
+                  }`}
+                  title={s.name}
+                >
+                  <span className="text-sm font-bold">
+                    {s.name.charAt(0).toUpperCase()}
+                  </span>
+                </a>
+                <div className="absolute left-16 top-1/2 -translate-y-1/2 px-2 py-1 bg-surface-container-high text-xs rounded opacity-0 rail-tooltip whitespace-nowrap z-[60] border border-border-subtle">
+                  {s.name}
+                </div>
+              </div>
+            );
+          })
+        ) : (
+          // Demo / no-server fallback: show the active server name only.
+          <div className="relative group">
+            <div className="absolute -left-1 top-1 w-1 h-10 bg-text-primary rounded-r-full" />
+            <button
+              className="w-12 h-12 rounded-xl flex items-center justify-center bg-primary text-on-primary hover:scale-105 transition-all duration-300"
+              title={serverName}
+            >
+              <span className="text-sm font-bold">
+                {serverName.charAt(0).toUpperCase()}
+              </span>
+            </button>
+            <div className="absolute left-16 top-1/2 -translate-y-1/2 px-2 py-1 bg-surface-container-high text-xs rounded opacity-0 rail-tooltip whitespace-nowrap z-[60] border border-border-subtle">
+              {serverName}
+            </div>
           </div>
-        </div>
+        )}
         {isOfficial ? (
           <div className="relative group">
             <a
@@ -604,13 +691,13 @@ function ServerRail({ serverName, isOfficial }: { serverName: string; isOfficial
         ) : null}
       </div>
       <div className="mt-auto space-y-2 flex flex-col items-center">
-        <a
+        <Link
           href="/settings"
           className="w-12 h-12 rounded-full flex items-center justify-center text-text-secondary hover:bg-surface-container hover:text-text-primary transition-all duration-300"
           title="User settings"
         >
           <span className="material-symbols-outlined">settings</span>
-        </a>
+        </Link>
       </div>
     </nav>
   );
@@ -652,27 +739,27 @@ function Sidebar({
         </button>
         {data.isLive && data.serverId ? (
           <div className="pointer-events-none absolute left-3 right-3 top-[58px] z-50 rounded-lg border border-border-subtle bg-surface-floating p-2 opacity-0 shadow-xl transition-all group-hover/server-menu:pointer-events-auto group-hover/server-menu:opacity-100 group-focus-within/server-menu:pointer-events-auto group-focus-within/server-menu:opacity-100">
-            <a
+            <Link
               href="/admin/settings"
               className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary"
             >
               <span className="material-symbols-outlined text-[18px]">admin_panel_settings</span>
               Admin panel
-            </a>
-            <a
+            </Link>
+            <Link
               href="/admin/settings/channels"
               className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary"
             >
               <span className="material-symbols-outlined text-[18px]">forum</span>
               Channels
-            </a>
-            <a
+            </Link>
+            <Link
               href="/admin/settings/invites"
               className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary"
             >
               <span className="material-symbols-outlined text-[18px]">link</span>
               Invites
-            </a>
+            </Link>
           </div>
         ) : null}
         {isOfficial ? (
