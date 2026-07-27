@@ -28,6 +28,7 @@ LobbyForge is the open niche: **voice-first + plugin SDK + self-hostable**.
 - **Self-host updates** — Ed25519-signed manifests, one-command upgrade, verified backups.
 - **Privacy-first defaults** — SEO off, invite-only registration, no telemetry, strict security headers (CSP, HSTS, Fetch-Metadata CSRF).
 - **i18n** — English + Turkish; community translations welcome.
+- **Native desktop client** — [Tauri 2](https://v2.tauri.app) shell for Windows/macOS/Linux. One official installer connects to any self-hosted instance. See [docs/DESKTOP.md](docs/DESKTOP.md).
 - **Calm Future design system** — quiet, premium, trust-evoking. Dark palette + ice-blue accent + glassmorphism. Not a neon gamer skin.
 
 ## Tech stack
