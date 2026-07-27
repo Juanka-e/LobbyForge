@@ -1,0 +1,32 @@
+{
+  // ── Rust (rust-analyzer) ───────────────────────────────────────────
+  // Point rust-analyzer at the Tauri crate so it indexes the shell.
+  "rust-analyzer.linkedProjects": [
+    "${workspaceFolder}/apps/desktop/src-tauri/Cargo.toml"
+  ],
+  // The MSVC toolchain needs the VS dev environment to find link.exe + SDK
+  // libs. rust-analyzer usually resolves this via the rustup toolchain; if
+  // you see "kernel32.lib not found", run the "help: check Tauri toolchain"
+  // task and install the Windows 10/11 SDK component via VS Installer.
+  "rust-analyzer.cargo.target": null,
+  "rust-analyzer.check.invocationLocation": "workspace",
+  "rust-analyzer.check.invocationStrategy": "perWorkspace",
+
+  // ── TypeScript ─────────────────────────────────────────────────────
+  "typescript.tsdk": "apps/web/node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+
+  // ── Editor ─────────────────────────────────────────────────────────
+  "files.associations": {
+    "*.json": "jsonc",
+    "tauri.conf.json": "jsonc",
+    "Cargo.toml": "toml"
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/.next": true,
+    "**/dist": true,
+    "**/target": true,
+    "**/pnpm-lock.yaml": true
+  }
+}

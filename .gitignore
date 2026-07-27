@@ -28,7 +28,11 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 .idea/
-.vscode/
+# .vscode is shared: tasks/launch/settings are useful for the whole team.
+# Only per-user overrides (settings.local.json, *.code-workspace personal bits)
+# stay ignored.
+.vscode/settings.local.json
+.vscode/launch.local.json
 
 # Turbo / tooling caches
 .turbo/

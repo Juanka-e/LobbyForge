@@ -1,0 +1,114 @@
+{
+  // See https://go.microsoft.com/fwlink/?LinkId=733558
+  // for the documentation about the tasks.json format
+  "version": "2.0.0",
+  "tasks": [
+    // ── Tauri desktop shell ──────────────────────────────────────────
+    {
+      "label": "desktop: dev (Tauri)",
+      "detail": "pnpm --filter @lobbyforge/desktop dev  →  tauri dev",
+      "type": "shell",
+      "command": "pnpm --filter @lobbyforge/desktop dev",
+      "group": { "kind": "build", "isDefault": true },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": ["$rustc", "$tsc"],
+      "isBackground": true,
+      "options": { "cwd": "${workspaceFolder}/apps/desktop" }
+    },
+    {
+      "label": "desktop: build (Tauri installer)",
+      "detail": "tsc + tauri build  →  MSI/NSIS installer in src-tauri/target/release/bundle",
+      "type": "shell",
+      "command": "pnpm --filter @lobbyforge/desktop build",
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": ["$rustc", "$tsc"],
+      "options": { "cwd": "${workspaceFolder}/apps/desktop" }
+    },
+    {
+      "label": "desktop: cargo check (no linking)",
+      "detail": "Type-check the Rust shell without producing a binary — fastest feedback loop",
+      "type": "shell",
+      "command": "cargo check",
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true, "showReuseMessage": false },
+      "problemMatcher": ["$rustc"],
+      "options": { "cwd": "${workspaceFolder}/apps/desktop/src-tauri" }
+    },
+    {
+      "label": "desktop: cargo clippy",
+      "detail": "Lint the Rust shell (catches idioms + bugs beyond the compiler)",
+      "type": "shell",
+      "command": "cargo clippy -- -D warnings",
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true, "showReuseMessage": false },
+      "problemMatcher": ["$rustc"],
+      "options": { "cwd": "${workspaceFolder}/apps/desktop/src-tauri" }
+    },
+    {
+      "label": "desktop: test (TS contracts)",
+      "type": "shell",
+      "command": "pnpm --filter @lobbyforge/desktop test",
+      "group": "test",
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true, "showReuseMessage": false },
+      "problemMatcher": []
+    },
+
+    // ── Web app ──────────────────────────────────────────────────────
+    {
+      "label": "web: dev (Next.js)",
+      "detail": "pnpm --filter @lobbyforge/web dev  →  http://localhost:3000",
+      "type": "shell",
+      "command": "pnpm --filter @lobbyforge/web dev",
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "web: build (Next.js)",
+      "type": "shell",
+      "command": "pnpm --filter @lobbyforge/web build",
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true, "showReuseMessage": false },
+      "problemMatcher": []
+    },
+    {
+      "label": "web: test (Vitest)",
+      "type": "shell",
+      "command": "pnpm --filter @lobbyforge/web test",
+      "group": { "kind": "test", "isDefault": true },
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true, "showReuseMessage": false },
+      "problemMatcher": []
+    },
+
+    // ── Monorepo-wide ────────────────────────────────────────────────
+    {
+      "label": "verify all (typecheck + lint + test)",
+      "detail": "node scripts/verify.js  →  the canonical CI gate",
+      "type": "shell",
+      "command": "node scripts/verify.js",
+      "group": "test",
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true, "showReuseMessage": false },
+      "problemMatcher": []
+    },
+    {
+      "label": "typecheck all workspaces",
+      "type": "shell",
+      "command": "pnpm -r --if-present typecheck",
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true, "showReuseMessage": false },
+      "problemMatcher": []
+    },
+
+    // ── Toolchain help (Windows / MSVC setup) ────────────────────────
+    {
+      "label": "help: check Tauri toolchain",
+      "detail": "Run `tauri info` to diagnose Rust / MSVC / WebView2 / SDK status",
+      "type": "shell",
+      "command": "pnpm --filter @lobbyforge/desktop tauri info",
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "problemMatcher": []
+    }
+  ]
+}

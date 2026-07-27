@@ -1,0 +1,44 @@
+{
+  // See https://go.microsoft.com/fwlink/?LinkId=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Tauri dev (desktop)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      // cargo builds the debug binary here; the exact filename follows the
+      // Cargo package name (lobbyforge-desktop).
+      "program": "${workspaceFolder}/apps/desktop/src-tauri/target/debug/lobbyforge-desktop.exe",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}/apps/desktop/src-tauri",
+      "environment": [],
+      "console": "integratedTerminal",
+      // Pre-launch task: build the shell in debug before attaching the
+      // debugger. Use the "desktop: dev" task for a non-attached run.
+      "preLaunchTask": "desktop: dev (Tauri)",
+      "internalConsoleOptions": "openOnSessionStart"
+    },
+    {
+      // Attach to an already-running Tauri dev session (launch it from the
+      // terminal with `pnpm --filter @lobbyforge/desktop dev`, then F5 here).
+      "name": "Attach to running Tauri (desktop)",
+      "type": "cppvsdbg",
+      "request": "attach",
+      "processId": "${command:pickProcess}"
+    },
+    {
+      // Launch the Next.js dev server under the JS debugger (breakpoints in
+      // server-side code). Run `pnpm --filter @lobbyforge/web dev` for a plain
+      // run without the debugger.
+      "name": "Web dev + debug (Next.js)",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@lobbyforge/web", "dev"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    }
+  ]
+}
