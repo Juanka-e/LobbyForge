@@ -144,14 +144,20 @@ export function callCreateInitialState(
   plugin: RegisteredGamePlugin,
   ctx: GamePluginContext
 ): unknown {
-  return plugin.createInitialState(ctx);
+  try {
+    return plugin.createInitialState(ctx);
+  } catch (err) {
+    console.error(`[plugin-context] createInitialState threw for "${plugin.manifest.id}":`, (err as Error).message);
+    throw new Error(`Plugin "${plugin.manifest.id}" failed to initialize.`);
+  }
 }
 
 /**
  * Dispatch an action through the plugin. We trust the plugin's
  * handleAction to be a pure function of (state, action, ctx) — the
- * host does not enforce that, but every registered plugin in M16
- * is a redux-style reducer.
+ * host does not enforce that, but every registered plugin is a
+ * redux-style reducer. For dynamically-loaded plugins (marketplace),
+ * a try/catch prevents a buggy reducer from crashing the API route.
  */
 export function callHandleAction(
   plugin: RegisteredGamePlugin,
@@ -159,5 +165,10 @@ export function callHandleAction(
   state: unknown,
   action: unknown
 ): unknown {
-  return plugin.handleAction(ctx, state, action);
+  try {
+    return plugin.handleAction(ctx, state, action);
+  } catch (err) {
+    console.error(`[plugin-context] handleAction threw for "${plugin.manifest.id}":`, (err as Error).message);
+    throw new Error(`Plugin "${plugin.manifest.id}" failed to handle action.`);
+  }
 }
