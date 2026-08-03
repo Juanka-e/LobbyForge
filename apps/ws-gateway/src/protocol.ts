@@ -21,7 +21,8 @@ import { z } from 'zod';
 export type Topic =
   | `activity-state:${string}:${string}`
   | `chat:${string}:${string}`
-  | `presence:${string}`;
+  | `presence:${string}`
+  | `dm:${string}`;
 
 export const SubscribeMessageSchema = z.object({
   type: z.literal('subscribe'),
@@ -90,7 +91,7 @@ export type ServerMessage =
  * are 3-part (`kind:{serverId}:{resourceId}`). The parser handles both.
  */
 export function parseTopic(topic: string): {
-  kind: 'activity-state' | 'chat' | 'presence';
+  kind: 'activity-state' | 'chat' | 'presence' | 'dm';
   serverId: string;
   resourceId: string;
 } | null {
@@ -101,6 +102,12 @@ export function parseTopic(topic: string): {
   if (kind === 'presence') {
     if (parts.length !== 2 || !parts[1]) return null;
     return { kind: 'presence', serverId: parts[1], resourceId: parts[1] };
+  }
+
+  // dm:{channelId} — 2 parts (DM channels are instance-local, no serverId)
+  if (kind === 'dm') {
+    if (parts.length !== 2 || !parts[1]) return null;
+    return { kind: 'dm', serverId: parts[1], resourceId: parts[1] };
   }
 
   // activity-state / chat — 3 parts
@@ -119,6 +126,9 @@ export function parseTopic(topic: string): {
 export function redisTopicName(envPrefix: string, parsed: NonNullable<ReturnType<typeof parseTopic>>): string {
   if (parsed.kind === 'presence') {
     return `lf:${envPrefix}:presence:${parsed.serverId}`;
+  }
+  if (parsed.kind === 'dm') {
+    return `lf:${envPrefix}:dm:${parsed.resourceId}`;
   }
   return `lf:${envPrefix}:${parsed.kind}:${parsed.serverId}:${parsed.resourceId}`;
 }

@@ -75,7 +75,8 @@ export type ServerMessage =
 export type Topic =
   | `activity-state:${string}:${string}`
   | `chat:${string}:${string}`
-  | `presence:${string}`;
+  | `presence:${string}`
+  | `dm:${string}`;
 
 type Handler<T = unknown> = (data: T) => void;
 

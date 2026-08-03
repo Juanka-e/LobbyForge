@@ -1,6 +1,7 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
+import Link from 'next/link';
 import { createContext, useContext, type ReactNode } from 'react';
 import SettingsModalFrame from './SettingsModalFrame';
 
@@ -34,6 +35,7 @@ const COMMUNITY_NAV: NavItem[] = [
   { href: '/admin/settings/storage', label: 'Storage', icon: 'cloud_upload' },
   { href: '/admin/settings/backups', label: 'Backups', icon: 'backup' },
   { href: '/admin/audit', label: 'Audit Log', icon: 'history' },
+  { href: '/admin/moderation', label: 'Moderation', icon: 'moderation' },
   { href: '/admin/health', label: 'Doctor & Health', icon: 'health_and_safety' },
   { href: '/admin/updates', label: 'Updates', icon: 'system_update' },
 ];
@@ -79,7 +81,7 @@ export default function SettingsShell({ scope, children }: { scope: 'community' 
               pathname === item.href ||
               (item.href !== '/settings' && item.href !== '/admin/settings' && pathname.startsWith(`${item.href}/`));
             return (
-              <a
+              <Link
                 key={item.href}
                 href={item.href}
                 className={active
@@ -88,7 +90,7 @@ export default function SettingsShell({ scope, children }: { scope: 'community' 
               >
                 <span className="material-symbols-outlined text-lg" aria-hidden>{item.icon}</span>
                 {item.label}
-              </a>
+              </Link>
             );
           })}
         </nav>

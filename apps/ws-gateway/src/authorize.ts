@@ -9,11 +9,11 @@
  * snapshot fetch — the WS gateway just runs it per subscribe because
  * the client can multiplex across topics.
  */
-import { getServerById, isServerMember } from '@lobbyforge/db';
+import { getServerById, isServerMember, isDmChannelParticipant } from '@lobbyforge/db';
 import { parseTopic } from './protocol.js';
 
 export type AuthorizeResult =
-  | { ok: true; kind: 'activity-state' | 'chat' | 'presence'; serverId: string; resourceId: string }
+  | { ok: true; kind: 'activity-state' | 'chat' | 'presence' | 'dm'; serverId: string; resourceId: string }
   | { ok: false; reason: 'unknown_topic' | 'server_not_found' | 'forbidden' };
 
 export async function authorizeTopicSubscribe(
@@ -23,6 +23,17 @@ export async function authorizeTopicSubscribe(
 ): Promise<AuthorizeResult> {
   const parsed = parseTopic(topic);
   if (!parsed) return { ok: false, reason: 'unknown_topic' };
+
+  // DM topics: check channel participation instead of server membership.
+  if (parsed.kind === 'dm') {
+    const isParticipant = await isDmChannelParticipant(
+      db as Parameters<typeof isDmChannelParticipant>[0],
+      parsed.resourceId,
+      userId
+    );
+    if (!isParticipant) return { ok: false, reason: 'forbidden' };
+    return { ok: true, kind: 'dm', serverId: parsed.serverId, resourceId: parsed.resourceId };
+  }
 
   const server = await getServerById(db as Parameters<typeof getServerById>[0], parsed.serverId);
   if (!server) return { ok: false, reason: 'server_not_found' };

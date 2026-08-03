@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import { getRealtimeClient } from '@/lib/realtime-client';
 
 interface DmMessage {
   id: string;
@@ -31,7 +32,28 @@ export default function DmView({
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages]);
 
-  // Poll for new messages every 5s (fallback until WS-gateway gains a `dm` topic).
+  // Realtime: subscribe to the dm:{channelId} WS topic for instant delivery.
+  // Falls back to polling below if WS is unavailable.
+  useEffect(() => {
+    let unsub: (() => void) | null = null;
+    try {
+      const client = getRealtimeClient();
+      unsub = client.subscribe(`dm:${channelId}`, (raw: unknown) => {
+        const msg = raw as DmMessage;
+        if (msg?.id) {
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === msg.id)) return prev;
+            return [...prev, msg];
+          });
+        }
+      });
+    } catch {
+      // WS unavailable — polling fallback handles delivery.
+    }
+    return () => { unsub?.(); };
+  }, [channelId]);
+
+  // Poll for new messages every 10s (fallback if WS is not connected).
   useEffect(() => {
     const poll = async () => {
       try {
@@ -50,7 +72,7 @@ export default function DmView({
         // Swallow — a single failed poll is fine.
       }
     };
-    const interval = setInterval(poll, 5000);
+    const interval = setInterval(poll, 10000);
     return () => clearInterval(interval);
   }, [channelId]);
 
