@@ -129,9 +129,7 @@ function DirectoryCard({ instance }: { instance: DirectoryCard }) {
   const tags = (instance.tags as string[]).slice(0, 4);
   return (
     <a
-      href={instance.domain}
-      target="_blank"
-      rel="noopener noreferrer"
+      href={`/discover/go?id=${encodeURIComponent(instance.instanceId)}`}
       className="group rounded-2xl border border-border-subtle bg-surface p-5 hover:border-primary/40 hover:bg-surface-raised transition-all"
     >
       <div className="flex items-start gap-3 mb-3">
