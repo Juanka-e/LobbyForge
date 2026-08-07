@@ -33,6 +33,7 @@ import { LobbyVoiceFooter } from './LobbyVoiceFooter';
 import { LobbyTextChannels } from './LobbyTextChannels';
 import { LobbyMainArea } from './LobbyMainArea';
 import { LobbyMembersClient } from './LobbyMembersClient';
+import DmLinkSection from './DmLinkSection';
 import { BlockListProvider } from './BlockListProvider';
 import { isLobbyDemoAllowed } from '@/lib/lobby-mode';
 
@@ -831,6 +832,27 @@ function Sidebar({
           )}
         </div>
       </div>
+
+      {/* Direct Messages + Discover (official host, authenticated only) */}
+      {data.isLive && hasUser && isOfficial ? (
+        <div className="border-t border-border-subtle p-3 space-y-1">
+          <a
+            href="/discover"
+            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors"
+          >
+            <span className="material-symbols-outlined text-[18px]">explore</span>
+            Discover
+          </a>
+          <a
+            href="/marketplace"
+            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors"
+          >
+            <span className="material-symbols-outlined text-[18px]">extension</span>
+            Marketplace
+          </a>
+          <DmLinkSection currentUserId={data.currentUserId} />
+        </div>
+      ) : null}
 
       {/* Voice control + user status footer */}
       {voiceProvider ? (

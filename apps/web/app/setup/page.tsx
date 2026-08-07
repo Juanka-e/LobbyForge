@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getInstanceBootstrapStatus, getUserById } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
+import { isOfficialDeployment } from '@/lib/deployment-mode';
 import SetupWizard from './SetupWizard';
 
 /**
@@ -32,6 +33,7 @@ export default async function SetupPage() {
         defaultOwnerDisplayName={existingOwner?.displayName ?? ''}
         setupTokenRequired={process.env.NODE_ENV === 'production' || Boolean(process.env.LOBBYFORGE_SETUP_TOKEN)}
         instanceId={status.instanceId}
+        isOfficialHost={isOfficialDeployment()}
       />
     </div>
   );

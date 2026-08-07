@@ -25,6 +25,10 @@ interface FormState {
   seoIndexingEnabled: boolean;
   seoTitle: string;
   seoDescription: string;
+  /** Register this instance in the official discovery directory. */
+  registerForDiscovery: boolean;
+  /** Short description for the discovery listing. */
+  discoveryDescription: string;
 }
 
 const ACCESS_OPTIONS: {
@@ -54,11 +58,13 @@ export default function SetupWizard({
   defaultOwnerDisplayName,
   setupTokenRequired,
   instanceId,
+  isOfficialHost,
 }: {
   defaultInstanceName: string;
   defaultOwnerDisplayName: string;
   setupTokenRequired: boolean;
   instanceId: string;
+  isOfficialHost: boolean;
 }) {
   const [stepIndex, setStepIndex] = useState(0);
   const [submitting, setSubmitting] = useState(false);
@@ -75,6 +81,8 @@ export default function SetupWizard({
     seoIndexingEnabled: false,
     seoTitle: '',
     seoDescription: '',
+    registerForDiscovery: false,
+    discoveryDescription: '',
   });
 
   const currentStep = STEPS[stepIndex]!;
@@ -292,6 +300,32 @@ export default function SetupWizard({
 
         {currentStep.id === 'seo' && (
           <div className="flex flex-col gap-4">
+            {/* Privacy warning — prominently shown before the SEO toggle. */}
+            {!form.seoIndexingEnabled ? (
+              <div className="rounded-lg border border-success/30 bg-success/5 p-3 flex items-start gap-2">
+                <span className="material-symbols-outlined text-success text-[18px] mt-0.5">lock</span>
+                <div>
+                  <p className="text-sm font-medium text-success">Search engines are blocked (recommended)</p>
+                  <p className="text-xs text-text-secondary mt-0.5">
+                    Your instance is invisible to Google, Bing, and other crawlers. This protects member
+                    privacy and prevents your community from being discoverable by strangers.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-tertiary/40 bg-tertiary/5 p-3 flex items-start gap-2">
+                <span className="material-symbols-outlined text-tertiary text-[18px] mt-0.5">warning</span>
+                <div>
+                  <p className="text-sm font-medium text-tertiary">Search engine indexing is ON</p>
+                  <p className="text-xs text-text-secondary mt-0.5">
+                    Your server name and public pages may appear in search results. <strong>Even after
+                    turning this off later, search engines may keep cached copies for weeks or months.</strong>
+                    Bot scrapers may also index your instance before the next crawl cycle removes it.
+                    Only enable this if you want your community to be publicly findable.
+                  </p>
+                </div>
+              </div>
+            )}
             <label className="inline-flex items-center gap-2 text-sm text-text-primary">
               <input
                 type="checkbox"
@@ -326,6 +360,39 @@ export default function SetupWizard({
                 placeholder="A self-hosted voice community for gamers and friends."
               />
             </Field>
+
+            {/* Discovery registration (official instance only) */}
+            {isOfficialHost ? (
+              <div className="mt-4 rounded-lg border border-border-subtle p-4 space-y-3">
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.registerForDiscovery}
+                    onChange={(e) => update('registerForDiscovery', e.target.checked)}
+                    className="accent-primary mt-0.5"
+                  />
+                  <div>
+                    <span className="text-sm font-medium text-text-primary">List in the Discovery directory</span>
+                    <p className="text-xs text-text-secondary mt-0.5">
+                      Your community will appear in the official <a href="/discover" className="text-primary hover:underline">Discovery</a> page
+                      so others can find and join it. An admin reviews each listing before it goes public.
+                    </p>
+                  </div>
+                </label>
+                {form.registerForDiscovery ? (
+                  <Field label="Community description" hint="A short pitch for your community. Shown on the discovery card.">
+                    <textarea
+                      maxLength={200}
+                      rows={2}
+                      value={form.discoveryDescription}
+                      onChange={(e) => update('discoveryDescription', e.target.value)}
+                      className="w-full rounded-md border border-border-subtle bg-background px-3 py-2 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      placeholder="A friendly community for gamers, creators, and friends."
+                    />
+                  </Field>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         )}
 
