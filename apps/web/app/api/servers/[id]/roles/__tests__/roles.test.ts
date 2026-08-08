@@ -161,6 +161,20 @@ describe('GET /api/servers/{id}/roles', () => {
 });
 
 describe('POST /api/servers/{id}/roles', () => {
+  it('rejects role icons outside the fixed allowlist', async () => {
+    getServerById.mockResolvedValue(mockServer());
+    getUserPermissions.mockResolvedValue(['administrator']);
+    const { POST } = await loadListRoute();
+    const req = new Request(`https://example.test/api/servers/${SERVER_ID}/roles`, {
+      method: 'POST',
+      headers: { cookie: makeSessionCookie() },
+      body: JSON.stringify({ name: 'Unsafe', icon: '<svg onload=alert(1)>', permissions: [] }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ id: SERVER_ID }) });
+    expect(res.status).toBe(400);
+    expect(createRole).not.toHaveBeenCalled();
+  });
+
   it('rejects a name-less body with 400', async () => {
     getServerById.mockResolvedValue(mockServer());
     getUserPermissions.mockResolvedValue(['administrator']);

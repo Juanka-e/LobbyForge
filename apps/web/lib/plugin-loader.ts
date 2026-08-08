@@ -153,37 +153,46 @@ export function listDynamicPluginIds(): string[] {
 
 /**
  * Reload a single plugin after the install API extracts a new version.
- * Removes the old entry from the import cache and re-imports.
+ * Uses a cache-busting query string on the import URL so ESM `import()`
+ * always picks up the new files on disk (ESM has no `require.cache`).
  */
 export async function reloadDynamicPlugin(pluginId: string): Promise<boolean> {
-  // Clear the Node module cache for this plugin so import() picks up the
-  // new files on disk.
-  for (const key of Object.keys(await import('node:module')).length
-    ? Object.keys(getModuleCache())
-    : []) {
-    if (key.includes(`plugins/installed/${pluginId}`)) {
-      getModuleCache().delete(key);
-    }
-  }
   try {
-    const loaded = await loadPluginFromDisk(pluginId);
-    if (loaded) {
-      dynamicPlugins.set(loaded.manifest.id, loaded);
-      if (!loadedPluginIds.includes(loaded.manifest.id)) {
-        loadedPluginIds.push(loaded.manifest.id);
-      }
-      console.info(`[plugin-loader] reloaded plugin: ${loaded.manifest.id}`);
-      return true;
+    // Force re-import by busting any internal ESM cache via a unique URL.
+    const pluginDir = join(INSTALLED_DIR, pluginId);
+    let indexPath = join(pluginDir, 'index.js');
+    if (!existsSync(indexPath)) {
+      const subdirs = existsSync(pluginDir)
+        ? readdirSync(pluginDir).filter((d) => statSync(join(pluginDir, d)).isDirectory()).sort().reverse()
+        : [];
+      if (subdirs.length === 0) return false;
+      indexPath = join(pluginDir, subdirs[0]!, 'index.js');
+      if (!existsSync(indexPath)) return false;
     }
+
+    // Cache-bust: append a unique version query so Node's ESM loader treats
+    // this as a new module (ESM doesn't have require.cache to clear).
+    const fileUrl = pathToFileURL(indexPath).href + `?v=${Date.now()}`;
+    const mod = await import(fileUrl);
+    const raw: unknown = mod?.plugin ?? mod?.default;
+    if (!isValidGamePlugin(raw)) {
+      console.warn(`[plugin-loader] reload shape validation failed for "${pluginId}"`);
+      return false;
+    }
+    const gamePlugin = raw as GamePlugin<unknown, unknown, unknown>;
+    if (gamePlugin.manifest.id !== pluginId) {
+      console.warn(`[plugin-loader] reload id mismatch: "${pluginId}" vs "${gamePlugin.manifest.id}"`);
+      return false;
+    }
+    const registered = registerGamePlugin(gamePlugin);
+    dynamicPlugins.set(registered.manifest.id, registered);
+    if (!loadedPluginIds.includes(registered.manifest.id)) {
+      loadedPluginIds.push(registered.manifest.id);
+    }
+    console.info(`[plugin-loader] reloaded plugin: ${registered.manifest.id}`);
+    return true;
   } catch (err) {
     console.error(`[plugin-loader] reload failed for "${pluginId}":`, (err as Error).message);
   }
   return false;
-}
-
-// Wrapper to access require.cache without breaking ESM.
-function getModuleCache(): Map<string, unknown> {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const mod = require('node:module');
-  return mod._cache as Map<string, unknown>;
 }

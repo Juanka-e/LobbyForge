@@ -448,6 +448,58 @@ describe('PATCH /api/servers/{id}/channels/{channelId}/messages/{messageId}', ()
     const json = (await res.json()) as { message: { content: string } };
     expect(json.message.content).toBe('mod-edited');
   });
+
+  it('rejects arbitrary client metadata on message updates', async () => {
+    mockServerAlive();
+    getMessageById.mockResolvedValue(mockMessageRow());
+    const { PATCH } = await loadItemRoute();
+    const res = await PATCH(new Request(
+      `https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}/messages/${MESSAGE_ID}`,
+      { method: 'PATCH', headers: { cookie: makeSessionCookie() }, body: JSON.stringify({ metadata: { bot: true } }) }
+    ), { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID, messageId: MESSAGE_ID }) });
+    expect(res.status).toBe(400);
+    expect(updateMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not let a regular message author pin their own message', async () => {
+    getServerById.mockResolvedValue({
+      id: SERVER_ID,
+      name: 'A',
+      slug: null,
+      ownerUserId: '00000000-0000-0000-0000-000000000099',
+      iconUrl: null,
+      defaultLocale: 'en',
+      isPublic: false,
+      createdAt: new Date('2026-06-09T00:00:00Z'),
+      deletedAt: null,
+    });
+    isServerMember.mockResolvedValue(true);
+    getUserPermissions.mockResolvedValue(['send_messages']);
+    mockChannelAlive();
+    getMessageById.mockResolvedValue(mockMessageRow());
+    const { PATCH } = await loadItemRoute();
+    const res = await PATCH(new Request(
+      `https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}/messages/${MESSAGE_ID}`,
+      { method: 'PATCH', headers: { cookie: makeSessionCookie() }, body: JSON.stringify({ pinned: true }) }
+    ), { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID, messageId: MESSAGE_ID }) });
+    expect(res.status).toBe(403);
+    expect(updateMessage).not.toHaveBeenCalled();
+  });
+
+  it('lets a server owner pin a message with server-controlled metadata', async () => {
+    mockServerAlive();
+    getMessageById.mockResolvedValue(mockMessageRow({ userId: '00000000-0000-0000-0000-000000000099' }));
+    updateMessage.mockImplementation(async (_db, _id, patch) => mockMessageRow({ metadata: patch.metadata }));
+    const { PATCH } = await loadItemRoute();
+    const res = await PATCH(new Request(
+      `https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}/messages/${MESSAGE_ID}`,
+      { method: 'PATCH', headers: { cookie: makeSessionCookie() }, body: JSON.stringify({ pinned: true }) }
+    ), { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID, messageId: MESSAGE_ID }) });
+    expect(res.status).toBe(200);
+    expect(updateMessage).toHaveBeenCalledWith(expect.anything(), MESSAGE_ID, {
+      metadata: expect.objectContaining({ $pinnedBy: USER_ID, $pinnedAt: expect.any(String) }),
+    });
+  });
 });
 
 describe('DELETE /api/servers/{id}/channels/{channelId}/messages/{messageId}', () => {

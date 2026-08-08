@@ -82,12 +82,48 @@ export async function installPluginBundle(
   }
 }
 
-/** Download a URL with a timeout, returning an ArrayBuffer. */
+/** Download a URL with a timeout, returning an ArrayBuffer.
+ *  Validates the URL is HTTPS and not pointing at a private/loopback IP (SSRF protection). */
 async function downloadWithTimeout(url: string): Promise<ArrayBuffer> {
+  // SSRF protection: only allow HTTPS, block private/loopback IPs.
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error('Invalid manifest URL');
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new Error('Manifest URL must use HTTPS');
+  }
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (
+    host === 'localhost' ||
+    host === '::1' ||
+    host.startsWith('127.') ||
+    host.startsWith('10.') ||
+    host.startsWith('172.16.') ||
+    host.startsWith('172.17.') ||
+    host.startsWith('172.18.') ||
+    host.startsWith('172.19.') ||
+    host.startsWith('172.2') ||
+    host.startsWith('172.3') ||
+    host.startsWith('192.168.') ||
+    host.startsWith('169.254.') ||
+    host.startsWith('fc') ||
+    host.startsWith('fd') ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal')
+  ) {
+    throw new Error('Manifest URL must not point to a private or loopback address');
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
   try {
-    const res = await fetch(url, { signal: controller.signal });
+    const res = await fetch(url, {
+      signal: controller.signal,
+      redirect: 'error', // No redirects — prevents DNS-rebinding bypass
+    });
     if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`);
     return await res.arrayBuffer();
   } finally {

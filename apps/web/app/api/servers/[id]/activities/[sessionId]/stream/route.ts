@@ -33,7 +33,7 @@ import {
   rateLimitKey,
   rateLimitResponse,
 } from '@/lib/security-headers';
-import { getPlugin } from '@/lib/plugin-registry';
+import { getPluginServer } from '@/lib/plugin-server-registry';
 import { subscribeActivityStateChange } from '@/lib/activity-bus';
 
 export const dynamic = 'force-dynamic';
@@ -123,7 +123,7 @@ async function handleStream(
     if (row.serverId !== serverId) {
       return applySecurityHeaders(jsonError(404, { error: 'Activity not found' }));
     }
-    const plugin = getPlugin(row.pluginId);
+    const plugin = getPluginServer(row.pluginId);
     const initialState = plugin?.migrateState ? plugin.migrateState(row.state) : row.state;
 
     const encoder = new TextEncoder();

@@ -15,6 +15,7 @@ import {
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
+import { ROLE_ICONS } from '@/lib/role-icons';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -24,6 +25,8 @@ const KNOWN_PERMISSIONS = new Set<string>(Object.values(CorePermission));
 const PatchRoleSchema = z.object({
   name: z.string().min(1).max(64).optional(),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(),
+  icon: z.enum(ROLE_ICONS).nullable().optional(),
+  displaySeparately: z.boolean().optional(),
   position: z.number().int().min(0).max(1_000_000).optional(),
   permissions: z.array(z.string()).max(64).optional(),
 });
@@ -42,6 +45,8 @@ function toJson(role: RoleRow): Record<string, unknown> {
     serverId: role.serverId,
     name: role.name,
     color: role.color,
+    icon: role.icon,
+    displaySeparately: role.displaySeparately,
     position: role.position,
     permissions: role.permissions,
     createdAt: role.createdAt.toISOString(),
@@ -150,6 +155,8 @@ async function handlePatch(req: Request, ctx: { params: Promise<{ id: string; ro
     if (
       body.name === undefined &&
       body.color === undefined &&
+      body.icon === undefined &&
+      body.displaySeparately === undefined &&
       body.position === undefined &&
       body.permissions === undefined
     ) {
@@ -179,6 +186,8 @@ async function handlePatch(req: Request, ctx: { params: Promise<{ id: string; ro
     const updated = await updateRole(getDb(), roleId, {
       ...(body.name !== undefined ? { name: body.name } : {}),
       ...(body.color !== undefined ? { color: body.color } : {}),
+      ...(body.icon !== undefined ? { icon: body.icon } : {}),
+      ...(body.displaySeparately !== undefined ? { displaySeparately: body.displaySeparately } : {}),
       ...(body.position !== undefined ? { position: body.position } : {}),
       ...(body.permissions !== undefined ? { permissions: body.permissions } : {}),
     });
@@ -191,6 +200,8 @@ async function handlePatch(req: Request, ctx: { params: Promise<{ id: string; ro
       metadata: {
         ...(body.name !== undefined ? { name: body.name } : {}),
         ...(body.color !== undefined ? { color: body.color } : {}),
+        ...(body.icon !== undefined ? { icon: body.icon } : {}),
+        ...(body.displaySeparately !== undefined ? { displaySeparately: body.displaySeparately } : {}),
         ...(body.position !== undefined ? { position: body.position } : {}),
         ...(body.permissions !== undefined ? { permissions: body.permissions } : {}),
       },

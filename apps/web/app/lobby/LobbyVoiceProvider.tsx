@@ -1065,6 +1065,30 @@ export function LobbyVoiceProvider({
     };
   }, [detachRemoteAudio, stopHeartbeat]);
 
+  // Server switch: disconnect from the old LiveKit room + stop stale heartbeat.
+  // Without this, switching communities via ?server=<id> keeps the old room
+  // connected and the presence heartbeating the wrong server.
+  const prevServerIdRef = useRef(serverId);
+  useEffect(() => {
+    if (prevServerIdRef.current !== serverId) {
+      prevServerIdRef.current = serverId;
+      const r = roomRef.current;
+      if (r) {
+        void r.disconnect();
+        roomRef.current = null;
+      }
+      stopHeartbeat();
+      lastBandwidthBytesRef.current = 0;
+      setActiveChannelId(null);
+      setParticipants([]);
+      setMicEnabled(false);
+      setCameraEnabled(false);
+      setScreenShareEnabled(false);
+      setDeafenEnabled(false);
+      setConnectionState(ConnectionState.Disconnected);
+    }
+  }, [serverId, stopHeartbeat]);
+
   // Reset camera/screen-share state on disconnect so the footer UI
   // doesn't show stale "on" state when the user reconnects.
   useEffect(() => {

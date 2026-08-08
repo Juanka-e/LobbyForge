@@ -159,7 +159,8 @@ export async function reviewPlugin(
       reviewedAt: new Date(),
       reviewNote: note ?? null,
       updatedAt: new Date(),
-      // Approved plugins gain 'verified-community' trust unless already 'official'.
+      // Promote to verified-community on approval (unless already official).
+      trustLevel: decision === 'approved' ? 'verified-community' : undefined,
     })
     .where(eq(pluginCatalog.pluginId, pluginId));
 }

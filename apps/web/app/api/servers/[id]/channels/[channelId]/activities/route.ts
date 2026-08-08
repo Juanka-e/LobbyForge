@@ -14,7 +14,7 @@ import {
 } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
-import { getPlugin } from '@/lib/plugin-registry';
+import { getPluginServer } from '@/lib/plugin-server-registry';
 import { callCreateInitialState, buildHttpPluginContext } from '@/lib/plugin-context';
 import { withApiSecurity } from '@/lib/security-headers';
 import { requireChannelInServer } from '@/lib/api-auth';
@@ -149,7 +149,7 @@ async function handlePost(
       );
     }
 
-    const plugin = getPlugin(body.pluginId);
+    const plugin = getPluginServer(body.pluginId);
     if (!plugin) {
       return NextResponse.json({ error: 'Unknown plugin' }, { status: 404 });
     }

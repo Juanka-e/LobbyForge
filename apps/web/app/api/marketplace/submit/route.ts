@@ -20,8 +20,8 @@ const SubmitSchema = z.object({
   tags: z.array(z.string().max(40)).max(20).optional(),
   permissions: z.array(z.string().max(60)).max(20).optional(),
   playerConfig: z.record(z.unknown()).nullable().optional(),
-  manifestUrl: z.string().url().nullable().optional(),
-  iconUrl: z.string().url().nullable().optional(),
+  manifestUrl: z.string().url().refine((u) => u.startsWith('https://'), 'Manifest URL must use HTTPS').nullable().optional(),
+  iconUrl: z.string().url().refine((u) => u.startsWith('https://'), 'Icon URL must use HTTPS').nullable().optional(),
   requiresVoiceRoom: z.boolean().optional(),
 }).strict();
 

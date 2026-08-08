@@ -10,7 +10,7 @@ import { asc, inArray } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
-import { getPlugin } from '@/lib/plugin-registry';
+import { getPluginServer } from '@/lib/plugin-server-registry';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -92,7 +92,7 @@ async function handleGet(
     // panel + reducer see the current shape even when the row was
     // written by an older build. The migrator is idempotent; it's
     // safe to run on every read.
-    const plugin = getPlugin(row.pluginId);
+    const plugin = getPluginServer(row.pluginId);
     const state = plugin?.migrateState ? plugin.migrateState(row.state) : row.state;
 
     return NextResponse.json(

@@ -123,21 +123,23 @@ export async function sendDmMessage(
   content: string,
   replyToId?: string | null
 ): Promise<DmMessageRow> {
-  const [message] = await db
-    .insert(dmMessages)
-    .values({
-      dmChannelId: channelId,
-      authorId,
-      content: content.slice(0, 4000),
-      ...(replyToId ? { replyToId } : {}),
-    })
-    .returning();
-  // Bump lastMessageAt for sidebar ordering.
-  await db
-    .update(dmChannels)
-    .set({ lastMessageAt: new Date() })
-    .where(eq(dmChannels.id, channelId));
-  return message as DmMessageRow;
+  // Transactional: message insert + channel timestamp bump must succeed together.
+  return await db.transaction(async (tx) => {
+    const [message] = await tx
+      .insert(dmMessages)
+      .values({
+        dmChannelId: channelId,
+        authorId,
+        content: content.slice(0, 4000),
+        ...(replyToId ? { replyToId } : {}),
+      })
+      .returning();
+    await tx
+      .update(dmChannels)
+      .set({ lastMessageAt: new Date() })
+      .where(eq(dmChannels.id, channelId));
+    return message as DmMessageRow;
+  });
 }
 
 /** List messages in a DM channel (paginated by cursor). */

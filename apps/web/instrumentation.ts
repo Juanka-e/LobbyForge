@@ -13,6 +13,17 @@ export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
   if (process.env.NEXT_PHASE === 'phase-production-build') return;
 
+  // Pre-warm dynamically-loaded marketplace plugins from disk.
+  // Safe no-op if plugins/installed/ doesn't exist or is empty.
+  try {
+    const { warmDynamicPlugins } = await import('./lib/plugin-server-registry');
+    void warmDynamicPlugins().catch((err: unknown) =>
+      console.error('[plugin-loader] boot warm failed:', (err as Error).message)
+    );
+  } catch {
+    // Dynamic import may fail in some bundler configs — non-fatal.
+  }
+
   if (process.env.LOBBYFORGE_BOOT_LOG === 'true') {
     console.log('[App Boot] LobbyForge web runtime initialized.');
   }

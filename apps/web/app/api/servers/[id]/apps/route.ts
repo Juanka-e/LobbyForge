@@ -8,7 +8,8 @@ import {
   upsertPluginInstall,
 } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
-import { listPluginSummaries, getPlugin } from '@/lib/plugin-registry';
+import { listPluginSummaries } from '@/lib/plugin-registry';
+import { getPluginServer } from '@/lib/plugin-server-registry';
 import {
   CorePermission,
   requireMaterializedSession,
@@ -96,7 +97,7 @@ async function handlePost(
     );
   }
 
-  const plugin = getPlugin(body.pluginId);
+  const plugin = getPluginServer(body.pluginId);
   if (!plugin) {
     return NextResponse.json({ error: 'Unknown plugin' }, { status: 404 });
   }
@@ -145,7 +146,7 @@ async function handleDelete(
     );
   }
 
-  const plugin = getPlugin(body.pluginId);
+  const plugin = getPluginServer(body.pluginId);
   if (!plugin) {
     return NextResponse.json({ error: 'Unknown plugin' }, { status: 404 });
   }

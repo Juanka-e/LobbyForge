@@ -61,10 +61,10 @@ const fakePlugin = {
   migrateState: (raw: unknown) => raw,
   renderClient: () => null,
 };
-const getPlugin = vi.fn((id: string) => (id === 'fake' ? fakePlugin : null));
+const getPluginServer = vi.fn((id: string) => (id === 'fake' ? fakePlugin : null));
 
-vi.mock('@/lib/plugin-registry', () => ({
-  getPlugin,
+vi.mock('@/lib/plugin-server-registry', () => ({
+  getPluginServer,
 }));
 
 const SECRET = 'x'.repeat(32);
@@ -79,8 +79,8 @@ beforeEach(() => {
   // The internal stash props aren't reset by mockClear; do it manually.
   delete (subscribeActivityStateChange as unknown as { __onMessage?: unknown }).__onMessage;
   delete (subscribeActivityStateChange as unknown as { __onError?: unknown }).__onError;
-  getPlugin.mockReset();
-  getPlugin.mockImplementation((id: string) => (id === 'fake' ? fakePlugin : null));
+  getPluginServer.mockReset();
+  getPluginServer.mockImplementation((id: string) => (id === 'fake' ? fakePlugin : null));
 });
 
 const SERVER_ID = 'srv-1';

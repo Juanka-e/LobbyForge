@@ -23,8 +23,8 @@ async function handlePost(
 ): Promise<NextResponse> {
   const { id: instanceId } = await ctx.params;
   const sessionResult = requireMaterializedSession(req);
-  // Reports can be filed by guests (uid may be null) — we just need a session.
-  const reporterUserId = sessionResult.ok ? sessionResult.session.uid : null;
+  if (!sessionResult.ok) return sessionResult.response;
+  const reporterUserId = sessionResult.session.uid;
 
   let body: z.infer<typeof ReportSchema>;
   try {

@@ -12,7 +12,7 @@ import {
 import { CorePermission, hasPermission } from '@lobbyforge/core';
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
-import { getPlugin } from '@/lib/plugin-registry';
+import { getPluginServer } from '@/lib/plugin-server-registry';
 import { buildHttpPluginContext, callHandleAction } from '@/lib/plugin-context';
 import { withApiSecurity } from '@/lib/security-headers';
 import { publishActivityStateChange } from '@/lib/activity-bus';
@@ -33,7 +33,7 @@ async function authorizePluginAction(input: {
   sessionId: string;
   actorUserId: string;
   hostUserId: string | null;
-  plugin: NonNullable<ReturnType<typeof getPlugin>>;
+  plugin: NonNullable<ReturnType<typeof getPluginServer>>;
   action: Record<string, unknown>;
 }): Promise<{ ok: true; action: Record<string, unknown> } | { ok: false; response: NextResponse }> {
   const actionType = String(input.action.type);
@@ -116,7 +116,7 @@ async function handlePost(
       return NextResponse.json({ error: 'Activity not found' }, { status: 404 });
     }
 
-    const plugin = getPlugin(row.pluginId);
+    const plugin = getPluginServer(row.pluginId);
     if (!plugin) {
       // A session exists for a plugin we no longer ship. We can't
       // dispatch — surface a clear error so the UI can offer to end.

@@ -28,7 +28,7 @@ const fakePlugin = {
   },
   renderClient: () => null,
 };
-const getPlugin = vi.fn((id: string) => (id === 'fake' ? fakePlugin : null));
+const getPluginServer = vi.fn((id: string) => (id === 'fake' ? fakePlugin : null));
 
 vi.mock('@lobbyforge/db', () => ({
   getServerById,
@@ -46,8 +46,8 @@ vi.mock('@lobbyforge/db', () => ({
   logAction,
 }));
 
-vi.mock('@/lib/plugin-registry', () => ({
-  getPlugin,
+vi.mock('@/lib/plugin-server-registry', () => ({
+  getPluginServer,
 }));
 
 vi.mock('@/lib/security-headers', () => ({
@@ -82,8 +82,8 @@ beforeEach(() => {
   getChannelById.mockResolvedValue(mockChannel());
   getActiveGameSessionForChannel.mockResolvedValue(null);
   getPluginInstall.mockResolvedValue(mockPluginInstall());
-  getPlugin.mockReset();
-  getPlugin.mockImplementation((id: string) => (id === 'fake' ? fakePlugin : null));
+  getPluginServer.mockReset();
+  getPluginServer.mockImplementation((id: string) => (id === 'fake' ? fakePlugin : null));
 });
 
 afterEach(() => {

@@ -19,6 +19,8 @@ export const runtime = 'nodejs';
 
 const NullableLimit = z.number().int().min(1).max(500).nullable();
 const NullableMediaLimit = z.number().int().min(1).max(100).nullable();
+const ScreenShareHeight = z.union([z.literal(480), z.literal(720), z.literal(1080), z.literal(1440), z.literal(2160)]);
+const ScreenShareFps = z.union([z.literal(15), z.literal(30), z.literal(60)]);
 
 const PatchSchema = z.object({
   defaultUserLimit: NullableLimit.optional(),
@@ -28,6 +30,8 @@ const PatchSchema = z.object({
   allowScreenShare: z.boolean().optional(),
   maxCameraUsersPerRoom: NullableMediaLimit.optional(),
   maxScreenShareUsersPerRoom: NullableMediaLimit.optional(),
+  maxScreenShareHeight: ScreenShareHeight.optional(),
+  maxScreenShareFps: ScreenShareFps.optional(),
 });
 
 interface RouteContext {
@@ -44,6 +48,8 @@ function toJson(settings: ServerVoiceSettingsRow): Record<string, unknown> {
     allowScreenShare: settings.allowScreenShare,
     maxCameraUsersPerRoom: settings.maxCameraUsersPerRoom,
     maxScreenShareUsersPerRoom: settings.maxScreenShareUsersPerRoom,
+    maxScreenShareHeight: settings.maxScreenShareHeight,
+    maxScreenShareFps: settings.maxScreenShareFps,
     updatedAt: settings.updatedAt.toISOString(),
   };
 }

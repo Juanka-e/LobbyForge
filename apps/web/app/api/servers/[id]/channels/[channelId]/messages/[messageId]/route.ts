@@ -21,8 +21,8 @@ export const runtime = 'nodejs';
 
 const PatchMessageSchema = z.object({
   content: MessageContentSchema.optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-});
+  pinned: z.boolean().optional(),
+}).strict();
 
 function getSessionSecret(): string {
   const secret = process.env.LOBBYFORGE_SESSION_SECRET;
@@ -166,10 +166,6 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
     const access = await loadAndAuthorize(serverId, channelId, messageId, session.uid);
     if (!access.ok) return access.response;
 
-    if (!(await canMutateMessage(serverId, access.isAuthor, session.uid))) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
-
     let body: z.infer<typeof PatchMessageSchema>;
     try {
       const raw = await req.json();
@@ -181,7 +177,7 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
       );
     }
 
-    if (body.content === undefined && body.metadata === undefined) {
+    if (body.content === undefined && body.pinned === undefined) {
       // Nothing to update — return the current row with 200.
       return NextResponse.json(
         { message: toJson(access.message) },
@@ -189,14 +185,33 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
       );
     }
 
+    if (body.content !== undefined && !(await canMutateMessage(serverId, access.isAuthor, session.uid))) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+    if (body.pinned !== undefined) {
+      const permissions = await getUserPermissions(getDb(), session.uid, serverId);
+      if (!access.isOwner && !hasPermission(permissions, CorePermission.MANAGE_MESSAGES)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
+    }
+
+    const metadata = { ...access.message.metadata };
+    if (body.pinned === true) {
+      metadata.$pinnedAt = new Date().toISOString();
+      metadata.$pinnedBy = session.uid;
+    } else if (body.pinned === false) {
+      delete metadata.$pinnedAt;
+      delete metadata.$pinnedBy;
+    }
+
     const updated = await updateMessage(getDb(), messageId, {
       ...(body.content !== undefined ? { content: body.content } : {}),
-      ...(body.metadata !== undefined ? { metadata: body.metadata } : {}),
+      ...(body.pinned !== undefined ? { metadata } : {}),
     });
     void logAction(getDb(), {
       serverId,
       actorUserId: session.uid,
-      action: 'message.update',
+      action: body.pinned === undefined ? 'message.update' : body.pinned ? 'message.pin' : 'message.unpin',
       targetType: 'message',
       targetId: messageId,
       metadata: { channelId },
