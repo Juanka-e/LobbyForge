@@ -1,24 +1,28 @@
 const isProduction = process.env.NODE_ENV === 'production';
-const connectSources = process.env.LOBBYFORGE_CSP_CONNECT_SRC?.trim()
-  || (isProduction
+function configuredConnectSources() {
+  const sources = new Set(["'self'"]);
+  for (const value of [process.env.NEXT_PUBLIC_LIVEKIT_URL, process.env.NEXT_PUBLIC_WS_URL]) {
+    if (!value) continue;
+    try {
+      const url = new URL(value);
+      if (!['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol)) continue;
+      sources.add(url.origin);
+      if (url.protocol === 'http:' || url.protocol === 'https:') {
+        const websocket = new URL(url.origin);
+        websocket.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+        sources.add(websocket.origin);
+      }
+    } catch {
+      // Invalid public runtime URLs fail closed instead of entering the CSP.
+    }
+  }
+  if (sources.size > 1) return [...sources].join(' ');
+  return isProduction
     ? "'self' wss:"
-    : "'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*");
-const contentSecurityPolicy = [
-  "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${isProduction ? '' : " 'unsafe-eval'"}`,
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src 'self' data: https://fonts.gstatic.com",
-  "img-src 'self' data: blob:",
-  "media-src 'self' blob:",
-  `connect-src ${connectSources}`,
-  "frame-src 'none'",
-  "object-src 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-  ...(isProduction ? ['upgrade-insecure-requests'] : []),
-].join('; ');
-
+    : "'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*";
+}
+const connectSources = process.env.LOBBYFORGE_CSP_CONNECT_SRC?.trim()
+  || configuredConnectSources();
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -43,8 +47,8 @@ const nextConfig = {
   serverExternalPackages: ['@lobbyforge/db'],
   typedRoutes: true,
   async headers() {
+    // Security headers (CSP is set per-request by middleware.ts with a nonce).
     const headers = [
-      { key: 'Content-Security-Policy', value: contentSecurityPolicy },
       { key: 'X-Content-Type-Options', value: 'nosniff' },
       { key: 'X-Frame-Options', value: 'DENY' },
       { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
