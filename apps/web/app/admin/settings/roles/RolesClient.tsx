@@ -1,12 +1,15 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { ROLE_ICONS } from '@/lib/role-icons';
 
 export interface RoleView {
   id: string;
   serverId: string;
   name: string;
   color: string | null;
+  icon: string | null;
+  displaySeparately: boolean;
   position: number;
   permissions: string[];
   memberCount: number;
@@ -67,7 +70,7 @@ const PERMISSION_GROUPS: PermissionGroup[] = [
 ];
 
 const DEFAULT_COLOR = '#7c8cff';
-const EMPTY_FORM = { name: '', color: DEFAULT_COLOR, permissions: [] as string[] };
+const EMPTY_FORM = { name: '', color: DEFAULT_COLOR, icon: null as string | null, displaySeparately: false, permissions: [] as string[] };
 
 export default function RolesClient({
   serverId,
@@ -81,7 +84,7 @@ export default function RolesClient({
   const [roles, setRoles] = useState(initialRoles);
   const [form, setForm] = useState(EMPTY_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState({ name: '', color: DEFAULT_COLOR, position: 0, permissions: [] as string[] });
+  const [draft, setDraft] = useState({ name: '', color: DEFAULT_COLOR, icon: null as string | null, displaySeparately: false, position: 0, permissions: [] as string[] });
   const [busyId, setBusyId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [message, setMessage] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
@@ -123,6 +126,8 @@ export default function RolesClient({
         body: JSON.stringify({
           name,
           color: form.color,
+          icon: form.icon,
+          displaySeparately: form.displaySeparately,
           position: maxPosition + 1,
           permissions: form.permissions,
         }),
@@ -144,6 +149,8 @@ export default function RolesClient({
     setDraft({
       name: role.name,
       color: role.color ?? DEFAULT_COLOR,
+      icon: role.icon,
+      displaySeparately: role.displaySeparately,
       position: role.position,
       permissions: role.permissions,
     });
@@ -166,6 +173,8 @@ export default function RolesClient({
     try {
       const body: Record<string, unknown> = {
         color: draft.color,
+        icon: draft.icon,
+        displaySeparately: draft.displaySeparately,
         position: draft.position,
         permissions: draft.permissions,
       };
@@ -275,6 +284,8 @@ export default function RolesClient({
             {isCreating ? 'Creating...' : 'Create'}
           </button>
         </div>
+        <RoleIconPicker value={form.icon} onChange={(icon) => setForm((current) => ({ ...current, icon }))} disabled={!serverId || isCreating} />
+        <SeparateMembersToggle checked={form.displaySeparately} onChange={(displaySeparately) => setForm((current) => ({ ...current, displaySeparately }))} disabled={!serverId || isCreating} />
         <PermissionMatrix selected={form.permissions} onToggle={updateFormPermission} compact />
       </div>
 
@@ -297,7 +308,7 @@ export default function RolesClient({
                     />
                     <div className="min-w-0 flex-1">
                       {isEditing ? (
-                        <div className="grid gap-3 md:grid-cols-[1fr_140px_120px]">
+                        <div className="grid gap-3 md:grid-cols-[1fr_140px_150px_120px]">
                           <input
                             value={draft.name}
                             onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
@@ -316,6 +327,16 @@ export default function RolesClient({
                             />
                             <span className="text-xs text-text-muted">{draft.color}</span>
                           </label>
+                          <select
+                            value={draft.icon ?? ''}
+                            disabled={isBusy}
+                            onChange={(event) => setDraft((current) => ({ ...current, icon: event.target.value || null }))}
+                            aria-label="Role icon"
+                            className="w-full rounded-lg border border-border-subtle bg-surface-container px-3 py-2 text-sm text-text-primary"
+                          >
+                            <option value="">No icon</option>
+                            {ROLE_ICONS.map((icon) => <option key={icon} value={icon}>{icon.replaceAll('_', ' ')}</option>)}
+                          </select>
                           <input
                             type="number"
                             min={0}
@@ -332,9 +353,11 @@ export default function RolesClient({
                       ) : (
                         <>
                           <div className="flex flex-wrap items-center gap-2">
+                            {role.icon ? <span className="material-symbols-outlined text-[17px]" style={{ color: role.color ?? undefined }} aria-hidden>{role.icon}</span> : null}
                             <h3 className="text-sm font-semibold text-text-primary truncate">{role.name}</h3>
                             {role.permissions.includes('administrator') ? <RoleBadge label="Admin" tone="danger" /> : null}
                             {role.name === '@everyone' ? <RoleBadge label="Default" tone="muted" /> : null}
+                            {role.displaySeparately ? <RoleBadge label="Member list" tone="muted" /> : null}
                           </div>
                           <p className="text-xs text-text-muted">
                             {role.memberCount} {role.memberCount === 1 ? 'member' : 'members'} - position {role.position}
@@ -363,7 +386,10 @@ export default function RolesClient({
                     </div>
                   </div>
                   {isEditing ? (
-                    <PermissionMatrix selected={draft.permissions} onToggle={updateDraftPermission} />
+                    <>
+                      <SeparateMembersToggle checked={draft.displaySeparately} onChange={(displaySeparately) => setDraft((current) => ({ ...current, displaySeparately }))} disabled={isBusy || role.name === '@everyone'} />
+                      <PermissionMatrix selected={draft.permissions} onToggle={updateDraftPermission} />
+                    </>
                   ) : (
                     <PermissionSummary permissions={role.permissions} />
                   )}
@@ -374,6 +400,33 @@ export default function RolesClient({
         </ul>
       </div>
     </section>
+  );
+}
+
+function SeparateMembersToggle({ checked, onChange, disabled }: { checked: boolean; onChange: (checked: boolean) => void; disabled: boolean }) {
+  return (
+    <label className="mt-4 flex items-center justify-between gap-4 rounded-md border border-border-subtle bg-surface-container px-3 py-2.5">
+      <span>
+        <span className="block text-sm font-medium text-text-primary">Display members separately</span>
+        <span className="block text-xs text-text-muted">Group online members under this role in the member list.</span>
+      </span>
+      <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className="size-4 accent-primary" />
+    </label>
+  );
+}
+
+function RoleIconPicker({ value, onChange, disabled }: { value: string | null; onChange: (icon: string | null) => void; disabled: boolean }) {
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-1.5" aria-label="Role icon">
+      <button type="button" disabled={disabled} onClick={() => onChange(null)} className={`grid size-8 place-items-center rounded-md border ${value === null ? 'border-primary bg-primary/10 text-primary' : 'border-border-subtle text-text-muted'}`} title="No icon">
+        <span className="material-symbols-outlined text-[17px]" aria-hidden>block</span>
+      </button>
+      {ROLE_ICONS.map((icon) => (
+        <button key={icon} type="button" disabled={disabled} onClick={() => onChange(icon)} className={`grid size-8 place-items-center rounded-md border ${value === icon ? 'border-primary bg-primary/10 text-primary' : 'border-border-subtle text-text-secondary hover:bg-surface-container'}`} title={icon.replaceAll('_', ' ')}>
+          <span className="material-symbols-outlined text-[17px]" aria-hidden>{icon}</span>
+        </button>
+      ))}
+    </div>
   );
 }
 

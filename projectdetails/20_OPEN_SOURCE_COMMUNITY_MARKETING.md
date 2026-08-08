@@ -5,7 +5,7 @@
 Açık kaynak olacaklar:
 
 - Web app
-- Electron desktop wrapper
+- Tauri desktop wrapper
 - Docker Compose
 - Nginx config
 - Installer
@@ -118,7 +118,7 @@ Self-host edilebilir açık kaynak sesli oyun odaları platformu yapıyorum. İl
 - Vampir Köylü gece/gündüz UI
 - tek komut kurulum
 - public directory demo
-- Electron PTT demo
+- Tauri PTT demo
 
 ## 9. Good first issues
 

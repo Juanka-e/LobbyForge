@@ -76,6 +76,8 @@ function toView(settings: ServerVoiceSettingsRow): VoiceSettingsView {
     allowScreenShare: settings.allowScreenShare,
     maxCameraUsersPerRoom: settings.maxCameraUsersPerRoom,
     maxScreenShareUsersPerRoom: settings.maxScreenShareUsersPerRoom,
+    maxScreenShareHeight: settings.maxScreenShareHeight,
+    maxScreenShareFps: settings.maxScreenShareFps,
     updatedAt: settings.updatedAt.toISOString(),
   };
 }

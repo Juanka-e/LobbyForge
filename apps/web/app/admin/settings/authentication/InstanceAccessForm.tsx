@@ -34,7 +34,13 @@ const REGISTRATION_OPTIONS: Array<{
   },
 ];
 
-export default function InstanceAccessForm({ initial }: { initial: Settings }) {
+export default function InstanceAccessForm({
+  initial,
+  serverId,
+}: {
+  initial: Settings;
+  serverId: string | null;
+}) {
   const [settings, setSettings] = useState(initial);
   const [savedSettings, setSavedSettings] = useState(initial);
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -190,6 +196,28 @@ export default function InstanceAccessForm({ initial }: { initial: Settings }) {
                 className="w-full resize-y rounded-lg border border-border-strong bg-surface-raised px-3 py-2 text-sm text-text-primary outline-none"
               />
             </label>
+          </div>
+        </section>
+
+        <section className="rounded-xl border border-border-subtle bg-surface p-5">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-text-primary">Community identity policy</h2>
+              <p className="mt-1 max-w-2xl text-sm text-text-secondary">
+                Configure invites, local accounts, official LobbyForge sign-in, account linking, and first-join approval for the community.
+              </p>
+            </div>
+            {serverId ? (
+              <a
+                href={`/servers/${encodeURIComponent(serverId)}?tab=access`}
+                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-border-strong px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-surface-raised"
+              >
+                <span className="material-symbols-outlined text-lg" aria-hidden>shield_lock</span>
+                Open access policy
+              </a>
+            ) : (
+              <span className="text-sm text-danger">No community is assigned to this instance.</span>
+            )}
           </div>
         </section>
       </div>

@@ -17,7 +17,7 @@ This document describes the structure, configuration, and cross-platform usage o
 lobbyforge/
 ├── apps/
 │   ├── web/             # Next.js main app (scaffold stage)
-│   ├── desktop/         # Electron wrapper (scaffold stage)
+│   ├── desktop/         # Tauri 2 wrapper (media-spike scaffold)
 │   └── registry/        # Public server directory (scaffold stage)
 ├── packages/
 │   ├── config/          # Shared tsconfig base, eslint, vitest presets

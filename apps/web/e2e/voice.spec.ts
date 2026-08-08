@@ -1,39 +1,45 @@
 import { test, expect } from '@playwright/test';
-import Redis from 'ioredis';
 
 test.describe('Voice and Presence Integration', () => {
-  test.beforeEach(async ({ request }) => {
-    await request.post('/api/test/db-reset');
-    await request.post('/api/test/redis-reset');
-  });
-
-  test('two users can generate LiveKit tokens for the same room', async ({ browser }) => {
+  test('two browser contexts receive distinct sessions and cannot mint tokens outside membership', async ({ browser }) => {
     const userAContext = await browser.newContext();
     const userBContext = await browser.newContext();
 
     const pageA = await userAContext.newPage();
     const pageB = await userBContext.newPage();
 
-    // Log in Alice & Bob
-    await pageA.goto('/connect');
-    await pageA.click('button:has-text("Create Guest")');
-    await pageB.goto('/connect');
-    await pageB.click('button:has-text("Create Guest")');
+    const guestA = await pageA.request.post('/api/auth/guest', { data: { displayNameSeed: 'Voice Alice' } });
+    const guestB = await pageB.request.post('/api/auth/guest', { data: { displayNameSeed: 'Voice Bob' } });
+    expect(guestA.ok()).toBeTruthy();
+    expect(guestB.ok()).toBeTruthy();
+    const bodyA = await guestA.json();
+    const bodyB = await guestB.json();
+    expect(bodyA.guest.gid).not.toBe(bodyB.guest.gid);
 
-    // Get Token
-    await pageA.click('button:has-text("Get Token")');
-    await pageB.click('button:has-text("Get Token")');
+    const payload = {
+      serverId: '00000000-0000-0000-0000-000000000090',
+      channelId: '00000000-0000-0000-0000-000000000091',
+      displayName: 'Voice test',
+    };
+    const [tokenA, tokenB] = await Promise.all([
+      pageA.request.post('/api/livekit/token', { data: payload }),
+      pageB.request.post('/api/livekit/token', { data: payload }),
+    ]);
+    expect([403, 404]).toContain(tokenA.status());
+    expect([403, 404]).toContain(tokenB.status());
 
-    // Verify token received
-    await expect(pageA.locator('pre')).toContainText('"token":');
-    await expect(pageB.locator('pre')).toContainText('"token":');
+    await userAContext.close();
+    await userBContext.close();
   });
 
-  test('updates presence in Redis with correct TTL', async ({ page }) => {
-    await page.goto('/connect');
-    await page.click('button:has-text("Create Guest")');
-    
-    // Simulate updating presence if UI exists or just trigger endpoint directly 
-    // Currently the UI for this might not exist.
+  test('rejects presence writes without a valid server and channel membership', async ({ page }) => {
+    const guest = await page.request.post('/api/auth/guest', { data: { displayNameSeed: 'Presence Test' } });
+    expect(guest.ok()).toBeTruthy();
+    const response = await page.request.post('/api/presence', { data: {
+      serverId: '00000000-0000-0000-0000-000000000090',
+      channelId: '00000000-0000-0000-0000-000000000091',
+      status: 'online',
+    } });
+    expect([403, 404]).toContain(response.status());
   });
 });

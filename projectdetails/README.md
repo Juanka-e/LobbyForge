@@ -6,7 +6,7 @@ Karar seti:
 
 - Ana konum: Açık kaynak, self-host edilebilir, sesli topluluk + oyun odaları platformu
 - Ana istemci: Web/PWA
-- Desktop: Electron wrapper
+- Desktop: Tauri 2 wrapper (media-spike gated; Electron fallback)
 - Reverse proxy: Nginx
 - Database: PostgreSQL
 - Cache / realtime yardımcı katman: Redis
@@ -35,7 +35,7 @@ Karar seti:
 - `13_VAMPIRE_VILLAGE_PLUGIN.md` — Vampir Köylü plugin tasarımı
 - `14_BOTS_MUSIC_WATCH_PARTY.md` — botlar, müzik, watch party
 - `15_I18N_JSON.md` — JSON tabanlı çeviri sistemi
-- `16_ELECTRON_DESKTOP.md` — Electron desktop client
+- `16_ELECTRON_DESKTOP.md` — Tauri desktop client (historical filename retained)
 - `17_WINDOWS_DEV_ENV.md` — Windows geliştirme ortamı
 - `18_API_EVENT_FLOWS.md` — API ve event akışları
 - `19_OBSERVABILITY_DOCTOR_CAPACITY.md` — Doctor, telemetry, kapasite önerileri

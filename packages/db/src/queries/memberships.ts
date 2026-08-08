@@ -294,9 +294,14 @@ export interface MemberSummary {
   globalDisplayName: string;
   nickname: string | null;
   avatarUrl: string | null;
+  bannerUrl: string | null;
   isGuest: boolean;
   roleName: string | null;
   roleColor: string | null;
+  roleIcon: string | null;
+  statusText: string | null;
+  bio: string | null;
+  roles: Array<{ id: string; name: string; color: string | null; icon: string | null; position: number; displaySeparately: boolean }>;
   joinedAt: Date;
 }
 
@@ -309,13 +314,18 @@ export async function listMemberSummariesForServer(
   const rows = await db
     .select({
       userId: memberships.userId,
+      membershipId: memberships.id,
       displayName: memberships.nickname,
       globalDisplayName: users.displayName,
       nickname: memberships.nickname,
       avatarUrl: users.avatarUrl,
+      bannerUrl: users.bannerUrl,
       isGuest: users.isGuest,
       roleName: roles.name,
       roleColor: roles.color,
+      roleIcon: roles.icon,
+      statusText: users.statusText,
+      bio: users.bio,
       joinedAt: memberships.createdAt,
     })
     .from(memberships)
@@ -328,8 +338,30 @@ export async function listMemberSummariesForServer(
       )
     )
     .orderBy(asc(memberships.createdAt));
-  return rows.map((row) => ({
+  const roleLinks = rows.length === 0
+    ? []
+    : await db
+        .select({
+          membershipId: membershipRoles.membershipId,
+          id: roles.id,
+          name: roles.name,
+          color: roles.color,
+          icon: roles.icon,
+          position: roles.position,
+          displaySeparately: roles.displaySeparately,
+        })
+        .from(membershipRoles)
+        .innerJoin(roles, eq(roles.id, membershipRoles.roleId))
+        .where(inArray(membershipRoles.membershipId, rows.map((row) => row.membershipId)));
+  const rolesByMembership = new Map<string, MemberSummary['roles']>();
+  for (const role of roleLinks) {
+    const current = rolesByMembership.get(role.membershipId) ?? [];
+    current.push({ id: role.id, name: role.name, color: role.color, icon: role.icon, position: role.position, displaySeparately: role.displaySeparately });
+    rolesByMembership.set(role.membershipId, current);
+  }
+  return rows.map(({ membershipId, ...row }) => ({
     ...row,
     displayName: row.displayName || row.globalDisplayName,
+    roles: (rolesByMembership.get(membershipId) ?? []).sort((a, b) => b.position - a.position),
   }));
 }

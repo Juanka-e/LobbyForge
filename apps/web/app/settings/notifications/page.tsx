@@ -14,8 +14,6 @@ type NotificationPreferences = {
   sound: Sound;
   unreadBadge: boolean;
   suppressWhileInVoice: boolean;
-  emailDigest: boolean;
-  mobilePushEnabled: boolean;
 };
 
 type SettingsResponse = {
@@ -33,8 +31,6 @@ const DEFAULT_NOTIFICATIONS: NotificationPreferences = {
   sound: 'default',
   unreadBadge: true,
   suppressWhileInVoice: true,
-  emailDigest: false,
-  mobilePushEnabled: false,
 };
 
 const LEVEL_OPTIONS: { value: NotificationLevel; label: string; description: string; icon: string }[] = [
@@ -98,11 +94,6 @@ function mergeNotifications(value: unknown): NotificationPreferences {
     suppressWhileInVoice: coerceBool(
       input.suppressWhileInVoice,
       DEFAULT_NOTIFICATIONS.suppressWhileInVoice
-    ),
-    emailDigest: coerceBool(input.emailDigest, DEFAULT_NOTIFICATIONS.emailDigest),
-    mobilePushEnabled: coerceBool(
-      input.mobilePushEnabled,
-      DEFAULT_NOTIFICATIONS.mobilePushEnabled
     ),
   };
 }
@@ -305,22 +296,6 @@ export default function NotificationsSettingsPage() {
               description="Pause desktop notifications while you are in a voice room."
               checked={prefs.suppressWhileInVoice}
               onChange={(value) => patch({ suppressWhileInVoice: value })}
-              last
-            />
-          </Section>
-
-          <Section title="Mobile & Email">
-            <ToggleRow
-              label="Mobile push (experimental)"
-              description="Receive pushes via the LobbyForge companion app."
-              checked={prefs.mobilePushEnabled}
-              onChange={(value) => patch({ mobilePushEnabled: value })}
-            />
-            <ToggleRow
-              label="Weekly email digest"
-              description="A Monday-morning summary of messages and mentions."
-              checked={prefs.emailDigest}
-              onChange={(value) => patch({ emailDigest: value })}
               last
             />
           </Section>

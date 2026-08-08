@@ -1,118 +1,114 @@
-# 16 — Electron Desktop Client
+# 16 - Tauri Desktop Client
 
-## 1. Genel karar
+> Historical filename retained so existing links do not break. The earlier Electron decision is superseded by a Tauri 2-first desktop strategy.
 
-Electron açık kaynak olacaktır. Ama ana ürün değildir.
+## 1. Decision
 
-Ana ürün Web/PWA’dır.
+The main product remains the Web/PWA application. The desktop client is a thin,
+open-source convenience shell for Windows, macOS, and Linux.
 
-Electron sadece desktop konforu sağlar.
+LobbyForge will use **Tauri 2** as the primary desktop direction because the
+desktop package is still a scaffold and no Electron-specific production code
+exists. Electron remains a fallback only if the media spike exposes a blocking
+WebView2/WebKit limitation.
 
-## 2. Electron hedefleri
+## 2. Why Tauri
 
-- global push-to-talk
-- tray/minimize
-- desktop notification
-- ses cihazı kısayolları
-- mikrofon mute hotkey
-- auto-update
-- game overlay ileri aşama
-- native menu
+- Uses the operating system webview instead of bundling Chromium.
+- Lower baseline download, disk, and memory cost fits an application that may remain open all day.
+- Official plugins cover global shortcuts, notifications, deep links, single-instance behavior, persisted settings, window state, and signed updates.
+- Tauri capabilities keep native commands deny-by-default and scoped to the windows that need them.
+- React/Next and the TypeScript domain packages remain the source of truth; Rust is limited to the native shell and audited bridges.
 
-## 2.1 Official app ve instance hesaplari
+## 3. Architecture boundary
 
-Electron client official LobbyForge app'in desktop kabugudur; tek bir merkezi zorunlu hesap sistemi gibi davranmaz.
+The desktop shell must not give arbitrary self-host pages unrestricted native access.
 
-Desktop'ta uc baglanti tipi desteklenmelidir:
+```txt
+Tauri local shell
+  - connection manager
+  - saved instances
+  - tray / global PTT / notifications / updater
+  - official account sync (optional)
 
-1. **Official LobbyForge hub:** kullanici official LobbyForge account ile girer.
-2. **Public registry instance:** kullanici registry'den bir instance secer; instance kendi auth politikasini uygular.
-3. **Manual connect:** kullanici domain/IP girer; yine hedef instance kendi auth politikasini uygular.
-
-Desktop app official hesapla su bilgileri senkronlayabilir:
-
-- saved instance list
-- recently connected instances
-- desktop preferences
-- global push-to-talk keybinds
-- optional profile/avatar for official hub
-
-Ama self-host instance session cookie'leri, local memberships ve local roles instance'a aittir. Bir self-host instance "Sign in with LobbyForge" acmadiysa desktop kullanicisi o instance icin local login/register/guest flow'u tamamlar.
-
-## 3. İlk yaklaşım
-
-Electron canlı web UI’yi açar:
-
-```ts
-win.loadURL("https://app.example.com");
+Instance webview
+  - isolated per origin
+  - normal instance cookies remain origin-bound
+  - no shell, filesystem, process, or updater capability
+  - receives only a small audited desktop event bridge
 ```
 
-Böylece:
+The local/bundled shell owns native capabilities. A remote instance webview
+does not receive generic Tauri APIs. Global PTT is forwarded as a fixed
+`pressed`/`released` event to the active instance view; remote content cannot
+execute arbitrary native commands.
 
-- web UI güncellenince desktop da güncel olur
-- Next.js’i Electron içine paketleme karmaşası azalır
-- ilk sürüm hızlı çıkar
+## 4. Account and DM model
 
-## 4. Güvenlik ayarları
+The desktop app supports the official hub, public registry instances, and
+manual HTTPS connections. Official sync may store saved instance references,
+desktop preferences, and global keybinds. Local instance sessions,
+memberships, roles, bans, messages, and instance DMs remain owned by that
+instance.
 
-```ts
-webPreferences: {
-  nodeIntegration: false,
-  contextIsolation: true,
-  sandbox: true
-}
-```
+Official friends/DMs are a separate central product surface. They never merge
+silently with an instance's local DMs or moderation records.
 
-Preload script sadece gerekli native köprüleri sağlar.
+## 5. Native feature set
 
-## 5. Global push-to-talk
+First desktop milestone:
 
-Electron globalShortcut ile PTT yakalar.
+- tray and start-minimized behavior
+- global push-to-talk with press and release events
+- mute/deafen shortcuts
+- native notifications while the app is running
+- deep-link auth callback with state validation and one-time codes
+- single-instance handling
+- persisted window position and safe local preferences
+- signed stable/beta updates
 
-Akış:
+Later: always-on-top compact activity/voice overlay, official preference sync,
+and richer notification actions.
 
-1. Kullanıcı keybind seçer.
-2. Electron global key event yakalar.
-3. Web UI’ye IPC veya preload bridge ile PTT active/inactive gönderir.
-4. Web UI LiveKit audio track mute/unmute yapar.
+## 6. Security rules
 
-## 6. Windows 7
+- No arbitrary shell/process execution capability.
+- No generic filesystem capability for remote instance views.
+- Native commands use narrow typed payloads and explicit capability grants.
+- Instance URLs are HTTPS origins; loopback HTTP is development-only.
+- Auth handoff uses short-lived one-time codes, state binding, and secret redaction.
+- Update artifacts and release metadata are signed; production packages are code-signed/notarized per platform.
+- Navigating to a new origin never inherits native privileges from the previous one.
 
-Electron Windows 7 hedeflenmez.
+## 7. Mandatory media spike
 
-Destek:
+Before calling the Tauri choice final, a Windows 10/11 spike must prove:
 
-- Windows 10/11 desktop
-- Windows 7/8/8.1 web best-effort legacy
+1. LiveKit join/leave and remote audio between two clients.
+2. Microphone/camera permissions and device switching.
+3. Entire-screen and window sharing, including browser-native stop sharing.
+4. Global PTT press/release while another application has focus.
+5. Deep-link login handoff without exposing session cookies or codes in logs.
+6. Tray restore, native notification, signed updater dry-run, and crash recovery.
+7. Memory/install-size comparison against the same Electron wrapper.
 
-## 7. Auto-update
+If WebView2 media behavior is unreliable after a bounded spike, Electron may be
+used as the compatibility fallback. Product and auth boundaries do not change.
 
-İleri sürümde:
-
-- GitHub Releases
-- electron-updater
-- code signing optional
-- stable/beta channels
-
-## 8. Repo yapısı
+## 8. Repository direction
 
 ```txt
 apps/desktop/
-  src/
-    main.ts
-    preload.ts
-  package.json
-  electron-builder.yml
+  src/                  # TypeScript shell contracts and tests
+  src-tauri/
+    src/
+      lib.rs
+      ptt.rs
+      deep_link.rs
+    capabilities/
+    tauri.conf.json
+    Cargo.toml
 ```
 
-## 9. Ne zaman yapılmalı?
-
-Electron şu aşamalardan sonra yapılmalı:
-
-1. Web voice çalışıyor
-2. Hushle oynanıyor
-3. Plugin sistemi var
-4. Installer var
-5. Core UI oturdu
-
-Erken Electron yapmak zaman kaybettirir.
+Do not add Tauri dependencies until the media spike begins. The current URL
+normalization and handoff contracts remain reusable.

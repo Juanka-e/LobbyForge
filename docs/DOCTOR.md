@@ -9,7 +9,7 @@ The Doctor code lives in two places:
 | **Domain primitive** | `packages/core/src/doctor.ts` | Types (`DoctorCheck`, `SystemStats`, `CapacityProfile`), `buildDoctorReport`, `recommendCapacityProfile`. Platform-agnostic — no `import 'node:os'`. |
 | **App-specific checks** | `apps/web/lib/doctor.ts` | `buildChecksFromStats` (pure) + `collectSystemStats` (Node-only) + `collectDoctorReport` (HTTP probes). |
 
-This split is deliberate: a future Electron desktop host or CLI tool can reuse `packages/core` without pulling in Next.js.
+This split is deliberate: a future Tauri desktop host or CLI tool can reuse `packages/core` without pulling in Next.js.
 
 ## Data model
 

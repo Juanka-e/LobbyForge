@@ -2,6 +2,92 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - M22: Production readiness outside the app/plugin system - 2026-07-15
+
+### Added
+
+- Added opt-in LiveKit screen-stream subscriptions, server-enforced maximum
+  stream resolution/FPS, compact voice-only tiles, rich member profiles with
+  bio/roles/per-user volume, allowlisted role icons, and a single-community
+  self-host lobby shell without the official instance rail.
+
+- Adopted a Tauri 2-first desktop direction with a mandatory Windows
+  LiveKit/WebView2 media and security spike; Electron remains a compatibility
+  fallback until the spike passes.
+- Fixed the product boundary for messaging: instance-local DMs ship first,
+  while official-account friends/DMs remain a separate later service and data
+  scope.
+- Migrated the web app to Next.js 16.2 and React 19.2. The production
+  Turbopack build completes without file-tracing warnings; no global
+  `proxy.ts` was added because authentication remains enforced at route and
+  server-component boundaries.
+- Aligned `packages/ui` with React 19 types and React-19-compatible Lucide and
+  Testing Library releases, removing the split React type graph.
+- Added open and invite-only local account registration plus explicit logout.
+- Added the `user_identity_links` migration and query layer. External account
+  references are unique and contain no provider credentials.
+- Added public-registry URL validation against insecure/private origins and a
+  state-bound, one-time-code desktop session handoff parser with log redaction.
+- Added full-screen voice focus, runtime keybinds, message search and
+  permission-gated pinning, per-channel mute, and native desktop message
+  notifications.
+- Local-account password changes now verify the existing scrypt credential,
+  hash the replacement, and update it with an old-hash compare-and-swap guard.
+- My Account now opens the canonical password modal and persists the change
+  through `/api/auth/password`; UI and API share a 12-character minimum.
+- The shared API security boundary checks Redis-backed session revocations for
+  authenticated cookies. Revoked cookies receive `401` and are cleared;
+  production fails closed with `503` if revocation storage is unavailable.
+- Password changes revoke every other tracked session while preserving the
+  current device.
+
+### Fixed
+
+- Rebuilt the full-screen voice surface around compact voice-only tiles,
+  camera grids, screen-share stage plus filmstrip, and a safe-area-aware call
+  dock. Desktop and 390px Chromium checks cover camera, screen share, native
+  stop-sharing, viewport bounds, and overflow.
+- Made member join-date rendering deterministic (`en-US`, UTC), removing a
+  server/client locale hydration mismatch in Community Settings.
+- LiveKit JWT grants now serialize screen sharing as `screen_share` and
+  `screen_share_audio`; the previous hyphenated values were parsed as unknown
+  sources and prevented screen publication.
+- Camera and screen-share UI state now follows actual LiveKit local-track
+  publish/unpublish events, including the browser-native stop-sharing action.
+- Rebuilt the voice focus view as a true viewport portal with a share-first
+  stage, participant filmstrip, responsive camera grid, persistent media dock,
+  and visible media permission errors.
+- Production CSP now derives exact HTTP/WebSocket connect origins from the
+  configured public LiveKit and realtime URLs. Local Docker voice traffic is
+  no longer blocked before reaching LiveKit.
+- Docker Compose now passes `LOBBYFORGE_SETUP_TOKEN` into the web container;
+  previously the documented installer token could never satisfy production
+  bootstrap validation.
+- Material Symbols now ship as a local WOFF2 asset in the production image.
+  Icon ligature text can no longer expand lobby/settings controls when an
+  external font request is blocked; CSP no longer permits Google font hosts.
+- Added a Chromium regression test for local icon loading, fixed icon width,
+  hidden ligature overflow, and the absence of external Google stylesheets.
+- Test-reset routes now pass through the shared API security boundary while
+  retaining their test-environment and high-entropy token gates.
+- Maintenance and update mutations use strict, size-bounded schemas.
+- Blocked users are excluded from presence reads; public invite lookups use a
+  stricter rate limit and uniform not-found behavior.
+- Explicit per-server access policies are enforced by local registration
+  before password hashing; approval-only modes fail closed.
+- Removed settings rows that advertised unavailable 2FA, recovery, export,
+  pronoun, email-digest, or mobile-push behavior.
+- Initial bootstrap no longer inserts a duplicate text/voice channel pair
+  after `createServer()` has already seeded the defaults.
+- Added focused password and central session-revocation security tests.
+
+### Verification
+
+- 524 workspace tests pass; live PostgreSQL integration passes 5/5 and
+  Chromium security/settings smoke tests pass 3/3.
+- All 15 workspace projects pass typecheck and production build. Lint has zero
+  errors and two intentional database-avatar optimization warnings.
+
 ## [Unreleased] — M21.9: Lobby interaction polish + cleanup — 2026-06-30
 
 Final cleanup pass: dead code removal, lint warnings fixed, voice channel
@@ -101,11 +187,11 @@ fix, and a comprehensive security audit with fixes.
 | Admin updates raw error leak | High | Fixed |
 | SSE stream raw error leak | Medium | Fixed |
 | Role assignment IDOR | Medium | Fixed |
-| Test-reset endpoints lack `withApiSecurity` | High | Accepted (NODE_ENV=test gate + token) |
-| Maintenance PATCH lacks Zod schema | Medium | Accepted (admin-gated) |
-| Admin updates POST body unvalidated | Medium | Accepted (admin-gated) |
-| Presence returns blocked users | Low | Accepted (minor) |
-| Invite code length / enumeration | Low | Accepted (60/min rate limit) |
+| Test-reset endpoints lack `withApiSecurity` | High | Fixed |
+| Maintenance PATCH lacks Zod schema | Medium | Fixed |
+| Admin updates POST body unvalidated | Medium | Fixed |
+| Presence returns blocked users | Low | Fixed |
+| Invite code length / enumeration | Low | Fixed |
 | Card-packs GET has side effect | Low | Accepted (idempotent) |
 
 ## [Unreleased] — M21: Stitch designs canonical integration + security hardening — 2026-06-22
@@ -250,7 +336,8 @@ Suite went from 273 tests / 35 files to **296 tests / 41 files** (+23 tests, +6 
   HSTS and browser hardening headers.
 - Removed self-host production fallback to lobby demo data on DB failure.
 - Updated Drizzle ORM to 0.45.2 and pinned patched PostCSS/esbuild transitive
-  dependencies. `pnpm audit --prod` now reports no known vulnerabilities.
+  dependencies. The audit service reported no known vulnerabilities at that
+  milestone; see the current verification snapshot for today's audit status.
 - Removed the development-wide admin bypass. Instance administration now
   requires the locked setup owner session or a constant-time emergency token.
 - Switched guest IDs to cryptographic randomness, removed raw API error details,

@@ -204,6 +204,15 @@ export async function revokeSession(userId: string, gid: string): Promise<void> 
   await redis.expire(revokedKey(userId), 30 * 24 * 3600);
 }
 
+export async function revokeOtherSessions(userId: string, currentGid: string): Promise<number> {
+  const sessions = await listSessions(userId);
+  const otherGids = sessions
+    .map((session) => session.gid)
+    .filter((gid) => gid !== currentGid);
+  await Promise.all(otherGids.map((gid) => revokeSession(userId, gid)));
+  return otherGids.length;
+}
+
 /**
  * Check if a gid has been revoked. Called by the auth layer to reject
  * cookies whose session was revoked from another device.

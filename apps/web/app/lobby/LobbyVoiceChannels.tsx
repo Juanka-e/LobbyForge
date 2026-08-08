@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useLobbyVoice, type LobbyVoiceParticipant } from './LobbyVoiceProvider';
+import Link from 'next/link';
 
 /**
  * Voice channels list for the sidebar. Each voice channel is a button
@@ -198,25 +199,31 @@ export function LobbyVoiceChannels({
                       connecting…
                     </span>
                   ) : null}
-                  {isConnected ? (
-                    <span className="text-[10px] uppercase tracking-wider text-success ml-1">
-                      connected
-                    </span>
-                  ) : null}
                   {!isConnected && participants.length > 0 ? (
                     <span className="text-[10px] text-text-muted ml-1">
                       {participants.length} in voice
                     </span>
                   ) : null}
                 </button>
-                <a
+                {isConnected ? (
+                  <button
+                    type="button"
+                    onClick={() => voice.setMainViewMode('voice')}
+                    className="grid size-7 flex-none place-items-center rounded text-primary hover:bg-surface-raised"
+                    title="Open voice view"
+                    aria-label={`Open ${c.name} voice view`}
+                  >
+                    <span className="material-symbols-outlined text-[16px]" aria-hidden>video_call</span>
+                  </button>
+                ) : null}
+                <Link
                   href="/admin/settings/channels"
-                  className="material-symbols-outlined mr-2 rounded p-1 text-[16px] opacity-0 transition-opacity text-text-secondary hover:bg-surface-raised hover:text-text-primary group-hover:opacity-100"
+                  className="mr-1 grid size-7 flex-none place-items-center rounded text-text-secondary opacity-0 transition-opacity hover:bg-surface-raised hover:text-text-primary group-hover:opacity-100 focus-visible:opacity-100"
                   title="Channel settings"
                   aria-label={`Settings for ${c.name}`}
                 >
-                  settings
-                </a>
+                  <span className="material-symbols-outlined text-[16px]" aria-hidden>settings</span>
+                </Link>
               </div>
               {participants.length > 0 ? (
                 <ul className="ml-6 mt-1 space-y-1 pb-2">
@@ -249,6 +256,12 @@ export function LobbyVoiceChannels({
                         <span className="material-symbols-outlined text-[14px] text-danger">
                           mic_off
                         </span>
+                      ) : null}
+                      {u.cameraEnabled ? (
+                        <span className="material-symbols-outlined text-[14px] text-primary" title="Camera on" aria-label="Camera on">videocam</span>
+                      ) : null}
+                      {u.hasScreenShare ? (
+                        <span className="material-symbols-outlined text-[14px] text-success" title="Sharing screen" aria-label="Sharing screen">present_to_all</span>
                       ) : null}
                     </li>
                   ))}

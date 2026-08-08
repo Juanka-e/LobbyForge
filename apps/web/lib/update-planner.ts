@@ -200,10 +200,22 @@ export async function loadReleaseManifest(source?: string): Promise<ReleaseManif
     return validateManifest(JSON.parse(raw));
   }
 
-  const candidates = [
-    path.resolve(process.cwd(), manifestSource),
-    path.resolve(process.cwd(), '..', '..', manifestSource),
+  if (path.isAbsolute(manifestSource)) {
+    throw new Error('Local release manifest paths must be relative to infra/update.');
+  }
+  const relativeSource = manifestSource.replace(/^infra[\\/]update[\\/]/, '');
+  const roots = [
+    path.resolve(/* turbopackIgnore: true */ process.cwd(), 'infra', 'update'),
+    path.resolve(/* turbopackIgnore: true */ process.cwd(), '..', '..', 'infra', 'update'),
   ];
+  const candidates = roots.map((root) => {
+    const absolute = path.resolve(root, relativeSource);
+    const relative = path.relative(root, absolute);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new Error('Local release manifest must stay inside infra/update.');
+    }
+    return absolute;
+  });
   let lastError: unknown;
   for (const absolute of [...new Set(candidates)]) {
     try {

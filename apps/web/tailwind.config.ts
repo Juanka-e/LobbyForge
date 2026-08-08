@@ -19,6 +19,7 @@ const config: Config = {
   darkMode: 'class',
   content: [
     './app/**/*.{ts,tsx}',
+    './components/**/*.{ts,tsx}',
     './src/**/*.{ts,tsx}',
     './lib/**/*.{ts,tsx}',
     '../../packages/ui/src/**/*.{ts,tsx}',

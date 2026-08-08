@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
 import {
   createSystemUpdateEvent,
   createSystemUpdateRun,
@@ -26,6 +27,29 @@ import { executeUpdateWorkerWithEvents, recordUpdatePreviewEvents } from '@/lib/
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+
+export const UpdateRequestSchema = z.preprocess(
+  (value) => {
+    if (value && typeof value === 'object' && !Array.isArray(value) && !('action' in value)) {
+      return { ...value, action: 'dry-run' };
+    }
+    return value;
+  },
+  z.discriminatedUnion('action', [
+    z.object({
+      action: z.literal('verify-backup'),
+      requireFileExists: z.boolean().optional(),
+    }).strict(),
+    z.object({
+      action: z.enum(['dry-run', 'apply', 'rollback']),
+      requireFileExists: z.boolean().optional(),
+      adminConfirmed: z.boolean().optional(),
+      majorConfirmed: z.boolean().optional(),
+      execute: z.boolean().optional(),
+      maxOutputBytes: z.number().int().min(1024).max(1024 * 1024).optional(),
+    }).strict(),
+  ])
+);
 
 type HistoryWrite =
   | { updateRun: SystemUpdateRunRow; historyError?: string }
@@ -140,19 +164,11 @@ async function handlePost(req: Request): Promise<NextResponse> {
   const denied = await requireAdminHealthToken(req);
   if (denied) return denied;
 
-  let body: {
-    action?: string;
-    requireFileExists?: boolean;
-    adminConfirmed?: boolean;
-    majorConfirmed?: boolean;
-    execute?: boolean;
-    maxOutputBytes?: number;
-  } = {};
-  try {
-    body = (await req.json()) as typeof body;
-  } catch {
-    body = {};
+  const parsed = UpdateRequestSchema.safeParse(await req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Invalid update request.' }, { status: 400 });
   }
+  const body = parsed.data;
 
   if (body.action === 'verify-backup') {
     const { manifest, baseDir } = await loadBackupManifest();
@@ -163,13 +179,7 @@ async function handlePost(req: Request): Promise<NextResponse> {
     return NextResponse.json({ backup }, { headers: { 'Cache-Control': 'no-store' } });
   }
 
-  const action = (body.action ?? 'dry-run') as UpdateExecutionAction;
-  if (action !== 'dry-run' && action !== 'apply' && action !== 'rollback') {
-    return NextResponse.json(
-      { error: 'Invalid action. Use dry-run, apply, rollback, or verify-backup.' },
-      { status: 400 }
-    );
-  }
+  const action: UpdateExecutionAction = body.action;
 
   const plan = buildUpdatePlan(await loadReleaseManifest());
   const { manifest, baseDir } = await loadBackupManifest();
@@ -269,5 +279,6 @@ export const GET = withApiSecurity(handleGet, {
 
 export const POST = withApiSecurity(handlePost, {
   allowedMethods: ['POST'],
+  maxBodyBytes: 4096,
   rateLimit: { identifier: 'admin-updates-post', config: { windowMs: 60_000, maxRequests: 5 } },
 });

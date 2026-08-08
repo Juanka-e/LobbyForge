@@ -1,8 +1,12 @@
-﻿@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=block');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer components {
+  .auth-input {
+    @apply w-full rounded-lg border border-border-strong bg-surface px-3 py-2.5 text-text-primary outline-none focus:border-primary;
+  }
+}
 
 .safe-area-page {
   padding-top: max(2.5rem, env(safe-area-inset-top));
@@ -19,10 +23,17 @@
   letter-spacing: normal;
   text-transform: none;
   display: inline-block;
+  inline-size: 1em;
+  max-inline-size: 1em;
+  overflow: hidden;
+  flex-shrink: 0;
   white-space: nowrap;
   word-wrap: normal;
   direction: ltr;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: 'liga';
   font-variation-settings:
     'FILL' 0,
     'wght' 400,
@@ -378,8 +389,7 @@
    * defined above. Also supports a manual `.force-reduced-motion`
    * override applied to <html> by the Accessibility settings page.
    */
-  @media (prefers-reduced-motion: reduce),
-    .force-reduced-motion {
+  @media (prefers-reduced-motion: reduce) {
     .animate-fade-in-right,
     .animate-fade-in-left,
     .animate-fade-in-up,
@@ -392,6 +402,19 @@
       transform: none !important;
       opacity: 1 !important;
     }
+  }
+
+  .force-reduced-motion .animate-fade-in-right,
+  .force-reduced-motion .animate-fade-in-left,
+  .force-reduced-motion .animate-fade-in-up,
+  .force-reduced-motion .animate-pulse-soft,
+  .force-reduced-motion .animate-speaking-pulse,
+  .force-reduced-motion .is-speaking,
+  .force-reduced-motion .speaking-ring {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+    opacity: 1 !important;
   }
 }
 

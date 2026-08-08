@@ -83,9 +83,13 @@ export function validateBackupManifest(value: unknown): BackupManifest {
 }
 
 async function fileExists(artifactPath: string, baseDir: string | undefined): Promise<boolean> {
-  const resolved = path.isAbsolute(artifactPath)
-    ? artifactPath
-    : path.resolve(baseDir ?? process.cwd(), artifactPath);
+  if (!baseDir) return false;
+  const root = path.resolve(baseDir);
+  const resolved = path.resolve(root, artifactPath);
+  const relative = path.relative(root, resolved);
+  if (path.isAbsolute(artifactPath) || relative.startsWith('..') || path.isAbsolute(relative)) {
+    return false;
+  }
   try {
     const stat = await fs.stat(resolved);
     return stat.isFile();
@@ -148,10 +152,31 @@ export async function loadBackupManifest(source?: string): Promise<{ manifest: B
     source ??
     process.env.LOBBYFORGE_BACKUP_MANIFEST ??
     DEFAULT_BACKUP_MANIFEST_PATH;
-  const absolute = path.resolve(process.cwd(), manifestSource);
-  const raw = await fs.readFile(absolute, 'utf8');
-  return {
-    manifest: validateBackupManifest(JSON.parse(raw)),
-    baseDir: path.dirname(absolute),
-  };
+  if (path.isAbsolute(manifestSource)) {
+    throw new Error('Backup manifest paths must be relative to infra/update.');
+  }
+  const relativeSource = manifestSource.replace(/^infra[\\/]update[\\/]/, '');
+  const roots = [
+    path.join(/* turbopackIgnore: true */ process.cwd(), 'infra', 'update'),
+    path.join(/* turbopackIgnore: true */ process.cwd(), '..', '..', 'infra', 'update'),
+  ];
+  let lastError: unknown;
+  for (const root of [...new Set(roots)]) {
+    const absolute = path.resolve(root, relativeSource);
+    const relative = path.relative(root, absolute);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new Error('Backup manifest must stay inside infra/update.');
+    }
+    try {
+      const raw = await fs.readFile(absolute, 'utf8');
+      return {
+        manifest: validateBackupManifest(JSON.parse(raw)),
+        baseDir: path.dirname(absolute),
+      };
+    } catch (error) {
+      lastError = error;
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+  throw lastError;
 }

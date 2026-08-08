@@ -10,7 +10,7 @@
  * messages for a channel; the route masks blocked authors before
  * returning the response.
  */
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
 import { userBlocks, users } from '../schema.js';
 

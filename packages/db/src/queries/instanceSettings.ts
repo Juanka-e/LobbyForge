@@ -1,6 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
-import { channels, instanceSettings, servers, users } from '../schema.js';
+import { instanceSettings, servers, users } from '../schema.js';
 import { createServer, type ServerRow } from './servers.js';
 
 export const DEFAULT_INSTANCE_ID = 'self-host';
@@ -435,11 +435,6 @@ export async function completeInitialBootstrap(
       ownerUserId: owner.id,
       isPublic: input.registrationMode === 'open',
     });
-    await tx.insert(channels).values([
-      { serverId: server.id, name: 'general', type: 'text', position: 0 },
-      { serverId: server.id, name: 'Lobby', type: 'voice', position: 1 },
-    ]);
-
     const setup = await completeInstanceSetup(executor, {
       instanceId,
       instanceName: input.instanceName,

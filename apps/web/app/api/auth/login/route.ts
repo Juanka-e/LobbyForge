@@ -41,5 +41,6 @@ async function handlePost(req: Request): Promise<NextResponse> {
 
 export const POST = withApiSecurity(handlePost, {
   allowedMethods: ['POST'],
+  sessionRevocation: 'bypass',
   rateLimit: { identifier: 'auth-local-login', config: { windowMs: 15 * 60_000, maxRequests: 10 } },
 });

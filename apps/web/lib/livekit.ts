@@ -13,6 +13,15 @@ import { RoomServiceClient } from 'livekit-server-sdk';
 
 export const LIVEKIT_TOKEN_TTL_SECONDS = 60 * 60; // 1 hour
 
+type LiveKitPublishSource = 'camera' | 'microphone' | 'screen-share' | 'screen-share-audio';
+type LiveKitWirePublishSource = 'camera' | 'microphone' | 'screen_share' | 'screen_share_audio';
+
+function toWirePublishSource(source: LiveKitPublishSource): LiveKitWirePublishSource {
+  if (source === 'screen-share') return 'screen_share';
+  if (source === 'screen-share-audio') return 'screen_share_audio';
+  return source;
+}
+
 export interface LiveKitGrants {
   /** Room the user is joining. Required for room-scoped tokens. */
   room: string;
@@ -25,11 +34,11 @@ export interface LiveKitGrants {
   /** Allow publishing data messages (chat, reactions). Default true. */
   canPublishData?: boolean;
   /** Restrict publishing to a specific set of tracks. */
-  canPublishSources?: ('camera' | 'microphone' | 'screen-share' | 'screen-share-audio')[];
+  canPublishSources?: LiveKitPublishSource[];
   /** Allow muting other participants. Requires server-side permission too. */
   canUpdateOwnMetadata?: boolean;
   /** Restrict subscription to a specific set of tracks. */
-  canSubscribeSources?: ('camera' | 'microphone' | 'screen-share' | 'screen-share-audio')[];
+  canSubscribeSources?: LiveKitPublishSource[];
   /** Hidden from the room's participant list. */
   hidden?: boolean;
   /** Recorder role (used for egress bots). */
@@ -76,8 +85,12 @@ export async function issueLiveKitToken(input: IssueLiveKitTokenInput): Promise<
     canSubscribe: input.grants.canSubscribe ?? true,
     canPublishData: input.grants.canPublishData ?? true,
   };
-  if (input.grants.canPublishSources) grants.canPublishSources = input.grants.canPublishSources;
-  if (input.grants.canSubscribeSources) grants.canSubscribeSources = input.grants.canSubscribeSources;
+  if (input.grants.canPublishSources) {
+    grants.canPublishSources = input.grants.canPublishSources.map(toWirePublishSource);
+  }
+  if (input.grants.canSubscribeSources) {
+    grants.canSubscribeSources = input.grants.canSubscribeSources.map(toWirePublishSource);
+  }
   if (input.grants.hidden) grants.hidden = true;
   if (input.grants.recorder) grants.recorder = true;
 

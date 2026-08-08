@@ -1,5 +1,33 @@
 # Verification Report
 
+## Current production-readiness snapshot - 2026-07-21
+
+- Full web Vitest suite passes: 56 files, 366 tests.
+- A live authenticated Chromium audit loaded all 18 user/community settings
+  routes with exactly one settings dialog, no 5xx/page errors, and no
+  horizontal overflow. User preferences and instance access settings passed
+  write/read/restore cycles against PostgreSQL.
+- LiveKit voice focus passed desktop (1440x900) and mobile (390x844) Chromium
+  checks with fake camera and screen capture. Camera, screen sharing,
+  browser-native stop sharing, controls, portal bounds, and overflow passed.
+- Web typecheck and lint pass; lint retains two pre-existing `no-img-element`
+  performance warnings and no errors.
+- Production Docker image rebuild, forward-only migration, and web-container
+  recreation passed after a transient Docker Hub DNS failure. PostgreSQL data
+  remained intact (one user and one server); no volume was reset.
+
+- All 15 workspace projects pass typecheck and production build on Node 22.
+- All workspace tests pass: 524 tests, with 363 from the web package.
+- Docker PostgreSQL, Redis, and LiveKit are healthy.
+- Five live PostgreSQL integration tests pass, including irreversible setup
+  locking, atomic invite registration, and external identity uniqueness.
+- Chromium settings/session/voice authorization smoke tests pass 3/3.
+- Next.js 16.2.10 + React 19.2.7 production build is clean; `packages/ui` uses
+  a React-19-compatible Testing Library and Lucide dependency graph.
+- npm advisory status is unknown for this pass: both tested pnpm clients
+  received HTTP 410 from npm's retired legacy audit endpoint.
+
+
 Concrete numbers from the cross-platform skeleton pass + the M8 Next.js / Doctor pass + the M9 guest-auth / LiveKit-token pass + the M10 Servers-API / DB-wiring pass + the M11 Channels-API / membership-check pass + the M12 Messages-API pass + the M13 Roles & Permissions pass + the M14 Phase 2 community MVP (first half) pass + the M15 Moderation & Polish pass + the M16 Aşama 3 (Plugin SDK minimal) pass (2026-06-11) + the M17 Aşama 4 (Hushle MVP) pass (2026-06-18) + the M18 Aşama 4 follow-up (Hushle card packs DB) pass (2026-06-18) + the M19 Aşama 4 follow-up (realtime + i18n + state versioning) pass (2026-06-18) + the M20-bis WS-gateway / chat-bus pass (2026-06-20) + the M20a Hushle 2v2 + floater + weighted card draw pass (2026-06-20) + the M21 Stitch designs canonical integration pass (2026-06-22).
 
 All commands were run on **Windows 11, PowerShell**, Node `v22.16.0`, pnpm `10.12.1`. Because every script in `package.json` is pnpm-native (no `&&`, no `export`, no Unix-only shell features), the same numbers will reproduce on Linux without modification.

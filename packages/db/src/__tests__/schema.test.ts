@@ -11,6 +11,7 @@ import {
   serverLocalCards,
   gameSessions,
   instanceSettings,
+  userIdentityLinks,
 } from '../schema.js';
 
 describe('Database Schema Definitions', () => {
@@ -24,6 +25,16 @@ describe('Database Schema Definitions', () => {
     expect(getTableName(cards)).toBe('cards');
     expect(getTableName(serverLocalCards)).toBe('server_local_cards');
     expect(getTableName(gameSessions)).toBe('game_sessions');
+    expect(getTableName(userIdentityLinks)).toBe('user_identity_links');
+  });
+
+  it('stores external identity references without credential token columns', () => {
+    expect(userIdentityLinks.userId.notNull).toBe(true);
+    expect(userIdentityLinks.provider.notNull).toBe(true);
+    expect(userIdentityLinks.providerSubject.notNull).toBe(true);
+    expect(userIdentityLinks.emailVerified.default).toBe(false);
+    expect('accessToken' in userIdentityLinks).toBe(false);
+    expect('refreshToken' in userIdentityLinks).toBe(false);
   });
 
   it('should define display_name as not nullable in users schema', () => {

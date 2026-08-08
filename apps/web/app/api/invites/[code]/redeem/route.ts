@@ -72,13 +72,11 @@ async function handlePost(req: Request, ctx: { params: Promise<{ code: string }>
     // Map the discriminated error to a status code.
     switch (result.error) {
       case 'not_found':
-        return NextResponse.json({ error: 'Invite not found' }, { status: 404 });
+      case 'expired':
+      case 'exhausted':
+        return NextResponse.json({ error: 'Invite is unavailable' }, { status: 403 });
       case 'already_member':
         return NextResponse.json({ error: 'You are already a member of this server' }, { status: 409 });
-      case 'expired':
-        return NextResponse.json({ error: 'Invite has expired' }, { status: 410 });
-      case 'exhausted':
-        return NextResponse.json({ error: 'Invite has reached its use limit' }, { status: 410 });
       case 'no_everyone_role':
         return NextResponse.json(
           { error: 'Server is missing the @everyone role. This is a server-side bug.' },
@@ -100,5 +98,6 @@ async function handlePost(req: Request, ctx: { params: Promise<{ code: string }>
 
 export const POST = withApiSecurity(handlePost, {
   allowedMethods: ['POST'],
-  rateLimit: { identifier: 'invite-redeem', config: { windowMs: 60_000, maxRequests: 30 } },
+  maxBodyBytes: 0,
+  rateLimit: { identifier: 'invite-redeem', config: { windowMs: 60_000, maxRequests: 10 } },
 });

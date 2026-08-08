@@ -11,6 +11,8 @@ export interface VoiceSettingsView {
   allowScreenShare: boolean;
   maxCameraUsersPerRoom: number | null;
   maxScreenShareUsersPerRoom: number | null;
+  maxScreenShareHeight: number;
+  maxScreenShareFps: number;
   updatedAt: string;
 }
 
@@ -51,6 +53,8 @@ export default function VoiceMediaClient({
           allowScreenShare: draft.allowScreenShare,
           maxCameraUsersPerRoom: draft.maxCameraUsersPerRoom,
           maxScreenShareUsersPerRoom: draft.maxScreenShareUsersPerRoom,
+          maxScreenShareHeight: draft.maxScreenShareHeight,
+          maxScreenShareFps: draft.maxScreenShareFps,
         }),
       });
       const data = (await response.json().catch(() => ({}))) as ApiResponse;
@@ -135,6 +139,30 @@ export default function VoiceMediaClient({
           max={100}
           onChange={(value) => setDraft((current) => ({ ...current, maxScreenShareUsersPerRoom: value }))}
         />
+        <SelectRow
+          label="Maximum stream resolution"
+          description="Members may select this resolution or any lower option."
+          value={String(draft.maxScreenShareHeight)}
+          options={[
+            { value: '480', label: '480p' },
+            { value: '720', label: '720p' },
+            { value: '1080', label: '1080p' },
+            { value: '1440', label: '1440p' },
+            { value: '2160', label: '2160p (4K)' },
+          ]}
+          onChange={(value) => setDraft((current) => ({ ...current, maxScreenShareHeight: Number(value) }))}
+        />
+        <SelectRow
+          label="Maximum stream frame rate"
+          description="Members may select this frame rate or a lower option."
+          value={String(draft.maxScreenShareFps)}
+          options={[
+            { value: '15', label: '15 FPS' },
+            { value: '30', label: '30 FPS' },
+            { value: '60', label: '60 FPS' },
+          ]}
+          onChange={(value) => setDraft((current) => ({ ...current, maxScreenShareFps: Number(value) }))}
+        />
       </Section>
 
       <div className="sticky bottom-0 mt-8 border-t border-border-subtle bg-background/95 py-4 backdrop-blur">
@@ -176,6 +204,8 @@ function defaultDraft(serverId: string): VoiceSettingsView {
     allowScreenShare: true,
     maxCameraUsersPerRoom: null,
     maxScreenShareUsersPerRoom: null,
+    maxScreenShareHeight: 1080,
+    maxScreenShareFps: 30,
     updatedAt: new Date(0).toISOString(),
   };
 }
@@ -274,6 +304,36 @@ function NumberRow({
         }}
         className="w-full rounded-lg border border-border-subtle bg-surface-container px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-primary-container"
       />
+    </div>
+  );
+}
+
+function SelectRow({
+  label,
+  description,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  description: string;
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="grid gap-4 px-5 py-4 md:grid-cols-[1fr_180px] md:items-center">
+      <div>
+        <p className="text-sm font-medium text-text-primary">{label}</p>
+        <p className="mt-1 text-xs text-text-muted">{description}</p>
+      </div>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full rounded-lg border border-border-subtle bg-surface-container px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-primary-container"
+      >
+        {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
     </div>
   );
 }

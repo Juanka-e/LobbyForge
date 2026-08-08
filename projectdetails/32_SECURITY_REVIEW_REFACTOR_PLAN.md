@@ -135,6 +135,55 @@ request-boundary gruplari 294 web testi, typecheck ve lint ile gecmistir.
 
 ## Implementation order
 
+## 2026-07-15 production-readiness plan (plugin/app catalog excluded)
+
+Bu sira, plugin/game/catalog implementasyonunu bilerek kapsam disinda tutar.
+Her faz typecheck, unit/API testleri ve ilgili Playwright akisi gecmeden sonraki
+faza tamamlandi sayilmaz.
+
+1. **Local account security - complete**
+   - Tamamlandi: setup owner password hash, local login, gercek password change,
+     old-hash compare-and-swap, merkezi revoked-session kontrolu, password change
+     sonrasi diger izlenen session'lari revoke etme.
+   - Tamamlandi: open/invite-only local registration ve logout cookie temizleme.
+   - Recovery/2FA sahte placeholder olarak sunulmaz; ayri guvenlik tasarimi ve
+     gercek backend olmadan UI'ya eklenmez.
+2. **Accepted security debt - plugin disi maddeler complete**
+   - Maintenance ve admin update body'lerini strict Zod schema ile sinirla.
+   - Test reset route'lari shared security boundary, `NODE_ENV=test` ve yuksek
+     entropili token ile cok katmanli korunur.
+   - Blocked-user presence filtreleme, invite enumeration davranisi ve GET
+     card-pack side effect'ini kapat.
+3. **Lobby, voice and settings completion - core complete**
+   - Permission-aware admin/channel controls, role sidebar visibility/order,
+     pin/notification actions, full-screen participant/screen-share focus.
+   - User settings'teki planned alanlari ya gercek akisa bagla ya da UI'dan kaldir.
+4. **Self-host update execution**
+   - Signed manifest, verified backup, allowlisted no-shell executor, migration,
+     compose image update, health gate ve automatic rollback zincirini tamamla.
+5. **Official/self-host identity boundary**
+   - `user_identity_links`, optional LobbyForge IdP handoff, local membership ve
+     ban/role ownershipunun instance DB'de kalmasi.
+   - Tamamlandi: token saklamayan schema/migration/query temeli, per-server
+     local register policy enforcement, registry public URL validation ve
+     desktop state-bound one-time-code handoff parser.
+   - Bekliyor: official issuer signing keys, audience, PKCE ve nonce kontrati
+     kesinlesmeden callback endpoint'i acilmayacak.
+6. **Stable web stack migration - complete**
+   - Next.js 16 + React 19.2 gecisini ayri migration olarak yap; global request
+     boundary gerekiyorsa `proxy.ts`, route-level guard'lar aynen devam eder.
+7. **Tauri desktop and release validation**
+   - Desktop session handoff, global PTT, tray/notification, signed package,
+     Windows smoke test ve temiz Ubuntu Docker install/upgrade/rollback testi.
+
+### Bu turda kapatilanlar
+
+- Password endpoint'indeki `501` placeholder kaldirildi.
+- My Account password modal'i gercek endpoint'e baglandi.
+- Redis'e yazilan session revoke kaydinin API tarafinda hic kontrol edilmemesi
+  acigi merkezi `withApiSecurity` sinirinda kapatildi.
+- Setup bootstrap'in varsayilan kanallari iki kez olusturmasi engellendi.
+
 ## 2026-06-23 audit follow-up
 
 - **Kapatildi - voice mute oda karisikligi:** mute endpoint'i artik room'u

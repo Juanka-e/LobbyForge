@@ -74,6 +74,76 @@ services:
       timeout: 5s
       retries: 10
 
+  migrate:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_LIVEKIT_URL: ${NEXT_PUBLIC_LIVEKIT_URL:-http://localhost:7880}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:3001}
+    image: lobbyforge-app:dev
+    restart: "no"
+    working_dir: /app/packages/db
+    command: ["node", "dist/migrate.js"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-lobbyforge}:${POSTGRES_PASSWORD:-lobbyforge_dev}@postgres:5432/${POSTGRES_DB:-lobbyforge}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    image: lobbyforge-app:dev
+    container_name: lobbyforge-web
+    restart: unless-stopped
+    command: ["pnpm", "--filter", "@lobbyforge/web", "start"]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-lobbyforge}:${POSTGRES_PASSWORD:-lobbyforge_dev}@postgres:5432/${POSTGRES_DB:-lobbyforge}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-lobbyforge_dev}@redis:6379
+      LOBBYFORGE_SESSION_SECRET: ${LOBBYFORGE_SESSION_SECRET:-dev_session_secret_change_before_public_use_1234}
+      LOBBYFORGE_SETUP_TOKEN: ${LOBBYFORGE_SETUP_TOKEN:-}
+      LOBBYFORGE_DEPLOYMENT_MODE: selfhost
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecret_please_change}
+      NEXT_PUBLIC_LIVEKIT_URL: ${NEXT_PUBLIC_LIVEKIT_URL:-http://localhost:7880}
+      NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:3001}
+    ports:
+      - "3000:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      livekit:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  ws-gateway:
+    image: lobbyforge-app:dev
+    container_name: lobbyforge-ws-gateway
+    restart: unless-stopped
+    command: ["node", "apps/ws-gateway/dist/index.js"]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-lobbyforge}:${POSTGRES_PASSWORD:-lobbyforge_dev}@postgres:5432/${POSTGRES_DB:-lobbyforge}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-lobbyforge_dev}@redis:6379
+      LOBBYFORGE_SESSION_SECRET: ${LOBBYFORGE_SESSION_SECRET:-dev_session_secret_change_before_public_use_1234}
+      WS_HOST: 0.0.0.0
+      WS_PORT: 3001
+      LOBBYFORGE_APP_ORIGIN: ${LOBBYFORGE_APP_ORIGIN:-http://localhost:3000}
+    ports:
+      - "3001:3001"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
   # Optional: local SMTP catcher for testing email flows. UI at http://localhost:8025.
   mailpit:
     image: axllent/mailpit:latest

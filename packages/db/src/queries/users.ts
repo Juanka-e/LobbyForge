@@ -5,9 +5,11 @@
  * from the environment or hold state, so they are trivially mockable in
  * route-level tests and re-usable across web / desktop / future CLI.
  */
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
-import { users } from '../schema.js';
+import { membershipRoles, memberships, roles, servers, users } from '../schema.js';
+import { redeemInvite, type RedeemInviteError } from './invites.js';
+import { EVERYONE_ROLE_NAME } from './roles.js';
 
 export interface UserRow {
   id: string;
@@ -19,6 +21,7 @@ export interface UserRow {
   isGuest: boolean;
   guestKey: string | null;
   statusText: string | null;
+  bio: string | null;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -97,6 +100,141 @@ export async function getUserCredentialsByEmail(
   return { ...found, email: found.email };
 }
 
+export interface UserCredentials {
+  id: string;
+  email: string | null;
+  displayName: string;
+  passwordHash: string | null;
+  isGuest: boolean;
+  deletedAt: Date | null;
+}
+
+export async function getUserCredentialsById(
+  db: DbClient,
+  id: string
+): Promise<UserCredentials | null> {
+  const [found] = await db
+    .select({
+      id: users.id,
+      email: users.email,
+      displayName: users.displayName,
+      passwordHash: users.passwordHash,
+      isGuest: users.isGuest,
+      deletedAt: users.deletedAt,
+    })
+    .from(users)
+    .where(eq(users.id, id))
+    .limit(1);
+  return (found as UserCredentials | undefined) ?? null;
+}
+
+/** Replace a password only if the credential verified by the caller is still current. */
+export async function replaceUserPasswordHash(
+  db: DbClient,
+  input: { userId: string; currentPasswordHash: string; newPasswordHash: string },
+  now: Date = new Date()
+): Promise<boolean> {
+  const updated = await db
+    .update(users)
+    .set({ passwordHash: input.newPasswordHash, updatedAt: now })
+    .where(and(
+      eq(users.id, input.userId),
+      eq(users.passwordHash, input.currentPasswordHash)
+    ))
+    .returning({ id: users.id });
+  return updated.length === 1;
+}
+
+export type CreateLocalAccountError =
+  | 'email_exists'
+  | 'server_unavailable'
+  | 'not_found'
+  | 'expired'
+  | 'exhausted'
+  | 'already_member'
+  | 'no_everyone_role'
+  | 'banned';
+
+export type CreateLocalAccountResult =
+  | { ok: true; user: { id: string; email: string; displayName: string }; serverId: string }
+  | { ok: false; error: CreateLocalAccountError };
+
+class LocalAccountRegistrationError extends Error {
+  constructor(readonly reason: CreateLocalAccountError) {
+    super(reason);
+    this.name = 'LocalAccountRegistrationError';
+  }
+}
+
+/** Create the credential and its first membership as one atomic operation. */
+export async function createLocalAccount(
+  db: DbClient,
+  input: {
+    email: string;
+    displayName: string;
+    passwordHash: string;
+    serverId?: string;
+    inviteCode?: string;
+  }
+): Promise<CreateLocalAccountResult> {
+  try {
+    return await db.transaction(async (tx) => {
+      const executor = tx as unknown as DbClient;
+      const email = input.email.trim().toLowerCase();
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`lobbyforge:register:${email}`}))`);
+
+      const [user] = await tx
+        .insert(users)
+        .values({
+          email,
+          displayName: input.displayName.trim(),
+          passwordHash: input.passwordHash,
+          isGuest: false,
+        })
+        .onConflictDoNothing({ target: users.email })
+        .returning({ id: users.id, email: users.email, displayName: users.displayName });
+      if (!user?.email) throw new LocalAccountRegistrationError('email_exists');
+
+      if (input.inviteCode) {
+        const redeemed = await redeemInvite(executor, input.inviteCode, user.id);
+        if (!redeemed.ok) {
+          throw new LocalAccountRegistrationError(redeemed.error as RedeemInviteError);
+        }
+        return { ok: true as const, user: { ...user, email: user.email }, serverId: redeemed.serverId };
+      }
+
+      if (!input.serverId) throw new LocalAccountRegistrationError('server_unavailable');
+      const [server] = await tx
+        .select({ id: servers.id })
+        .from(servers)
+        .where(and(eq(servers.id, input.serverId), isNull(servers.deletedAt)))
+        .limit(1);
+      if (!server) throw new LocalAccountRegistrationError('server_unavailable');
+
+      const [everyone] = await tx
+        .select({ id: roles.id })
+        .from(roles)
+        .where(and(eq(roles.serverId, server.id), eq(roles.name, EVERYONE_ROLE_NAME)))
+        .limit(1);
+      if (!everyone) throw new LocalAccountRegistrationError('no_everyone_role');
+
+      const [membership] = await tx
+        .insert(memberships)
+        .values({ serverId: server.id, userId: user.id, roleId: everyone.id })
+        .returning({ id: memberships.id });
+      if (!membership) throw new LocalAccountRegistrationError('server_unavailable');
+      await tx.insert(membershipRoles).values({ membershipId: membership.id, roleId: everyone.id });
+
+      return { ok: true as const, user: { ...user, email: user.email }, serverId: server.id };
+    });
+  } catch (error) {
+    if (error instanceof LocalAccountRegistrationError) {
+      return { ok: false, error: error.reason };
+    }
+    throw error;
+  }
+}
+
 /**
  * Mark a user as soft-deleted. Used when a guest wants to "forget" their
  * identity. Idempotent: deleting a user that is already deleted is a no-op.
@@ -136,6 +274,7 @@ export async function updateUserAvatar(
     isGuest: updated[0].isGuest,
     guestKey: updated[0].guestKey,
     statusText: updated[0].statusText,
+    bio: updated[0].bio,
     createdAt: updated[0].createdAt,
     updatedAt: updated[0].updatedAt,
     deletedAt: updated[0].deletedAt,
@@ -166,12 +305,13 @@ export async function updateUserBanner(
 export async function updateUserProfile(
   db: DbClient,
   id: string,
-  input: { displayName?: string; statusText?: string | null },
+  input: { displayName?: string; statusText?: string | null; bio?: string | null },
   now: Date = new Date()
 ): Promise<UserRow> {
   const values: Partial<typeof users.$inferInsert> = { updatedAt: now };
   if (input.displayName !== undefined) values.displayName = input.displayName.trim();
   if (input.statusText !== undefined) values.statusText = input.statusText?.trim() || null;
+  if (input.bio !== undefined) values.bio = input.bio?.trim() || null;
   const updated = await db.update(users).set(values).where(eq(users.id, id)).returning();
   if (!updated[0]) throw new Error(`User ${id} not found`);
   return updated[0] as UserRow;

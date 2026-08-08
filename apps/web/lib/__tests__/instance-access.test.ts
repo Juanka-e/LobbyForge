@@ -55,16 +55,17 @@ describe('instance guest registration access', () => {
     await expect(authorizeGuestRegistration(db, {})).resolves.toMatchObject({ ok: false, status: 400 });
 
     getInviteMetadata.mockResolvedValue({ isExpired: false, isExhausted: false });
-    await expect(authorizeGuestRegistration(db, { inviteCode: 'ABCDEFGH' })).resolves.toMatchObject({ ok: true });
-    expect(getInviteMetadata).toHaveBeenCalledWith(db, 'ABCDEFGH');
+    await expect(authorizeGuestRegistration(db, { inviteCode: '23456789ABCD' })).resolves.toMatchObject({ ok: true });
+    expect(getInviteMetadata).toHaveBeenCalledWith(db, '23456789ABCD');
   });
 
   it('rejects expired or exhausted registration invites', async () => {
     getEffectiveInstanceAccessSettings.mockResolvedValue(settings({ registrationMode: 'invite_only' }));
     getInviteMetadata.mockResolvedValue({ isExpired: true, isExhausted: false });
-    await expect(authorizeGuestRegistration(db, { inviteCode: 'ABCDEFGH' })).resolves.toMatchObject({
+    await expect(authorizeGuestRegistration(db, { inviteCode: '23456789ABCD' })).resolves.toMatchObject({
       ok: false,
-      status: 410,
+      status: 403,
+      error: 'Invite is unavailable.',
     });
   });
 });

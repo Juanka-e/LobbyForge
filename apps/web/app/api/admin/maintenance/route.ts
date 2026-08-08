@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
 import { getEffectiveInstanceMaintenance, setInstanceMaintenance } from '@lobbyforge/db';
 import { requireAdminHealthToken } from '@/lib/admin-auth';
 import { getDb } from '@/lib/db';
@@ -6,6 +7,11 @@ import { withApiSecurity } from '@/lib/security-headers';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+
+export const MaintenanceSchema = z.object({
+  enabled: z.boolean(),
+  message: z.string().trim().max(500).nullable().optional(),
+}).strict();
 
 async function handleGet(req: Request): Promise<NextResponse> {
   const denied = await requireAdminHealthToken(req);
@@ -18,23 +24,14 @@ async function handlePatch(req: Request): Promise<NextResponse> {
   const denied = await requireAdminHealthToken(req);
   if (denied) return denied;
 
-  let body: { enabled?: unknown; message?: unknown } = {};
-  try {
-    body = (await req.json()) as typeof body;
-  } catch {
-    body = {};
-  }
-
-  if (typeof body.enabled !== 'boolean') {
-    return NextResponse.json({ error: 'enabled boolean is required.' }, { status: 400 });
-  }
-  if (body.message !== undefined && body.message !== null && typeof body.message !== 'string') {
-    return NextResponse.json({ error: 'message must be a string.' }, { status: 400 });
+  const parsed = MaintenanceSchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Invalid maintenance settings.' }, { status: 400 });
   }
 
   const maintenance = await setInstanceMaintenance(getDb(), {
-    enabled: body.enabled,
-    message: typeof body.message === 'string' ? body.message : null,
+    enabled: parsed.data.enabled,
+    message: parsed.data.message ?? null,
   });
   return NextResponse.json({ maintenance }, { headers: { 'Cache-Control': 'no-store' } });
 }
@@ -46,5 +43,6 @@ export const GET = withApiSecurity(handleGet, {
 
 export const PATCH = withApiSecurity(handlePatch, {
   allowedMethods: ['PATCH'],
+  maxBodyBytes: 1024,
   rateLimit: { identifier: 'admin-maintenance-patch', config: { windowMs: 60_000, maxRequests: 10 } },
 });

@@ -132,6 +132,7 @@ function applyAppearanceTheme(theme: ThemeChoice): void {
 export default function AppearanceSettingsPage() {
   const [theme, setTheme] = useState<ThemeChoice>('dark');
   const [extra, setExtra] = useState<AppearanceExtra>(DEFAULT_EXTRA);
+  const [accentDraft, setAccentDraft] = useState(DEFAULT_EXTRA.accent.slice(1));
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [status, setStatus] = useState<string>('Loading settings...');
   const [busy, setBusy] = useState(false);
@@ -149,6 +150,7 @@ export default function AppearanceSettingsPage() {
     let cancelled = false;
     const storedExtra = loadExtraFromStorage();
     setExtra(storedExtra);
+    setAccentDraft(storedExtra.accent.slice(1));
     setSavedExtraSnapshot(storedExtra);
     applyAppearanceExtra(storedExtra);
     async function load() {
@@ -196,6 +198,12 @@ export default function AppearanceSettingsPage() {
     });
   }
 
+  function selectAccent(accent: string) {
+    const normalized = normalizeHex(accent);
+    setAccentDraft(normalized.slice(1));
+    patchExtra({ accent: normalized });
+  }
+
   async function save() {
     setBusy(true);
     setStatus('Saving...');
@@ -228,6 +236,8 @@ export default function AppearanceSettingsPage() {
 
   function reset() {
     setExtra(DEFAULT_EXTRA);
+    setAccentDraft(DEFAULT_EXTRA.accent.slice(1));
+    applyAppearanceExtra(DEFAULT_EXTRA);
     patchTheme('dark');
   }
 
@@ -266,7 +276,7 @@ export default function AppearanceSettingsPage() {
                       type="button"
                       aria-label={preset.label}
                       aria-pressed={selected}
-                      onClick={() => patchExtra({ accent: preset.value })}
+                      onClick={() => selectAccent(preset.value)}
                       className={`w-8 h-8 rounded-full transition-transform hover:scale-110 ${
                         selected
                           ? 'ring-2 ring-offset-2 ring-offset-background ring-primary'
@@ -290,8 +300,13 @@ export default function AppearanceSettingsPage() {
                 <span className="text-text-muted font-mono text-sm">#</span>
                 <input
                   type="text"
-                  value={extra.accent.replace(/^#/, '')}
-                  onChange={(event) => patchExtra({ accent: normalizeHex(event.target.value) })}
+                  value={accentDraft}
+                  onChange={(event) => {
+                    const next = event.target.value.replace(/[^0-9a-f]/gi, '').slice(0, 6).toUpperCase();
+                    setAccentDraft(next);
+                    if (next.length === 6) patchExtra({ accent: `#${next}` });
+                  }}
+                  onBlur={() => selectAccent(accentDraft)}
                   maxLength={6}
                   className="bg-transparent border-none p-0 w-20 text-text-primary font-mono text-sm focus:ring-0 uppercase"
                 />

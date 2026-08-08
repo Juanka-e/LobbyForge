@@ -299,7 +299,11 @@ export default function MembersClient({
                       </div>
                     </div>
                     <div className="text-text-secondary text-[13px] hidden sm:block whitespace-nowrap">
-                      {new Date(member.joinedAt).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}
+                      {new Intl.DateTimeFormat('en-US', {
+                        month: 'short',
+                        year: 'numeric',
+                        timeZone: 'UTC',
+                      }).format(new Date(member.joinedAt))}
                     </div>
                     <div className="text-right">
                       <RoleBadge

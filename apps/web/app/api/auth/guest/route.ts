@@ -11,7 +11,7 @@ import {
 import { getDb } from '@/lib/db';
 import { authorizeGuestRegistration } from '@/lib/instance-access';
 import { withApiSecurity } from '@/lib/security-headers';
-import { recordSession } from '@/lib/session-tracker';
+import { isSessionRevoked, recordSession } from '@/lib/session-tracker';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -23,8 +23,8 @@ const GuestRequestSchema = z.object({
   // If true, this is a re-bind of an existing guest (e.g. after refresh).
   // In that case we keep the gid + uid from the cookie and just refresh the name.
   rebind: z.boolean().optional(),
-  inviteCode: z.string().min(6).max(16).optional(),
-});
+  inviteCode: z.string().length(12).optional(),
+}).strict();
 
 function getSessionSecret(): string {
   const secret = process.env.LOBBYFORGE_SESSION_SECRET;
@@ -52,7 +52,15 @@ async function handlePost(req: Request): Promise<NextResponse> {
   }
 
   const secret = getSessionSecret();
-  const existing = readGuestSession(req.headers.get('cookie'), secret);
+  let existing = readGuestSession(req.headers.get('cookie'), secret);
+  if (existing?.uid) {
+    try {
+      if (await isSessionRevoked(existing.uid, existing.gid)) existing = null;
+    } catch (err) {
+      console.error('[auth/guest] revocation check failed:', (err as Error).message);
+      return NextResponse.json({ error: 'Session verification is temporarily unavailable.' }, { status: 503 });
+    }
+  }
   let access: Awaited<ReturnType<typeof authorizeGuestRegistration>>;
   try {
     access = await authorizeGuestRegistration(getDb(), {
@@ -132,6 +140,7 @@ async function handleGet(req: Request): Promise<NextResponse> {
 
 export const POST = withApiSecurity(handlePost, {
   allowedMethods: ['POST'],
+  sessionRevocation: 'bypass',
   rateLimit: { identifier: 'auth-guest-post', config: { windowMs: 60_000, maxRequests: 30 } },
 });
 

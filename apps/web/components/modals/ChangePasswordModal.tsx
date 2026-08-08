@@ -18,12 +18,12 @@ interface Strength {
 }
 
 function evaluateStrength(value: string, current: string): Strength {
-  const lengthOk = value.length >= 8;
+  const lengthOk = value.length >= 12;
   const numberOk = /\d/.test(value);
   const specialOk = /[^A-Za-z0-9]/.test(value);
   const mismatchOk = value.length > 0 && value !== current;
   const rules = [
-    { ok: lengthOk, label: 'At least 8 characters' },
+    { ok: lengthOk, label: 'At least 12 characters' },
     { ok: numberOk, label: 'Contains a number' },
     { ok: specialOk, label: 'Contains a special character' },
     { ok: mismatchOk, label: 'Does not match current password' },
@@ -55,7 +55,7 @@ export function ChangePasswordModal({ open, onClose, onSave }: ChangePasswordMod
 
   const canSave =
     currentPassword.length > 0 &&
-    newPassword.length >= 8 &&
+    newPassword.length >= 12 &&
     newPassword === confirm &&
     strength.score >= 3;
 
@@ -184,7 +184,7 @@ export function ChangePasswordModal({ open, onClose, onSave }: ChangePasswordMod
             info
           </span>
           <p className="text-xs text-text-secondary leading-relaxed">
-            Changing your password keeps this device signed in, but other sessions will need to sign in again.
+            Changing your password keeps this device signed in and revokes your other tracked sessions.
           </p>
         </div>
         {error ? (
@@ -229,6 +229,7 @@ function PasswordField({
           placeholder={placeholder}
           className="w-full bg-transparent border-none text-text-primary focus:ring-0 p-0 placeholder-text-muted"
           autoComplete="off"
+          maxLength={128}
         />
         <button
           type="button"

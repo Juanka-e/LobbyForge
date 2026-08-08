@@ -1,5 +1,5 @@
 import { cookies } from 'next/headers';
-import { getEffectiveInstanceAccessSettings } from '@lobbyforge/db';
+import { getEffectiveInstanceAccessSettings, getInstanceBootstrapStatus } from '@lobbyforge/db';
 import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
 import { getDb } from '@/lib/db';
 import SettingsShell from '@/app/SettingsShell';
@@ -26,7 +26,10 @@ export default async function AuthenticationSettingsPage() {
     );
   }
 
-  const settings = await getEffectiveInstanceAccessSettings(getDb());
+  const [settings, bootstrap] = await Promise.all([
+    getEffectiveInstanceAccessSettings(getDb()),
+    getInstanceBootstrapStatus(getDb()),
+  ]);
   return (
     <SettingsShell scope="community">
       <section>
@@ -43,6 +46,7 @@ export default async function AuthenticationSettingsPage() {
               seoTitle: settings.seoTitle,
               seoDescription: settings.seoDescription,
             }}
+            serverId={bootstrap.firstServerId}
           />
         </div>
       </section>

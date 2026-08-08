@@ -52,7 +52,7 @@ LobbyForge sadece indirilen bir self-host paket degildir; ayni zamanda resmi bir
 - official LobbyForge web app / hub
 - public instance registry
 - app catalog
-- Electron desktop download
+- Tauri desktop download
 - developer/app owner portal
 
 Bu resmi katman self-host vaadini bozmamalidir. Official hesap kullaniciya kolay kesif, desktop sync ve app/developer portal saglar; self-host instance'lar kendi auth, data, moderation ve app install kararlarini korur.

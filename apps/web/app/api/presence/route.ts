@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { DEFAULT_USER_PRIVACY_SETTINGS, getServerById, getUserSettings, isServerMember } from '@lobbyforge/db';
+import {
+  DEFAULT_USER_PRIVACY_SETTINGS,
+  getBlockedUserIds,
+  getServerById,
+  getUserSettings,
+  isServerMember,
+} from '@lobbyforge/db';
 import {
   requireChannelInServer,
   requireMaterializedSession,
@@ -34,7 +40,7 @@ const PresenceSchema = z.object({
       label: z.string().min(1).max(128),
       pluginId: z.string().max(80).optional(),
       serverName: z.string().max(120).optional(),
-    })
+    }).strict()
     .optional(),
   /**
    * Optional RTC stats delta since the last heartbeat (M21.5-bandwidth).
@@ -44,7 +50,7 @@ const PresenceSchema = z.object({
    * contributes to the same Redis counters.
    */
   bandwidthDeltaBytes: z.number().nonnegative().max(10 * 1024 * 1024 * 1024).optional(),
-});
+}).strict();
 
 async function handlePost(req: Request): Promise<NextResponse> {
   const sessionResult = requireMaterializedSession(req);
@@ -131,9 +137,12 @@ async function handleGet(req: Request): Promise<NextResponse> {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }
     }
-    const presences = await getUserPresenceInServer(serverId);
+    const [presences, blockedIds] = await Promise.all([
+      getUserPresenceInServer(serverId),
+      getBlockedUserIds(getDb(), session.uid),
+    ]);
     const filtered = await Promise.all(
-      presences.map(async (presence) => {
+      presences.filter((presence) => !blockedIds.has(presence.userId)).map(async (presence) => {
         const settings = await getUserSettings(getDb(), presence.userId);
         return applyPresencePrivacy(presence, settings?.privacy ?? DEFAULT_USER_PRIVACY_SETTINGS, {
           isSelf: presence.userId === session.uid,

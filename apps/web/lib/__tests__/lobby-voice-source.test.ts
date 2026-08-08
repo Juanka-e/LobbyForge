@@ -30,7 +30,7 @@ describe('lobby voice client integration', () => {
     expect(source).toContain("fetch('/api/settings/me'");
     expect(source).toContain('setMicrophoneEnabled(next, audioCaptureOptions(prefs))');
     expect(source).toContain('setCameraEnabled(next, cameraCaptureOptions(prefs))');
-    expect(source).toContain('setScreenShareEnabled(next, screenShareOptions(prefs))');
+    expect(source).toContain('setScreenShareEnabled(next, screenShareOptions(prefs, screenSharePolicyRef.current))');
   });
 
   it('implements push-to-talk from saved voice preferences', () => {
@@ -45,9 +45,19 @@ describe('lobby voice client integration', () => {
     expect(source).toContain('serverStartMuted');
   });
 
-  it('switches the lobby into voice view when video or screen share becomes active', () => {
+  it('opens local video in the voice view while remote streams remain opt-in', () => {
     expect(source).toContain("if (next) setMainViewMode('voice');");
-    expect(source).toContain('participant.hasScreenShare');
-    expect(source).toContain("setMainViewMode('voice')");
+    expect(source).toContain('autoSubscribe: false');
+    expect(source).toContain('publication.setSubscribed(true)');
+    expect(source).toContain('publication.setSubscribed(false)');
+  });
+
+  it('synchronizes camera and screen-share state from actual local track lifecycle events', () => {
+    expect(source).toContain('RoomEvent.LocalTrackPublished');
+    expect(source).toContain('RoomEvent.LocalTrackUnpublished');
+    expect(source).toContain('Track.Source.ScreenShare');
+    expect(source).toContain('setScreenShareEnabled(false)');
+    expect(source).toContain("pub.track?.mediaStreamTrack.readyState === 'live'");
+    expect(source).toContain('queueMicrotask');
   });
 });

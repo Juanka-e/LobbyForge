@@ -91,6 +91,47 @@ Evet, su yapi mantiklidir:
 
 Official LobbyForge hesabini kullanmak, instance'in local user row'una identity link olusturur. Official hesap instance rollerini, banlarini veya mesajlarini merkezi olarak tasimaz.
 
+## 2.1 Friends and DM boundary
+
+Karar: LobbyForge iki ayri mesajlasma alani sunacak; bunlar UI ve veri
+sahipliginde acikca ayrilacak.
+
+1. **Instance DM (ilk teslimat)**
+   - Yalniz ayni self-host instance'in local uyeleri arasinda calisir.
+   - Mesaj, engel listesi, rapor, retention ve moderasyon kayitlari instance
+     DB'sinde kalir.
+   - Instance admini teknik olarak local DM verisine erisebilir; urun bunu
+     gizlilik metninde acikca belirtir.
+   - MVP'de TLS/WSS ile transport encryption vardir; E2EE iddiasi yoktur.
+
+2. **Official friends + DM (ikinci asama)**
+   - Official LobbyForge hesaplari arasinda merkezi ve ayri bir sosyal alandir.
+   - Self-host instance'a uye olma zorunlulugu yoktur.
+   - Official block/report/takedown ve retention politikalari official servis
+     tarafindan yonetilir.
+   - Bir official DM, local instance DM'i gibi gosterilmez veya local admin
+     paneline sizdirilmaz.
+
+3. **Cross-instance davranis**
+   - A instance'indaki local hesap B instance'ina dogrudan DM atamaz.
+   - Kullanici iki tarafta official hesabini baglasa bile local mesajlar
+     otomatik birlestirilmez.
+   - Gercek Matrix-tarzi federasyon ve cross-instance E2EE bu kararin parcasi
+     degildir.
+
+Client navigation iki inbox'i ayri kaynak etiketiyle gosterebilir:
+
+```txt
+Messages
+- Official friends
+- LobbyForge / local DMs
+- Ankara Gaming / local DMs
+```
+
+Veri modeli simdiden `conversation_scope = instance | official` ayrimini
+tasiyacak; local kayitlarda `instance_id` zorunlu, official kayitlarda null
+olacaktir. Tek bir global user UUID varsayimi yapilmayacak.
+
 ## 3. Tek tikla update
 
 Admin panelinden tek tikla update yapilabilir, ama guvenli bir update pipeline'i gerekir. Docker'i bastan kurmak zorunda kalmadan image pull + migration + health check + rollback modeli uygulanir.
@@ -261,7 +302,7 @@ Oyun UI'i tek mod olmamali. Kullanici ayni session icin farkli gorunum secmelidi
    - Timer, skor, siradaki oyuncu, mute/phase gibi hizli bilgiler.
 
 4. **Picture-in-picture / floating overlay**
-   - Electron icin ileri asama.
+   - Tauri icin ileri asama.
    - Oyun oynarken push-to-talk ve game state'i kucuk pencerede gosterir.
 
 ### Karar
@@ -272,7 +313,7 @@ MVP:
 - Fullscreen activity
 - Compact HUD
 
-Electron ileri asama:
+Tauri ileri asama:
 
 - Always-on-top floating overlay
 - global PTT ile birlikte oyun HUD
@@ -390,12 +431,12 @@ Default privacy:
 
 ## 9. Modern web stack karari
 
-Mevcut kodda `apps/web` Next 15 ve React 18 kullaniyor. 2026 hedefi icin karar:
+`apps/web` Next 16.2 ve React 19.2 stable hattina gecmistir. Karar:
 
 - Yeni feature development hedefi: Next.js 16 + React 19.2 stable hattina gecis.
 - `middleware.ts` yerine Next 16 `proxy.ts` kullanimi tercih edilir.
 - Node.js hedefi zaten `>=22`, Next 16 icin yeterlidir.
-- Gecis ayri migration/refactor PR'i olarak yapilmalidir.
+- Gecis tamamlanmistir; production Turbopack build temizdir.
 
 Migration notlari:
 
@@ -411,13 +452,13 @@ Bu liste kod taramasina gore hazirlanmistir; implement turunda tek tek ele alinm
 
 | Alan | Mevcut durum | Refactor karari |
 |---|---|---|
-| Web stack | `apps/web` Next `^15.0.3`, React `^18.3.1` | Next 16 + React 19.2 migration planla |
+| Web stack | `apps/web` Next `^16.2.10`, React `^19.2.7` | Tamamlandi; stable surum hatti korunacak |
 | Proxy/middleware | `withApiSecurity` route wrapper var, global proxy yok | Global request boundary gerekirse `proxy.ts`; route wrapper devam |
 | Plugin registry | `apps/web/lib/plugin-registry.ts` sadece `quiz` import ediyor | Hushle/Vampire/Watch Party hazir oldukca registry'ye ekle |
 | Activity start | Start/list/read/action/end route var; ayni voice/stage channel'da ikinci aktif session 409 ile reddediliyor | Siradaki refactor Game Shell + HUD tarafinda |
 | Activity UI | Generic JSON action panel var | Game Shell + per-plugin renderClient + compact HUD/fullscreen modes |
 | Plugin settings | `plugins_enabled` tablo var; host artik install/enabled kontrolu yapiyor ve Server Apps tab'i temel install/config sunuyor | App permission screen ve per-channel/role enforcement sonraki refactor |
-| Identity links | Dokumana eklendi, schema kodunda yok | `user_identity_links` Drizzle schema + migration |
+| Identity links | `user_identity_links` schema, migration, unique provider-subject/user-provider constraint ve query katmani var; token saklanmaz | Signed IdP callback + state/nonce/PKCE kontrati official issuer hazir olunca |
 | Registry app catalog | Dokumana eklendi, schema kodunda yok | `registry_apps` Drizzle schema + registry UI/API |
 | Auth policy | Server Access & Auth policy schema/API/UI temeli var | Join enforcement, identity-link flow ve registry visitor handoff sonraki refactor |
 | One-click update | `pnpm lfctl update check/plan`, `pnpm lfctl backup verify`, `/admin/updates`, `/admin/updates/{runId}`, `/api/admin/updates`, Ed25519 manifest signature status, backup manifest gate, dry-run/apply/rollback runner preview, non-executing worker contract, command allowlist gate, structured command descriptor, explicit no-shell process runner, sequential worker orchestration, bounded stdout/stderr capture, shared worker event recorder, central execution policy gate, gated apply/rollback endpoint wiring, admin UI confirmation controls, `system_update_runs` history/detail modeli, `system_update_events` event timeline ve maintenance mode runtime guard var; admin execution iki env flag + body execute + tum gate'ler arkasinda | Maintenance/backup controls in update panel |
@@ -427,6 +468,21 @@ Bu liste kod taramasina gore hazirlanmistir; implement turunda tek tek ele alinm
 ## 11. Ilk implement sirasi onerisi
 
 1. Maintenance/backup controls in update panel.
-2. Next 16 + React 19.2 migration.
+2. Next 16 + React 19.2 migration. (Tamamlandi.)
 3. Bot profile/popover + message badge + configure/disable actions.
 4. Friends graph + rich profile activity text.
+
+## 12. Voice stream and instance shell decision
+
+- Screen sharing is publisher-to-SFU once, but viewer delivery is opt-in.
+  Remote clients do not subscribe until `Join stream`; `Leave stream`
+  unsubscribes screen video and system audio together.
+- Admin policy defines a maximum resolution (`480p` through `2160p`) and FPS
+  (`15`, `30`, `60`). A member preference can only select that ceiling or a
+  lower option.
+- Self-host web installations are single-community products and hide the
+  official global instance rail. The official app/hub keeps the rail for
+  account-owned, registry, and manually connected instances.
+- Profile status and bio are separate fields. Member profile cards show all
+  assigned roles with an allowlisted icon and color; voice participant volume
+  is a local `0-100` playback preference, not a server-side moderation value.

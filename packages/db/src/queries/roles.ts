@@ -27,6 +27,8 @@ export interface RoleRow {
   serverId: string;
   name: string;
   color: string | null;
+  icon: string | null;
+  displaySeparately: boolean;
   position: number;
   permissions: string[];
   createdAt: Date;
@@ -36,6 +38,8 @@ export interface CreateRoleInput {
   serverId: string;
   name: string;
   color?: string | null;
+  icon?: string | null;
+  displaySeparately?: boolean;
   position?: number;
   permissions: string[];
 }
@@ -45,7 +49,7 @@ export interface CreateRoleInput {
  * route layer can reject a rename of `@everyone` or a position-0 collision.
  */
 export const EVERYONE_ROLE_NAME = '@everyone';
-export const ADMIN_ROLE_NAME = '@admin';
+export const ADMIN_ROLE_NAME = 'Owner';
 
 /**
  * The default permission set for `@everyone`. New members get exactly
@@ -137,6 +141,7 @@ export async function seedDefaultRoles(
       .values({
         serverId,
         name: ADMIN_ROLE_NAME,
+        displaySeparately: false,
         position: 100,
         permissions: DEFAULT_ADMIN_PERMISSIONS,
       })
@@ -182,6 +187,8 @@ export async function createRole(db: DbClient, input: CreateRoleInput): Promise<
       serverId: input.serverId,
       name: input.name,
       color: input.color ?? null,
+      icon: input.icon ?? null,
+      displaySeparately: input.displaySeparately ?? false,
       position: input.position ?? 0,
       permissions: normalizePermissions(input.permissions),
     })
@@ -198,6 +205,8 @@ export async function listRolesForServer(db: DbClient, serverId: string): Promis
       serverId: roles.serverId,
       name: roles.name,
       color: roles.color,
+      icon: roles.icon,
+      displaySeparately: roles.displaySeparately,
       position: roles.position,
       permissions: roles.permissions,
       createdAt: roles.createdAt,
@@ -216,6 +225,8 @@ export async function getRoleById(db: DbClient, roleId: string): Promise<RoleRow
       serverId: roles.serverId,
       name: roles.name,
       color: roles.color,
+      icon: roles.icon,
+      displaySeparately: roles.displaySeparately,
       position: roles.position,
       permissions: roles.permissions,
       createdAt: roles.createdAt,
@@ -231,6 +242,8 @@ export async function getRoleById(db: DbClient, roleId: string): Promise<RoleRow
 export interface UpdateRoleInput {
   name?: string;
   color?: string | null;
+  icon?: string | null;
+  displaySeparately?: boolean;
   position?: number;
   permissions?: string[];
 }
@@ -243,6 +256,8 @@ export async function updateRole(
   const patch: Record<string, unknown> = {};
   if (input.name !== undefined) patch.name = input.name;
   if (input.color !== undefined) patch.color = input.color;
+  if (input.icon !== undefined) patch.icon = input.icon;
+  if (input.displaySeparately !== undefined) patch.displaySeparately = input.displaySeparately;
   if (input.position !== undefined) patch.position = input.position;
   if (input.permissions !== undefined) patch.permissions = normalizePermissions(input.permissions);
 

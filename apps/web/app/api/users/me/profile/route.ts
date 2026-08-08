@@ -12,9 +12,10 @@ const ProfilePatchSchema = z
   .object({
     displayName: z.string().trim().min(2).max(64).optional(),
     statusText: z.string().trim().max(128).nullable().optional(),
+    bio: z.string().trim().max(190).nullable().optional(),
   })
   .strict()
-  .refine((value) => value.displayName !== undefined || value.statusText !== undefined, {
+  .refine((value) => value.displayName !== undefined || value.statusText !== undefined || value.bio !== undefined, {
     message: 'At least one profile field is required.',
   });
 
@@ -36,6 +37,7 @@ async function handlePatch(req: Request): Promise<NextResponse> {
         id: updated.id,
         displayName: updated.displayName,
         statusText: updated.statusText,
+        bio: updated.bio,
       },
     },
     { headers: { 'Cache-Control': 'no-store' } }

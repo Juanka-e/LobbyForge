@@ -20,6 +20,7 @@ interface ChatMessage {
   body: string;
   attachment?: { name: string; size: string };
   blocked?: boolean;
+  pinned?: boolean;
 }
 
 interface Channel {
@@ -39,6 +40,7 @@ interface LobbyData {
   currentDisplayName: string;
   messages: ChatMessage[];
   isLive: boolean;
+  canManageMessages: boolean;
   members?: Array<{
     id: string;
     name: string;
@@ -59,6 +61,9 @@ export function LobbyMainArea({ data, canVoice }: { data: LobbyData; canVoice: b
 /** Live mode — inside LobbyVoiceProvider, can safely use useLobbyVoice(). */
 function LobbyMainAreaLive({ data }: { data: LobbyData }) {
   const voice = useLobbyVoice();
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showPinned, setShowPinned] = useState(false);
+  const [notificationsMuted, setNotificationsMuted] = useState(false);
   const connected = voice.connectionState === ConnectionState.Connected && !!voice.activeChannelId;
   // Use the provider's active text channel (switchable from sidebar) or
   // fall back to the SSR-provided one.
@@ -79,6 +84,25 @@ function LobbyMainAreaLive({ data }: { data: LobbyData }) {
     [data.members]
   );
 
+  useEffect(() => {
+    if (!activeChannelId) return;
+    try {
+      setNotificationsMuted(window.localStorage.getItem(`lf-channel-muted:${activeChannelId}`) === 'true');
+    } catch {
+      setNotificationsMuted(false);
+    }
+  }, [activeChannelId]);
+
+  function toggleChannelNotifications() {
+    setNotificationsMuted((current) => {
+      const next = !current;
+      if (activeChannelId) {
+        try { window.localStorage.setItem(`lf-channel-muted:${activeChannelId}`, String(next)); } catch { /* local preference */ }
+      }
+      return next;
+    });
+  }
+
   if (connected && voice.mainViewMode === 'voice' && voice.activeChannelId) {
     return (
       <main className="flex-1 flex flex-col bg-background min-w-0 relative animate-fade-in-up">
@@ -89,8 +113,16 @@ function LobbyMainAreaLive({ data }: { data: LobbyData }) {
 
   return (
     <main className="flex-1 flex flex-col bg-background min-w-0 relative text-[14px] animate-fade-in-up">
-      <ChannelHeader channelName={channelName} voiceConnected={connected} onToggleVoiceView={() => voice.setMainViewMode('voice')} />
-      <MessagesArea data={data} activeChannelId={activeChannelId} channelName={channelName} />
+      <ChannelHeader
+        channelName={channelName}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        showPinned={showPinned}
+        onTogglePinned={() => setShowPinned((value) => !value)}
+        notificationsMuted={notificationsMuted}
+        onToggleNotifications={toggleChannelNotifications}
+      />
+      <MessagesArea data={data} activeChannelId={activeChannelId} channelName={channelName} searchQuery={searchQuery} showPinned={showPinned} />
       <Composer
         channelName={channelName}
         serverId={data.serverId}
@@ -105,10 +137,13 @@ function LobbyMainAreaLive({ data }: { data: LobbyData }) {
 /** Demo mode — no voice provider, no hooks violations. */
 function LobbyMainAreaDemo({ data }: { data: LobbyData }) {
   const channelName = data.activeTextChannel?.name ?? 'general';
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showPinned, setShowPinned] = useState(false);
+  const [notificationsMuted, setNotificationsMuted] = useState(false);
   return (
     <main className="flex-1 flex flex-col bg-background min-w-0 relative text-[14px] animate-fade-in-up">
-      <ChannelHeader channelName={channelName} voiceConnected={false} onToggleVoiceView={() => {}} />
-      <MessagesArea data={data} activeChannelId={data.activeTextChannel?.id ?? null} channelName={channelName} />
+      <ChannelHeader channelName={channelName} searchQuery={searchQuery} onSearchChange={setSearchQuery} showPinned={showPinned} onTogglePinned={() => setShowPinned((value) => !value)} notificationsMuted={notificationsMuted} onToggleNotifications={() => setNotificationsMuted((value) => !value)} />
+      <MessagesArea data={data} activeChannelId={data.activeTextChannel?.id ?? null} channelName={channelName} searchQuery={searchQuery} showPinned={showPinned} />
       <Composer
         channelName={channelName}
         serverId={data.serverId}
@@ -122,12 +157,20 @@ function LobbyMainAreaDemo({ data }: { data: LobbyData }) {
 
 function ChannelHeader({
   channelName,
-  voiceConnected,
-  onToggleVoiceView,
+  searchQuery,
+  onSearchChange,
+  showPinned,
+  onTogglePinned,
+  notificationsMuted,
+  onToggleNotifications,
 }: {
   channelName: string;
-  voiceConnected: boolean;
-  onToggleVoiceView: () => void;
+  searchQuery: string;
+  onSearchChange: (value: string) => void;
+  showPinned: boolean;
+  onTogglePinned: () => void;
+  notificationsMuted: boolean;
+  onToggleNotifications: () => void;
 }) {
   return (
     <header className="h-16 px-6 flex items-center justify-between border-b border-border-subtle bg-surface-dim/80 backdrop-blur-md z-10 sticky top-0 shadow-sm">
@@ -140,21 +183,10 @@ function ChannelHeader({
         </p>
       </div>
       <div className="flex items-center gap-4">
-        {voiceConnected ? (
-          <button
-            type="button"
-            onClick={onToggleVoiceView}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-primary/10 border border-primary/20 text-primary text-xs font-medium hover:bg-primary/20 transition-colors"
-            title="Switch to full-screen voice/video view"
-          >
-            <span className="material-symbols-outlined text-[16px]">videocam</span>
-            Voice View
-          </button>
-        ) : null}
-        <button className="hover:text-text-primary transition-colors text-text-secondary">
-          <span className="material-symbols-outlined">notifications</span>
+        <button type="button" onClick={onToggleNotifications} title={notificationsMuted ? 'Enable channel notifications' : 'Mute channel notifications'} className={notificationsMuted ? 'text-danger hover:text-danger/80' : 'hover:text-text-primary transition-colors text-text-secondary'}>
+          <span className="material-symbols-outlined">{notificationsMuted ? 'notifications_off' : 'notifications'}</span>
         </button>
-        <button className="hover:text-text-primary transition-colors text-text-secondary">
+        <button type="button" onClick={onTogglePinned} aria-pressed={showPinned} title={showPinned ? 'Show all messages' : 'Show pinned messages'} className={showPinned ? 'text-primary' : 'hover:text-text-primary transition-colors text-text-secondary'}>
           <span className="material-symbols-outlined">push_pin</span>
         </button>
         <div className="relative hidden lg:block w-48">
@@ -163,6 +195,8 @@ function ChannelHeader({
             className="w-full bg-surface-container border border-border-subtle rounded-md py-1 pl-8 pr-2 text-label-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all"
             placeholder="Search"
             type="text"
+            value={searchQuery}
+            onChange={(event) => onSearchChange(event.target.value)}
           />
         </div>
       </div>
@@ -170,7 +204,7 @@ function ChannelHeader({
   );
 }
 
-function MessagesArea({ data, activeChannelId, channelName }: { data: LobbyData; activeChannelId: string | null; channelName: string }) {
+function MessagesArea({ data, activeChannelId, channelName, searchQuery, showPinned }: { data: LobbyData; activeChannelId: string | null; channelName: string; searchQuery: string; showPinned: boolean }) {
   const knownNames = useMemo(() => {
     const names: Record<string, string> = {};
     if (data.currentUserId) names[data.currentUserId] = data.currentDisplayName;
@@ -196,13 +230,16 @@ function MessagesArea({ data, activeChannelId, channelName }: { data: LobbyData;
           voiceChannelId: null,
           initialMessages: isInitialChannel ? data.messages : [],
           knownNames,
+          canManageMessages: data.canManageMessages,
         }}
+        searchQuery={searchQuery}
+        showPinned={showPinned}
       />
     );
   }
   return (
     <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6 flex flex-col-reverse">
-      {data.messages.map((m) => (
+      {data.messages.filter((message) => (!showPinned || message.pinned) && (!searchQuery.trim() || `${message.author} ${message.body}`.toLocaleLowerCase().includes(searchQuery.trim().toLocaleLowerCase()))).map((m) => (
         <Message key={m.id} message={m} />
       ))}
       <ChannelWelcome channelName={data.activeTextChannel?.name ?? 'general'} />

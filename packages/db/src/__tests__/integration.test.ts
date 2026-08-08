@@ -1,12 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import { createDb } from '../client.js';
-import { eq, sql } from 'drizzle-orm';
-import { instanceSettings, servers, users } from '../schema.js';
+import { and, eq, sql } from 'drizzle-orm';
+import { instanceSettings, invites, memberships, servers, users } from '../schema.js';
 import {
   completeInitialBootstrap,
   getInstanceBootstrapStatus,
   SetupAlreadyCompleteError,
 } from '../queries/instanceSettings.js';
+import { createLocalAccount } from '../queries/users.js';
+import { createInvite } from '../queries/invites.js';
+import {
+  createUserIdentityLink,
+  getIdentityLinkByProviderSubject,
+  listUserIdentityLinks,
+} from '../queries/userIdentityLinks.js';
 
 describe('Database Integrations', () => {
   const url = process.env.TEST_DATABASE_URL;
@@ -75,6 +82,126 @@ describe('Database Integrations', () => {
     } finally {
       await db.delete(instanceSettings).where(eq(instanceSettings.instanceId, instanceId));
       if (ownerId) await db.delete(users).where(eq(users.id, ownerId));
+    }
+  }, 15000);
+
+  it('creates a local account and default membership atomically', async () => {
+    const db = createDb(url);
+    const setup = await getInstanceBootstrapStatus(db);
+    if (!setup.firstServerId) throw new Error('Default instance has no first server');
+    const email = `registration-${crypto.randomUUID()}@example.invalid`;
+    let userId: string | undefined;
+
+    try {
+      const result = await createLocalAccount(db, {
+        email,
+        displayName: 'Registration Test',
+        passwordHash: '$test$not-a-real-password-hash',
+        serverId: setup.firstServerId,
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      userId = result.user.id;
+
+      const rows = await db
+        .select({ id: memberships.id, roleId: memberships.roleId })
+        .from(memberships)
+        .where(and(eq(memberships.serverId, setup.firstServerId), eq(memberships.userId, userId)));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.roleId).toBeTruthy();
+
+      const duplicate = await createLocalAccount(db, {
+        email,
+        displayName: 'Duplicate',
+        passwordHash: '$test$duplicate',
+        serverId: setup.firstServerId,
+      });
+      expect(duplicate).toEqual({ ok: false, error: 'email_exists' });
+    } finally {
+      if (userId) await db.delete(users).where(eq(users.id, userId));
+    }
+  }, 15000);
+
+  it('creates an invite-only local account and consumes the invite atomically', async () => {
+    const db = createDb(url);
+    const setup = await getInstanceBootstrapStatus(db);
+    if (!setup.firstServerId || !setup.ownerUserId) throw new Error('Default instance is not bootstrapped');
+    const email = `invite-registration-${crypto.randomUUID()}@example.invalid`;
+    const invite = await createInvite(db, {
+      serverId: setup.firstServerId,
+      createdBy: setup.ownerUserId,
+      maxUses: 1,
+    });
+    let userId: string | undefined;
+
+    try {
+      const result = await createLocalAccount(db, {
+        email,
+        displayName: 'Invite Registration Test',
+        passwordHash: '$test$not-a-real-password-hash',
+        inviteCode: invite.code,
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      userId = result.user.id;
+
+      const [storedInvite] = await db
+        .select({ currentUses: invites.currentUses })
+        .from(invites)
+        .where(eq(invites.id, invite.id));
+      expect(storedInvite?.currentUses).toBe(1);
+
+      const exhaustedEmail = `invite-exhausted-${crypto.randomUUID()}@example.invalid`;
+      const exhausted = await createLocalAccount(db, {
+        email: exhaustedEmail,
+        displayName: 'Must Roll Back',
+        passwordHash: '$test$not-a-real-password-hash',
+        inviteCode: invite.code,
+      });
+      expect(exhausted).toEqual({ ok: false, error: 'exhausted' });
+      const orphan = await db.select({ id: users.id }).from(users).where(eq(users.email, exhaustedEmail));
+      expect(orphan).toHaveLength(0);
+    } finally {
+      await db.delete(invites).where(eq(invites.id, invite.id));
+      if (userId) await db.delete(users).where(eq(users.id, userId));
+    }
+  }, 15000);
+
+  it('links an external subject to exactly one local account without storing tokens', async () => {
+    const db = createDb(url);
+    const nonce = crypto.randomUUID();
+    const inserted = await db
+      .insert(users)
+      .values([
+        { email: `identity-a-${nonce}@example.invalid`, displayName: 'Identity A' },
+        { email: `identity-b-${nonce}@example.invalid`, displayName: 'Identity B' },
+      ])
+      .returning({ id: users.id });
+    const [userA, userB] = inserted;
+    if (!userA || !userB) throw new Error('Identity integration users were not created');
+
+    try {
+      const link = await createUserIdentityLink(db, {
+        userId: userA.id,
+        provider: 'lobbyforge',
+        providerSubject: `official-${nonce}`,
+        providerEmail: `official-${nonce}@example.invalid`,
+        emailVerified: true,
+        claims: { displayName: 'Official User' },
+      });
+      expect(link.userId).toBe(userA.id);
+      expect(await getIdentityLinkByProviderSubject(db, 'lobbyforge', `official-${nonce}`))
+        .toMatchObject({ id: link.id, userId: userA.id });
+      expect(await listUserIdentityLinks(db, userA.id)).toHaveLength(1);
+
+      await expect(createUserIdentityLink(db, {
+        userId: userB.id,
+        provider: 'lobbyforge',
+        providerSubject: `official-${nonce}`,
+      })).rejects.toBeDefined();
+    } finally {
+      await db.delete(users).where(eq(users.id, userA.id));
+      await db.delete(users).where(eq(users.id, userB.id));
     }
   }, 15000);
 });

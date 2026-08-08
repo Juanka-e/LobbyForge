@@ -51,6 +51,23 @@ describe('issueLiveKitToken', () => {
     expect((payload.video as LiveKitGrants).canPublishSources).toEqual(['microphone']);
   });
 
+  it('serializes screen-share grants with LiveKit wire names', async () => {
+    const token = await issueLiveKitToken({
+      apiKey: API_KEY,
+      apiSecret: API_SECRET,
+      identity: 'g_1',
+      name: 'x',
+      grants: { room: 'r', canPublishSources: ['camera', 'screen-share', 'screen-share-audio'] },
+      now: NOW,
+    });
+    const { payload } = await jwtVerify(token, SECRET_BYTES, { currentDate: new Date(NOW * 1000) });
+    expect((payload.video as { canPublishSources: string[] }).canPublishSources).toEqual([
+      'camera',
+      'screen_share',
+      'screen_share_audio',
+    ]);
+  });
+
   it('includes metadata when provided', async () => {
     const token = await issueLiveKitToken({
       apiKey: API_KEY,

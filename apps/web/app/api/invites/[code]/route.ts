@@ -52,5 +52,5 @@ async function handleGet(_req: Request, ctx: { params: Promise<{ code: string }>
 
 export const GET = withApiSecurity(handleGet, {
   allowedMethods: ['GET'],
-  rateLimit: { identifier: 'invite-metadata', config: { windowMs: 60_000, maxRequests: 60 } },
+  rateLimit: { identifier: 'invite-metadata', config: { windowMs: 60_000, maxRequests: 10 } },
 });

@@ -35,7 +35,7 @@ Kısa İngilizce positioning:
 Bu dokümanda kararlaştırılan stack:
 
 - Web UI/API: Next.js
-- Desktop: Electron
+- Desktop: Tauri 2 (media spike gated)
 - Reverse proxy: Nginx
 - Database: PostgreSQL
 - Cache / queue / pub-sub / presence: Redis
@@ -59,7 +59,7 @@ Bu dokümanda kararlaştırılan stack:
 3. Public self-hosted server directory
 4. Doctor/capacity advisor
 5. JSON dil paketleriyle kolay lokalizasyon
-6. Electron ile global push-to-talk ve masaüstü deneyimi
+6. Tauri ile global push-to-talk ve masaüstü deneyimi
 7. Bot sistemi: müzik, moderasyon, oyun hostu, watch party
 
 ## 6. İlk official pluginler
@@ -81,7 +81,7 @@ Bu dokümanda kararlaştırılan stack:
 5. Installer ve self-host polish
 6. LobbyForge Doctor
 7. Vampir Köylü MVP
-8. Electron desktop wrapper
+8. Tauri desktop wrapper
 9. Public directory / registry
 10. Bot SDK + Watch Party + Music Bot prototipleri
 
@@ -104,7 +104,7 @@ Bu dokümanda kararlaştırılan stack:
 Repo açık kaynak olmalıdır. Şu parçalar açık kaynak olur:
 
 - Web app
-- Electron wrapper
+- Tauri wrapper
 - Plugin SDK
 - Bot SDK
 - Official pluginler
@@ -120,7 +120,7 @@ Resmi registry instance ayrica yonetilir. Kod acik olur ama official public list
 
 LobbyForge iki farkli kimlik alanini bilerek ayri tutar:
 
-- **Official LobbyForge account:** lobbyforge.org, official registry, app/developer portal, official community hub ve Electron desktop baglanti senkronizasyonu icindir.
+- **Official LobbyForge account:** lobbyforge.org, official registry, app/developer portal, official community hub ve Tauri desktop baglanti senkronizasyonu icindir.
 - **Instance local account:** her self-host instance'in kendi users/memberships/roles verisidir.
 
 MVP'de federasyon yoktur. Bu yuzden bir kullanicinin official LobbyForge hesabinin olmasi, tum self-host instance'larda otomatik hesap sahibi oldugu anlamina gelmez. Varsayilan model:
@@ -154,7 +154,7 @@ Ilk surumun ana ekrani official LobbyForge hub + self-host/manual connect deneyi
 2. Official hub/community icinde oyun odalarina girebilir.
 3. Public registry'den self-host instance kesfedebilir.
 4. Direkt domain/IP ile self-host instance'a baglanabilir.
-5. Isterse Electron desktop indirip ayni web deneyimini desktop konforuyla kullanabilir.
+5. Isterse Tauri desktop indirip ayni web deneyimini desktop konforuyla kullanabilir.
 
 Self-host instance'lar registry'ye bagimli olmadan calismaya devam eder.
 

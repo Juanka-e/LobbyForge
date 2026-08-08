@@ -6,7 +6,7 @@ This document covers:
 - The DB query helpers ([`packages/db/src/queries/roles.ts`](../packages/db/src/queries/roles.ts), extended [`packages/db/src/queries/memberships.ts`](../packages/db/src/queries/memberships.ts))
 - The 14 permission constants in [`@lobbyforge/core`](../packages/core/src/permissions.ts)
 - The 8 new HTTP endpoints (5 role-management + 3 membership)
-- The default `@everyone` + `@admin` seed on server creation
+- The default `@everyone` + `Owner` seed on server creation
 - The `getUserPermissions` helper that powers every mutation route
 - The relationship to M10 + M11 + M12
 - The out-of-scope list (invites, bans, audit log, role reordering UI)
@@ -45,7 +45,15 @@ export const CorePermission = {
 | Name | Position | Default permissions | Assigned to |
 |---|---|---|---|
 | `@everyone` | 0 | `send_messages`, `connect_voice`, `speak`, `add_reactions`, `create_invite` | Every future member (the seed only assigns the owner; M14's invite-redeem will assign it to new joiners) |
-| `@admin` | 100 | `administrator`, `manage_server`, `manage_channels`, `manage_roles`, `manage_messages`, `kick_members`, `ban_members`, `mute_members`, `deafen_members`, `start_activity` | The owner, on create |
+| `Owner` | 100 | `administrator`, `manage_server`, `manage_channels`, `manage_roles`, `manage_messages`, `kick_members`, `ban_members`, `mute_members`, `deafen_members`, `start_activity` | The owner, on create |
+
+`Administrator` is a permission, not a reserved display name. The initial owner receives the ordinary `Owner` role carrying that permission. `@everyone` remains the structural base permission layer and is not rendered as a profile badge.
+
+## Display hierarchy and member grouping
+
+Roles are ordered by descending `position`. A member's highest assigned non-`@everyone` role supplies the visible name color and role icon. Profiles show all assigned non-structural roles.
+
+`displaySeparately` is independent from permissions. When enabled, online members whose highest separately displayed role is that role appear under its own heading in the right member list. Each member appears once. Other online members remain under Online, and offline members remain under Offline.
 
 The owner's `@admin` assignment means the freshly created server has the same capabilities the M10 + M11 hardcoded "owner-only" rules used to enforce — `MANAGE_CHANNELS`, `MANAGE_MESSAGES`, `MANAGE_ROLES`, etc. all flow through `hasPermission([administrator], anything) === true`.
 
@@ -84,9 +92,9 @@ The owner shortcut is what makes the "owner always has ADMINISTRATOR" rule work 
 | Method | Path | Body | Description | Rate limit |
 |---|---|---|---|---|
 | `GET`    | `/api/servers/{id}/roles`         | — | List the server's roles, ordered by `position ASC`. Members can read. | 60 / min |
-| `POST`   | `/api/servers/{id}/roles`         | `{ name, color?, position?, permissions }` | Create a role. Requires `MANAGE_ROLES`. | 10 / min |
+| `POST`   | `/api/servers/{id}/roles`         | `{ name, color?, icon?, displaySeparately?, position?, permissions }` | Create a role. Requires `MANAGE_ROLES`. | 10 / min |
 | `GET`    | `/api/servers/{id}/roles/{roleId}` | — | Fetch a single role. Members can read. | 60 / min |
-| `PATCH`  | `/api/servers/{id}/roles/{roleId}` | `{ name?, color?, position?, permissions? }` | Partial update. Requires `MANAGE_ROLES`. Renaming `@everyone` is rejected. | 30 / min |
+| `PATCH`  | `/api/servers/{id}/roles/{roleId}` | `{ name?, color?, icon?, displaySeparately?, position?, permissions? }` | Partial update. Requires `MANAGE_ROLES`. Renaming `@everyone` is rejected. | 30 / min |
 | `DELETE` | `/api/servers/{id}/roles/{roleId}` | — | Delete a role. Requires `MANAGE_ROLES`. Deleting `@everyone` is rejected (it's structural, not a real role). Best-effort clears the `roleId` on memberships that pointed at the role. | 10 / min |
 
 ### Members
@@ -116,6 +124,8 @@ interface RoleJson {
   serverId: string;       // uuid
   name: string;           // 1..64 chars
   color: string | null;   // '#RRGGBB' or null
+  icon: string | null;
+  displaySeparately: boolean;
   position: number;       // dense, server-scoped
   permissions: string[];  // subset of CorePermission values
   createdAt: string;      // ISO-8601
@@ -169,7 +179,7 @@ The "owner override" survives as a data fact (the owner has `ADMINISTRATOR` via 
 ```ts
 // packages/db/src/queries/roles.ts
 seedDefaultRoles(db, serverId, ownerUserId)
-  // Idempotent. Creates @everyone + @admin and assigns @admin to the owner.
+  // Idempotent. Creates @everyone + Owner and assigns Owner to the owner.
   // Returns { everyoneRoleId, adminRoleId }.
 
 createRole(db, { serverId, name, color?, position?, permissions })

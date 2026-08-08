@@ -1,5 +1,5 @@
 export type InputMode = 'voice_activity' | 'push_to_talk';
-export type ScreenQuality = 'auto' | 'low' | 'standard' | 'high';
+export type ScreenQuality = 'auto' | 'low' | 'standard' | 'high' | 'q1440' | 'q2160';
 export type ScreenFps = '15' | '30' | '60';
 
 export type VoiceVideoPreferences = {
@@ -55,7 +55,9 @@ function coerceInputMode(value: unknown): InputMode {
 }
 
 function coerceScreenQuality(value: unknown): ScreenQuality {
-  return value === 'low' || value === 'standard' || value === 'high' ? value : 'auto';
+  return value === 'low' || value === 'standard' || value === 'high' || value === 'q1440' || value === 'q2160'
+    ? value
+    : 'auto';
 }
 
 function coerceScreenFps(value: unknown): ScreenFps {

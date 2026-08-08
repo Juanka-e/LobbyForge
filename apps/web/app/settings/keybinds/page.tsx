@@ -19,10 +19,10 @@ type SettingsResponse = {
 
 const ACTIONS: { key: KeybindAction; label: string; description: string; icon: string }[] = [
   { key: 'pushToTalk', label: 'Push to talk', description: 'Hold this key to open your mic in a voice room.', icon: 'keyboard_voice' },
-  { key: 'toggleMute', label: 'Toggle mute', description: 'Reserved for the global mute shortcut.', icon: 'mic_off' },
-  { key: 'toggleDeafen', label: 'Toggle deafen', description: 'Reserved for muting incoming voice audio.', icon: 'headphones' },
-  { key: 'toggleCamera', label: 'Toggle camera', description: 'Reserved for quickly turning camera on or off.', icon: 'videocam' },
-  { key: 'toggleScreenShare', label: 'Toggle screen share', description: 'Reserved for quickly starting or stopping share.', icon: 'screen_share' },
+  { key: 'toggleMute', label: 'Toggle mute', description: 'Mute or unmute your microphone while LobbyForge is focused.', icon: 'mic_off' },
+  { key: 'toggleDeafen', label: 'Toggle deafen', description: 'Mute or restore incoming voice audio.', icon: 'headphones' },
+  { key: 'toggleCamera', label: 'Toggle camera', description: 'Turn your camera on or off in the current room.', icon: 'videocam' },
+  { key: 'toggleScreenShare', label: 'Toggle screen share', description: 'Start or stop sharing your screen.', icon: 'screen_share' },
 ];
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {

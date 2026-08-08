@@ -280,7 +280,7 @@ MVP gorunumleri:
 - **Fullscreen activity:** oyunu tam ekran oynama
 - **Compact HUD:** voice controls ustunde timer/skor/phase/sira bilgisi
 
-Electron ileri asama:
+Tauri ileri asama:
 
 - always-on-top floating overlay
 - global PTT ile birlikte kucuk oyun HUD

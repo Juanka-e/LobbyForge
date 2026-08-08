@@ -5,7 +5,7 @@
 Bileşenler:
 
 - Next.js Web UI/API
-- Electron Desktop Wrapper
+- Tauri Desktop Wrapper
 - PostgreSQL
 - Redis
 - LiveKit Server
@@ -17,7 +17,7 @@ Bileşenler:
 Basit akış:
 
 ```txt
-Browser/Electron
+Browser/Tauri
    ↓ HTTPS/WSS
 Nginx
    ├── web:3000      → Next.js UI/API

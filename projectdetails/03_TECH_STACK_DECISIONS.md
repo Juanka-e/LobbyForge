@@ -7,7 +7,7 @@
 - Cache/pubsub/presence: Redis
 - Media/SFU: LiveKit
 - UI/API: Next.js
-- Desktop: Electron
+- Desktop: Tauri 2 (media spike gated; Electron fallback only)
 - Deployment: Docker Compose
 - Server OS: Ubuntu
 - Çeviri: JSON language packs
@@ -122,20 +122,16 @@ Gecis ayri migration olarak yapilmalidir:
 - Playwright + Vitest smoke suite calisir
 - production Docker build test edilir
 
-## 7. Neden Electron?
+## 7. Neden Tauri 2?
 
-Electron ana ürün değildir; web uygulamasının desktop wrapper’ıdır.
+Tauri ana ürün değildir; web uygulamasının düşük kaynak kullanan desktop
+kabuğudur. Global PTT, tray, native notification, deep link ve imzalı updater
+resmi pluginlerle sağlanır. Remote self-host sayfalara genel native yetki
+verilmez; capability modeli deny-by-default kalır.
 
-Gerekçeler:
-
-- global push-to-talk
-- tray
-- masaüstü bildirimleri
-- cihaz kısayolları
-- oyun oynarken kolay kullanım
-- auto-update
-
-Electron ilk günden değil, web app oturduktan sonra eklenmelidir.
+Karar, Windows 10/11 üzerinde LiveKit mic/camera/screen-share ve global PTT
+spike'ının geçmesine bağlıdır. Bloklayıcı WebView2 sorunu çıkarsa Electron
+compatibility fallback olarak yeniden değerlendirilir.
 
 ## 8. ORM seçimi
 

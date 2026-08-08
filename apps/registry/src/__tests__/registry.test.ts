@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { APP_NAME, createServerEntry, listPublicEntries, findEntryById } from '../index.js';
+import {
+  APP_NAME,
+  createServerEntry,
+  listPublicEntries,
+  findEntryById,
+  normalizeRegistryInstanceUrl,
+} from '../index.js';
 
 describe('@lobbyforge/registry', () => {
   it('createServerEntry assigns id and defaults', () => {
@@ -26,5 +32,20 @@ describe('@lobbyforge/registry', () => {
 
   it('exposes APP_NAME', () => {
     expect(APP_NAME).toBe('LobbyForge Registry');
+  });
+
+  it('accepts only public HTTPS origins for registry entries', () => {
+    expect(normalizeRegistryInstanceUrl('https://community.example/')).toBe('https://community.example');
+    expect(() => normalizeRegistryInstanceUrl('http://community.example')).toThrow(/HTTPS/);
+    expect(() => normalizeRegistryInstanceUrl('https://127.0.0.1')).toThrow(/Private network/);
+    expect(() => normalizeRegistryInstanceUrl('https://user:pass@community.example')).toThrow(/credentials/);
+    expect(() => normalizeRegistryInstanceUrl('https://community.example/admin')).toThrow(/origin/);
+  });
+
+  it('allows explicit loopback HTTP only for local development', () => {
+    expect(normalizeRegistryInstanceUrl('http://localhost:3000', { allowLoopbackHttp: true }))
+      .toBe('http://localhost:3000');
+    expect(() => normalizeRegistryInstanceUrl('http://192.168.1.2', { allowLoopbackHttp: true }))
+      .toThrow(/HTTPS/);
   });
 });

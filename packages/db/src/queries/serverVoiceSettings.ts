@@ -11,6 +11,8 @@ export interface ServerVoiceSettingsRow {
   allowScreenShare: boolean;
   maxCameraUsersPerRoom: number | null;
   maxScreenShareUsersPerRoom: number | null;
+  maxScreenShareHeight: number;
+  maxScreenShareFps: number;
   updatedAt: Date;
 }
 
@@ -22,6 +24,8 @@ export interface UpdateServerVoiceSettingsInput {
   allowScreenShare?: boolean;
   maxCameraUsersPerRoom?: number | null;
   maxScreenShareUsersPerRoom?: number | null;
+  maxScreenShareHeight?: number;
+  maxScreenShareFps?: number;
 }
 
 export function defaultServerVoiceSettings(serverId: string): ServerVoiceSettingsRow {
@@ -34,6 +38,8 @@ export function defaultServerVoiceSettings(serverId: string): ServerVoiceSetting
     allowScreenShare: true,
     maxCameraUsersPerRoom: null,
     maxScreenShareUsersPerRoom: null,
+    maxScreenShareHeight: 1080,
+    maxScreenShareFps: 30,
     updatedAt: new Date(0),
   };
 }
@@ -52,6 +58,8 @@ export async function getEffectiveServerVoiceSettings(
       allowScreenShare: serverVoiceSettings.allowScreenShare,
       maxCameraUsersPerRoom: serverVoiceSettings.maxCameraUsersPerRoom,
       maxScreenShareUsersPerRoom: serverVoiceSettings.maxScreenShareUsersPerRoom,
+      maxScreenShareHeight: serverVoiceSettings.maxScreenShareHeight,
+      maxScreenShareFps: serverVoiceSettings.maxScreenShareFps,
       updatedAt: serverVoiceSettings.updatedAt,
     })
     .from(serverVoiceSettings)
@@ -77,6 +85,8 @@ export async function updateServerVoiceSettings(
     ...(input.maxScreenShareUsersPerRoom !== undefined
       ? { maxScreenShareUsersPerRoom: input.maxScreenShareUsersPerRoom }
       : {}),
+    ...(input.maxScreenShareHeight !== undefined ? { maxScreenShareHeight: input.maxScreenShareHeight } : {}),
+    ...(input.maxScreenShareFps !== undefined ? { maxScreenShareFps: input.maxScreenShareFps } : {}),
     updatedAt: new Date(),
   };
 
@@ -96,6 +106,8 @@ export async function updateServerVoiceSettings(
       allowScreenShare: serverVoiceSettings.allowScreenShare,
       maxCameraUsersPerRoom: serverVoiceSettings.maxCameraUsersPerRoom,
       maxScreenShareUsersPerRoom: serverVoiceSettings.maxScreenShareUsersPerRoom,
+      maxScreenShareHeight: serverVoiceSettings.maxScreenShareHeight,
+      maxScreenShareFps: serverVoiceSettings.maxScreenShareFps,
       updatedAt: serverVoiceSettings.updatedAt,
     });
   if (!row) throw new Error('updateServerVoiceSettings: upsert returned no rows');

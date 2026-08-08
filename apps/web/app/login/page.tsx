@@ -45,7 +45,7 @@ export default async function LoginPage({
         </p>
         <LoginForm
           guestEnabled={settings.guestAccessEnabled && settings.registrationMode !== 'closed'}
-          inviteOnly={inviteOnly}
+          registrationMode={settings.registrationMode}
           initialInviteCode={invite}
         />
       </section>

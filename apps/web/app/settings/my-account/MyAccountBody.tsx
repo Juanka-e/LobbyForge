@@ -1,6 +1,9 @@
 'use client';
 
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { UserRow } from '@lobbyforge/db';
+import { ChangePasswordModal } from '@/components/modals/ChangePasswordModal';
 
 export default function MyAccountBody({
   user,
@@ -9,6 +12,39 @@ export default function MyAccountBody({
   user: UserRow | null;
   signedIn: boolean;
 }) {
+  const router = useRouter();
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const [accountError, setAccountError] = useState<string | null>(null);
+
+  async function changePassword(input: { currentPassword: string; newPassword: string }) {
+    const response = await fetch('/api/auth/password', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    if (!response.ok) throw new Error(body.error ?? 'Password could not be changed.');
+  }
+
+  async function signOut() {
+    setSigningOut(true);
+    setAccountError(null);
+    const response = await fetch('/api/auth/logout', {
+      method: 'POST',
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      setAccountError(body.error ?? 'Could not sign out.');
+      setSigningOut(false);
+      return;
+    }
+    router.replace('/login');
+    router.refresh();
+  }
+
   if (!signedIn || !user) {
     return (
       <section className="max-w-3xl mx-auto">
@@ -29,7 +65,7 @@ export default function MyAccountBody({
 
         <Section title="Account Identity">
           <Row label="Display name" value={user.displayName} readOnly />
-          <Row label="Email" value={user.email ?? 'Not set'} badge="Planned" />
+          <Row label="Email" value={user.email ?? 'Not set'} readOnly />
           <Row
             label="Account type"
             value={user.isGuest ? 'Guest account' : 'Local account'}
@@ -44,13 +80,9 @@ export default function MyAccountBody({
           <Row
             label="Password"
             value={user.isGuest ? 'Not set (guest)' : 'Set'}
-            badge="Planned"
-          />
-          <Row label="Two-step verification" value="Off" badge="Planned" />
-          <Row
-            label="Recovery email"
-            value={user.email ? 'Verified' : 'Not set'}
-            badge={user.email ? undefined : 'Planned'}
+            action={user.isGuest ? undefined : 'Change'}
+            onAction={user.isGuest ? undefined : () => setPasswordOpen(true)}
+            badge={user.isGuest ? 'Unavailable' : undefined}
           />
         </Section>
 
@@ -69,13 +101,22 @@ export default function MyAccountBody({
             value="Manage signed-in devices"
             href="/settings/active-sessions"
             action="Open"
+          />
+          <Row
+            label="Current session"
+            value={signingOut ? 'Signing out...' : 'Sign out on this device'}
+            action="Sign out"
+            onAction={signingOut ? undefined : signOut}
             last
           />
+          {accountError ? <p role="alert" className="text-sm text-danger">{accountError}</p> : null}
         </Section>
 
-        <Section title="Account Actions" tone="danger">
-          <Row label="Export local profile data" value="Not available yet" badge="Planned" last />
-        </Section>
+        <ChangePasswordModal
+          open={passwordOpen}
+          onClose={() => setPasswordOpen(false)}
+          onSave={changePassword}
+        />
       </section>
   );
 }
@@ -83,18 +124,14 @@ export default function MyAccountBody({
 function Section({
   title,
   children,
-  tone = 'default',
 }: {
   title: string;
   children: React.ReactNode;
-  tone?: 'default' | 'danger';
 }) {
   return (
     <section className="space-y-4">
       <h2
-        className={`text-xs uppercase tracking-wider border-b border-border-subtle pb-2 ${
-          tone === 'danger' ? 'text-danger' : 'text-text-secondary'
-        }`}
+        className="text-xs uppercase tracking-wider border-b border-border-subtle pb-2 text-text-secondary"
       >
         {title}
       </h2>
@@ -109,6 +146,7 @@ function Row({
   readOnly = false,
   action,
   href,
+  onAction,
   badge,
   last = false,
 }: {
@@ -117,6 +155,7 @@ function Row({
   readOnly?: boolean;
   action?: string;
   href?: string;
+  onAction?: () => void;
   badge?: string;
   last?: boolean;
 }) {
@@ -138,6 +177,10 @@ function Row({
         <span className="px-2 py-1 rounded bg-surface-container-high text-text-muted text-[10px] uppercase tracking-wide">
           {badge}
         </span>
+      ) : action && onAction ? (
+        <button type="button" onClick={onAction} className="btn-secondary-sm">
+          {action}
+        </button>
       ) : action && href ? (
         <a href={href} className="btn-secondary-sm">
           {action}

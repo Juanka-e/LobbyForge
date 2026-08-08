@@ -16,8 +16,9 @@ export default function ProfileBody({
   const [bannerUrl, setBannerUrl] = useState<string | null>(user?.bannerUrl ?? null);
   const [displayName, setDisplayName] = useState(user?.displayName ?? '');
   const [statusText, setStatusText] = useState(user?.statusText ?? '');
+  const [bio, setBio] = useState(user?.bio ?? '');
   const [serverNickname, setServerNickname] = useState(serverProfile?.nickname ?? '');
-  const [editing, setEditing] = useState<'displayName' | 'statusText' | 'serverNickname' | null>(null);
+  const [editing, setEditing] = useState<'displayName' | 'statusText' | 'bio' | 'serverNickname' | null>(null);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [bannerBusy, setBannerBusy] = useState(false);
@@ -92,9 +93,9 @@ export default function ProfileBody({
     if (bannerInputRef.current) bannerInputRef.current.value = '';
   }
 
-  function beginEdit(field: 'displayName' | 'statusText' | 'serverNickname') {
+  function beginEdit(field: 'displayName' | 'statusText' | 'bio' | 'serverNickname') {
     setEditing(field);
-    setDraft(field === 'displayName' ? displayName : field === 'statusText' ? statusText : serverNickname);
+    setDraft(field === 'displayName' ? displayName : field === 'statusText' ? statusText : field === 'bio' ? bio : serverNickname);
     setError(null);
   }
 
@@ -121,7 +122,9 @@ export default function ProfileBody({
       }
       const body = editing === 'displayName'
         ? { displayName: draft }
-        : { statusText: draft.trim() ? draft : null };
+        : editing === 'bio'
+          ? { bio: draft.trim() ? draft : null }
+          : { statusText: draft.trim() ? draft : null };
       const res = await fetch('/api/users/me/profile', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -131,9 +134,10 @@ export default function ProfileBody({
         const detail = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(detail.error ?? `HTTP ${res.status}`);
       }
-      const payload = (await res.json()) as { user: { displayName: string; statusText: string | null } };
+      const payload = (await res.json()) as { user: { displayName: string; statusText: string | null; bio: string | null } };
       setDisplayName(payload.user.displayName);
       setStatusText(payload.user.statusText ?? '');
+      setBio(payload.user.bio ?? '');
       setEditing(null);
       setDraft('');
     } catch (err) {
@@ -231,7 +235,18 @@ export default function ProfileBody({
             onSave={saveProfileField}
             onCancel={() => setEditing(null)}
           />
-          <Row label="Pronouns" value="Not set" badge="Planned" last />
+          <EditableRow
+            label="About me"
+            value={bio || 'No bio set'}
+            editing={editing === 'bio'}
+            draft={draft}
+            maxLength={190}
+            busy={busy}
+            onBegin={() => beginEdit('bio')}
+            onDraft={setDraft}
+            onSave={saveProfileField}
+            onCancel={() => setEditing(null)}
+          />
         </Section>
 
         <Section title="Server-specific">

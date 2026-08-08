@@ -166,6 +166,15 @@ only; page-route discovery for the legacy Pages Router would be noise here.
 - The four standard security headers (see `DOCTOR.md` for the list).
 - A 405 + `Allow` header for any method not in the allowlist.
 - An atomic Redis fixed-window rate limit in production, configurable per route.
+- Redis-backed session revocation for authenticated cookies. Revoked sessions
+  are rejected centrally before route handlers run. Login, guest sign-in and
+  first-run setup explicitly bypass this check so a revoked browser can recover.
+
+Local owner credentials are created atomically by `/api/setup/complete` using
+scrypt. `/api/auth/login` uses a dummy-hash verification for unknown accounts
+to reduce timing-based account discovery. `/api/auth/password` verifies the
+current credential, performs an old-hash compare-and-swap update, and revokes
+other tracked sessions.
 
 What is **not** there yet:
 
@@ -187,7 +196,9 @@ The latest security pass added these concrete guards:
 - HSTS, `nosniff`, `DENY`, strict referrer policy, and camera/microphone
   permissions are emitted for every route.
 - Production dependencies are pinned to patched Drizzle/PostCSS/esbuild
-  versions; `pnpm audit --prod` reports no known vulnerabilities.
+  versions. On 2026-07-16 both pnpm 10.12.1 and 11.13.0 audit clients received
+  HTTP 410 from npm's retired legacy audit endpoint, so this pass does not
+  claim a successful advisory result.
 
 - `/api/livekit/token` requires `serverId`, `channelId`, local `uid`, server
   membership, voice/stage channel type, and `CONNECT_VOICE`.
@@ -201,6 +212,9 @@ The latest security pass added these concrete guards:
 - `/api/servers/{id}/access-policy` stores the server's join policy,
   official LobbyForge identity behavior, local-account policy, and
   account-linking mode. Updates require `MANAGE_SERVER`.
+- Local registration honors an explicitly persisted server access policy
+  before password hashing. Invite-only, local-account-disabled, and approval
+  policies cannot be bypassed through the instance registration endpoint.
 - `/api/servers/{id}/bots` lists server bots for members. The Server
   `bots` tab shows `BOT`, trust, enabled/disabled, token status, and
   declared permissions.
@@ -295,7 +309,8 @@ The interaction contract is fixed:
   exposes open, invite-only, and closed registration modes, guest access, SEO
   indexing, title, and description with a sticky save/reset footer. The PATCH
   endpoint is admin-gated, rate-limited, schema-validated, and body-size
-  limited.
+  limited. The page links the first community to its canonical Access policy
+  tab for official identity, account linking, and first-join approval.
 - `/admin/settings/invites` is wired to the invite APIs. Admins can create,
   search, filter, copy active links, and confirm revocation. Public invite
   metadata and redeem routes accept only the canonical 12-character invite
@@ -351,9 +366,57 @@ The interaction contract is fixed:
 
 - `/admin/updates` renders the guarded self-host update plan for admins.
 - `/api/admin/updates?action=check|plan` exposes the same planner as JSON.
-- `POST /api/admin/updates` currently returns 501. Execution remains locked
-  until signed manifest verification, backup verification, and the self-host
-  script runner are implemented.
+- `POST /api/admin/updates` supports dry-run, backup verification, and gated
+  apply/rollback. Live execution requires both update execution environment
+  flags, explicit request confirmation, maintenance mode, a verified signed
+  manifest, a verified backup, and an allowlisted no-shell worker plan.
+
+## Voice streams and profiles
+
+- Remote screen shares are opt-in. The LiveKit client connects with
+  `autoSubscribe: false`, automatically subscribes to microphone/camera, and
+  subscribes to screen-share video/audio only after `Join stream`. Leaving a
+  stream unsubscribes both tracks and stops downstream media delivery.
+- Community admins set the maximum screen-share resolution and frame rate.
+  Members may choose the configured maximum or a lower value; capture
+  constraints are clamped client-side to the policy returned with the signed
+  room token.
+- Voice-only full-screen tiles use a compact fixed layout. Camera and joined
+  screen-share tracks retain the responsive stage/filmstrip layout.
+- The full-screen call dock groups connection state, microphone, deafen,
+  camera, screen share/quality, Voice & Video settings, and disconnect in one
+  compact bottom control surface. Opening Voice & Video settings does not leave
+  the active room.
+- Text-only lobby sessions refresh their Redis presence every 30 seconds; the
+  5-second voice heartbeat takes over while connected. Visibility/focus also
+  triggers a refresh, so an open lobby does not fall offline after the 90-second
+  Redis TTL.
+- Camera and screen share are independent media surfaces. A publisher first
+  sees a compact local stream preview; joining the stream promotes it to the
+  stage. When the same participant also has a camera track, desktop renders the
+  two sources side by side and narrow viewports stack them. The participant is
+  removed from the auxiliary filmstrip to avoid a third duplicate tile.
+- The Voice View participant order is a persisted local preference: default,
+  camera first, or alphabetical. Voice-channel member rows expose camera and
+  screen-share icons without subscribing the viewer to screen media. Those
+  indicators are derived from unmuted, live LiveKit publications and are
+  removed after publication teardown completes.
+- Disconnect is optimistic and idempotent: it clears the local call UI and
+  presence state even if the LiveKit room reference was already lost, then
+  finishes transport cleanup when a room still exists.
+- Member popovers expose a separate bio, short status, all assigned roles,
+  and a local per-participant volume slider while that member is in voice.
+- Role icons use a fixed Material Symbols allowlist validated by both Zod and
+  a PostgreSQL check constraint. Role color values remain strict six-digit
+  hex colors.
+
+## Deployment shell
+
+- Official deployments render the global instance rail and add-community
+  entry points.
+- Self-host deployments render a single-community shell: the community
+  channel sidebar starts at the left edge and official instance switching is
+  absent. A desktop client may provide its own native account/instance switcher.
 
 ## Local development
 

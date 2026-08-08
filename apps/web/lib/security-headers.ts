@@ -12,6 +12,7 @@
  * wrapper keeps method, header, and coarse rate-limit concerns central.
  */
 import { NextResponse } from 'next/server';
+import { clearCookieHeader } from '@lobbyforge/core';
 import { maintenanceResponseForRequest } from '@/lib/maintenance-guard';
 
 const SECURITY_HEADER_NAMES = [
@@ -94,6 +95,32 @@ export function requestSizeGuard(req: Request, maxBodyBytes = DEFAULT_MAX_BODY_B
     return NextResponse.json({ error: 'Request body too large' }, { status: 413 });
   }
   return null;
+}
+
+async function revokedSessionResponse(req: Request): Promise<NextResponse | null> {
+  const cookie = req.headers.get('cookie');
+  if (!cookie?.includes('lf_guest=')) return null;
+
+  const secret = process.env.LOBBYFORGE_SESSION_SECRET;
+  if (!secret || secret.length < 32) return null;
+  const { readGuestSession } = await import('@/lib/guest-session');
+  const session = readGuestSession(cookie, secret);
+  if (!session?.uid) return null;
+
+  try {
+    const { isSessionRevoked } = await import('@/lib/session-tracker');
+    if (!(await isSessionRevoked(session.uid, session.gid))) return null;
+  } catch (error) {
+    console.error('[session] revocation check unavailable', error);
+    return process.env.NODE_ENV === 'production'
+      ? NextResponse.json({ error: 'Session verification unavailable' }, { status: 503 })
+      : null;
+  }
+
+  return NextResponse.json(
+    { error: 'Session has been revoked' },
+    { status: 401, headers: { 'Set-Cookie': clearCookieHeader('lf_guest') } }
+  );
 }
 
 export interface RateLimitConfig {
@@ -253,6 +280,7 @@ export function withApiSecurity<TContext = unknown>(
     allowedMethods: string[];
     rateLimit?: { identifier: string; config: RateLimitConfig };
     maintenanceMode?: 'enforce' | 'bypass';
+    sessionRevocation?: 'enforce' | 'bypass';
     maxBodyBytes?: number;
   }
 ) {
@@ -263,6 +291,10 @@ export function withApiSecurity<TContext = unknown>(
     if (badOrigin) return applySecurityHeaders(badOrigin);
     const oversized = requestSizeGuard(req, options.maxBodyBytes);
     if (oversized) return applySecurityHeaders(oversized);
+    if (options.sessionRevocation !== 'bypass') {
+      const revoked = await revokedSessionResponse(req);
+      if (revoked) return applySecurityHeaders(revoked);
+    }
     if (options.maintenanceMode !== 'bypass') {
       const maintenance = await maintenanceResponseForRequest(req);
       if (maintenance) return applySecurityHeaders(maintenance);

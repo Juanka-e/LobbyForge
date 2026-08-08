@@ -240,7 +240,17 @@ export async function redeemInvite(
       WHERE code = ${code}
       FOR UPDATE
     `);
-    const invite = (inviteRows as unknown as { rows: Array<{ id: string; server_id: string; max_uses: number | null; current_uses: number; expires_at: Date | null }> }).rows[0];
+    type LockedInvite = {
+      id: string;
+      server_id: string;
+      max_uses: number | null;
+      current_uses: number;
+      expires_at: Date | null;
+    };
+    const normalizedRows = Array.isArray(inviteRows)
+      ? inviteRows as unknown as LockedInvite[]
+      : (inviteRows as unknown as { rows?: LockedInvite[] }).rows ?? [];
+    const invite = normalizedRows[0];
     if (!invite) {
       return { ok: false as const, error: 'not_found' as RedeemInviteError };
     }

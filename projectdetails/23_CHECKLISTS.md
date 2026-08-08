@@ -169,14 +169,14 @@
 
 ## 15. Update/refactor checklist
 
-- [ ] admin Updates page
-- [ ] update check
-- [ ] release notes display
-- [ ] preflight doctor before update
-- [ ] backup before update
-- [ ] Docker image pull + compose update
-- [ ] migration plan/dry-run
-- [ ] health check after update
-- [ ] rollback last update
-- [ ] Next 16 + React 19.2 migration
-- [ ] proxy.ts decision applied if global request boundary is needed
+- [x] admin Updates page
+- [x] update check
+- [x] release notes display
+- [x] preflight doctor before update
+- [x] backup verification gate before update
+- [x] Docker image pull + compose update worker
+- [x] migration plan/dry-run
+- [x] health check after update
+- [x] rollback worker plan
+- [x] Next 16 + React 19.2 migration
+- [x] proxy.ts decision applied: no global proxy required; route guards remain canonical

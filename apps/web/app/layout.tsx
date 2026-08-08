@@ -6,6 +6,7 @@ import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
 import { readMaintenanceSnapshot } from '@/lib/maintenance-guard';
 import { getEffectiveInstanceAccessSettings } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
+import 'material-symbols/outlined.css';
 import './globals.css';
 import GlobalHeader from './GlobalHeader';
 import AppearanceRuntime from './AppearanceRuntime';
@@ -24,7 +25,7 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export const dynamic = 'force-dynamic';
 
-export default async function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children, modal }: { children: ReactNode; modal: ReactNode }) {
   const cookieStore = await cookies();
   const isAdmin = await isInstanceAdminAllowed(
     cookieStore.toString(),
@@ -53,6 +54,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         <AppearanceRuntime />
         <GlobalHeader />
         <main className="flex-1">{content}</main>
+        {maintenance?.maintenanceMode ? null : modal}
       </body>
     </html>
   );

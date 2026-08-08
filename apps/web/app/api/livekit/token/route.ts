@@ -150,6 +150,8 @@ async function handler(req: Request): Promise<NextResponse> {
         serverVoiceSettings: {
           requirePushToTalk: voiceSettings.requirePushToTalk,
           startMuted: voiceSettings.startMuted,
+          maxScreenShareHeight: voiceSettings.maxScreenShareHeight,
+          maxScreenShareFps: voiceSettings.maxScreenShareFps,
         },
       },
       { headers: { 'Cache-Control': 'no-store' } }

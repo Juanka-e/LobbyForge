@@ -10,6 +10,7 @@ import {
   type ScreenQuality,
   type VoiceVideoPreferences,
 } from '@/lib/voice-video-preferences';
+import { setVoiceTestState } from '@/lib/voice-test-events';
 
 type SettingsResponse = {
   settings: {
@@ -235,6 +236,7 @@ export default function VoiceVideoSettingsPage() {
   }
 
   function stopMicTest() {
+    setVoiceTestState('microphone', false);
     analyserStopRef.current?.();
     analyserStopRef.current = null;
     if (monitorAudioRef.current) {
@@ -256,6 +258,7 @@ export default function VoiceVideoSettingsPage() {
         return;
       }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: constraintsForAudio(prefs), video: false });
+      setVoiceTestState('microphone', true);
       micStreamRef.current = stream;
       const monitor = new Audio();
       monitor.srcObject = stream;
@@ -285,8 +288,8 @@ export default function VoiceVideoSettingsPage() {
         void audioContext.close();
       };
       setMicTesting(true);
-      setStatus('Microphone test running. You should hear your mic at reduced volume.');
       await refreshDevices(false);
+      setStatus('Microphone test running. You should hear your mic at reduced volume.');
     } catch (err) {
       setStatus(`Microphone test failed: ${(err as Error).message}`);
       stopMicTest();
@@ -295,6 +298,7 @@ export default function VoiceVideoSettingsPage() {
 
   async function testOutput() {
     try {
+      setVoiceTestState('output', true);
       const audioContext = new AudioContext();
       const oscillator = audioContext.createOscillator();
       const gain = audioContext.createGain();
@@ -315,9 +319,11 @@ export default function VoiceVideoSettingsPage() {
         oscillator.stop();
         void audioContext.close();
         audio.srcObject = null;
+        setVoiceTestState('output', false);
       }, 450);
       setStatus(canPickOutput ? 'Output test played.' : 'Output test played on browser default output.');
     } catch (err) {
+      setVoiceTestState('output', false);
       setStatus(`Output test failed: ${(err as Error).message}`);
     }
   }
@@ -405,6 +411,8 @@ export default function VoiceVideoSettingsPage() {
                 { value: 'low', label: 'Low (480p)' },
                 { value: 'standard', label: 'Standard (720p)' },
                 { value: 'high', label: 'High (1080p)' },
+                { value: 'q1440', label: '1440p' },
+                { value: 'q2160', label: '2160p (4K)' },
               ]} />
               <NativeSelect label="Preferred frame rate" value={prefs.screenFps} onChange={(value) => patch({ screenFps: value as ScreenFps })} options={[
                 { value: '15', label: '15 FPS' },

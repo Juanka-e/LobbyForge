@@ -52,4 +52,17 @@ describe('db:migrate', () => {
     expect(sql).toContain('u."password_hash" IS NOT NULL');
     expect(sql).toContain('s."deleted_at" IS NULL');
   });
+
+  it('adds identity links without recreating previously migrated tables', () => {
+    const sql = readFileSync(
+      join(__dirname, '..', '..', 'drizzle', '0018_user_identity_links.sql'),
+      'utf8'
+    );
+    expect(sql.match(/CREATE TABLE/g)).toHaveLength(1);
+    expect(sql).toContain('CREATE TABLE "user_identity_links"');
+    expect(sql).toContain('user_identity_links_provider_subject_unique');
+    expect(sql).toContain('user_identity_links_user_provider_unique');
+    expect(sql).not.toContain('CREATE TABLE "user_blocks"');
+    expect(sql).not.toContain('CREATE TABLE "server_voice_settings"');
+  });
 });

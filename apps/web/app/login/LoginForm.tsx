@@ -3,45 +3,59 @@
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 
+type RegistrationMode = 'open' | 'invite_only' | 'closed';
+
 export default function LoginForm({
   guestEnabled,
-  inviteOnly,
+  registrationMode,
   initialInviteCode,
 }: {
   guestEnabled: boolean;
-  inviteOnly: boolean;
+  registrationMode: RegistrationMode;
   initialInviteCode: string;
 }) {
   const router = useRouter();
+  const canRegister = registrationMode !== 'closed';
+  const inviteOnly = registrationMode === 'invite_only';
+  const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [loginBusy, setLoginBusy] = useState(false);
-  const [loginError, setLoginError] = useState<string | null>(null);
-  const [displayName, setDisplayName] = useState('');
+  const [accountDisplayName, setAccountDisplayName] = useState('');
+  const [guestDisplayName, setGuestDisplayName] = useState('');
   const [inviteCode, setInviteCode] = useState(initialInviteCode);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function submitLocal(event: FormEvent<HTMLFormElement>) {
+  async function submitAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setLoginBusy(true);
-    setLoginError(null);
-    const response = await fetch('/api/auth/login', {
+    setBusy(true);
+    setError(null);
+    const endpoint = mode === 'login' ? '/api/auth/login' : '/api/auth/register';
+    const payload = mode === 'login'
+      ? { email: email.trim(), password }
+      : {
+          email: email.trim(),
+          password,
+          displayName: accountDisplayName.trim(),
+          ...(inviteCode.trim() ? { inviteCode: inviteCode.trim() } : {}),
+        };
+    const response = await fetch(endpoint, {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email: email.trim(), password }),
+      body: JSON.stringify(payload),
     });
     const body = (await response.json().catch(() => ({}))) as { error?: string };
     if (!response.ok) {
-      setLoginError(body.error ?? 'Sign in failed.');
-      setLoginBusy(false);
+      setError(body.error ?? (mode === 'login' ? 'Sign in failed.' : 'Account could not be created.'));
+      setBusy(false);
       return;
     }
     router.replace('/lobby');
+    router.refresh();
   }
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  async function submitGuest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
     setError(null);
@@ -50,96 +64,162 @@ export default function LoginForm({
       credentials: 'same-origin',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        displayNameSeed: displayName.trim(),
+        displayNameSeed: guestDisplayName.trim(),
         ...(inviteCode.trim() ? { inviteCode: inviteCode.trim() } : {}),
       }),
     });
     const body = (await response.json().catch(() => ({}))) as { error?: string };
     if (!response.ok) {
-      setError(body.error ?? 'Sign in failed.');
+      setError(body.error ?? 'Guest sign in failed.');
       setBusy(false);
       return;
     }
     router.replace('/lobby');
+    router.refresh();
+  }
+
+  function switchMode(next: 'login' | 'register') {
+    setMode(next);
+    setError(null);
+    setPassword('');
   }
 
   return (
     <div className="grid gap-6">
-    <form onSubmit={submitLocal} className="grid gap-4 border-t border-border-subtle pt-6">
-      <label className="grid gap-2 text-sm font-medium text-text-secondary">
-        Email
-        <input
-          type="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          required
-          autoComplete="email"
-          className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2.5 text-text-primary outline-none focus:border-primary"
-          placeholder="you@example.com"
-        />
-      </label>
-      <label className="grid gap-2 text-sm font-medium text-text-secondary">
-        Password
-        <input
-          type="password"
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          required
-          maxLength={128}
-          autoComplete="current-password"
-          className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2.5 text-text-primary outline-none focus:border-primary"
-          placeholder="Enter your password"
-        />
-      </label>
-      <button type="submit" disabled={loginBusy || !email.trim() || !password} className="w-full rounded-lg bg-primary-container px-4 py-2.5 font-semibold text-[#07101e] disabled:cursor-not-allowed disabled:opacity-50">
-        {loginBusy ? 'Signing in...' : 'Sign in'}
-      </button>
-      {loginError ? <p role="alert" className="text-pretty text-sm text-danger">{loginError}</p> : null}
-    </form>
-
-    {guestEnabled ? (
-    <>
-    <div className="flex items-center gap-3 text-xs text-text-muted"><span className="h-px flex-1 bg-border-subtle" /><span>or join as guest</span><span className="h-px flex-1 bg-border-subtle" /></div>
-    <form onSubmit={submit} className="grid gap-5 border-t border-border-subtle pt-6">
-      <label className="grid gap-2 text-sm font-medium text-text-secondary">
-        Display name
-        <input
-          value={displayName}
-          onChange={(event) => setDisplayName(event.target.value)}
-          minLength={2}
-          maxLength={48}
-          required
-          autoComplete="nickname"
-          className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2.5 text-text-primary outline-none focus:border-primary"
-          placeholder="How people will see you"
-        />
-      </label>
-      {inviteOnly ? (
-        <label className="grid gap-2 text-sm font-medium text-text-secondary">
-          Invite code
-          <input
-            value={inviteCode}
-            onChange={(event) => setInviteCode(event.target.value.toUpperCase())}
-            minLength={6}
-            maxLength={16}
-            required
-            autoComplete="one-time-code"
-            className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2.5 font-mono text-text-primary outline-none focus:border-primary"
-            placeholder="Required for this community"
-          />
-        </label>
+      {canRegister ? (
+        <div className="grid grid-cols-2 rounded-md bg-surface-container p-1" role="tablist" aria-label="Account access">
+          <ModeButton active={mode === 'login'} onClick={() => switchMode('login')}>Sign in</ModeButton>
+          <ModeButton active={mode === 'register'} onClick={() => switchMode('register')}>Create account</ModeButton>
+        </div>
       ) : null}
-      <button
-        type="submit"
-        disabled={busy || displayName.trim().length < 2 || (inviteOnly && inviteCode.trim().length < 6)}
-        className="w-full rounded-lg bg-primary-container px-4 py-2.5 font-semibold text-[#07101e] disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {busy ? 'Joining...' : 'Continue to community'}
-      </button>
+
+      <form onSubmit={submitAccount} className="grid gap-4">
+        {mode === 'register' ? (
+          <Field label="Display name">
+            <input
+              value={accountDisplayName}
+              onChange={(event) => setAccountDisplayName(event.target.value)}
+              minLength={2}
+              maxLength={48}
+              required
+              autoComplete="nickname"
+              className="auth-input"
+              placeholder="How people will see you"
+            />
+          </Field>
+        ) : null}
+        <Field label="Email">
+          <input
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            required
+            maxLength={254}
+            autoComplete="email"
+            className="auth-input"
+            placeholder="you@example.com"
+          />
+        </Field>
+        <Field label="Password">
+          <input
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            required
+            minLength={mode === 'register' ? 12 : 1}
+            maxLength={128}
+            autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+            className="auth-input"
+            placeholder={mode === 'register' ? 'At least 12 characters' : 'Enter your password'}
+          />
+        </Field>
+        {mode === 'register' && (inviteOnly || initialInviteCode) ? (
+          <InviteField value={inviteCode} onChange={setInviteCode} required={inviteOnly} />
+        ) : null}
+        <button
+          type="submit"
+          disabled={
+            busy ||
+            !email.trim() ||
+            !password ||
+            (mode === 'register' && (accountDisplayName.trim().length < 2 || password.length < 12)) ||
+            (mode === 'register' && inviteOnly && inviteCode.trim().length < 6)
+          }
+          className="w-full rounded-lg bg-primary-container px-4 py-2.5 font-semibold text-[#07101e] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {busy ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'}
+        </button>
+      </form>
+
+      {guestEnabled ? (
+        <>
+          <div className="flex items-center gap-3 text-xs text-text-muted">
+            <span className="h-px flex-1 bg-border-subtle" />
+            <span>or join as guest</span>
+            <span className="h-px flex-1 bg-border-subtle" />
+          </div>
+          <form onSubmit={submitGuest} className="grid gap-4">
+            <Field label="Guest display name">
+              <input
+                value={guestDisplayName}
+                onChange={(event) => setGuestDisplayName(event.target.value)}
+                minLength={2}
+                maxLength={48}
+                required
+                autoComplete="nickname"
+                className="auth-input"
+                placeholder="How people will see you"
+              />
+            </Field>
+            {inviteOnly ? <InviteField value={inviteCode} onChange={setInviteCode} required /> : null}
+            <button
+              type="submit"
+              disabled={busy || guestDisplayName.trim().length < 2 || (inviteOnly && inviteCode.trim().length < 6)}
+              className="w-full rounded-lg border border-border-strong bg-surface px-4 py-2.5 font-semibold text-text-primary hover:bg-surface-container disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {busy ? 'Please wait...' : 'Continue as guest'}
+            </button>
+          </form>
+        </>
+      ) : null}
       {error ? <p role="alert" className="text-pretty text-sm text-danger">{error}</p> : null}
-    </form>
-    </>
-    ) : null}
     </div>
+  );
+}
+
+function ModeButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={active
+        ? 'rounded px-3 py-2 text-sm font-semibold text-text-primary shadow-sm bg-surface-raised'
+        : 'rounded px-3 py-2 text-sm text-text-secondary hover:text-text-primary'}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <label className="grid gap-2 text-sm font-medium text-text-secondary">{label}{children}</label>;
+}
+
+function InviteField({ value, onChange, required }: { value: string; onChange: (value: string) => void; required: boolean }) {
+  return (
+    <Field label={required ? 'Invite code' : 'Invite code (optional)'}>
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value.toUpperCase())}
+        minLength={required ? 6 : undefined}
+        maxLength={16}
+        required={required}
+        autoComplete="one-time-code"
+        className="auth-input font-mono"
+        placeholder={required ? 'Required for this community' : 'Join a specific community'}
+      />
+    </Field>
   );
 }

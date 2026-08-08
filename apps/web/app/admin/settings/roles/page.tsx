@@ -112,6 +112,8 @@ function toRoleView(role: RoleWithCount): RoleView {
     serverId: role.serverId,
     name: role.name,
     color: role.color,
+    icon: role.icon,
+    displaySeparately: role.displaySeparately,
     position: role.position,
     permissions: role.permissions,
     memberCount: role.memberCount,

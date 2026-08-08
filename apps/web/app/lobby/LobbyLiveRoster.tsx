@@ -27,6 +27,7 @@ interface ChatMessage {
   body: string;
   attachment?: { name: string; size: string };
   blocked?: boolean;
+  pinned?: boolean;
 }
 
 interface WsChatEnvelope {
@@ -57,6 +58,7 @@ export interface LobbyLiveRosterData {
   initialMessages: ChatMessage[];
   /** name lookup seeded by the server component from DB rows */
   knownNames: Record<string, string>;
+  canManageMessages: boolean;
 }
 
 const PRESENCE_POLL_MS = 8_000;
@@ -74,15 +76,34 @@ function formatTimestamp(iso: string): string {
   }
 }
 
-export function LobbyLiveRoster({ data }: { data: LobbyLiveRosterData }) {
+export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: { data: LobbyLiveRosterData; searchQuery?: string; showPinned?: boolean }) {
   const [messages, setMessages] = useState<ChatMessage[]>(data.initialMessages);
   const nameCacheRef = useRef<Map<string, string>>(new Map(Object.entries(data.knownNames)));
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const notificationPrefsRef = useRef({ level: 'mentions', desktopEnabled: true, showPreview: true, sound: 'default' });
 
   // Sync name cache when knownNames prop changes (parent re-render with new data).
   useEffect(() => {
     for (const [k, v] of Object.entries(data.knownNames)) nameCacheRef.current.set(k, v);
   }, [data.knownNames]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/settings/me', { credentials: 'same-origin', cache: 'no-store' })
+      .then(async (response) => response.ok ? response.json() : null)
+      .then((body: { settings?: { notifications?: Record<string, unknown> } } | null) => {
+        if (cancelled || !body?.settings?.notifications) return;
+        const input = body.settings.notifications;
+        notificationPrefsRef.current = {
+          level: input.level === 'all' || input.level === 'nothing' ? input.level : 'mentions',
+          desktopEnabled: typeof input.desktopEnabled === 'boolean' ? input.desktopEnabled : true,
+          showPreview: typeof input.showPreview === 'boolean' ? input.showPreview : true,
+          sound: typeof input.sound === 'string' ? input.sound : 'default',
+        };
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
 
   // Auto-scroll to bottom when messages change.
   useEffect(() => {
@@ -91,6 +112,37 @@ export function LobbyLiveRoster({ data }: { data: LobbyLiveRosterData }) {
     el.scrollTop = el.scrollHeight;
   }, [messages]);
 
+  // Fetch the selected channel instead of relying only on the initial SSR
+  // snapshot. This keeps channel switching useful even before a new WS event.
+  useEffect(() => {
+    let cancelled = false;
+    async function loadMessages() {
+      try {
+        const res = await fetch(`/api/servers/${encodeURIComponent(data.serverId)}/channels/${encodeURIComponent(data.channelId)}/messages?limit=50`, {
+          credentials: 'same-origin',
+          cache: 'no-store',
+        });
+        if (!res.ok) return;
+        const body = (await res.json()) as { messages?: Array<{ id: string; userId: string | null; content: string; createdAt: string; metadata?: Record<string, unknown>; blocked?: boolean }> };
+        if (cancelled || !body.messages) return;
+        setMessages(body.messages.map((message) => ({
+          id: message.id,
+          authorId: message.userId,
+          author: message.blocked ? 'Blocked user' : message.userId ? (nameCacheRef.current.get(message.userId) ?? 'User') : 'Deleted User',
+          authorColor: message.userId === data.currentUserId ? 'primary' : 'default',
+          timestamp: formatTimestamp(message.createdAt),
+          body: message.content,
+          blocked: message.blocked,
+          pinned: typeof message.metadata?.$pinnedAt === 'string',
+        })));
+      } catch {
+        // Realtime/local echo can continue from the current snapshot.
+      }
+    }
+    void loadMessages();
+    return () => { cancelled = true; };
+  }, [data.channelId, data.currentUserId, data.serverId]);
+
   // ---- Chat WS subscribe ----
   useEffect(() => {
     const topic = `chat:${data.serverId}:${data.channelId}` as const;
@@ -98,9 +150,9 @@ export function LobbyLiveRoster({ data }: { data: LobbyLiveRosterData }) {
     const unsubscribe = rc.subscribe<WsChatEnvelope>(topic, (env) => {
       if (!env || env.type !== 'message' || !env.message) return;
       const m = env.message;
+      const author = nameCacheRef.current.get(m.userId) ?? 'User';
       setMessages((prev) => {
         if (prev.some((x) => x.id === m.id)) return prev;
-        const author = nameCacheRef.current.get(m.userId) ?? 'User';
         const next: ChatMessage = {
           id: m.id,
           authorId: m.userId,
@@ -112,11 +164,32 @@ export function LobbyLiveRoster({ data }: { data: LobbyLiveRosterData }) {
         // Newest first; UI uses flex-col-reverse so newest appears at bottom.
         return [next, ...prev];
       });
+      const prefs = notificationPrefsRef.current;
+      const myName = data.currentUserId ? nameCacheRef.current.get(data.currentUserId) : null;
+      const mentioned = Boolean(myName && m.content.toLocaleLowerCase().includes(`@${myName.toLocaleLowerCase()}`));
+      let channelMuted = false;
+      try { channelMuted = window.localStorage.getItem(`lf-channel-muted:${data.channelId}`) === 'true'; } catch { /* local preference */ }
+      if (
+        m.userId !== data.currentUserId &&
+        !channelMuted &&
+        prefs.desktopEnabled &&
+        prefs.level !== 'nothing' &&
+        (prefs.level === 'all' || mentioned) &&
+        typeof Notification !== 'undefined' &&
+        Notification.permission === 'granted' &&
+        document.visibilityState !== 'visible'
+      ) {
+        new Notification(`${author} in #${data.channelName}`, {
+          body: prefs.showPreview ? m.content : 'New message',
+          silent: prefs.sound === 'none',
+          tag: `lf-message:${data.channelId}`,
+        });
+      }
     });
     return () => {
       unsubscribe();
     };
-  }, [data.serverId, data.channelId, data.currentUserId]);
+  }, [data.serverId, data.channelId, data.channelName, data.currentUserId]);
 
   // ---- Local message echo — listens for 'lf-message-sent' custom events
   // dispatched by the Composer after a successful POST. This provides
@@ -195,15 +268,25 @@ export function LobbyLiveRoster({ data }: { data: LobbyLiveRosterData }) {
     return () => window.clearInterval(id);
   }, [refreshChannelPresence]);
 
+  const normalizedSearch = searchQuery.trim().toLocaleLowerCase();
+  const visibleMessages = messages.filter((message) =>
+    (!showPinned || message.pinned) &&
+    (!normalizedSearch || `${message.author} ${message.body}`.toLocaleLowerCase().includes(normalizedSearch))
+  );
+
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-6 space-y-6 flex flex-col-reverse">
-      {messages.length === 0 ? (
+      {visibleMessages.length === 0 ? (
         <p className="font-body-md text-text-muted italic">
-          No messages yet — be the first to say something.
+          {showPinned
+            ? 'No pinned messages in this channel.'
+            : normalizedSearch
+              ? 'No messages match your search.'
+              : 'No messages yet. Be the first to say something.'}
         </p>
       ) : null}
-      {messages.map((m) => (
-        <LiveMessage key={m.id} message={m} currentUserId={data.currentUserId} serverId={data.serverId} channelId={data.channelId} />
+      {visibleMessages.map((m) => (
+        <LiveMessage key={m.id} message={m} currentUserId={data.currentUserId} serverId={data.serverId} channelId={data.channelId} canManageMessages={data.canManageMessages} onPinnedChange={(pinned) => setMessages((current) => current.map((item) => item.id === m.id ? { ...item, pinned } : item))} />
       ))}
       {typers.length > 0 ? (
         <div className="px-2 py-1 flex items-center gap-2 text-xs text-text-muted animate-fade-in-up">
@@ -226,7 +309,7 @@ export function LobbyLiveRoster({ data }: { data: LobbyLiveRosterData }) {
   );
 }
 
-function LiveMessage({ message, currentUserId, serverId, channelId }: { message: ChatMessage; currentUserId: string | null; serverId: string; channelId: string }) {
+function LiveMessage({ message, currentUserId, serverId, channelId, canManageMessages, onPinnedChange }: { message: ChatMessage; currentUserId: string | null; serverId: string; channelId: string; canManageMessages: boolean; onPinnedChange: (pinned: boolean) => void }) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(message.body);
   const isOwn = message.authorId === currentUserId;
@@ -257,6 +340,20 @@ function LiveMessage({ message, currentUserId, serverId, channelId }: { message:
     } catch { /* non-fatal */ }
   }
 
+  async function togglePinned() {
+    const pinned = !message.pinned;
+    try {
+      const res = await fetch(`/api/servers/${serverId}/channels/${channelId}/messages/${message.id}`, {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pinned }),
+      });
+      if (!res.ok) throw new Error(`pin failed: ${res.status}`);
+      onPinnedChange(pinned);
+    } catch { /* non-fatal */ }
+  }
+
   if (message.blocked) {
     return (
       <div className="flex gap-4 group p-2 -mx-2 rounded-lg opacity-50 animate-fade-in-up">
@@ -280,6 +377,7 @@ function LiveMessage({ message, currentUserId, serverId, channelId }: { message:
         <div className="flex items-baseline gap-2">
           <span className={`font-label-sm font-medium ${authorColorClass}`}>{message.author}</span>
           <span className="font-label-xs text-[11px] text-text-secondary">{message.timestamp}</span>
+          {message.pinned ? <span className="material-symbols-outlined text-[13px] text-primary" title="Pinned">push_pin</span> : null}
         </div>
         {editing ? (
           <div className="mt-1 flex gap-2">
@@ -298,16 +396,24 @@ function LiveMessage({ message, currentUserId, serverId, channelId }: { message:
         )}
       </div>
       {/* Hover action menu — only for own messages */}
-      {isOwn && !editing ? (
+      {(isOwn || canManageMessages) && !editing ? (
         <div className="absolute top-1 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 bg-surface-raised rounded-md border border-border-subtle shadow-sm">
-          <button
+          {canManageMessages ? <button
+            type="button"
+            onClick={() => void togglePinned()}
+            title={message.pinned ? 'Unpin' : 'Pin'}
+            className={message.pinned ? 'p-1 text-primary' : 'p-1 text-text-secondary hover:text-primary'}
+          >
+            <span className="material-symbols-outlined text-[16px]">push_pin</span>
+          </button> : null}
+          {isOwn ? <button
             type="button"
             onClick={() => { setEditing(true); setEditValue(message.body); }}
             title="Edit"
             className="p-1 text-text-secondary hover:text-text-primary"
           >
             <span className="material-symbols-outlined text-[16px]">edit</span>
-          </button>
+          </button> : null}
           <button
             type="button"
             onClick={deleteMessage}

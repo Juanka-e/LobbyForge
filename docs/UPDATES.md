@@ -147,16 +147,15 @@ Example:
 `POST /api/admin/updates` with `{ "action": "verify-backup" }` returns
 `{ backup }`. `POST /api/admin/updates` with `{ "action": "dry-run" }`
 returns `{ plan, backup, run, worker }`. `run` is the gate preview; `worker`
-is the step-level execution contract. Apply/rollback still return 501 and
-include the same `run` and `worker` payloads until command execution is
-implemented.
+is the step-level execution contract. Apply/rollback remain non-executing
+unless every gate and the explicit execution request are present.
 
-The initial worker is intentionally non-executing:
+The worker defaults to non-executing:
 
 - dry-run steps are reported as `planned`
-- apply/rollback steps are `blocked`
-- the `commandExecutor` gate is false for apply/rollback
-- no OS command is spawned from the web process yet
+- apply/rollback steps are blocked until the execution gates pass
+- the `commandExecutor` gate is false unless worker execution is enabled
+- no OS command is spawned for previews or partially satisfied requests
 
 ## Command Executor Contract
 
@@ -183,12 +182,11 @@ process runner:
 - shell execution is not allowed
 - executable and argv are hardcoded by step id
 - timeouts are assigned per command class
-- apply/rollback still return `501` until the process runner is explicitly
-  implemented and enabled
+- apply/rollback execute only through the explicitly enabled process runner
 
-`executePreparedUpdateCommand` now has a guarded process runner for internal
-use. It only runs when called with explicit `execute` mode. The web API does
-not select this mode yet, so admin apply/rollback remains locked.
+`executePreparedUpdateCommand` is the guarded process runner. It only runs
+when called with explicit `execute` mode, and the web API selects that mode
+only after its independent policy checks pass.
 
 Runner safety properties:
 
@@ -335,8 +333,8 @@ Admin surfaces now read the same planner:
 - `PATCH /api/admin/maintenance` updates maintenance mode.
 - `POST /api/admin/updates` with `action=dry-run` returns the runner preview
   and worker plan.
-- `POST /api/admin/updates` with `action=apply|rollback` is locked and returns
-  501 until execution is safe.
+- `POST /api/admin/updates` with `action=apply|rollback` previews by default;
+  execution requires `execute: true` and every documented server-side gate.
 - `POST /api/admin/updates` with `action=verify-backup` verifies the configured
   backup manifest.
 - CLI check: `lfctl update check --json`

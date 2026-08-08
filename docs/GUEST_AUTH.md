@@ -39,6 +39,23 @@ and never stored in PostgreSQL.
 A user may need to register or join separately on different self-host
 instances unless that instance explicitly enables LobbyForge account login.
 
+`user_identity_links` stores that optional mapping as `(provider,
+provider_subject) -> local userId`. Provider subjects and user/provider pairs
+are independently unique. The table stores display claims and verified email
+metadata, but never upstream access tokens, refresh tokens, local roles, or
+local credentials.
+
+Local registration applies the instance registration mode first. When the
+target server has an explicit access-policy row, the route also enforces its
+local-account, join-policy, and first-join-approval restrictions before
+hashing a password. Approval policies fail closed until the approval queue is
+implemented. A missing server policy row preserves instance-level behavior
+for existing installations.
+
+Official sign-in callbacks remain closed until the official IdP publishes an
+issuer/audience, signed-token, state, nonce, PKCE, and key-rotation contract.
+The identity-link schema is not permission to trust browser assertions.
+
 ## Cookie Format
 
 The `lf_guest` cookie value is:

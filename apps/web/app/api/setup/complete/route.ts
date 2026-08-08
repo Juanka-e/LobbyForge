@@ -93,5 +93,6 @@ function matchesSetupToken(candidate: string | undefined, expected: string): boo
 
 export const POST = withApiSecurity(handlePost, {
   allowedMethods: ['POST'],
+  sessionRevocation: 'bypass',
   rateLimit: { identifier: 'setup-complete', config: { windowMs: 15 * 60_000, maxRequests: 10 } },
 });

@@ -141,16 +141,18 @@ Başarı:
 
 - 6-12 kişi oynayabiliyor
 
-## Aşama 8 — Electron
+## Aşama 8 — Tauri Desktop
 
 Yapılacaklar:
 
-- desktop wrapper
-- web UI load
+- Tauri 2 media/security spike
+- isolated desktop shell + instance webview
 - global PTT
 - tray
 - notification
 - device shortcut
+- deep-link auth handoff
+- signed updater dry-run
 
 Başarı:
 
@@ -218,7 +220,7 @@ Yapilacaklar:
 - Docker image pull + compose update
 - migration plan
 - rollback
-- Next 16 + React 19.2 migration
+- Next 16 + React 19.2 migration (completed 2026-07-16)
 - `proxy.ts` request boundary karari
 
 Basari:
