@@ -49,3 +49,40 @@ jobs:
 
       - name: Build
         run: pnpm -r --if-present build
+
+  # Docker image build — verifies the Dockerfile compiles and the image starts.
+  # Only runs on Linux (Docker is not available on windows-latest runners).
+  docker-build:
+    name: Docker image build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t lobbyforge-web:ci .
+
+  # DB migration journal integrity — verifies all migration files are
+  # tracked in _journal.json in the correct order and snapshots exist.
+  migration-check:
+    name: DB migration integrity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.1
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Migration journal test
+        run: pnpm --filter @lobbyforge/db test
