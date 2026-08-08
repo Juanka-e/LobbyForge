@@ -23,6 +23,7 @@ yarn-error.log*
 .env
 .env.*
 !.env.example
+!.env.prod.example
 
 # OS / editor
 .DS_Store

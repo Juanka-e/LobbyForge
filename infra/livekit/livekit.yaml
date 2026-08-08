@@ -1,0 +1,38 @@
+# LiveKit production configuration.
+#
+# Replace LOBBYFORGE_DOMAIN with your domain. The RTC port range (50000-60000/udp)
+# must be open on the firewall. TURN is optional but recommended for restrictive
+# networks.
+
+port: 7880
+bind_addresses:
+  - "0.0.0.0"
+
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 60000
+  use_external_ip: true
+  enable_loopback_reflection: false
+
+keys:
+  # Set via LIVEKIT_KEYS env var in docker-compose (format: "key: secret")
+
+# TURN server (optional — uncomment if you run coturn)
+# turn:
+#   enabled: true
+#   domain: LOBBYFORGE_DOMAIN
+#   tls_port: 5349
+#   secret: "your-turn-secret"
+
+logging:
+  level: info
+  json: false
+
+room:
+  auto_create: true
+  enable_remote_unmute: true
+  empty_timeout: 300
+
+webhook:
+  # api_key: your-key  # Set if you use webhooks
