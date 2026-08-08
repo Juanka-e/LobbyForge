@@ -87,6 +87,7 @@ interface ChatMessage {
 }
 interface LobbyData {
   serverName: string;
+  serverBannerUrl: string | null;
   serverId: string | null;
   /** All servers the user has joined — drives the ServerRail switcher.
    * Empty in demo mode. */
@@ -384,6 +385,7 @@ async function loadLiveData(
 
   return {
     serverName: '', // filled in by caller
+    serverBannerUrl: null, // filled in by caller
     serverId,
     joinedServers: [], // filled in by the caller after listing all servers
     textChannels,
@@ -470,6 +472,7 @@ export default async function LobbyPage({
         liveData = await loadLiveData(db, srv.id, userId);
         if (liveData) {
           liveData.serverName = serverName;
+          liveData.serverBannerUrl = (srv as { bannerUrl?: string | null }).bannerUrl ?? null;
           liveData.joinedServers = joinedServerList;
         }
       }
@@ -485,6 +488,7 @@ export default async function LobbyPage({
 
   const data: LobbyData = liveData ?? {
     serverName,
+    serverBannerUrl: null,
     serverId: null,
     joinedServers: [],
     textChannels: DEMO_CHANNELS.filter((c) => c.category === 'text'),
@@ -741,8 +745,16 @@ function Sidebar({
     <nav
       className="hidden md:flex w-[240px] lg:w-[260px] flex-shrink-0 bg-surface border-r border-border-subtle flex-col h-full z-20 animate-fade-in-right"
     >
-      {/* Server header - community name + "Add instance" CTA on official host */}
-      <div className="relative border-b border-border-subtle group/server-menu">
+      {/* Server header — community name with optional host banner */}
+      <div className="relative border-b border-border-subtle group/server-menu overflow-hidden">
+        {data.serverBannerUrl ? (
+          <div
+            className="absolute inset-0 bg-cover bg-center opacity-40"
+            style={{ backgroundImage: `url(${data.serverBannerUrl})` }}
+            aria-hidden
+          />
+        ) : null}
+        <div className="relative">
         <button className="h-16 px-4 flex items-center justify-between hover:bg-surface-container transition-colors duration-150 w-full text-left group">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-8 h-8 rounded-lg bg-secondary-container flex items-center justify-center flex-shrink-0 font-bold text-text-primary">
@@ -797,6 +809,7 @@ function Sidebar({
             </a>
           </div>
         ) : null}
+        </div>
       </div>
 
       {/* Scrollable channels list */}

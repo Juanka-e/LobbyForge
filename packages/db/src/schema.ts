@@ -64,6 +64,7 @@ export const servers = pgTable('servers', {
   slug: text('slug'),
   ownerUserId: uuid('owner_user_id').notNull().references(() => users.id),
   iconUrl: text('icon_url'),
+  bannerUrl: text('banner_url'),
   defaultLocale: text('default_locale').default('en').notNull(),
   isPublic: boolean('is_public').default(false).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -645,4 +646,39 @@ export const pluginCatalog = pgTable('plugin_catalog', {
   uniquePluginId: unique('plugin_catalog_plugin_id_unique').on(table.pluginId),
   statusIdx: index('idx_plugin_catalog_status').on(table.reviewStatus, table.trustLevel),
   categoryIdx: index('idx_plugin_catalog_category').on(table.category),
+}));
+
+// ── Instance Reports (discovery directory complaints) ──────────────────
+export const instanceReports = pgTable('instance_reports', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  instanceId: text('instance_id').notNull(),
+  reporterUserId: uuid('reporter_user_id').references(() => users.id, { onDelete: 'set null' }),
+  reason: text('reason').notNull(), // spam, nsfw, abuse, malware, other
+  detail: text('detail'),
+  status: text('status').default('pending').notNull(), // pending | reviewed | dismissed | actioned
+  reviewerUserId: uuid('reviewer_user_id').references(() => users.id, { onDelete: 'set null' }),
+  reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  instanceIdx: index('idx_instance_reports_instance').on(table.instanceId),
+  statusIdx: index('idx_instance_reports_status').on(table.status),
+}));
+
+// ── Plugin Data (generic host-owned key-value store for marketplace plugins) ─
+// Plugins access this via the SDK's storage sub-context — they never get raw
+// SQL or DbClient access. The host reads/writes on their behalf.
+export const pluginData = pgTable('plugin_data', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  serverId: uuid('server_id').references(() => servers.id, { onDelete: 'cascade' }),
+  pluginId: text('plugin_id').notNull(),
+  key: text('key').notNull(),
+  value: jsonb('value').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  // One value per key per plugin per server.
+  uniquePluginKey: unique('plugin_data_server_plugin_key_unique').on(
+    table.serverId, table.pluginId, table.key
+  ),
+  pluginIdx: index('idx_plugin_data_plugin').on(table.pluginId, table.serverId),
 }));
