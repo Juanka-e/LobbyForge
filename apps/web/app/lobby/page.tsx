@@ -849,23 +849,27 @@ function Sidebar({
         </div>
       </div>
 
-      {/* Direct Messages + Discover (official host, authenticated only) */}
-      {data.isLive && hasUser && isOfficial ? (
+      {/* Direct Messages + Discover (authenticated users; DMs on all instances) */}
+      {data.isLive && hasUser ? (
         <div className="border-t border-border-subtle p-3 space-y-1">
-          <a
-            href="/discover"
-            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors"
-          >
-            <span className="material-symbols-outlined text-[18px]">explore</span>
-            Discover
-          </a>
-          <a
-            href="/marketplace"
-            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors"
-          >
-            <span className="material-symbols-outlined text-[18px]">extension</span>
-            Marketplace
-          </a>
+          {isOfficial ? (
+            <>
+              <a
+                href="/discover"
+                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors"
+              >
+                <span className="material-symbols-outlined text-[18px]">explore</span>
+                Discover
+              </a>
+              <a
+                href="/marketplace"
+                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors"
+              >
+                <span className="material-symbols-outlined text-[18px]">extension</span>
+                Marketplace
+              </a>
+            </>
+          ) : null}
           <DmLinkSection currentUserId={data.currentUserId} />
         </div>
       ) : null}

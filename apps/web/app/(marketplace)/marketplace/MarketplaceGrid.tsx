@@ -1,3 +1,6 @@
+'use client';
+
+import { useState } from 'react';
 import type { PluginCatalogRow } from '@lobbyforge/db';
 
 const TRUST_COLORS: Record<string, string> = {
@@ -52,6 +55,8 @@ export default function MarketplaceGrid({
 }
 
 function PluginCard({ plugin }: { plugin: PluginCatalogRow }) {
+  const [installing, setInstalling] = useState(false);
+  const [installResult, setInstallResult] = useState<string | null>(null);
   const tags = (plugin.tags as string[]).slice(0, 3);
   const trustClass = TRUST_COLORS[plugin.trustLevel] ?? TRUST_COLORS.unverified;
   const playerConfig = plugin.playerConfig as { minPlayers?: number; maxPlayers?: number } | null;
@@ -124,6 +129,42 @@ function PluginCard({ plugin }: { plugin: PluginCatalogRow }) {
           </span>
         ) : null}
       </div>
+
+      {/* Install button (admin-only — the API checks requireAdminHealthToken) */}
+      <button
+        onClick={async () => {
+          setInstalling(true);
+          setInstallResult(null);
+          try {
+            const res = await fetch('/api/marketplace/install', {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ pluginId: plugin.pluginId }),
+            });
+            const data = await res.json();
+            if (res.ok) {
+              setInstallResult('Installed ✓');
+            } else {
+              setInstallResult(data.error ?? 'Install failed');
+            }
+          } catch {
+            setInstallResult('Network error');
+          } finally {
+            setInstalling(false);
+          }
+        }}
+        disabled={installing}
+        className={`mt-3 w-full rounded-lg px-3 py-2 text-xs font-semibold transition-all ${
+          installResult === 'Installed ✓'
+            ? 'bg-success/20 text-success border border-success/30'
+            : installing
+              ? 'bg-surface-container text-text-muted cursor-wait'
+              : 'bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20'
+        }`}
+      >
+        {installing ? 'Installing…' : installResult ?? 'Install'}
+      </button>
     </article>
   );
 }

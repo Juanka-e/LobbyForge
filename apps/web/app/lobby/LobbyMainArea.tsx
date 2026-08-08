@@ -121,6 +121,8 @@ function LobbyMainAreaLive({ data }: { data: LobbyData }) {
         onTogglePinned={() => setShowPinned((value) => !value)}
         notificationsMuted={notificationsMuted}
         onToggleNotifications={toggleChannelNotifications}
+        serverId={data.serverId}
+        voiceChannelId={voice.activeChannelId ?? data.activeVoiceChannel?.id ?? null}
       />
       <MessagesArea data={data} activeChannelId={activeChannelId} channelName={channelName} searchQuery={searchQuery} showPinned={showPinned} />
       <Composer
@@ -142,7 +144,7 @@ function LobbyMainAreaDemo({ data }: { data: LobbyData }) {
   const [notificationsMuted, setNotificationsMuted] = useState(false);
   return (
     <main className="flex-1 flex flex-col bg-background min-w-0 relative text-[14px] animate-fade-in-up">
-      <ChannelHeader channelName={channelName} searchQuery={searchQuery} onSearchChange={setSearchQuery} showPinned={showPinned} onTogglePinned={() => setShowPinned((value) => !value)} notificationsMuted={notificationsMuted} onToggleNotifications={() => setNotificationsMuted((value) => !value)} />
+      <ChannelHeader channelName={channelName} searchQuery={searchQuery} onSearchChange={setSearchQuery} showPinned={showPinned} onTogglePinned={() => setShowPinned((value) => !value)} notificationsMuted={notificationsMuted} onToggleNotifications={() => setNotificationsMuted((value) => !value)} serverId={data.serverId} voiceChannelId={data.activeVoiceChannel?.id ?? null} />
       <MessagesArea data={data} activeChannelId={data.activeTextChannel?.id ?? null} channelName={channelName} searchQuery={searchQuery} showPinned={showPinned} />
       <Composer
         channelName={channelName}
@@ -163,6 +165,8 @@ function ChannelHeader({
   onTogglePinned,
   notificationsMuted,
   onToggleNotifications,
+  serverId,
+  voiceChannelId,
 }: {
   channelName: string;
   searchQuery: string;
@@ -171,6 +175,8 @@ function ChannelHeader({
   onTogglePinned: () => void;
   notificationsMuted: boolean;
   onToggleNotifications: () => void;
+  serverId: string | null;
+  voiceChannelId: string | null;
 }) {
   return (
     <header className="h-16 px-6 flex items-center justify-between border-b border-border-subtle bg-surface-dim/80 backdrop-blur-md z-10 sticky top-0 shadow-sm">
@@ -183,6 +189,17 @@ function ChannelHeader({
         </p>
       </div>
       <div className="flex items-center gap-4">
+        {/* Start Activity — links to the /room page where ActivityPicker lives */}
+        {serverId && voiceChannelId ? (
+          <a
+            href={`/room/${voiceChannelId}?serverId=${serverId}&channelId=${voiceChannelId}`}
+            title="Start a game or activity in this voice room"
+            className="flex items-center gap-1.5 rounded-md bg-primary/10 px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+          >
+            <span className="material-symbols-outlined text-[16px]">stadia_controller</span>
+            <span className="hidden sm:inline">Activities</span>
+          </a>
+        ) : null}
         <button type="button" onClick={onToggleNotifications} title={notificationsMuted ? 'Enable channel notifications' : 'Mute channel notifications'} className={notificationsMuted ? 'text-danger hover:text-danger/80' : 'hover:text-text-primary transition-colors text-text-secondary'}>
           <span className="material-symbols-outlined">{notificationsMuted ? 'notifications_off' : 'notifications'}</span>
         </button>
