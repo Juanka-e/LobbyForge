@@ -33,8 +33,8 @@ export default async function MarketplacePage({
       search: query || null,
       limit: 100,
     });
-  } catch {
-    // Marketplace unavailable — empty state.
+  } catch (err) {
+    console.error('[marketplace] catalog load failed:', (err as Error).message);
   }
 
   return (

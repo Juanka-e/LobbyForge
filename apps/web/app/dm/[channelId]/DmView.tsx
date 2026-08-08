@@ -108,6 +108,7 @@ export default function DmView({
           href="/lobby"
           className="rounded-md p-1.5 text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors"
           title="Back to lobby"
+          aria-label="Back to lobby"
         >
           <span className="material-symbols-outlined text-[20px]">arrow_back</span>
         </Link>
@@ -115,7 +116,13 @@ export default function DmView({
       </header>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto px-4 py-4 space-y-3"
+        role="log"
+        aria-live="polite"
+        aria-label="Direct messages"
+      >
         {messages.length === 0 ? (
           <p className="text-center text-sm text-text-muted mt-8">
             No messages yet — say hello!

@@ -243,6 +243,21 @@ export class RealtimeClient {
   private scheduleReconnect(): void {
     if (this.explicitClose) return;
     if (this.reconnectTimer) return;
+    // Circuit breaker: stop reconnecting after 20 consecutive failures.
+    // This prevents infinite hammering when the ws-gateway is permanently
+    // down (e.g., not started in the container). The client will retry on
+    // the next page load or visibilitychange → visible.
+    if (this.reconnectAttempt >= 20) {
+      console.warn('[realtime] gave up after 20 reconnect attempts — ws-gateway may be down');
+      this.subscriptions.forEach((handlers) => {
+        handlers.forEach((h) => {
+          if (typeof h === 'object' && h !== null && 'onError' in h) {
+            (h as { onError?: (e: Error) => void }).onError?.(new Error('Realtime unavailable after 20 retries'));
+          }
+        });
+      });
+      return;
+    }
     const delay = Math.min(
       RECONNECT_MAX_MS,
       RECONNECT_BASE_MS * 2 ** Math.min(this.reconnectAttempt, 10)

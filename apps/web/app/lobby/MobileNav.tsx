@@ -22,7 +22,8 @@ export default function MobileNav({ children }: { children: ReactNode }) {
         type="button"
         onClick={() => setOpen(true)}
         className="md:hidden fixed top-3 left-3 z-50 w-10 h-10 rounded-lg bg-surface-raised border border-border-subtle flex items-center justify-center text-text-secondary hover:text-text-primary transition-colors"
-        aria-label="Open navigation"
+        aria-label="Open navigation menu"
+        aria-expanded={open}
       >
         <span className="material-symbols-outlined text-[20px]">menu</span>
       </button>

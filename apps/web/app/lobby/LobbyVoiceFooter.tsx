@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import { useLobbyVoice, ConnectionState } from './LobbyVoiceProvider';
+import Link from 'next/link';
 
 /**
  * Voice footer - same visual frame as the M19 `VoiceControlFooter`,
@@ -66,6 +67,7 @@ export function LobbyVoiceFooter({ serverName, hasUser }: LobbyVoiceFooterProps)
               disabled={!connected}
               onClick={() => void voice.toggleScreenShare()}
               title={voice.screenShareEnabled ? 'Stop screen share' : 'Share your screen'}
+              aria-label={voice.screenShareEnabled ? 'Stop screen share' : 'Share your screen'}
               className={
                 connected
                   ? voice.screenShareEnabled
@@ -81,6 +83,7 @@ export function LobbyVoiceFooter({ serverName, hasUser }: LobbyVoiceFooterProps)
               disabled={!connected}
               onClick={() => void voice.toggleCamera()}
               title={voice.cameraEnabled ? 'Turn off camera' : 'Turn on camera'}
+              aria-label={voice.cameraEnabled ? 'Turn off camera' : 'Turn on camera'}
               className={
                 connected
                   ? voice.cameraEnabled
@@ -96,6 +99,7 @@ export function LobbyVoiceFooter({ serverName, hasUser }: LobbyVoiceFooterProps)
               disabled={!connected}
               onClick={() => void voice.disconnect()}
               title="Disconnect"
+              aria-label="Disconnect from voice"
               className="p-1.5 rounded hover:bg-surface-container text-danger transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
             >
               <span className="material-symbols-outlined text-[18px]">call_end</span>
@@ -138,6 +142,7 @@ export function LobbyVoiceFooter({ serverName, hasUser }: LobbyVoiceFooterProps)
               disabled={!connected}
               onClick={() => void voice.toggleMic()}
               title={voice.micEnabled ? 'Mute' : 'Unmute'}
+              aria-label={voice.micEnabled ? 'Mute microphone' : 'Unmute microphone'}
               className={
                 connected
                   ? voice.micEnabled
@@ -155,6 +160,7 @@ export function LobbyVoiceFooter({ serverName, hasUser }: LobbyVoiceFooterProps)
               disabled={!connected}
               onClick={() => voice.toggleDeafen()}
               title={voice.deafenEnabled ? 'Undeafen' : 'Deafen'}
+              aria-label={voice.deafenEnabled ? 'Undeafen' : 'Deafen audio'}
               className={
                 connected
                   ? voice.deafenEnabled
@@ -165,13 +171,14 @@ export function LobbyVoiceFooter({ serverName, hasUser }: LobbyVoiceFooterProps)
             >
               <span className="material-symbols-outlined text-[18px]">headphones</span>
             </button>
-            <a
+            <Link
               href="/settings/voice-video"
               title="Voice & video settings"
+              aria-label="Voice and video settings"
               className="p-1.5 rounded hover:bg-surface-container text-text-secondary hover:text-text-primary transition-colors"
             >
               <span className="material-symbols-outlined text-[18px]">settings</span>
-            </a>
+            </Link>
           </div>
         </div>
       </div>

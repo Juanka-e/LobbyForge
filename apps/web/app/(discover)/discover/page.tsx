@@ -32,8 +32,8 @@ export default async function DiscoverPage({
   let instances: Awaited<ReturnType<typeof listPublicRegistryInstances>> = [];
   try {
     instances = await listPublicRegistryInstances(getDb(), { limit: 100, region });
-  } catch {
-    // Directory unavailable — render empty state.
+  } catch (err) {
+    console.error('[discover] directory load failed:', (err as Error).message);
   }
 
   // Client-side search filter (name / description / tags).
