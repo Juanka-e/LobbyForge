@@ -34,6 +34,7 @@ import { LobbyTextChannels } from './LobbyTextChannels';
 import { LobbyMainArea } from './LobbyMainArea';
 import { LobbyMembersClient } from './LobbyMembersClient';
 import DmLinkSection from './DmLinkSection';
+import MobileNav from './MobileNav';
 import { BlockListProvider } from './BlockListProvider';
 import { isLobbyDemoAllowed } from '@/lib/lobby-mode';
 
@@ -556,19 +557,21 @@ function LobbyShell({
 
   const shell = (
     <>
-      <ServerRail
-        serverName={serverName}
-        isOfficial={isOfficial}
-        activeServerId={data.serverId}
-        joinedServers={data.joinedServers}
-      />
-      <Sidebar
-        serverName={serverName}
-        isOfficial={isOfficial}
-        hasUser={hasUser}
-        data={data}
-        voiceProvider={canVoiceConnect}
-      />
+      <MobileNav>
+        <ServerRail
+          serverName={serverName}
+          isOfficial={isOfficial}
+          activeServerId={data.serverId}
+          joinedServers={data.joinedServers}
+        />
+        <Sidebar
+          serverName={serverName}
+          isOfficial={isOfficial}
+          hasUser={hasUser}
+          data={data}
+          voiceProvider={canVoiceConnect}
+        />
+      </MobileNav>
       <LobbyMainArea data={data} canVoice={canVoiceConnect} />
       {data.isLive && data.serverId ? (
         <LobbyMembersClient
