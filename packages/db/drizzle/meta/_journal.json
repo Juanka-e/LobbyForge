@@ -167,7 +167,7 @@
       "idx": 24,
       "version": "7",
       "when": 1785040000000,
-      "tag": "0024_reports_plugin_data_banner",
+      "tag": "0024_reports_and_plugin_data",
       "breakpoints": true
     }
   ]
