@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim AS builder
+FROM node:26-bookworm-slim AS builder
 
 RUN corepack enable && corepack prepare pnpm@10.12.1 --activate
 WORKDIR /app
@@ -25,7 +25,7 @@ RUN pnpm --filter @lobbyforge/config build && \
     pnpm --filter @lobbyforge/ws-gateway build && \
     pnpm --filter @lobbyforge/web build
 
-FROM node:22-bookworm-slim AS runtime
+FROM node:26-bookworm-slim AS runtime
 
 RUN corepack enable && corepack prepare pnpm@10.12.1 --activate
 WORKDIR /app
