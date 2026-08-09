@@ -35,9 +35,25 @@ async function authorizePluginAction(input: {
   hostUserId: string | null;
   plugin: NonNullable<ReturnType<typeof getPluginServer>>;
   action: Record<string, unknown>;
+  currentState: Record<string, unknown>;
 }): Promise<{ ok: true; action: Record<string, unknown> } | { ok: false; response: NextResponse }> {
   const actionType = String(input.action.type);
   const policy = input.plugin.actionPolicies?.[actionType] ?? { role: 'host' as const };
+
+  // LF-014: Reject actions on ended sessions.
+  const status = (input.currentState as { status?: string })?.status;
+  if (status === 'ended' || status === 'cancelled') {
+    return { ok: false, response: NextResponse.json({ error: 'Activity has ended.' }, { status: 409 }) };
+  }
+
+  // LF-014: Phase-based validation — reject actions that don't match the
+  // current game phase. The plugin's reducer is the primary authority, but
+  // this host-side check provides defense-in-depth against stale clients.
+  const phase = (input.currentState as { phase?: string })?.phase;
+  const phaseError = validateActionPhase(input.plugin.manifest.id, actionType, phase);
+  if (phaseError) {
+    return { ok: false, response: NextResponse.json({ error: phaseError }, { status: 409 }) };
+  }
 
   if (policy.role === 'host' && input.hostUserId !== input.actorUserId) {
     const permissions = await getUserPermissions(getDb(), input.actorUserId, input.serverId);
@@ -58,6 +74,44 @@ async function authorizePluginAction(input: {
     normalizedAction[field] = input.actorUserId;
   }
   return { ok: true, action: normalizedAction };
+}
+
+/**
+ * LF-014: Validate that an action type is allowed in the current game phase.
+ * Returns an error message if invalid, null if OK.
+ * This is a host-side safety net — the plugin reducer is the primary
+ * authority but this prevents stale clients from submitting actions
+ * that are nonsensical for the phase.
+ */
+function validateActionPhase(pluginId: string, actionType: string, phase: string | undefined): string | null {
+  if (!phase) return null; // Can't validate without phase info.
+
+  if (pluginId === 'hushle') {
+    // Hushle phases: lobby, team_setup, playing, ended
+    const playingActions = ['correct-guess', 'pass', 'penalty', 'next-card', 'end-turn'];
+    const lobbyActions = ['start-game', 'set-teams', 'set-explainer'];
+    if (phase === 'lobby' && [...playingActions, 'end-game'].includes(actionType)) {
+      return 'Game has not started yet.';
+    }
+    if (phase === 'ended' && actionType !== 'end-game') {
+      return 'Game has ended.';
+    }
+  }
+
+  if (pluginId === 'quiz') {
+    // Quiz phases: lobby, playing, reveal, ended
+    if (phase === 'lobby' && ['answer', 'next'].includes(actionType)) {
+      return 'Quiz has not started yet.';
+    }
+    if (phase === 'reveal' && actionType === 'answer') {
+      return 'Answer period has ended for this question.';
+    }
+    if (phase === 'ended') {
+      return 'Quiz has ended.';
+    }
+  }
+
+  return null;
 }
 
 function getSessionSecret(): string {
@@ -152,6 +206,7 @@ async function handlePost(
       hostUserId: row.createdBy,
       plugin,
       action: body,
+      currentState: row.state as Record<string, unknown>,
     });
     if (!actionAuth.ok) return actionAuth.response;
 
