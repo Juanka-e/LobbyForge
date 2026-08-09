@@ -99,13 +99,28 @@ function recordSubscribe(state: ConnectionState): boolean {
   return true;
 }
 
+const MAX_CONNECTIONS_PER_IP = parseInt(process.env.WS_MAX_CONN_PER_IP || '10', 10);
+const ipConnectionCounts = new Map<string, number>();
+
 export function createGateway(): { wss: WebSocketServer; close: () => Promise<void> } {
   const wss = new WebSocketServer({
     host: getEnvHost(),
     port: getEnvPort(),
     perMessageDeflate: false,
-    verifyClient: (info: { origin: string; secure: boolean; req: import('http').IncomingMessage }) =>
-      isAllowedWsOrigin(info.origin),
+    verifyClient: (info: { origin: string; secure: boolean; req: import('http').IncomingMessage }) => {
+      if (!isAllowedWsOrigin(info.origin)) return false;
+      // Per-IP connection cap — prevents DoS via unauthenticated WS floods.
+      const ip = info.req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim()
+        || info.req.socket.remoteAddress
+        || 'unknown';
+      const count = ipConnectionCounts.get(ip) ?? 0;
+      if (count >= MAX_CONNECTIONS_PER_IP) {
+        console.warn(`[ws-gateway] rejecting connection from ${ip}: ${count} active (max ${MAX_CONNECTIONS_PER_IP})`);
+        return false;
+      }
+      ipConnectionCounts.set(ip, count + 1);
+      return true;
+    },
   });
 
   const connections = new WeakMap<WebSocket, ConnectionState>();
@@ -131,6 +146,9 @@ export function createGateway(): { wss: WebSocketServer; close: () => Promise<vo
   }, HEARTBEAT_INTERVAL_MS);
 
   wss.on('connection', (socket, req) => {
+    const connectionIp = req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim()
+      || req.socket.remoteAddress
+      || 'unknown';
     const cookieHeader = req.headers.cookie;
     const auth = validateGuestFromHeaders(cookieHeader);
     if (!auth.ok) {
@@ -256,9 +274,22 @@ export function createGateway(): { wss: WebSocketServer; close: () => Promise<vo
 
     socket.on('close', () => {
       state.subs.closeAll();
+      // Decrement per-IP connection counter.
+      const count = ipConnectionCounts.get(connectionIp) ?? 0;
+      if (count <= 1) {
+        ipConnectionCounts.delete(connectionIp);
+      } else {
+        ipConnectionCounts.set(connectionIp, count - 1);
+      }
     });
     socket.on('error', () => {
       state.subs.closeAll();
+      const count = ipConnectionCounts.get(connectionIp) ?? 0;
+      if (count <= 1) {
+        ipConnectionCounts.delete(connectionIp);
+      } else {
+        ipConnectionCounts.set(connectionIp, count - 1);
+      }
     });
   });
 

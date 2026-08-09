@@ -44,7 +44,12 @@ describe('POST /api/users/me/banner', () => {
   });
 
   it('updates the current user banner', async () => {
-    const dataUrl = 'data:image/webp;base64,' + 'a'.repeat(80);
+    // Valid WebP magic bytes: RIFF....WEBP
+    const webpMagic = Buffer.alloc(12);
+    webpMagic.write('RIFF', 0);
+    webpMagic.writeUInt32LE(0, 4); // file size placeholder
+    webpMagic.write('WEBP', 8);
+    const dataUrl = 'data:image/webp;base64,' + webpMagic.toString('base64') + 'a'.repeat(60);
     const response = await post({ dataUrl });
 
     expect(response.status).toBe(200);

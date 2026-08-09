@@ -176,7 +176,7 @@ async function handlePost(
     const migratedState = plugin.migrateState
       ? (plugin.migrateState(row.state) as Record<string, unknown>)
       : row.state;
-    const nextState = callHandleAction(plugin, ctx2, migratedState, prepared.action) as Record<string, unknown>;
+    const nextState = await callHandleAction(plugin, ctx2, migratedState, prepared.action) as Record<string, unknown>;
     await setGameSessionState(getDb(), sessionId, nextState);
     // Push the new state to any open SSE subscriptions on this session.
     // Fire-and-forget — a Redis blip must not fail the action.

@@ -135,40 +135,72 @@ export async function buildHttpPluginContext(
   };
 }
 
+/** CPU budget for plugin reducer calls (ms). A reducer that takes longer
+ *  than this is considered hung/malicious and the call is aborted. */
+const PLUGIN_TIMEOUT_MS = 5_000;
+
 /**
- * Compute the initial state of a plugin against the HTTP context. Most
- * plugins ignore the context for this; the signature is part of the
- * SDK so the host has a uniform call site.
+ * Run a synchronous plugin function with a wall-clock timeout. Since the
+ * function runs in-process (no true sandbox), this at least prevents
+ * infinite loops from hanging the API route indefinitely. The function
+ * runs in the next microtask via Promise.resolve, so the event loop can
+ * still process the timeout.
  */
-export function callCreateInitialState(
+function runWithTimeout<T>(fn: () => T, pluginId: string, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Plugin "${pluginId}" timed out after ${ms}ms`));
+    }, ms);
+    try {
+      const result = fn();
+      clearTimeout(timer);
+      resolve(result);
+    } catch (err) {
+      clearTimeout(timer);
+      reject(err);
+    }
+  });
+}
+
+/**
+ * Compute the initial state of a plugin. Wrapped in try/catch + timeout.
+ * Now async — callers must await.
+ */
+export async function callCreateInitialState(
   plugin: RegisteredGamePlugin,
   ctx: GamePluginContext
-): unknown {
+): Promise<unknown> {
   try {
-    return plugin.createInitialState(ctx);
+    return await runWithTimeout(
+      () => plugin.createInitialState(ctx),
+      plugin.manifest.id,
+      PLUGIN_TIMEOUT_MS
+    );
   } catch (err) {
-    console.error(`[plugin-context] createInitialState threw for "${plugin.manifest.id}":`, (err as Error).message);
+    console.error(`[plugin-context] createInitialState failed for "${plugin.manifest.id}":`, (err as Error).message);
     throw new Error(`Plugin "${plugin.manifest.id}" failed to initialize.`);
   }
 }
 
 /**
- * Dispatch an action through the plugin. We trust the plugin's
- * handleAction to be a pure function of (state, action, ctx) — the
- * host does not enforce that, but every registered plugin is a
- * redux-style reducer. For dynamically-loaded plugins (marketplace),
- * a try/catch prevents a buggy reducer from crashing the API route.
+ * Dispatch an action through the plugin. Wrapped in try/catch + timeout
+ * to prevent infinite loops in dynamically-loaded marketplace plugins.
+ * Now async — callers must await.
  */
-export function callHandleAction(
+export async function callHandleAction(
   plugin: RegisteredGamePlugin,
   ctx: GamePluginContext,
   state: unknown,
   action: unknown
-): unknown {
+): Promise<unknown> {
   try {
-    return plugin.handleAction(ctx, state, action);
+    return await runWithTimeout(
+      () => plugin.handleAction(ctx, state, action),
+      plugin.manifest.id,
+      PLUGIN_TIMEOUT_MS
+    );
   } catch (err) {
-    console.error(`[plugin-context] handleAction threw for "${plugin.manifest.id}":`, (err as Error).message);
+    console.error(`[plugin-context] handleAction failed for "${plugin.manifest.id}":`, (err as Error).message);
     throw new Error(`Plugin "${plugin.manifest.id}" failed to handle action.`);
   }
 }

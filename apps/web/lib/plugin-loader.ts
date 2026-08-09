@@ -100,7 +100,30 @@ async function loadPluginFromDisk(pluginId: string): Promise<RegisteredGamePlugi
   }
 
   const fileUrl = pathToFileURL(indexPath).href;
+
+  // Scrub sensitive env vars before importing untrusted plugin code.
+  // A marketplace plugin runs in-process and could read process.env to
+  // exfiltrate secrets. We restore the original env immediately after.
+  const SENSITIVE_KEYS = [
+    'LOBBYFORGE_SESSION_SECRET',
+    'LOBBYFORGE_ADMIN_TOKEN',
+    'LOBBYFORGE_SETUP_TOKEN',
+    'POSTGRES_PASSWORD',
+    'REDIS_PASSWORD',
+    'LIVEKIT_API_SECRET',
+    'GOOGLE_OAUTH_CLIENT_SECRET',
+    'DATABASE_URL',
+  ];
+  const savedValues: Record<string, string | undefined> = {};
+  for (const key of SENSITIVE_KEYS) {
+    savedValues[key] = process.env[key];
+    delete process.env[key];
+  }
   const mod = await import(fileUrl);
+  // Restore env immediately.
+  for (const [key, value] of Object.entries(savedValues)) {
+    if (value !== undefined) process.env[key] = value;
+  }
 
   // Accept either `{ plugin }` or default export.
   const raw: unknown = mod?.plugin ?? mod?.default;

@@ -26,8 +26,18 @@ async function handler(req: Request): Promise<NextResponse> {
  */
 function redactStatsForPublic(stats: SystemStats): Record<string, unknown> {
   const safe: Record<string, unknown> = { ...stats };
-  // startedAt is process-level — keep uptimeSeconds but not the Date object.
+  // Strip process-level timestamps and absolute hardware sizes.
+  // Keep ratios (percentages) which are all the admin needs for capacity
+  // decisions without exposing a host hardware fingerprint.
   delete safe.startedAt;
+  delete (safe as Record<string, unknown>).totalMemoryBytes;
+  delete (safe as Record<string, unknown>).freeMemoryBytes;
+  delete (safe as Record<string, unknown>).totalDiskBytes;
+  delete (safe as Record<string, unknown>).freeDiskBytes;
+  // Compute memory free ratio (keep it for the capacity tier check).
+  if (stats.totalMemoryBytes > 0) {
+    safe.memoryFreeRatio = stats.freeMemoryBytes / stats.totalMemoryBytes;
+  }
   return safe;
 }
 

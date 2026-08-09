@@ -169,7 +169,7 @@ async function handlePost(
       sessionId: 'pending',
       actorUserId: session.uid,
     });
-    const initialState = callCreateInitialState(plugin, ctx) as Record<string, unknown>;
+    const initialState = await callCreateInitialState(plugin, ctx) as Record<string, unknown>;
 
     const created = await createGameSession(getDb(), {
       serverId,
