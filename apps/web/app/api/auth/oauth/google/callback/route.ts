@@ -39,7 +39,10 @@ async function handleGet(req: Request): Promise<NextResponse> {
   // Verify state against the cookie (CSRF protection).
   const cookieState = req.headers.get('cookie')
     ?.match(/lf_oauth_state=([a-f0-9]+)/)?.[1];
-  if (!cookieState || !timingSafeEqual(Buffer.from(state), Buffer.from(cookieState))) {
+  // Length guard before timingSafeEqual to prevent RangeError on mismatched lengths.
+  const stateBuf = Buffer.from(state);
+  const cookieBuf = cookieState ? Buffer.from(cookieState) : Buffer.alloc(0);
+  if (!cookieState || stateBuf.length !== cookieBuf.length || !timingSafeEqual(stateBuf, cookieBuf)) {
     return NextResponse.redirect(new URL('/login?error=state_mismatch', req.url));
   }
 
@@ -91,8 +94,10 @@ async function handleGet(req: Request): Promise<NextResponse> {
     });
 
     // Clear OAuth cookies + redirect to the app.
+    // Use signed.setCookieHeader verbatim — buildGuestSessionCookie already
+    // emits a fully-formed Set-Cookie with Path, Max-Age, HttpOnly, SameSite, Secure.
     const res = NextResponse.redirect(new URL(redirect, req.url));
-    res.headers.set('Set-Cookie', `${signed.setCookieHeader}; Path=/; Max-Age=${GUEST_SESSION_TTL_SECONDS}`);
+    res.headers.set('Set-Cookie', signed.setCookieHeader);
     res.cookies.delete('lf_oauth_state');
     res.cookies.delete('lf_oauth_redirect');
     return res;

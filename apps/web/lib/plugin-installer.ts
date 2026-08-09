@@ -83,9 +83,9 @@ export async function installPluginBundle(
 }
 
 /** Download a URL with a timeout, returning an ArrayBuffer.
- *  Validates the URL is HTTPS and not pointing at a private/loopback IP (SSRF protection). */
+ *  Validates the URL is HTTPS and resolves the hostname to verify the IP
+ *  is not private/loopback (SSRF protection with DNS-rebinding mitigation). */
 async function downloadWithTimeout(url: string): Promise<ArrayBuffer> {
-  // SSRF protection: only allow HTTPS, block private/loopback IPs.
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -96,25 +96,27 @@ async function downloadWithTimeout(url: string): Promise<ArrayBuffer> {
     throw new Error('Manifest URL must use HTTPS');
   }
   const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
-  if (
-    host === 'localhost' ||
-    host === '::1' ||
-    host.startsWith('127.') ||
-    host.startsWith('10.') ||
-    host.startsWith('172.16.') ||
-    host.startsWith('172.17.') ||
-    host.startsWith('172.18.') ||
-    host.startsWith('172.19.') ||
-    host.startsWith('172.2') ||
-    host.startsWith('172.3') ||
-    host.startsWith('192.168.') ||
-    host.startsWith('169.254.') ||
-    host.startsWith('fc') ||
-    host.startsWith('fd') ||
-    host.endsWith('.local') ||
-    host.endsWith('.internal')
-  ) {
-    throw new Error('Manifest URL must not point to a private or loopback address');
+
+  // Quick hostname string check (catches obvious cases before DNS).
+  if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) {
+    throw new Error('Manifest URL must not point to a private address');
+  }
+
+  // DNS resolve the hostname and check each resolved IP against private ranges.
+  // This catches DNS-rebinding attacks where the hostname passes the string
+  // check but resolves to an internal IP at fetch time.
+  const { lookup } = await import('node:dns').then((m) => m.promises);
+  let addresses: string[];
+  try {
+    const result = await lookup(host, { all: true });
+    addresses = result.map((r) => r.address);
+  } catch {
+    throw new Error(`Could not resolve hostname: ${host}`);
+  }
+  for (const ip of addresses) {
+    if (isPrivateIp(ip)) {
+      throw new Error(`Manifest URL resolves to private address: ${ip}`);
+    }
   }
 
   const controller = new AbortController();
@@ -122,13 +124,37 @@ async function downloadWithTimeout(url: string): Promise<ArrayBuffer> {
   try {
     const res = await fetch(url, {
       signal: controller.signal,
-      redirect: 'error', // No redirects — prevents DNS-rebinding bypass
+      redirect: 'error',
     });
     if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`);
     return await res.arrayBuffer();
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Check if an IP address is private, loopback, or link-local. */
+function isPrivateIp(ip: string): boolean {
+  // IPv4 checks
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(ip)) {
+    const parts = ip.split('.').map(Number);
+    return (
+      parts[0] === 10 ||                                    // 10.0.0.0/8
+      (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || // 172.16.0.0/12
+      (parts[0] === 192 && parts[1] === 168) ||             // 192.168.0.0/16
+      parts[0] === 127 ||                                   // 127.0.0.0/8 (loopback)
+      (parts[0] === 169 && parts[1] === 254) ||             // 169.254.0.0/16 (link-local)
+      parts[0] === 0                                        // 0.0.0.0/8
+    );
+  }
+  // IPv6 checks
+  const lower = ip.toLowerCase();
+  return (
+    lower === '::1' ||                                     // loopback
+    lower.startsWith('fe80:') ||                            // link-local
+    lower.startsWith('fc') || lower.startsWith('fd') ||     // ULA
+    lower.startsWith('::ffff:') && isPrivateIp(lower.slice(7)) // IPv4-mapped
+  );
 }
 
 /** Extract a .tgz tarball using the system `tar` command. */

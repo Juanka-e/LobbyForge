@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { heartbeatRegistryInstance } from '@lobbyforge/db';
+import { requireMaterializedSession } from '@/lib/api-auth';
 import { withApiSecurity } from '@/lib/security-headers';
 import { getDb } from '@/lib/db';
 
@@ -20,9 +21,12 @@ const HeartbeatSchema = z.object({
  *
  * Called periodically by self-hosted instances to report their current load.
  * No auth (the instance's publicKey is verified out-of-band in a future
- * signature step); rate-limited to prevent abuse.
+ * Requires a materialized session to prevent anonymous stats spoofing.
  */
 async function handlePost(req: Request): Promise<NextResponse> {
+  const sessionResult = requireMaterializedSession(req);
+  if (!sessionResult.ok) return sessionResult.response;
+
   let body: z.infer<typeof HeartbeatSchema>;
   try {
     body = HeartbeatSchema.parse(await req.json());

@@ -196,6 +196,11 @@ export function resolveClientAddress(
   if (mode === 'x-forwarded-for') {
     return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
   }
+  // In production behind a reverse proxy (Nginx), warn loudly if the trusted
+  // proxy is not configured — without it, ALL clients share one rate-limit bucket.
+  if (process.env.NODE_ENV === 'production') {
+    console.warn('[security] LOBBYFORGE_TRUSTED_PROXY is not set — rate limiting is ineffective (all clients share one bucket). Set to "x-forwarded-for" behind Nginx.');
+  }
   return 'unknown';
 }
 
@@ -251,8 +256,9 @@ export async function distributedRateLimit(
  * Build a NextResponse from a RateLimitResult, including 429 + Retry-After when blocked.
  * Returns null when the request is allowed, leaving the handler free to continue.
  */
-export function rateLimitResponse(result: RateLimitResult): NextResponse | null {
+export function rateLimitResponse(result: RateLimitResult, identifier?: string): NextResponse | null {
   if (result.allowed) return null;
+  console.warn(`[security] rate limit hit: ${identifier ?? 'unknown'}`);
   const retryAfter = Math.max(1, Math.ceil((result.resetAt - Date.now()) / 1000));
   return NextResponse.json(
     { error: 'Rate limit exceeded', retryAfter, resetAt: new Date(result.resetAt).toISOString() },
@@ -305,7 +311,7 @@ export function withApiSecurity<TContext = unknown>(
         rateLimitKey(req, options.rateLimit.identifier),
         options.rateLimit.config
       );
-      const blocked = rateLimitResponse(result);
+      const blocked = rateLimitResponse(result, options.rateLimit.identifier);
       if (blocked) return applySecurityHeaders(blocked);
     }
 

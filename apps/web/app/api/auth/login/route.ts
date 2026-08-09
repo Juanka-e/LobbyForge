@@ -24,6 +24,7 @@ async function handlePost(req: Request): Promise<NextResponse> {
   const user = await getUserCredentialsByEmail(getDb(), parsed.data.email);
   const valid = await verifyPassword(parsed.data.password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
   if (!user || user.deletedAt || !user.passwordHash || !valid) {
+    console.warn(`[security] failed login: email=${parsed.data.email.slice(0, 3)}*** ip=${req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'}`);
     return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 });
   }
 

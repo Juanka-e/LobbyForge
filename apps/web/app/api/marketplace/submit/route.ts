@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 const SubmitSchema = z.object({
-  pluginId: z.string().min(2).max(128),
+  pluginId: z.string().min(2).max(128).regex(/^[a-z0-9][a-z0-9-_]*$/i, 'Plugin ID must be alphanumeric with dashes/underscores only'),
   name: z.string().min(2).max(100),
   version: z.string().min(1).max(30),
   type: z.enum(['game', 'activity', 'utility']),

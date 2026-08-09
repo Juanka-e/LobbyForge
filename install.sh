@@ -18,6 +18,7 @@ set -euo pipefail
 #   5. Runs the Doctor health check.
 
 set -e
+umask 077  # Secrets written by this script should only be readable by the owner.
 
 BOLD='\033[1m'
 GREEN='\033[0;32m'
@@ -135,6 +136,7 @@ LOBBYFORGE_SETUP_TOKEN=$SETUP_TOKEN
 # Product
 LOBBYFORGE_DEPLOYMENT_MODE=$DEPLOYMENT_MODE
 LOBBYFORGE_INSTANCE_NAME=$INSTANCE_NAME
+LOBBYFORGE_TRUSTED_PROXY=x-forwarded-for
 NEXT_PUBLIC_BASE_URL=https://$DOMAIN
 
 # Node
