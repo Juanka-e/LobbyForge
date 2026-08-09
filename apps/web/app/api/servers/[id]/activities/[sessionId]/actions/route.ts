@@ -7,7 +7,7 @@ import {
   isServerMember,
   listPlayersForSession,
   logAction,
-  setGameSessionState,
+  setGameSessionStateCAS,
 } from '@lobbyforge/db';
 import { CorePermission, hasPermission } from '@lobbyforge/core';
 import { getDb } from '@/lib/db';
@@ -177,13 +177,41 @@ async function handlePost(
       ? (plugin.migrateState(row.state) as Record<string, unknown>)
       : row.state;
     const nextState = await callHandleAction(plugin, ctx2, migratedState, prepared.action) as Record<string, unknown>;
-    await setGameSessionState(getDb(), sessionId, nextState);
+
+    // Compare-and-swap with optimistic concurrency: retry up to 3 times
+    // if another concurrent action changed the revision.
+    const expectedRevision = (row as { revision?: number }).revision ?? 0;
+    const MAX_CAS_RETRIES = 3;
+    let casResult: { ok: boolean; row: { id: string; state: Record<string, unknown>; status: string; revision: number } | null } = { ok: false, row: null };
+    let currentState = migratedState;
+    let currentRev = expectedRevision;
+
+    for (let attempt = 0; attempt < MAX_CAS_RETRIES; attempt++) {
+      casResult = await setGameSessionStateCAS(getDb(), sessionId, currentRev, nextState) as typeof casResult;
+      if (casResult.ok) break;
+      // Concurrent modification — re-read, re-migrate, re-reduce.
+      if (!casResult.row) {
+        return NextResponse.json({ error: 'Session not found during CAS retry.' }, { status: 404 });
+      }
+      currentRev = casResult.row.revision;
+      currentState = plugin.migrateState
+        ? (plugin.migrateState(casResult.row.state) as Record<string, unknown>)
+        : casResult.row.state;
+    }
+
+    if (!casResult.ok) {
+      return NextResponse.json(
+        { error: 'Conflict: too many concurrent actions. Please retry.', revision: currentRev },
+        { status: 409 }
+      );
+    }
+
     // Push the new state to any open SSE subscriptions on this session.
     // Fire-and-forget — a Redis blip must not fail the action.
     publishActivityStateChange({
       serverId,
       sessionId,
-      status: row.status,
+      status: (casResult.row as { status?: string })?.status ?? row.status,
       state: nextState,
     });
     void logAction(getDb(), {
@@ -194,8 +222,12 @@ async function handlePost(
       targetId: sessionId,
       metadata: { pluginId: row.pluginId, actionType: parseResult.data.type },
     }).catch((err) => console.error('[audit] activity.action failed:', (err as Error).message));
+
+    // LF-001: Project state for non-host actors — never return raw server state.
+    const isHostActor = session.uid === row.createdBy;
+    const viewerState = isHostActor ? nextState : projectStateForViewer(nextState, row.pluginId);
     return NextResponse.json(
-      { activity: { id: row.id, state: nextState, status: row.status } },
+      { activity: { id: row.id, state: viewerState, status: row.status } },
       { headers: { 'Cache-Control': 'no-store' } }
     );
   } catch {
@@ -210,3 +242,20 @@ export const POST = withApiSecurity(handlePost, {
   allowedMethods: ['POST'],
   rateLimit: { identifier: 'activity-action', config: { windowMs: 60_000, maxRequests: 30 } },
 });
+
+/** LF-001: Strip secret state fields for non-host viewers. */
+function projectStateForViewer(state: unknown, pluginId: string): unknown {
+  if (!state || typeof state !== 'object') return state;
+  const s = { ...(state as Record<string, unknown>) };
+  if (pluginId === 'hushle' && s.phase !== 'ended' && s.currentCard) {
+    s.currentCard = '[hidden — host only]';
+  }
+  if (pluginId === 'quiz' && s.phase !== 'reveal' && s.phase !== 'ended' && Array.isArray(s.questions)) {
+    s.questions = (s.questions as Array<Record<string, unknown>>).map((q) => {
+      const safe = { ...q };
+      delete safe.correctIndex;
+      return safe;
+    });
+  }
+  return s;
+}

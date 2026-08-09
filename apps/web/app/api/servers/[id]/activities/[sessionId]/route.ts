@@ -95,6 +95,13 @@ async function handleGet(
     const plugin = getPluginServer(row.pluginId);
     const state = plugin?.migrateState ? plugin.migrateState(row.state) : row.state;
 
+    // LF-001: Project the state — never send raw server state to the client.
+    // The projection strips secret fields (Hushle's currentCard word +
+    // forbiddenWords, Quiz's correctIndex) so a player inspecting Network
+    // tab cannot cheat. Hosts (actorUserId === createdBy) see full state.
+    const isHost = session.uid === row.createdBy;
+    const projectedState = isHost ? state : projectStateForViewer(state, row.pluginId);
+
     return NextResponse.json(
       {
         activity: {
@@ -103,7 +110,7 @@ async function handleGet(
           channelId: row.channelId,
           pluginId: row.pluginId,
           status: row.status,
-          state,
+          state: projectedState,
           publicSummary: row.publicSummary,
           createdBy: row.createdBy,
           createdAt: row.createdAt.toISOString(),
@@ -131,3 +138,43 @@ export const GET = withApiSecurity(handleGet, {
   allowedMethods: ['GET'],
   rateLimit: { identifier: 'activity-get', config: { windowMs: 60_000, maxRequests: 60 } },
 });
+
+/**
+ * LF-001: Project server state for a non-host viewer.
+ * Strips secret fields so players can't cheat by inspecting the Network tab.
+ *
+ * Hushle secrets: currentCard.word, currentCard.forbiddenWords.
+ * Quiz secrets: questions[].correctIndex.
+ *
+ * When phase === 'ended' or 'reveal', secrets are safe to show.
+ */
+function projectStateForViewer(state: unknown, pluginId: string): unknown {
+  if (!state || typeof state !== 'object') return state;
+  const s = { ...(state as Record<string, unknown>) };
+
+  if (pluginId === 'hushle') {
+    const phase = s.phase as string | undefined;
+    if (phase !== 'ended') {
+      // Strip the secret card data — players only see the card exists.
+      if (s.currentCard && typeof s.currentCard === 'object') {
+        s.currentCard = '[hidden — host only]';
+      }
+    }
+  }
+
+  if (pluginId === 'quiz') {
+    const phase = s.phase as string | undefined;
+    if (phase !== 'reveal' && phase !== 'ended') {
+      // Strip correctIndex from each question.
+      if (Array.isArray(s.questions)) {
+        s.questions = (s.questions as Array<Record<string, unknown>>).map((q) => {
+          const safe = { ...q };
+          delete safe.correctIndex;
+          return safe;
+        });
+      }
+    }
+  }
+
+  return s;
+}

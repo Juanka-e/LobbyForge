@@ -193,7 +193,7 @@ export async function setGameSessionState(
   state: Record<string, unknown>,
   publicSummary?: Record<string, unknown>
 ): Promise<GameSessionRow | null> {
-  const patch: Record<string, unknown> = { state };
+  const patch: Record<string, unknown> = { state, revision: sql`${gameSessions.revision} + 1` };
   if (publicSummary !== undefined) patch.publicSummary = publicSummary;
   const [row] = await db
     .update(gameSessions)
@@ -201,6 +201,33 @@ export async function setGameSessionState(
     .where(eq(gameSessions.id, sessionId))
     .returning();
   return (row as GameSessionRow | undefined) ?? null;
+}
+
+/**
+ * Compare-and-swap state update with optimistic concurrency.
+ * Returns { ok: true, row } on success, { ok: false, row } if the
+ * revision didn't match (concurrent modification). The caller should
+ * retry by re-reading the state, re-running the reducer, and retrying
+ * with the new revision.
+ */
+export async function setGameSessionStateCAS(
+  db: DbClient,
+  sessionId: string,
+  expectedRevision: number,
+  state: Record<string, unknown>,
+  publicSummary?: Record<string, unknown>
+): Promise<{ ok: boolean; row: GameSessionRow | null }> {
+  const patch: Record<string, unknown> = { state, revision: sql`${gameSessions.revision} + 1` };
+  if (publicSummary !== undefined) patch.publicSummary = publicSummary;
+  const [row] = await db
+    .update(gameSessions)
+    .set(patch)
+    .where(and(eq(gameSessions.id, sessionId), eq(gameSessions.revision, expectedRevision)))
+    .returning();
+  if (row) return { ok: true, row: row as GameSessionRow };
+  // Revision didn't match — concurrent modification. Return current row.
+  const [current] = await db.select().from(gameSessions).where(eq(gameSessions.id, sessionId)).limit(1);
+  return { ok: false, row: (current as GameSessionRow | undefined) ?? null };
 }
 
 /**

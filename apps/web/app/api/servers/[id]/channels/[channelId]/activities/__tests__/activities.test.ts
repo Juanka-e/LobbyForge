@@ -12,6 +12,7 @@ const getPluginInstall = vi.fn();
 const listGameSessionsForChannel = vi.fn();
 const getGameSessionById = vi.fn();
 const setGameSessionState = vi.fn();
+const setGameSessionStateCAS = vi.fn();
 const endGameSession = vi.fn();
 const listPlayersForSession = vi.fn();
 const logAction = vi.fn().mockResolvedValue(undefined);
@@ -41,6 +42,7 @@ vi.mock('@lobbyforge/db', () => ({
   listGameSessionsForChannel,
   getGameSessionById,
   setGameSessionState,
+  setGameSessionStateCAS,
   endGameSession,
   listPlayersForSession,
   logAction,
@@ -74,6 +76,7 @@ beforeEach(() => {
   listGameSessionsForChannel.mockReset();
   getGameSessionById.mockReset();
   setGameSessionState.mockReset();
+  setGameSessionStateCAS.mockReset();
   endGameSession.mockReset();
   listPlayersForSession.mockReset();
   listPlayersForSession.mockResolvedValue([]);
@@ -440,7 +443,11 @@ describe('POST /api/servers/{id}/activities/{sessionId}/actions', () => {
     getServerById.mockResolvedValue(mockServer(OWNER_ID));
     isServerMember.mockResolvedValue(true);
     getGameSessionById.mockResolvedValue(mockSession({ state: { count: 0 } }));
-    setGameSessionState.mockResolvedValue(null);
+    // CAS mock — returns ok with the new state.
+    setGameSessionStateCAS.mockResolvedValue({
+      ok: true,
+      row: { ...mockSession({ state: { count: 3 } }), revision: 1 },
+    });
     const { POST } = await loadActionRoute();
     const res = await POST(
       new Request(`https://example.test/api/servers/${SERVER_ID}/activities/${SESSION_ID}/actions`, {
@@ -453,11 +460,7 @@ describe('POST /api/servers/{id}/activities/{sessionId}/actions', () => {
     expect(res.status).toBe(200);
     const json = (await res.json()) as { activity: { state: { count: number } } };
     expect(json.activity.state).toEqual({ count: 3 });
-    expect(setGameSessionState).toHaveBeenCalledWith(
-      expect.anything(),
-      SESSION_ID,
-      { count: 3 }
-    );
+    expect(setGameSessionStateCAS).toHaveBeenCalled();
   });
 });
 

@@ -169,6 +169,13 @@
       "when": 1785040000000,
       "tag": "0024_reports_and_plugin_data",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1785126400000,
+      "tag": "0025_game_session_revision",
+      "breakpoints": true
     }
   ]
 }

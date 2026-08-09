@@ -201,6 +201,9 @@ export const gameSessions = pgTable('game_sessions', {
   // opaque to other plugins.
   teamSize: integer('team_size'),
   difficultyDistribution: jsonb('difficulty_distribution'),
+  // Optimistic concurrency control — incremented on every state update.
+  // The action route uses CAS: UPDATE ... WHERE revision = $expected.
+  revision: integer('revision').default(0).notNull(),
   createdBy: uuid('created_by').references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   startedAt: timestamp('started_at', { withTimezone: true }),
