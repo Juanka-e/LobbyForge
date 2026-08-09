@@ -35,6 +35,6 @@ COPY --from=builder /app /app
 
 EXPOSE 3000 3001
 
-# Start both the Next.js web server and the WebSocket gateway.
-# The gateway runs in the background; the web server is the foreground process.
-CMD ["sh", "-c", "node apps/ws-gateway/dist/index.js & pnpm --filter @lobbyforge/web start"]
+# Start only the Next.js web server. The ws-gateway runs as a separate
+# Docker Compose service with its own CMD override.
+CMD ["pnpm", "--filter", "@lobbyforge/web", "start"]

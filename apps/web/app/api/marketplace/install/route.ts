@@ -27,6 +27,16 @@ async function handlePost(req: Request): Promise<NextResponse> {
   const denied = await requireAdminHealthToken(req);
   if (denied) return denied;
 
+  // Dynamic plugin execution is disabled by default until process-level
+  // isolation is implemented. This prevents untrusted code from running
+  // in the web process.
+  if (process.env.LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED !== 'true') {
+    return NextResponse.json(
+      { error: 'Dynamic plugin installation is disabled. Set LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED=true to enable (not recommended — plugins run in-process without isolation).' },
+      { status: 503 }
+    );
+  }
+
   let body: z.infer<typeof InstallSchema>;
   try {
     body = InstallSchema.parse(await req.json());

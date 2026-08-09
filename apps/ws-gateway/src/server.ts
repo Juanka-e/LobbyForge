@@ -39,7 +39,7 @@ function getEnvPort(): number {
 }
 
 function getEnvHost(): string {
-  return process.env.WS_HOST ?? '127.0.0.1';
+  return process.env.WS_HOST ?? '0.0.0.0';
 }
 
 function configuredOrigins(): Set<string> {
@@ -107,12 +107,16 @@ export function createGateway(): { wss: WebSocketServer; close: () => Promise<vo
     host: getEnvHost(),
     port: getEnvPort(),
     perMessageDeflate: false,
+    maxPayload: 64 * 1024, // 64 KB — reject oversized messages
     verifyClient: (info: { origin: string; secure: boolean; req: import('http').IncomingMessage }) => {
       if (!isAllowedWsOrigin(info.origin)) return false;
       // Per-IP connection cap — prevents DoS via unauthenticated WS floods.
-      const ip = info.req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim()
-        || info.req.socket.remoteAddress
-        || 'unknown';
+      // Use x-forwarded-for only when behind a trusted proxy (production Nginx).
+      const ip = process.env.NODE_ENV === 'production'
+        ? (info.req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim()
+          || info.req.socket.remoteAddress
+          || 'unknown')
+        : (info.req.socket.remoteAddress || 'unknown');
       const count = ipConnectionCounts.get(ip) ?? 0;
       if (count >= MAX_CONNECTIONS_PER_IP) {
         console.warn(`[ws-gateway] rejecting connection from ${ip}: ${count} active (max ${MAX_CONNECTIONS_PER_IP})`);
@@ -146,9 +150,26 @@ export function createGateway(): { wss: WebSocketServer; close: () => Promise<vo
   }, HEARTBEAT_INTERVAL_MS);
 
   wss.on('connection', (socket, req) => {
-    const connectionIp = req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim()
-      || req.socket.remoteAddress
-      || 'unknown';
+    const connectionIp = process.env.NODE_ENV === 'production'
+      ? (req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim()
+        || req.socket.remoteAddress
+        || 'unknown')
+      : (req.socket.remoteAddress || 'unknown');
+
+    // Single-fire cleanup — prevents counter leak/double-decrement when
+    // both 'close' and 'error' fire on the same socket.
+    let ipReleased = false;
+    const releaseIpSlot = () => {
+      if (ipReleased) return;
+      ipReleased = true;
+      const count = ipConnectionCounts.get(connectionIp) ?? 0;
+      if (count <= 1) {
+        ipConnectionCounts.delete(connectionIp);
+      } else {
+        ipConnectionCounts.set(connectionIp, count - 1);
+      }
+    };
+
     const cookieHeader = req.headers.cookie;
     const auth = validateGuestFromHeaders(cookieHeader);
     if (!auth.ok) {
@@ -157,6 +178,8 @@ export function createGateway(): { wss: WebSocketServer; close: () => Promise<vo
         code: 'forbidden',
         message: 'Authentication required',
       });
+      // Release the IP slot even on auth failure.
+      releaseIpSlot();
       socket.close(4401, 'unauthenticated');
       return;
     }
@@ -272,24 +295,13 @@ export function createGateway(): { wss: WebSocketServer; close: () => Promise<vo
       }
     });
 
-    socket.on('close', () => {
+    socket.once('close', () => {
       state.subs.closeAll();
-      // Decrement per-IP connection counter.
-      const count = ipConnectionCounts.get(connectionIp) ?? 0;
-      if (count <= 1) {
-        ipConnectionCounts.delete(connectionIp);
-      } else {
-        ipConnectionCounts.set(connectionIp, count - 1);
-      }
+      releaseIpSlot();
     });
-    socket.on('error', () => {
+    socket.once('error', () => {
       state.subs.closeAll();
-      const count = ipConnectionCounts.get(connectionIp) ?? 0;
-      if (count <= 1) {
-        ipConnectionCounts.delete(connectionIp);
-      } else {
-        ipConnectionCounts.set(connectionIp, count - 1);
-      }
+      releaseIpSlot();
     });
   });
 

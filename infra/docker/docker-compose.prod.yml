@@ -52,6 +52,11 @@ services:
     build:
       context: ../..
       dockerfile: Dockerfile
+      args:
+        # These are baked into the Next.js client bundle at build time.
+        # They MUST match the public URLs the browser will use.
+        NEXT_PUBLIC_LIVEKIT_URL: ${NEXT_PUBLIC_LIVEKIT_URL:?required}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:?required}
     image: lobbyforge-web:latest
     container_name: lobbyforge-web
     restart: unless-stopped
@@ -85,9 +90,17 @@ services:
     command: ["node", "apps/ws-gateway/dist/index.js"]
     env_file:
       - ../../.env.prod
+    environment:
+      - WS_HOST=0.0.0.0
+      - WS_PORT=3001
     depends_on:
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
     networks:
       - edge
       - internal

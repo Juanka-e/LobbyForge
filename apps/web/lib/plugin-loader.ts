@@ -54,6 +54,14 @@ export async function warmInstalledPlugins(): Promise<void> {
   if (warmed) return;
   warmed = true;
 
+  // Dynamic plugin execution is disabled by default. The feature requires
+  // process-level isolation (separate container/worker_thread with no access
+  // to host secrets) before it can be safely enabled for third-party code.
+  // Set LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED=true to opt in (not recommended yet).
+  if (process.env.LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED !== 'true') {
+    return;
+  }
+
   if (!existsSync(INSTALLED_DIR)) return;
 
   let entries: string[];
@@ -180,6 +188,10 @@ export function listDynamicPluginIds(): string[] {
  * always picks up the new files on disk (ESM has no `require.cache`).
  */
 export async function reloadDynamicPlugin(pluginId: string): Promise<boolean> {
+  if (process.env.LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED !== 'true') {
+    console.warn('[plugin-loader] dynamic plugins are disabled (LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED != true)');
+    return false;
+  }
   try {
     // Force re-import by busting any internal ESM cache via a unique URL.
     const pluginDir = join(INSTALLED_DIR, pluginId);

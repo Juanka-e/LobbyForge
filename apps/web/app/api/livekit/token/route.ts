@@ -26,16 +26,17 @@ export const runtime = 'nodejs';
 const TokenRequestSchema = z.object({
   serverId: z.string().uuid(),
   channelId: z.string().uuid(),
-  // Optional display name override for the LiveKit participant list.
-  // The server still uses the cookie's gid as the immutable identity.
+  // Display name override — sourced from the session profile server-side.
   displayName: z.string().min(1).max(64).optional(),
-  // Optional narrowing of publish / subscribe capabilities.
+  // Optional narrowing of publish / subscribe capabilities (client-initiated).
+  // The server intersects these with the server voice settings policy.
   canPublishSources: z
     .array(z.enum(['camera', 'microphone', 'screen-share', 'screen-share-audio']))
     .optional(),
-  hidden: z.boolean().optional(),
-  metadata: z.string().max(1024).optional(),
-});
+  // hidden and metadata are NOT accepted from the client — they are
+  // server-generated only. A regular user must not be able to become
+  // a hidden participant or inject arbitrary metadata.
+}).strict();
 
 async function handler(req: Request): Promise<NextResponse> {
   const sessionResult = requireMaterializedSession(req);
@@ -121,18 +122,20 @@ async function handler(req: Request): Promise<NextResponse> {
   const grants: LiveKitGrants = {
     room,
     canPublishSources: allowedPublishSources,
-    hidden: body.hidden,
+    hidden: false, // Regular users are never hidden — admin bots use a separate endpoint.
   };
 
   try {
     const identity = session.uid ?? session.gid;
+    // Server-generated metadata — the client cannot inject arbitrary metadata.
+    const metadata = JSON.stringify({ uid: identity, kind: 'user' });
     const token = await issueLiveKitToken({
       apiKey,
       apiSecret,
       identity,
       name: body.displayName ?? session.name,
       grants,
-      ...(body.metadata ? { metadata: body.metadata } : {}),
+      metadata,
     });
     return NextResponse.json(
       {

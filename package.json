@@ -14,7 +14,10 @@
     }
   },
   "scripts": {
-    "build": "pnpm -r --if-present build",
+    "build:packages": "pnpm --filter './packages/**' -r --if-present build",
+    "build:server": "pnpm build:packages && pnpm --filter @lobbyforge/ws-gateway build && pnpm --filter @lobbyforge/web build",
+    "build:desktop": "pnpm --filter @lobbyforge/desktop build",
+    "build": "pnpm build:server",
     "dev": "pnpm -r --if-present --parallel dev",
     "lint": "pnpm -r --if-present lint",
     "typecheck": "pnpm -r --if-present typecheck",

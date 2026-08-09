@@ -14,6 +14,8 @@ vi.mock('@/lib/plugin-installer', () => ({ installPluginBundle }));
 
 beforeEach(() => {
   vi.resetModules();
+  // Enable dynamic plugins for install tests.
+  vi.stubEnv('LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED', 'true');
   requireAdminHealthToken.mockReset();
   getCatalogEntry.mockReset();
   incrementDownloadCount.mockReset();
@@ -101,6 +103,20 @@ describe('POST /api/marketplace/install', () => {
       {}
     );
     expect(res.status).toBe(500);
+  });
+
+  it('returns 503 when dynamic plugins are disabled (default)', async () => {
+    vi.stubEnv('LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED', '');
+    vi.resetModules();
+    const { POST } = await import('../route.js');
+    const res = await POST(
+      new Request('https://example.test/api/marketplace/install', {
+        method: 'POST',
+        body: JSON.stringify({ pluginId: 'cool-game' }),
+      }),
+      {}
+    );
+    expect(res.status).toBe(503);
   });
 
   it('rejects when admin token is missing', async () => {

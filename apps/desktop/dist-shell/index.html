@@ -152,9 +152,9 @@
     </div>
   </div>
 
-  <!-- Instance iframe (loaded after connect) -->
-  <iframe id="instance-frame" class="hidden" referrerpolicy="no-referrer" allow="microphone; camera; autoplay; display-capture; clipboard-read; clipboard-write"></iframe>
-  <button id="exit-pill" title="Disconnect and return to the connect screen">Switch instance</button>
+  <!-- The instance loads via top-level webview navigation (not iframe).
+       This avoids CSP/X-Frame-Options conflicts. The Rust side calls
+       window.__lobbyforgeNavigate(url) to navigate. -->
 
   <script src="shell.js"></script>
 </body>
