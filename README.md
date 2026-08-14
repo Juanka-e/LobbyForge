@@ -2,34 +2,61 @@
 
 > Self-hostable, voice-first community platform with a built-in plugin SDK for live activities.
 
+**Status: Experimental alpha.** Core voice/chat/DM flows work end-to-end;
+some features are incomplete or disabled by default. See the
+[feature status table](#feature-status) below before deploying.
+
 LobbyForge is an open-source community platform you run on your own server. It
 takes the "server → channel → voice room" structure you know, and lets voice
 rooms run live activities — games, quizzes, watch parties — through a typed
 plugin SDK.
 
-Discord owns your data. TeamSpeak can't run games. Element is text-first.
-LobbyForge is the open niche: **voice-first + plugin SDK + self-hostable**.
-
 | | LobbyForge | Discord | TeamSpeak | Revolt |
 |---|:-:|:-:|:-:|:-:|
 | Voice-first | ✅ | ✅ | ✅ | ❌ |
-| Plugin SDK (in-room activities) | ✅ | ❌ | ❌ | ❌ |
+| Plugin SDK (in-room activities) | ✅ | ❌¹ | ❌ | ❌ |
 | Self-hostable | ✅ | ❌ | ✅ | ✅ |
 | Guest-friendly (no account needed) | ✅ | ❌ | ❌ | ❌ |
+
+> ¹ Discord has Activities/Embedded App SDK; LobbyForge's in-room plugin
+> model is different but the "no plugin SDK" claim you may have read
+> elsewhere is not accurate.
+
+## Feature status
+
+Honest assessment of what works today:
+
+| Feature | Status |
+|---------|--------|
+| Guest access (invite → one-click join) | ✅ Available |
+| Voice rooms (LiveKit audio/video/screen share) | 🟡 Alpha — real-network validation in progress |
+| Text channels + chat | ✅ Available |
+| Direct messages (instance-local) | ✅ Available |
+| Multi-server lobby switching | ✅ Available (official instance) |
+| Discovery directory | 🟡 Alpha — registration/review flow works, needs real instances |
+| Hushle (Taboo-style game) | 🟡 Alpha — server-side anti-cheat in place |
+| Quiz | 🔬 Experimental — basic reducer + UI, no per-player answer model |
+| Plugin SDK (bundled plugins) | ✅ Available |
+| Community plugin marketplace | ❌ Disabled by default — runs in-process without isolation (`LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED`) |
+| Admin panel (settings, moderation, doctor) | ✅ Available |
+| Self-host updates (one-click upgrade/rollback) | 🟡 Preview — apply/rollback gated behind maintenance+signature+backup checks |
+| Backups (create/restore) | ❌ Planned — only manifest verification exists today |
+| Desktop app (Tauri 2) | 🔬 Experimental — builds and opens, real media spike pending |
+| Google OAuth login | ✅ Available (opt-in via env vars) |
+| TURN relay | ❌ Not configured by default — required for restrictive NATs |
 
 ## Features
 
 - **Voice rooms** powered by [LiveKit](https://livekit.io) — WebRTC SFU, mic/camera/screen-share, speaking indicators, per-user volume.
-- **Plugin SDK** — pure reducer pattern (`State → Action → State`), 9 sub-contexts, declarative auth, per-plugin i18n, built-in test harness.
-- **Pre-installed games** — Hushle (Taboo-style), Quiz, Vampire Village, Watch Party. All removable.
+- **Plugin SDK** — pure reducer pattern (`State → Action → State`), declarative action policies, server-side state projection (anti-cheat), built-in test harness.
+- **Bundled games** — Hushle (Taboo-style, alpha) and Quiz (experimental). Vampire Village and Watch Party are planned.
 - **Guest access** — invite link → one click into a voice room. No account required.
-- **Real-time** — WebSocket gateway + Redis pub/sub for presence, chat, and activity state.
-- **Doctor** — built-in health monitoring + automatic capacity profiling (how many voice/camera users your hardware can host).
-- **Self-host updates** — Ed25519-signed manifests, one-command upgrade, verified backups.
-- **Privacy-first defaults** — SEO off, invite-only registration, no telemetry, strict security headers (CSP, HSTS, Fetch-Metadata CSRF).
+- **Real-time** — WebSocket gateway + Redis pub/sub for presence, chat, DMs, and activity state.
+- **Game integrity** — optimistic concurrency (revision CAS), per-viewer state projection, phase-based action validation.
+- **Doctor** — built-in health monitoring + capacity profiling.
+- **Privacy-first defaults** — SEO off, invite-only registration, no telemetry, strict security headers (CSP with nonce, HSTS, Fetch-Metadata CSRF).
 - **i18n** — English + Turkish; community translations welcome.
-- **Native desktop client** — [Tauri 2](https://v2.tauri.app) shell for Windows/macOS/Linux. One official installer connects to any self-hosted instance. See [docs/DESKTOP.md](docs/DESKTOP.md).
-- **Calm Future design system** — quiet, premium, trust-evoking. Dark palette + ice-blue accent + glassmorphism. Not a neon gamer skin.
+- **Native desktop client** — [Tauri 2](https://v2.tauri.app) shell (experimental). See [docs/DESKTOP.md](docs/DESKTOP.md).
 
 ## Tech stack
 

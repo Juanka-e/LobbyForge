@@ -7,8 +7,10 @@ open a public GitHub issue**. Instead, report it privately:
 
 1. **GitHub Security Advisories** (preferred): go to the
    [Security tab](../../security/advisories/new) of this repo and create
-   a private security advisory.
-2. **Email**: send details to `security@lobbyforge.dev` (if available).
+   a private security advisory. This is monitored and reaches the
+   maintainers directly.
+2. **GitHub Confidential Vulnerability Reporting**: use the
+   "Report a vulnerability" button on the Security tab.
 
 Please include:
 - A description of the vulnerability and its impact.

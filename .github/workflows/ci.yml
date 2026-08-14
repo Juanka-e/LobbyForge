@@ -89,9 +89,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # db tests import @lobbyforge/core — must be built first.
+      # db tests import @lobbyforge/core AND check dist/migrate.js exists —
+      # both @lobbyforge/core and @lobbyforge/db must be built first.
       - name: Build dependencies
-        run: pnpm --filter @lobbyforge/config build && pnpm --filter @lobbyforge/core build
+        run: pnpm --filter @lobbyforge/config build && pnpm --filter @lobbyforge/core build && pnpm --filter @lobbyforge/db build
 
       - name: Migration journal test
         run: pnpm --filter @lobbyforge/db test

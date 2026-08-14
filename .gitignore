@@ -56,4 +56,14 @@ docker-compose.override.yml
 apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/gen/
 
+# Internal development/agent artifacts — not part of the public repo surface
+.agents/
+.zcode/
+.codex/
+ORIGINAL_REQUEST.md
+progress.md
+TEST_READY.md
+TEST_INFRA.md
+optimizasyon/
+
 
