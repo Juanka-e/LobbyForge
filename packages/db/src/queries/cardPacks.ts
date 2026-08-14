@@ -183,6 +183,27 @@ export async function deleteCardPack(db: DbClient, id: string): Promise<boolean>
   return rows.length > 0;
 }
 
+/** Delete a single card from a pack (admin card management). */
+export async function deleteCardFromPack(db: DbClient, cardId: string): Promise<boolean> {
+  const rows = await db.delete(cards).where(eq(cards.id, cardId)).returning({ id: cards.id });
+  return rows.length > 0;
+}
+
+/** Update a card's payload/difficulty/category (admin card management). */
+export async function updateCardInPack(
+  db: DbClient,
+  cardId: string,
+  updates: { payload?: Record<string, unknown>; difficulty?: string; category?: string }
+): Promise<CardRow | null> {
+  const patch: Record<string, unknown> = {};
+  if (updates.payload !== undefined) patch.payload = updates.payload;
+  if (updates.difficulty !== undefined) patch.difficulty = updates.difficulty;
+  if (updates.category !== undefined) patch.category = updates.category;
+  if (Object.keys(patch).length === 0) return null;
+  const [row] = await db.update(cards).set(patch).where(eq(cards.id, cardId)).returning();
+  return (row as CardRow | undefined) ?? null;
+}
+
 /**
  * Idempotently seeds a single built-in pack. Skips the insert if a pack
  * with the same `(pluginId, slug)` already exists. Returns the resulting

@@ -26,7 +26,13 @@
 
 export type HushlePhase = 'lobby' | 'team_setup' | 'playing' | 'ended';
 
-export type HushleLanguage = 'en' | 'tr';
+/**
+ * Card language. The two built-in packs ship `en` and `tr`, but hosts
+ * can create packs in any language via the admin panel (M20b). The
+ * `(string & {})` intersection keeps IDE autocomplete for the known
+ * codes while accepting arbitrary BCP-47-ish tags (e.g. `de`, `pt-BR`).
+ */
+export type HushleLanguage = 'en' | 'tr' | (string & {});
 
 /**
  * Difficulty tiers for a Hushle card. The visual treatment (color +

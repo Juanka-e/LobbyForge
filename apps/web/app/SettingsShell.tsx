@@ -30,6 +30,7 @@ const COMMUNITY_NAV: NavItem[] = [
   { href: '/admin/settings/roles', label: 'Roles & Permissions', icon: 'shield' },
   { href: '/admin/settings/invites', label: 'Invites', icon: 'qr_code_2' },
   { href: '/admin/settings/voice-media', label: 'Voice & Media', icon: 'mic' },
+  { href: '/admin/plugins', label: 'Plugins & Word Packs', icon: 'extension' },
   { href: '/admin/bandwidth', label: 'Bandwidth', icon: 'data_usage' },
   { href: '/admin/settings/authentication', label: 'Authentication', icon: 'shield_lock' },
   { href: '/admin/settings/storage', label: 'Storage', icon: 'cloud_upload' },

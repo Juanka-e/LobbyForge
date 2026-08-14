@@ -1,5 +1,6 @@
 import {
   getCardPackById,
+  getCardPackBySlug,
   listCardsForPack,
   listServerLocalCards,
   type DbClient,
@@ -26,7 +27,9 @@ function cardPayload(
   }
   return {
     id,
-    language: language === 'tr' ? 'tr' : 'en',
+    // M20b: pass the pack's language through verbatim — hosts can seed
+    // packs in any language via the admin panel, not just en/tr.
+    language,
     word,
     forbiddenWords,
     difficulty: HUSHLE_DIFFICULTIES.has(difficulty) ? difficulty : 'easy',
@@ -44,15 +47,24 @@ export async function preparePluginAction(
   }
 
   const packId = input.action.packId;
-  if (typeof packId !== 'string') {
+  if (typeof packId !== 'string' || packId.length === 0) {
     return { ok: false, status: 400, error: 'A card pack is required' };
   }
-  const pack = await getCardPackById(db, packId);
+  // The host UI sends the pack's SLUG from the pack selector (e.g.
+  // `hushle-en-basic`); the admin panel and older sessions may carry the
+  // pack's UUID. Accept both so a session can always be (re)started.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const pack = UUID_RE.test(packId)
+    ? await getCardPackById(db, packId)
+    : await getCardPackBySlug(db, 'hushle', packId);
   if (!pack || pack.pluginId !== 'hushle') {
     return { ok: false, status: 404, error: 'Card pack not found' };
   }
-  if (pack.language !== 'en' && pack.language !== 'tr') {
-    return { ok: false, status: 409, error: 'Card pack language is not supported' };
+  // M20b: accept any well-formed language tag (BCP-47-ish, e.g. `de`,
+  // `pt-BR`). The built-in seeds only ship en/tr, but hosts can create
+  // packs in their own language through the admin panel.
+  if (!/^[a-z]{2,3}(-[a-z0-9]{2,8})*$/i.test(pack.language)) {
+    return { ok: false, status: 409, error: 'Card pack language is malformed' };
   }
 
   const [globalCards, localCards] = await Promise.all([
