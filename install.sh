@@ -72,10 +72,15 @@ if [ ! -f "$COMPOSE_FILE" ]; then
   exit 1
 fi
 
-# Domain
+# Domain (validated — used in sed and nginx config)
 read -rp "$(echo -e ${BOLD}'Enter your domain (e.g. lobby.example.com): '${NC})" DOMAIN
 if [ -z "$DOMAIN" ]; then
   echo -e "${RED}✗ Domain is required for HTTPS/WebRTC.${NC}"
+  exit 1
+fi
+# LF-010: Reject domains that would break sed/nginx config (/, &, \, spaces).
+if ! [[ "$DOMAIN" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
+  echo -e "${RED}✗ Invalid domain "$DOMAIN" — only letters, digits, dots, and hyphens allowed.${NC}"
   exit 1
 fi
 
@@ -170,23 +175,33 @@ read -rp "$(echo -e ${BOLD}'Proceed with certbot now? [Y/n]: '${NC})" DO_CERTBOT
 DO_CERTBOT="${DO_CERTBOT:-Y}"
 
 if [[ "$DO_CERTBOT" =~ ^[Yy]$ ]]; then
-  # Start nginx temporarily for the HTTP challenge
+  # LF-010: Use --standalone mode — certbot runs its own HTTP server on
+  # port 80 for the challenge (requires port 80 free; the full stack
+  # starts AFTER this succeeds). This is simpler and more reliable than
+  # webroot mode which would need a running nginx serving the challenge dir.
   docker run --rm \
-    -v "$SCRIPT_DIR/infra/certbot/www:/var/www/certbot" \
+    -p 80:80 \
     -v "$SCRIPT_DIR/infra/certbot/conf:/etc/letsencrypt" \
-    certbot/certbot certonly --webroot \
-    -w /var/www/certbot \
+    certbot/certbot certonly --standalone \
     -d "$DOMAIN" \
     --non-interactive \
     --agree-tos \
     --register-unsafely-without-email \
-    --no-eff-email 2>/dev/null || {
-    echo -e "${YELLOW}⚠ Certbot failed. You can provision SSL manually later.${NC}"
-    echo "   See SECURITY.md for manual certbot instructions."
+    --no-eff-email || {
+    echo -e "${RED}✗ Certbot FAILED. The stack will start with HTTP-only nginx.${NC}"
+    echo "   Common causes: DNS not pointing here yet, port 80 blocked, rate limit."
+    echo "   Fix and re-run: bash install.sh (or see SECURITY.md for manual steps)."
+    CERT_FAILED=true
   }
-  echo -e "${GREEN}✓ Certificate provisioned.${NC}"
+  if [ -z "$CERT_FAILED" ] && [ -d "$SCRIPT_DIR/infra/certbot/conf/live/$DOMAIN" ]; then
+    echo -e "${GREEN}✓ Certificate provisioned for $DOMAIN${NC}"
+  elif [ -z "$CERT_FAILED" ]; then
+    echo -e "${YELLOW}⚠ Certificate directory not found — certbot may have failed silently.${NC}"
+    CERT_FAILED=true
+  fi
 else
   echo -e "${YELLOW}Skipping certbot. Provision SSL before going live.${NC}"
+  CERT_FAILED=true
 fi
 echo ""
 
