@@ -45,6 +45,11 @@ function parseArgs(argv) {
     else if (arg === '--require-files') options.requireFiles = true;
     else if (arg === '--json') options.json = true;
     else if (arg === '--yes') options.yes = true;
+    // Backup create/restore options
+    else if (arg === '--out') options.out = rest[++i];
+    else if (arg === '--file') options.file = rest[++i];
+    else if (arg === '--to') options['to'] = rest[++i];
+    else if (arg === '--database-url') options['database-url'] = rest[++i];
     else throw new Error(`Unknown argument: ${arg}`);
   }
 

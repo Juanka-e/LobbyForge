@@ -285,9 +285,8 @@ async function handlePost(
       metadata: { pluginId: row.pluginId, actionType: parseResult.data.type },
     }).catch((err) => console.error('[audit] activity.action failed:', (err as Error).message));
 
-    // LF-001: Project state for non-explainer actors — never return raw server state.
-    const isHostActor = session.uid === row.createdBy;
-    const viewerState = isHostActor ? committedState : projectStateForViewer(committedState, row.pluginId, session.uid);
+    // LF-001: EVERYONE gets the projection — including the host. Anti-cheat.
+    const viewerState = projectStateForViewer(committedState, row.pluginId, session.uid);
     return NextResponse.json(
       { activity: { id: row.id, state: viewerState, status: row.status } },
       { headers: { 'Cache-Control': 'no-store' } }

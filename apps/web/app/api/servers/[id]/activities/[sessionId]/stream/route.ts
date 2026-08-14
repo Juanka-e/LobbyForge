@@ -126,12 +126,9 @@ async function handleStream(
     const plugin = getPluginServer(row.pluginId);
     const initialState = plugin?.migrateState ? plugin.migrateState(row.state) : row.state;
 
-    // LF-001: Project state for non-host viewers — never send raw server
-    // state over SSE. This closes the secret-leak gap where a player could
-    // read the hidden word / correct answers from the EventSource payload.
-    // The Hushle card is visible to the currentExplainer even when non-host.
-    const isHost = session.uid === row.createdBy;
-    const projectedInitial = isHost ? initialState : projectStateForViewer(initialState, row.pluginId, session.uid);
+    // LF-001: EVERYONE gets the projection — including the host. A host who
+    // isn't the current explainer must not see the secret card (anti-cheat).
+    const projectedInitial = projectStateForViewer(initialState, row.pluginId, session.uid);
 
     const encoder = new TextEncoder();
     let closed = false;
@@ -159,7 +156,7 @@ async function handleStream(
           sessionId,
           (msg) => {
             if (closed) return;
-            const projectedMsg = isHost ? msg.state : projectStateForViewer(msg.state, row.pluginId, session.uid);
+            const projectedMsg = projectStateForViewer(msg.state, row.pluginId, session.uid);
             controller.enqueue(
               encoder.encode(
                 sse('state', { status: msg.status, state: projectedMsg, at: msg.at })

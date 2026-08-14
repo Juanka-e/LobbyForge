@@ -27,6 +27,9 @@ RUN pnpm --filter @lobbyforge/config build && \
 
 FROM node:22-bookworm-slim AS runtime
 
+# PostgreSQL client tools for lfctl backup create/restore (pg_dump, pg_restore, psql)
+RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client && rm -rf /var/lib/apt/lists/*
+
 RUN corepack enable && corepack prepare pnpm@10.12.1 --activate
 WORKDIR /app
 ENV NODE_ENV=production

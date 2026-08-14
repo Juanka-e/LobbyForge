@@ -101,7 +101,9 @@ async function handleGet(
     // Hosts (createdBy) see full state; the Hushle card additionally goes
     // to the currentExplainer even when they aren't the host.
     const isHost = session.uid === row.createdBy;
-    const projectedState = isHost ? state : projectStateForViewer(state, row.pluginId, session.uid);
+    // LF-001: EVERYONE gets the projection — including the host. A host who
+    // isn't the current explainer must not see the secret card (anti-cheat).
+    const projectedState = projectStateForViewer(state, row.pluginId, session.uid);
 
     return NextResponse.json(
       {

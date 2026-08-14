@@ -34,7 +34,7 @@ Honest assessment of what works today:
 | Direct messages (instance-local) | ✅ Available |
 | Multi-server lobby switching | ✅ Available (official instance) |
 | Discovery directory | 🟡 Alpha — registration/review flow works, needs real instances |
-| Hushle (Taboo-style game) | 🟡 Alpha — server-side anti-cheat in place |
+| Hushle (Taboo-style game) | 🟡 Alpha — viewer state projection works; authoritative timer/idempotency pending |
 | Quiz | 🔬 Experimental — basic reducer + UI, no per-player answer model |
 | Plugin SDK (bundled plugins) | ✅ Available |
 | Community plugin marketplace | ❌ Disabled by default — runs in-process without isolation (`LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED`) |
@@ -60,7 +60,7 @@ Honest assessment of what works today:
 
 ## Tech stack
 
-- **[Next.js 15](https://nextjs.org)** (App Router) + React + TypeScript
+- **[Next.js 16](https://nextjs.org)** (App Router) + React + TypeScript
 - **[LiveKit](https://livekit.io)** for WebRTC voice/video
 - **[PostgreSQL](https://www.postgresql.org)** + **[Drizzle ORM](https://orm.drizzle.team)**
 - **[Redis](https://redis.io)** for presence, pub/sub, rate limiting, ephemeral state
@@ -128,7 +128,7 @@ pnpm verify     # typecheck + lint + test across all workspaces
 ```
 apps/
   web/          Next.js app — lobby, admin, API routes, realtime
-  desktop/      Electron shell (planned)
+  desktop/      Tauri 2 shell (experimental)
   registry/     Instance registry service
   ws-gateway/   Standalone WebSocket gateway for realtime fan-out
 packages/
