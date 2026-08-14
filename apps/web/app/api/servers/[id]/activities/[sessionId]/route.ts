@@ -11,6 +11,7 @@ import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
 import { getPluginServer } from '@/lib/plugin-server-registry';
+import { projectActivityState } from '@/lib/activity-projection';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -101,9 +102,9 @@ async function handleGet(
     // Hosts (createdBy) see full state; the Hushle card additionally goes
     // to the currentExplainer even when they aren't the host.
     const isHost = session.uid === row.createdBy;
-    // LF-001: EVERYONE gets the projection — including the host. A host who
-    // isn't the current explainer must not see the secret card (anti-cheat).
-    const projectedState = projectStateForViewer(state, row.pluginId, session.uid);
+    // LF-001: EVERYONE gets the projection — including the host. Uses the
+    // canonical projector (lib/activity-projection.ts) shared across all routes.
+    const projectedState = projectActivityState(state, row.pluginId, session.uid);
 
     return NextResponse.json(
       {
@@ -141,47 +142,3 @@ export const GET = withApiSecurity(handleGet, {
   allowedMethods: ['GET'],
   rateLimit: { identifier: 'activity-get', config: { windowMs: 60_000, maxRequests: 60 } },
 });
-
-/**
- * LF-001: Project server state for a non-host viewer.
- * Strips secret fields so players can't cheat by inspecting the Network tab.
- *
- * Hushle secrets: currentCard.word, currentCard.forbiddenWords — visible
- * only to the currentExplainer (not the host — a non-explainer host
- * could otherwise cheat).
- * Quiz secrets: questions[].correctIndex.
- *
- * When phase === 'ended' or 'reveal', secrets are safe to show.
- */
-function projectStateForViewer(state: unknown, pluginId: string, viewerUserId?: string): unknown {
-  if (!state || typeof state !== 'object') return state;
-  const s = { ...(state as Record<string, unknown>) };
-
-  if (pluginId === 'hushle') {
-    const phase = s.phase as string | undefined;
-    if (phase !== 'ended') {
-      // The card goes to the currentExplainer — they must describe it.
-      const explainerId = s.currentExplainerId ?? s.currentExplainer ?? null;
-      const isExplainer = viewerUserId != null && String(explainerId) === viewerUserId;
-      if (!isExplainer && s.currentCard) {
-        s.currentCard = '[hidden — explainer only]';
-      }
-    }
-  }
-
-  if (pluginId === 'quiz') {
-    const phase = s.phase as string | undefined;
-    if (phase !== 'reveal' && phase !== 'ended') {
-      // Strip correctIndex from each question.
-      if (Array.isArray(s.questions)) {
-        s.questions = (s.questions as Array<Record<string, unknown>>).map((q) => {
-          const safe = { ...q };
-          delete safe.correctIndex;
-          return safe;
-        });
-      }
-    }
-  }
-
-  return s;
-}

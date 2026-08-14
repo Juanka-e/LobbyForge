@@ -174,12 +174,15 @@ echo -e "${YELLOW}This requires port 80 to be open and DNS to point here.${NC}"
 read -rp "$(echo -e ${BOLD}'Proceed with certbot now? [Y/n]: '${NC})" DO_CERTBOT
 DO_CERTBOT="${DO_CERTBOT:-Y}"
 
+# LF-010: Initialize explicitly to avoid unbound variable with set -u.
+CERT_FAILED=false
+
 if [[ "$DO_CERTBOT" =~ ^[Yy]$ ]]; then
   # LF-010: Use --standalone mode — certbot runs its own HTTP server on
   # port 80 for the challenge (requires port 80 free; the full stack
   # starts AFTER this succeeds). This is simpler and more reliable than
   # webroot mode which would need a running nginx serving the challenge dir.
-  docker run --rm \
+  if docker run --rm \
     -p 80:80 \
     -v "$SCRIPT_DIR/infra/certbot/conf:/etc/letsencrypt" \
     certbot/certbot certonly --standalone \
@@ -187,21 +190,31 @@ if [[ "$DO_CERTBOT" =~ ^[Yy]$ ]]; then
     --non-interactive \
     --agree-tos \
     --register-unsafely-without-email \
-    --no-eff-email || {
-    echo -e "${RED}✗ Certbot FAILED. The stack will start with HTTP-only nginx.${NC}"
+    --no-eff-email; then
+    if [ -d "$SCRIPT_DIR/infra/certbot/conf/live/$DOMAIN" ]; then
+      echo -e "${GREEN}✓ Certificate provisioned for $DOMAIN${NC}"
+    else
+      echo -e "${RED}✗ Certificate directory not found — certbot may have failed silently.${NC}"
+      CERT_FAILED=true
+    fi
+  else
+    echo -e "${RED}✗ Certbot FAILED.${NC}"
     echo "   Common causes: DNS not pointing here yet, port 80 blocked, rate limit."
-    echo "   Fix and re-run: bash install.sh (or see SECURITY.md for manual steps)."
-    CERT_FAILED=true
-  }
-  if [ -z "$CERT_FAILED" ] && [ -d "$SCRIPT_DIR/infra/certbot/conf/live/$DOMAIN" ]; then
-    echo -e "${GREEN}✓ Certificate provisioned for $DOMAIN${NC}"
-  elif [ -z "$CERT_FAILED" ]; then
-    echo -e "${YELLOW}⚠ Certificate directory not found — certbot may have failed silently.${NC}"
     CERT_FAILED=true
   fi
 else
-  echo -e "${YELLOW}Skipping certbot. Provision SSL before going live.${NC}"
+  echo -e "${YELLOW}Skipping certbot.${NC}"
   CERT_FAILED=true
+fi
+
+# P0-D: Fail-closed — WebRTC requires HTTPS (secure context). Without a
+# certificate the production Nginx config cannot start (it loads cert files
+# unconditionally), so aborting is the only safe action.
+if [ "$CERT_FAILED" = true ]; then
+  echo ""
+  echo -e "${RED}✗ TLS certificate is not available. Aborting — WebRTC voice requires HTTPS.${NC}"
+  echo "   Fix the issue above and re-run: bash install.sh"
+  exit 1
 fi
 echo ""
 

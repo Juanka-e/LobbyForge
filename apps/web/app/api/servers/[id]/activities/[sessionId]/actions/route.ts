@@ -13,6 +13,7 @@ import { CorePermission, hasPermission } from '@lobbyforge/core';
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { getPluginServer } from '@/lib/plugin-server-registry';
+import { projectActivityState } from '@/lib/activity-projection';
 import { buildHttpPluginContext, callHandleAction } from '@/lib/plugin-context';
 import { withApiSecurity } from '@/lib/security-headers';
 import { publishActivityStateChange } from '@/lib/activity-bus';
@@ -286,7 +287,7 @@ async function handlePost(
     }).catch((err) => console.error('[audit] activity.action failed:', (err as Error).message));
 
     // LF-001: EVERYONE gets the projection — including the host. Anti-cheat.
-    const viewerState = projectStateForViewer(committedState, row.pluginId, session.uid);
+    const viewerState = projectActivityState(committedState, row.pluginId, session.uid);
     return NextResponse.json(
       { activity: { id: row.id, state: viewerState, status: row.status } },
       { headers: { 'Cache-Control': 'no-store' } }
@@ -303,29 +304,3 @@ export const POST = withApiSecurity(handlePost, {
   allowedMethods: ['POST'],
   rateLimit: { identifier: 'activity-action', config: { windowMs: 60_000, maxRequests: 30 } },
 });
-
-/** LF-001: Strip secret state fields for non-explainer viewers.
- *  The Hushle card is visible to the currentExplainer (who must describe
- *  it), NOT the host — a host who isn't the explainer could otherwise cheat. */
-function projectStateForViewer(state: unknown, pluginId: string, viewerUserId?: string): unknown {
-  if (!state || typeof state !== 'object') return state;
-  const s = { ...(state as Record<string, unknown>) };
-
-  if (pluginId === 'hushle' && s.phase !== 'ended' && s.currentCard) {
-    // Hushle state tracks the current explainer — only they see the card.
-    const explainerId = s.currentExplainerId ?? s.currentExplainer ?? null;
-    const isExplainer = viewerUserId != null && String(explainerId) === viewerUserId;
-    if (!isExplainer) {
-      s.currentCard = '[hidden — explainer only]';
-    }
-  }
-
-  if (pluginId === 'quiz' && s.phase !== 'reveal' && s.phase !== 'ended' && Array.isArray(s.questions)) {
-    s.questions = (s.questions as Array<Record<string, unknown>>).map((q) => {
-      const safe = { ...q };
-      delete safe.correctIndex;
-      return safe;
-    });
-  }
-  return s;
-}
