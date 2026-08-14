@@ -62,6 +62,11 @@ services:
     restart: unless-stopped
     env_file:
       - ../../.env.prod
+    environment:
+      # The web app's Redis client reads REDIS_URL — point it at the
+      # compose-internal Redis (not localhost) in the container network.
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - DATABASE_URL=postgres://${POSTGRES_USER:-lobbyforge}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-lobbyforge}
     depends_on:
       postgres:
         condition: service_healthy
@@ -93,6 +98,8 @@ services:
     environment:
       - WS_HOST=0.0.0.0
       - WS_PORT=3001
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - LF_DB_URL=postgres://${POSTGRES_USER:-lobbyforge}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-lobbyforge}
     depends_on:
       redis:
         condition: service_healthy

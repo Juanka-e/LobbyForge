@@ -96,11 +96,12 @@ async function handleGet(
     const state = plugin?.migrateState ? plugin.migrateState(row.state) : row.state;
 
     // LF-001: Project the state — never send raw server state to the client.
-    // The projection strips secret fields (Hushle's currentCard word +
-    // forbiddenWords, Quiz's correctIndex) so a player inspecting Network
-    // tab cannot cheat. Hosts (actorUserId === createdBy) see full state.
+    // The projection strips secret fields (Hushle's currentCard, Quiz's
+    // correctIndex) so a player inspecting Network tab cannot cheat.
+    // Hosts (createdBy) see full state; the Hushle card additionally goes
+    // to the currentExplainer even when they aren't the host.
     const isHost = session.uid === row.createdBy;
-    const projectedState = isHost ? state : projectStateForViewer(state, row.pluginId);
+    const projectedState = isHost ? state : projectStateForViewer(state, row.pluginId, session.uid);
 
     return NextResponse.json(
       {
@@ -143,21 +144,25 @@ export const GET = withApiSecurity(handleGet, {
  * LF-001: Project server state for a non-host viewer.
  * Strips secret fields so players can't cheat by inspecting the Network tab.
  *
- * Hushle secrets: currentCard.word, currentCard.forbiddenWords.
+ * Hushle secrets: currentCard.word, currentCard.forbiddenWords — visible
+ * only to the currentExplainer (not the host — a non-explainer host
+ * could otherwise cheat).
  * Quiz secrets: questions[].correctIndex.
  *
  * When phase === 'ended' or 'reveal', secrets are safe to show.
  */
-function projectStateForViewer(state: unknown, pluginId: string): unknown {
+function projectStateForViewer(state: unknown, pluginId: string, viewerUserId?: string): unknown {
   if (!state || typeof state !== 'object') return state;
   const s = { ...(state as Record<string, unknown>) };
 
   if (pluginId === 'hushle') {
     const phase = s.phase as string | undefined;
     if (phase !== 'ended') {
-      // Strip the secret card data — players only see the card exists.
-      if (s.currentCard && typeof s.currentCard === 'object') {
-        s.currentCard = '[hidden — host only]';
+      // The card goes to the currentExplainer — they must describe it.
+      const explainerId = s.currentExplainerId ?? s.currentExplainer ?? null;
+      const isExplainer = viewerUserId != null && String(explainerId) === viewerUserId;
+      if (!isExplainer && s.currentCard) {
+        s.currentCard = '[hidden — explainer only]';
       }
     }
   }

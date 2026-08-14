@@ -231,20 +231,27 @@ async function handlePost(
     const migratedState = plugin.migrateState
       ? (plugin.migrateState(row.state) as Record<string, unknown>)
       : row.state;
-    const nextState = await callHandleAction(plugin, ctx2, migratedState, prepared.action) as Record<string, unknown>;
 
-    // Compare-and-swap with optimistic concurrency: retry up to 3 times
-    // if another concurrent action changed the revision.
+    // Compare-and-swap with optimistic concurrency. On each retry the
+    // reducer is RE-RUN against the fresh state — computing nextState once
+    // outside the loop would just move the lost-update one revision later.
     const expectedRevision = (row as { revision?: number }).revision ?? 0;
     const MAX_CAS_RETRIES = 3;
     let casResult: { ok: boolean; row: { id: string; state: Record<string, unknown>; status: string; revision: number } | null } = { ok: false, row: null };
     let currentState = migratedState;
     let currentRev = expectedRevision;
+    let committedState: Record<string, unknown> | null = null;
 
     for (let attempt = 0; attempt < MAX_CAS_RETRIES; attempt++) {
-      casResult = await setGameSessionStateCAS(getDb(), sessionId, currentRev, nextState) as typeof casResult;
-      if (casResult.ok) break;
-      // Concurrent modification — re-read, re-migrate, re-reduce.
+      // Run the reducer against the CURRENT state on every attempt.
+      const attemptState = await callHandleAction(plugin, ctx2, currentState, prepared.action) as Record<string, unknown>;
+      casResult = await setGameSessionStateCAS(getDb(), sessionId, currentRev, attemptState) as typeof casResult;
+      if (casResult.ok) {
+        committedState = attemptState;
+        break;
+      }
+      // Concurrent modification — re-read, re-migrate; the reducer runs
+      // again at the top of the next iteration.
       if (!casResult.row) {
         return NextResponse.json({ error: 'Session not found during CAS retry.' }, { status: 404 });
       }
@@ -254,20 +261,20 @@ async function handlePost(
         : casResult.row.state;
     }
 
-    if (!casResult.ok) {
+    if (!casResult.ok || !committedState) {
       return NextResponse.json(
         { error: 'Conflict: too many concurrent actions. Please retry.', revision: currentRev },
         { status: 409 }
       );
     }
 
-    // Push the new state to any open SSE subscriptions on this session.
+    // Push the committed state to any open SSE subscriptions on this session.
     // Fire-and-forget — a Redis blip must not fail the action.
     publishActivityStateChange({
       serverId,
       sessionId,
       status: (casResult.row as { status?: string })?.status ?? row.status,
-      state: nextState,
+      state: committedState,
     });
     void logAction(getDb(), {
       serverId,
@@ -278,9 +285,9 @@ async function handlePost(
       metadata: { pluginId: row.pluginId, actionType: parseResult.data.type },
     }).catch((err) => console.error('[audit] activity.action failed:', (err as Error).message));
 
-    // LF-001: Project state for non-host actors — never return raw server state.
+    // LF-001: Project state for non-explainer actors — never return raw server state.
     const isHostActor = session.uid === row.createdBy;
-    const viewerState = isHostActor ? nextState : projectStateForViewer(nextState, row.pluginId);
+    const viewerState = isHostActor ? committedState : projectStateForViewer(committedState, row.pluginId, session.uid);
     return NextResponse.json(
       { activity: { id: row.id, state: viewerState, status: row.status } },
       { headers: { 'Cache-Control': 'no-store' } }
@@ -298,13 +305,22 @@ export const POST = withApiSecurity(handlePost, {
   rateLimit: { identifier: 'activity-action', config: { windowMs: 60_000, maxRequests: 30 } },
 });
 
-/** LF-001: Strip secret state fields for non-host viewers. */
-function projectStateForViewer(state: unknown, pluginId: string): unknown {
+/** LF-001: Strip secret state fields for non-explainer viewers.
+ *  The Hushle card is visible to the currentExplainer (who must describe
+ *  it), NOT the host — a host who isn't the explainer could otherwise cheat. */
+function projectStateForViewer(state: unknown, pluginId: string, viewerUserId?: string): unknown {
   if (!state || typeof state !== 'object') return state;
   const s = { ...(state as Record<string, unknown>) };
+
   if (pluginId === 'hushle' && s.phase !== 'ended' && s.currentCard) {
-    s.currentCard = '[hidden — host only]';
+    // Hushle state tracks the current explainer — only they see the card.
+    const explainerId = s.currentExplainerId ?? s.currentExplainer ?? null;
+    const isExplainer = viewerUserId != null && String(explainerId) === viewerUserId;
+    if (!isExplainer) {
+      s.currentCard = '[hidden — explainer only]';
+    }
   }
+
   if (pluginId === 'quiz' && s.phase !== 'reveal' && s.phase !== 'ended' && Array.isArray(s.questions)) {
     s.questions = (s.questions as Array<Record<string, unknown>>).map((q) => {
       const safe = { ...q };

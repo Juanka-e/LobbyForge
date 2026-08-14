@@ -8,6 +8,9 @@ const spawnOptions = {
 };
 
 const tasks = [
+  // Build packages FIRST — workspace typecheck imports their dist/ type
+  // declarations (e.g. plugins/quiz needs @lobbyforge/plugin-sdk built).
+  { name: 'Build packages', cmd: 'pnpm', args: ['build:packages'] },
   { name: 'Typecheck', cmd: 'pnpm', args: ['typecheck'] },
   { name: 'Lint', cmd: 'pnpm', args: ['lint'] },
   { name: 'Test', cmd: 'pnpm', args: ['test'] }

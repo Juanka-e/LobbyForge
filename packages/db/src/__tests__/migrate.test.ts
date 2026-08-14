@@ -35,9 +35,12 @@ describe('db:migrate', () => {
 
     const latest = journal.entries.at(-1);
     expect(latest).toBeDefined();
+    // Derive the snapshot filename from the TAG prefix (e.g. "0025_game_session_revision"
+    // → "0025_snapshot.json"), not from idx — they can diverge legitimately.
+    const latestPrefix = latest!.tag.slice(0, 4);
     expect(
       readdirSync(join(drizzleDir, 'meta')).includes(
-        `${String(latest!.idx).padStart(4, '0')}_snapshot.json`
+        `${latestPrefix}_snapshot.json`
       )
     ).toBe(true);
   });

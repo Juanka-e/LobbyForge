@@ -915,11 +915,23 @@ export function LobbyVoiceProvider({
       void setPushToTalkMic(false);
     };
 
+    // Desktop shell (Tauri) PTT events — the shell forwards the global
+    // Ctrl+Space hotkey as a postMessage since the top-level webview
+    // navigation replaced the old iframe + shell.js listener.
+    const onShellMessage = (event: MessageEvent) => {
+      if (event.source !== window) return;
+      const data = event.data as { type?: string; pressed?: boolean } | null;
+      if (!data || data.type !== 'lobbyforge:ptt') return;
+      void setPushToTalkMic(data.pressed === true);
+    };
+
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('message', onShellMessage);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('message', onShellMessage);
       if (held) void setPushToTalkMic(false);
     };
   }, [activeChannelId, collectParticipants, connectionState, toggleCamera, toggleDeafen, toggleMic, toggleScreenShare]);

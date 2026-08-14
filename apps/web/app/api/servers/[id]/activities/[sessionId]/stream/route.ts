@@ -126,6 +126,13 @@ async function handleStream(
     const plugin = getPluginServer(row.pluginId);
     const initialState = plugin?.migrateState ? plugin.migrateState(row.state) : row.state;
 
+    // LF-001: Project state for non-host viewers — never send raw server
+    // state over SSE. This closes the secret-leak gap where a player could
+    // read the hidden word / correct answers from the EventSource payload.
+    // The Hushle card is visible to the currentExplainer even when non-host.
+    const isHost = session.uid === row.createdBy;
+    const projectedInitial = isHost ? initialState : projectStateForViewer(initialState, row.pluginId, session.uid);
+
     const encoder = new TextEncoder();
     let closed = false;
 
@@ -137,7 +144,7 @@ async function handleStream(
               id: row.id,
               pluginId: row.pluginId,
               status: row.status,
-              state: initialState,
+              state: projectedInitial,
               publicSummary: row.publicSummary,
               createdBy: row.createdBy,
               at: new Date().toISOString(),
@@ -151,9 +158,10 @@ async function handleStream(
           sessionId,
           (msg) => {
             if (closed) return;
+            const projectedMsg = isHost ? msg.state : projectStateForViewer(msg.state, row.pluginId, session.uid);
             controller.enqueue(
               encoder.encode(
-                sse('state', { status: msg.status, state: msg.state, at: msg.at })
+                sse('state', { status: msg.status, state: projectedMsg, at: msg.at })
               )
             );
           },
@@ -211,3 +219,29 @@ async function handleStream(
 }
 
 export const GET = handleStream;
+
+/**
+ * LF-001: Strip secret state fields for non-explainer viewers.
+ * Mirrors the projection in activities/[sessionId]/route.ts and actions/route.ts.
+ * Hushle: currentCard visible only to the currentExplainer. Quiz: correctIndex
+ * stripped unless reveal/ended.
+ */
+function projectStateForViewer(state: unknown, pluginId: string, viewerUserId?: string): unknown {
+  if (!state || typeof state !== 'object') return state;
+  const s = { ...(state as Record<string, unknown>) };
+  if (pluginId === 'hushle' && s.phase !== 'ended' && s.currentCard) {
+    const explainerId = s.currentExplainerId ?? s.currentExplainer ?? null;
+    const isExplainer = viewerUserId != null && String(explainerId) === viewerUserId;
+    if (!isExplainer) {
+      s.currentCard = '[hidden — explainer only]';
+    }
+  }
+  if (pluginId === 'quiz' && s.phase !== 'reveal' && s.phase !== 'ended' && Array.isArray(s.questions)) {
+    s.questions = (s.questions as Array<Record<string, unknown>>).map((q) => {
+      const safe = { ...q };
+      delete safe.correctIndex;
+      return safe;
+    });
+  }
+  return s;
+}

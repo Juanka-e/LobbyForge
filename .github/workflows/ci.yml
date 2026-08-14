@@ -6,7 +6,6 @@ on:
   pull_request:
     branches: [main]
 
-# Cancel in-progress runs for the same branch / PR to save CI minutes.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -24,34 +23,39 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # pnpm MUST be installed before setup-node's cache: pnpm lookup.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.1
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.12.1
-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Build packages first — workspace typecheck depends on built dist/
+      # type declarations (e.g. @lobbyforge/plugin-sdk for plugins/quiz).
+      - name: Build packages
+        run: pnpm build:packages
+
       - name: Typecheck
-        run: pnpm -r --if-present typecheck
+        run: pnpm typecheck
 
       - name: Lint
         run: pnpm -r --if-present lint
 
       - name: Test
-        run: pnpm -r --if-present test
+        run: pnpm test
 
-      - name: Build
-        run: pnpm -r --if-present build
+      - name: Build server
+        run: pnpm build:server
 
   # Docker image build — verifies the Dockerfile compiles and the image starts.
-  # Only runs on Linux (Docker is not available on windows-latest runners).
   docker-build:
     name: Docker image build
     runs-on: ubuntu-latest
@@ -71,18 +75,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 10.12.1
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # db tests import @lobbyforge/core — must be built first.
+      - name: Build dependencies
+        run: pnpm --filter @lobbyforge/config build && pnpm --filter @lobbyforge/core build
 
       - name: Migration journal test
         run: pnpm --filter @lobbyforge/db test

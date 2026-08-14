@@ -11,6 +11,7 @@
  * handles reconnect / backoff.
  */
 import { WebSocketServer, type WebSocket } from 'ws';
+import * as http from 'node:http';
 import { validateGuestFromHeaders, type ResolvedGuest } from './auth.js';
 import { authorizeTopicSubscribe } from './authorize.js';
 import { ConnectionSubscriptions } from './subscriptions.js';
@@ -103,9 +104,20 @@ const MAX_CONNECTIONS_PER_IP = parseInt(process.env.WS_MAX_CONN_PER_IP || '10', 
 const ipConnectionCounts = new Map<string, number>();
 
 export function createGateway(): { wss: WebSocketServer; close: () => Promise<void> } {
+  // Create an HTTP server first — it serves the /health endpoint for
+  // Docker healthchecks (the WS-only server returns 426 for plain HTTP).
+  const httpServer = http.createServer((req, res) => {
+    if (req.url === '/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, service: 'ws-gateway' }));
+      return;
+    }
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Not found' }));
+  });
+
   const wss = new WebSocketServer({
-    host: getEnvHost(),
-    port: getEnvPort(),
+    server: httpServer, // Share the HTTP server — WS upgrades + /health on one port.
     perMessageDeflate: false,
     maxPayload: 64 * 1024, // 64 KB — reject oversized messages
     verifyClient: (info: { origin: string; secure: boolean; req: import('http').IncomingMessage }) => {
@@ -126,6 +138,8 @@ export function createGateway(): { wss: WebSocketServer; close: () => Promise<vo
       return true;
     },
   });
+
+  httpServer.listen(getEnvPort(), getEnvHost());
 
   const connections = new WeakMap<WebSocket, ConnectionState>();
   const heartbeat = setInterval(() => {
