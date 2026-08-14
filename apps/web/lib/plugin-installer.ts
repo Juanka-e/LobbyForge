@@ -7,10 +7,13 @@
  * `index.js` is imported and shape-validated before admission.
  */
 
-import { existsSync, mkdirSync, rmSync, writeFileSync, readdirSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync, rmSync, writeFileSync, readdirSync, statSync, lstatSync } from 'node:fs';
+import { join, resolve, sep } from 'node:path';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import { reloadDynamicPlugin } from './plugin-loader';
+
+const execFileAsync = promisify(execFile);
 
 const INSTALLED_DIR = resolve(process.cwd(), 'plugins', 'installed');
 const MAX_BUNDLE_BYTES = 10 * 1024 * 1024; // 10 MB
@@ -32,7 +35,22 @@ export async function installPluginBundle(
   url: string,
   version: string
 ): Promise<InstallResult> {
+  // LF-004: Validate version as strict semver — it's used as a path segment.
+  if (!/^\d+\.\d+\.\d+(-[a-z0-9.-]+)?(\+[a-z0-9.-]+)?$/i.test(version)) {
+    return { ok: false, error: `Invalid version "${version}" — must be semver (e.g. 1.0.0).` };
+  }
+
   const targetDir = join(INSTALLED_DIR, pluginId, version);
+
+  // LF-004: Verify targetDir stays inside INSTALLED_DIR (path traversal guard).
+  const resolvedTarget = resolve(targetDir);
+  if (!resolvedTarget.startsWith(INSTALLED_DIR + sep)) {
+    return { ok: false, error: 'Install path escapes the plugin directory. Rejected.' };
+  }
+
+  // LF-004: Extract to a staging dir first, then atomically move into place —
+  // a half-failed install never corrupts a previously working version.
+  const stagingDir = join(INSTALLED_DIR, pluginId, `.staging-${Date.now()}`);
 
   try {
     // 1. Download the tarball.
@@ -41,42 +59,43 @@ export async function installPluginBundle(
       return { ok: false, error: `Bundle exceeds ${MAX_BUNDLE_BYTES} bytes` };
     }
 
-    // 2. Prepare the target directory.
-    if (existsSync(targetDir)) {
-      rmSync(targetDir, { recursive: true, force: true });
-    }
-    mkdirSync(targetDir, { recursive: true });
+    // 2. Extract into staging.
+    mkdirSync(stagingDir, { recursive: true });
 
-    // 3. Write the tarball to a temp file and extract with `tar`.
-    const tarPath = join(targetDir, 'bundle.tgz');
+    // 3. Write the tarball to staging and extract there.
+    const tarPath = join(stagingDir, 'bundle.tgz');
     writeFileSync(tarPath, Buffer.from(tarball));
-    await extractTarball(tarPath, targetDir);
+    await extractTarball(tarPath, stagingDir);
 
     // 4. Verify the extracted bundle has an index.js.
-    const indexPath = join(targetDir, 'index.js');
+    const indexPath = join(stagingDir, 'index.js');
     if (!existsSync(indexPath)) {
-      // Some tarballs wrap in a `package/` dir — try to find it.
-      const nested = findIndexJs(targetDir);
+      const nested = findIndexJs(stagingDir);
       if (!nested) {
-        rmSync(targetDir, { recursive: true, force: true });
+        rmSync(stagingDir, { recursive: true, force: true });
         return { ok: false, error: 'Bundle missing index.js — not a valid LobbyForge plugin.' };
       }
     }
 
-    // 5. Reload the dynamic loader so the new plugin is immediately available.
+    // 5. Atomically move staging into the version dir (replaces any old version).
+    if (existsSync(targetDir)) {
+      rmSync(targetDir, { recursive: true, force: true });
+    }
+    const { renameSync } = await import('node:fs');
+    renameSync(stagingDir, targetDir);
+
+    // 6. Reload the dynamic loader so the new plugin is immediately available.
     const reloaded = await reloadDynamicPlugin(pluginId);
     if (!reloaded) {
-      // The loader validation may have rejected the shape — don't delete
-      // the files (the admin may want to inspect), but report the failure.
       return { ok: false, error: 'Plugin loaded but failed shape validation. Check server logs.' };
     }
 
     return { ok: true, path: targetDir };
   } catch (err) {
     console.error('[plugin-installer] install failed:', (err as Error).message);
-    // Clean up a partial extraction.
-    if (existsSync(targetDir)) {
-      rmSync(targetDir, { recursive: true, force: true });
+    // Clean up staging — the previous version (if any) stays intact.
+    if (existsSync(stagingDir)) {
+      rmSync(stagingDir, { recursive: true, force: true });
     }
     return { ok: false, error: (err as Error).message };
   }
@@ -157,19 +176,76 @@ function isPrivateIp(ip: string): boolean {
   );
 }
 
-/** Extract a .tgz tarball using the system `tar` command. */
-function extractTarball(tarPath: string, destDir: string): Promise<void> {
-  return new Promise((resolvePromise, reject) => {
-    const child = spawn('tar', ['-xzf', tarPath, '-C', destDir, '--strip-components=1'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: false,
-    });
-    child.on('close', (code) => {
-      if (code === 0) resolvePromise();
-      else reject(new Error(`tar extraction failed with code ${code}`));
-    });
-    child.on('error', reject);
-  });
+/** Extract a .tgz tarball using the system `tar` command.
+ *  LF-004 hardening:
+ *  - Lists entries FIRST and rejects path traversal (..), absolute paths,
+ *    symlinks, hardlinks, and device/FIFO entries before extracting.
+ *  - Rejects entries that would resolve outside destDir.
+ *  - Limits total extracted entries and uncompressed size (tar bomb defense). */
+async function extractTarball(tarPath: string, destDir: string): Promise<void> {
+  // 1. List entries and validate.
+  const MAX_ENTRIES = 500;
+  const MAX_TOTAL_BYTES = 50 * 1024 * 1024; // 50 MB uncompressed
+  const { stdout: listing } = await execFileAsync('tar', ['-tzf', tarPath, '--verbose'], { timeout: 30_000 });
+
+  const lines = listing.split('\n').filter((l) => l.trim().length > 0);
+  if (lines.length > MAX_ENTRIES) {
+    throw new Error(`Tarball has ${lines.length} entries (max ${MAX_ENTRIES}) — possible tar bomb.`);
+  }
+
+  let totalBytes = 0;
+  for (const line of lines) {
+    // tar -tv output: "perm owner/group size date time path"
+    const match = line.match(/^([a-zA-Z-]{10})\s+\S+\s+(\d+)\s+\S+\s+\S+\s+\S+\s+(.+)$/);
+    if (!match) continue;
+    const [, perms, sizeStr, entryPath] = match;
+    const size = parseInt(sizeStr, 10) || 0;
+    totalBytes += size;
+    if (totalBytes > MAX_TOTAL_BYTES) {
+      throw new Error(`Tarball exceeds ${MAX_TOTAL_BYTES} bytes uncompressed — possible tar bomb.`);
+    }
+    // Reject symlinks, hardlinks, devices, FIFOs.
+    if (perms?.startsWith('l') || perms?.startsWith('h') || perms?.startsWith('b') || perms?.startsWith('c') || perms?.startsWith('p')) {
+      throw new Error(`Tarball contains a non-regular file entry: ${entryPath} (${perms}). Rejected.`);
+    }
+    // Reject path traversal and absolute paths.
+    if (entryPath.includes('..') || entryPath.startsWith('/') || entryPath.includes('\\')) {
+      throw new Error(`Tarball contains an unsafe path: ${entryPath}. Rejected.`);
+    }
+  }
+
+  // 2. Extract with hardened flags.
+  await execFileAsync('tar', [
+    '-xzf', tarPath,
+    '-C', destDir,
+    '--strip-components=1',
+    '--no-same-owner',
+    '--no-same-permissions',
+    '--overwrite-dir',
+  ], { timeout: 60_000 });
+
+  // 3. Post-extraction: verify nothing escaped destDir (no symlinks pointing out).
+  assertNoEscapingSymlinks(destDir);
+}
+
+/** Walk destDir and reject any symlink whose target resolves outside it. */
+function assertNoEscapingSymlinks(dir: string, depth = 0): void {
+  if (depth > 10) return; // depth cap
+  try {
+    for (const entry of readdirSync(dir)) {
+      const fullPath = join(dir, entry);
+      const stat = lstatSync(fullPath);
+      if (stat.isSymbolicLink()) {
+        throw new Error(`Extracted bundle contains a symlink: ${fullPath}. Rejected.`);
+      }
+      if (stat.isDirectory()) {
+        assertNoEscapingSymlinks(fullPath, depth + 1);
+      }
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('Rejected')) throw err;
+    // ignore walk errors
+  }
 }
 
 /** Recursively find an `index.js` in a directory tree (for nested tarballs). */

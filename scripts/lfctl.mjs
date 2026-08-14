@@ -16,6 +16,8 @@ Usage:
   node scripts/lfctl.mjs update apply [--manifest <path-or-url>] [--current-version <version>] [--channel stable] [--public-key <pem-file>] [--yes]
   node scripts/lfctl.mjs update rollback
   node scripts/lfctl.mjs backup verify [--manifest <path>] [--require-files] [--json]
+  node scripts/lfctl.mjs backup create [--out <dir>] [--database-url <url>] [--json]
+  node scripts/lfctl.mjs backup restore --file <dump> --to <database-url> [--json]
   node scripts/lfctl.mjs setup token [--json]
 
 Notes:
@@ -342,6 +344,26 @@ async function main() {
     return;
   }
   if (domain === 'backup') {
+    if (action === 'create') {
+      const out = await backupCreate(options);
+      if (options.json) console.log(JSON.stringify(out, null, 2));
+      else {
+        console.log(`Backup created: ${out.file}`);
+        console.log(`SHA-256: ${out.sha256}`);
+      }
+      return;
+    }
+    if (action === 'restore') {
+      if (!options.file) throw new Error('backup restore requires --file <path-to-dump>');
+      if (!options['to']) throw new Error('backup restore requires --to <empty-database-url>');
+      const out = await backupRestore(options.file, options['to']);
+      if (options.json) console.log(JSON.stringify(out, null, 2));
+      else {
+        console.log(`Restore ${out.ok ? 'completed' : 'FAILED'}: ${out.message}`);
+      }
+      if (!out.ok) process.exitCode = 2;
+      return;
+    }
     if (action !== 'verify') throw new Error(`Unknown backup action: ${action ?? '(missing)'}`);
     const { manifest, baseDir } = await loadBackupManifest(options.manifest);
     const backup = await verifyBackup(manifest, baseDir, options);
@@ -402,3 +424,69 @@ main().catch((err) => {
   console.error(err instanceof Error ? err.message : String(err));
   process.exitCode = 1;
 });
+
+// ── Backup create / restore ──────────────────────────────────────────
+// Real pg_dump-based backup with SHA-256 checksum, and restore into an
+// empty database. Both require pg_dump/pg_restore on PATH (ships with
+// the postgres client package inside the Docker image).
+
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { createHash } from 'node:crypto';
+const execFileAsync = promisify(execFile);
+
+async function backupCreate(options = {}) {
+  const outDir = options.out ?? 'backups';
+  const dbUrl = options['database-url'] ?? process.env.DATABASE_URL;
+  if (!dbUrl) throw new Error('backup create requires --database-url or DATABASE_URL');
+
+  await fs.mkdir(outDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const file = path.join(outDir, `lobbyforge-${stamp}.dump`);
+
+  // pg_dump custom format (-Fc) — compressed, supports parallel restore + selective tables.
+  await execFileAsync('pg_dump', ['-Fc', '-f', file, dbUrl], { timeout: 300_000 });
+
+  const buf = await fs.readFile(file);
+  const sha256 = createHash('sha256').update(buf).digest('hex');
+
+  // Write a sidecar manifest with metadata for verify.
+  const meta = {
+    file: path.basename(file),
+    sha256,
+    sizeBytes: buf.length,
+    createdAt: new Date().toISOString(),
+    databaseUrlPrefix: dbUrl.split('@').pop()?.split('/')[0] ?? 'unknown-host',
+  };
+  await fs.writeFile(`${file}.json`, JSON.stringify(meta, null, 2));
+
+  return { file, sha256, sizeBytes: buf.length };
+}
+
+async function backupRestore(file, targetUrl) {
+  try {
+    // Verify checksum if sidecar manifest exists.
+    try {
+      const sidecar = JSON.parse(await fs.readFile(`${file}.json`, 'utf8'));
+      const buf = await fs.readFile(file);
+      const actual = createHash('sha256').update(buf).digest('hex');
+      if (sidecar.sha256 && actual !== sidecar.sha256) {
+        return { ok: false, message: 'SHA-256 mismatch — dump may be corrupted.' };
+      }
+    } catch {
+      // No sidecar — proceed without checksum verification.
+    }
+
+    // Safety: refuse to restore into a database that already has tables.
+    const { stdout } = await execFileAsync('psql', [targetUrl, '-tAc',
+      "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"], { timeout: 30_000 });
+    if (parseInt(stdout.trim(), 10) > 0) {
+      return { ok: false, message: 'Target database is not empty. Restore requires an empty database.' };
+    }
+
+    await execFileAsync('pg_restore', ['--no-owner', '--no-privileges', '-d', targetUrl, file], { timeout: 600_000 });
+    return { ok: true, message: 'Database restored successfully.' };
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : String(err) };
+  }
+}

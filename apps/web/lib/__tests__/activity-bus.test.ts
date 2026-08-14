@@ -13,9 +13,14 @@ type ErrHandler = (err: Error) => void;
 interface CapturedSub {
   on: (event: string, h: Handler | ErrHandler) => void;
   off: (event: string, h: Handler | ErrHandler) => void;
+  once: (event: string, h: Handler | ErrHandler) => void;
+  removeListener: (event: string, h: Handler | ErrHandler) => void;
+  listenerCount: (event: string) => number;
   subscribe: (...args: unknown[]) => unknown;
   unsubscribe: (...args: unknown[]) => unknown;
   quit: (...args: unknown[]) => unknown;
+  disconnect: () => void;
+  status: string;
   messageHandlers: Handler[];
   errorHandlers: ErrHandler[];
 }
@@ -23,7 +28,7 @@ interface CapturedSub {
 function makeSub(): CapturedSub {
   const messageHandlers: Handler[] = [];
   const errorHandlers: ErrHandler[] = [];
-  return {
+  const sub: CapturedSub = {
     on: (event: string, h: Handler | ErrHandler) => {
       if (event === 'message') messageHandlers.push(h as Handler);
       else if (event === 'error') errorHandlers.push(h as ErrHandler);
@@ -34,12 +39,23 @@ function makeSub(): CapturedSub {
         if (i >= 0) messageHandlers.splice(i, 1);
       }
     },
+    once: (event: string, h: Handler | ErrHandler) => {
+      // Emit ready immediately (the bus awaits the ready event).
+      if (event === 'ready') {
+        setTimeout(() => (h as () => void)(), 0);
+      }
+    },
+    removeListener: () => undefined,
+    listenerCount: (event: string) => (event === 'message' ? messageHandlers.length : 0),
     subscribe: vi.fn(async () => undefined),
     unsubscribe: vi.fn(async () => undefined),
     quit: vi.fn(async () => undefined),
+    disconnect: vi.fn(() => undefined),
+    status: 'ready',
     messageHandlers,
     errorHandlers,
   };
+  return sub;
 }
 
 const publish = vi.fn(async (_channel: string, _raw: string) => 1);
@@ -120,7 +136,7 @@ describe('subscribeActivityStateChange', () => {
   it('forwards parsed messages to the onMessage callback', async () => {
     const { subscribeActivityStateChange } = await import('../activity-bus.js');
     const onMessage = vi.fn();
-    subscribeActivityStateChange(SERVER_ID, SESSION_ID, onMessage);
+    await subscribeActivityStateChange(SERVER_ID, SESSION_ID, onMessage);
     await flush();
     const sub = capturedSubs[0]!;
     const msg = { status: 'running', state: { x: 1 }, at: '2026-01-01T00:00:00.000Z' };
@@ -131,7 +147,7 @@ describe('subscribeActivityStateChange', () => {
   it('ignores messages on a different channel', async () => {
     const { subscribeActivityStateChange } = await import('../activity-bus.js');
     const onMessage = vi.fn();
-    subscribeActivityStateChange(SERVER_ID, SESSION_ID, onMessage);
+    await subscribeActivityStateChange(SERVER_ID, SESSION_ID, onMessage);
     await flush();
     const sub = capturedSubs[0]!;
     sub.messageHandlers[0]!('lf:test:activity-state:other:other', JSON.stringify({ status: 'x' }));
@@ -142,7 +158,7 @@ describe('subscribeActivityStateChange', () => {
     const { subscribeActivityStateChange } = await import('../activity-bus.js');
     const onMessage = vi.fn();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    subscribeActivityStateChange(SERVER_ID, SESSION_ID, onMessage);
+    await subscribeActivityStateChange(SERVER_ID, SESSION_ID, onMessage);
     await flush();
     const sub = capturedSubs[0]!;
     expect(() => sub.messageHandlers[0]!(TOPIC, 'not-json')).not.toThrow();
@@ -150,30 +166,34 @@ describe('subscribeActivityStateChange', () => {
     warn.mockRestore();
   });
 
-  it('quits the connection when the last listener closes', async () => {
+  it('unsubscribes but does NOT quit the shared connection when the last listener closes', async () => {
     const { subscribeActivityStateChange } = await import('../activity-bus.js');
-    const { close } = subscribeActivityStateChange(SERVER_ID, SESSION_ID, vi.fn());
+    const { close } = await subscribeActivityStateChange(SERVER_ID, SESSION_ID, vi.fn());
     await flush();
     const sub = capturedSubs[0]!;
     close();
     await flush();
+    // LF-029: the connection is shared across topics — close() unsubscribes
+    // but must NOT quit the connection.
     expect(sub.unsubscribe).toHaveBeenCalledWith(TOPIC);
-    expect(sub.quit).toHaveBeenCalled();
+    expect(sub.quit).not.toHaveBeenCalled();
   });
 
-  it('does not quit when other listeners remain on the same topic', async () => {
+  it('multiple listeners on the same topic share one connection', async () => {
     const { subscribeActivityStateChange } = await import('../activity-bus.js');
-    const a = subscribeActivityStateChange(SERVER_ID, SESSION_ID, vi.fn());
-    const b = subscribeActivityStateChange(SERVER_ID, SESSION_ID, vi.fn());
+    const a = await subscribeActivityStateChange(SERVER_ID, SESSION_ID, vi.fn());
+    const b = await subscribeActivityStateChange(SERVER_ID, SESSION_ID, vi.fn());
     await flush();
-    const sub = capturedSubs[0]!;
+    // Only ONE subscriber connection should have been created.
+    expect(capturedSubs.length).toBe(1);
     a.close();
     await flush();
-    // First close should keep the connection alive (b is still listening).
-    expect(sub.quit).not.toHaveBeenCalled();
+    // First close: connection stays (b listening).
+    expect(capturedSubs[0]!.quit).not.toHaveBeenCalled();
     b.close();
     await flush();
-    // Second close drops refcount to 0 → quit.
-    expect(sub.quit).toHaveBeenCalled();
+    // Second close: unsubscribe called, connection STILL stays (shared for other topics).
+    expect(capturedSubs[0]!.unsubscribe).toHaveBeenCalledWith(TOPIC);
+    expect(capturedSubs[0]!.quit).not.toHaveBeenCalled();
   });
 });

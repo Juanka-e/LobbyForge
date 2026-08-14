@@ -33,6 +33,10 @@ ENV NODE_ENV=production
 
 COPY --from=builder /app /app
 
+# Run as non-root — the node image ships with a `node` user (uid 1000).
+RUN chown -R node:node /app
+USER node
+
 EXPOSE 3000 3001
 
 # Start only the Next.js web server. The ws-gateway runs as a separate

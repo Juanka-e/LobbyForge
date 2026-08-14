@@ -14,6 +14,7 @@ import type { NextRequest } from 'next/server';
  */
 export function middleware(request: NextRequest) {
   const nonce = crypto.randomUUID().replace(/-/g, '');
+  const requestId = crypto.randomUUID().slice(0, 8);
 
   // Construct the CSP with the per-request nonce.
   const isProduction = process.env.NODE_ENV === 'production';
@@ -66,6 +67,7 @@ export function middleware(request: NextRequest) {
 
   response.headers.set('Content-Security-Policy', csp);
   response.headers.set('x-nonce', nonce);
+  response.headers.set('x-request-id', requestId);
   response.headers.set('X-Content-Type-Options', 'nosniff');
   response.headers.set('X-Frame-Options', 'DENY');
   response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');

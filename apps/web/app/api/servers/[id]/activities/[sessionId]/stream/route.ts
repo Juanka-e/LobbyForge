@@ -153,7 +153,8 @@ async function handleStream(
         );
         controller.enqueue(encoder.encode(sse('hello', { ok: true })));
 
-        const subscription = subscribeActivityStateChange(
+        let subscription: { close: () => void } | null = null;
+        void subscribeActivityStateChange(
           serverId,
           sessionId,
           (msg) => {
@@ -172,7 +173,10 @@ async function handleStream(
               encoder.encode(sse('error', { message: 'stream error' }))
             );
           }
-        );
+        ).then((sub) => {
+          if (closed) sub.close();
+          else subscription = sub;
+        });
 
         const keepAlive = setInterval(() => {
           if (closed) return;
@@ -187,7 +191,7 @@ async function handleStream(
           if (closed) return;
           closed = true;
           clearInterval(keepAlive);
-          subscription.close();
+          subscription?.close();
           try {
             controller.close();
           } catch {

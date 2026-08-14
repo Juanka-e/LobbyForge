@@ -31,9 +31,10 @@ const subscribeActivityStateChange = Object.assign(vi.fn(
   ) => {
     subscribeActivityStateChange.__onMessage = onMessage;
     subscribeActivityStateChange.__onError = onError;
-    return {
+    // Return a Promise (the real API is async since LF-029).
+    return Promise.resolve({
       close: vi.fn(),
-    };
+    });
   }
 ), {
   __onMessage: undefined as ((msg: unknown) => void) | undefined,
