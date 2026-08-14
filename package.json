@@ -14,7 +14,7 @@
     }
   },
   "scripts": {
-    "build:packages": "pnpm --filter './packages/**' -r --if-present build",
+    "build:packages": "pnpm --filter @lobbyforge/config --filter @lobbyforge/core --filter @lobbyforge/plugin-sdk --filter @lobbyforge/bot-sdk --filter @lobbyforge/db --filter @lobbyforge/i18n --filter @lobbyforge/ui --filter @lobbyforge/registry -r --if-present build",
     "build:server": "pnpm build:packages && pnpm --filter @lobbyforge/ws-gateway build && pnpm --filter @lobbyforge/web build",
     "build:desktop": "pnpm --filter @lobbyforge/desktop build",
     "build": "pnpm build:server",
