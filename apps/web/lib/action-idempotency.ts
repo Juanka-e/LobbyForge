@@ -1,16 +1,22 @@
 /**
- * LF-002: exactly-once activity action dispatch.
+ * LF-002: duplicate-suppression for activity action dispatches.
+ *
+ * CONTRACT (deliberately NOT "exactly-once"): within the TTL window the
+ * same (sessionId, actionId) is admitted to the reducer at most ONCE.
+ * There is no response replay — if the caller loses the response after
+ * commit, a retry with the same id gets 409 {duplicate:true} and must
+ * re-GET the activity state to reconcile (the UI does this).
  *
  * The CAS loop prevents LOST updates but not DUPLICATE application: a
- * client retrying a `correct-guess` (or the new Taboo `bust-forbidden`)
+ * client retrying a `correct-guess` (or the Taboo `bust-forbidden`)
  * after a network timeout would otherwise score the same event twice.
  *
- * Contract: a client that wants exactly-once semantics attaches a
- * client-generated UUID `actionId` to the action body. The route claims
- * it (Redis SET NX + TTL) before touching the reducer; a second dispatch
- * with the same id is rejected as a duplicate. On any failure path the
- * claim is RELEASED so an honest retry isn't poisoned by a transient
- * error — the TTL is only a safety net, not the mechanism.
+ * A client that wants this protection attaches a client-generated UUID
+ * `actionId` to the action body. The route claims it (Redis SET NX +
+ * TTL) before touching the reducer; a second dispatch with the same id
+ * is rejected as a duplicate. On any failure path the claim is RELEASED
+ * so an honest retry works. If the claim store itself THROWS, the route
+ * fails closed with a retryable 503 (V4-001) — never a fake duplicate.
  */
 import { redis } from '@/lib/redis';
 

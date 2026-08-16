@@ -715,8 +715,29 @@ function ActivityPanel({
           body: JSON.stringify({ actionId: crypto.randomUUID(), ...body }),
         }
       );
+      if (res.status === 409) {
+        // V4-001 reconcile: a duplicate means this action was already
+        // COMMITTED by an earlier attempt (there is no response replay
+        // server-side). Re-GET the state instead of surfacing an error —
+        // to the player the button press simply succeeded.
+        const detail = (await res.json().catch(() => ({}))) as { duplicate?: boolean };
+        if (detail.duplicate) {
+          const current = await fetch(
+            `/api/servers/${serverId}/activities/${sessionId}`,
+            { credentials: 'same-origin' }
+          );
+          if (current.ok) {
+            const data = (await current.json()) as { activity: ActivityDetail };
+            setDetail(data.activity);
+          }
+          return true;
+        }
+      }
       if (!res.ok) {
         const detail = await res.json().catch(() => ({}));
+        // 503 = idempotency store unavailable (retryable): a fresh press
+        // generates a fresh actionId, which is the correct user-level
+        // retry semantic.
         throw new Error(`${res.status} ${JSON.stringify(detail)}`);
       }
       // Force an immediate re-fetch so the panel reflects the new state

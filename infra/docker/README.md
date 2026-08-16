@@ -67,5 +67,6 @@ The release smoke sequence is documented in
 
 ## What this is *not*
 
-- This is **not** the production deployment. The production stack (Nginx, certbot, single-VPS hardening) lives in `projectdetails/04_DEPLOYMENT_SINGLE_VPS_NGINX.md` and is implemented in a separate set of compose files / scripts that this repository does not yet ship.
-- This is **not** an integration test rig. For automated integration tests against these services, see `projectdetails/25_TESTING_STRATEGY.md` (TBD) — typically a `docker compose -f docker-compose.test.yml up -d` inside the test runner with a different data store and seed script.
+- This is **not** the production deployment. Production SHIPS in this repo: [`docker-compose.prod.yml`](docker-compose.prod.yml) (nginx + certbot + web + postgres + redis + livekit + coturn + ws-gateway) provisioned by [`install.sh`](../../install.sh) — see [docs/VOICE_TURN.md](../../docs/VOICE_TURN.md) for the voice/TURN port matrix. This dev file remains the local-development stack.
+- Integration/E2E: the CI `e2e` job runs Playwright against THIS compose stack (real Postgres/Redis/LiveKit and the production-built image). `scripts/e2e-compose.sh` runs the same locally; `docker-compose.e2e-ports.yml` runs an isolated copy beside a live dev stack.
+- Production exposure note: in production only 80/443 (+ the WebRTC/TURN UDP-TCP ranges) need to be public. LiveKit's 7880 signaling is proxied by nginx at `wss://<domain>/livekit` — do NOT expose 7880/7881 directly in production; the ports listed below are the DEV stack's host mappings.

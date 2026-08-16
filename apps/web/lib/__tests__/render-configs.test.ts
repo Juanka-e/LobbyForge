@@ -142,9 +142,13 @@ describe('scripts/render-configs.sh — LF-019 TURN wiring', () => {
     expect(livekit).toContain('host: third.example.com');
     expect(livekit).toContain('username: lobbyforge');
     expect(livekit).toContain(`credential: ${TURN_SECRET}`);
-    // Both UDP and TCP fallbacks are advertised to clients.
+    // UDP, TCP and TURN/TLS (5349) fallbacks are all advertised to
+    // clients (V4-005 — a listener without an ICE advertisement is
+    // unreachable by WebRTC clients).
     expect(livekit.match(/protocol: udp/g)).toHaveLength(1);
     expect(livekit.match(/protocol: tcp/g)).toHaveLength(1);
+    expect(livekit).toContain('port: 5349');
+    expect(livekit).toContain('protocol: tls');
   });
 
   it('rejects a non-hex turn secret before writing anything', () => {

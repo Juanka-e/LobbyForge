@@ -165,7 +165,12 @@ async function insertCardWithOrdinalRetry(
       return { ok: true, card };
     } catch (err) {
       const message = (err as Error).message ?? '';
+      // Classify by SQLSTATE first (23505 = unique_violation); the
+      // message substrings are only a fallback — driver wording and
+      // constraint names can change across versions.
+      const pgCode = (err as { code?: string }).code;
       const isUniqueViolation =
+        pgCode === '23505' ||
         message.includes('cards_pack_id_ordinal_unique') ||
         message.includes('duplicate key value violates unique constraint');
       if (!isUniqueViolation) throw err;
@@ -302,21 +307,30 @@ async function handlePost(req: Request): Promise<NextResponse> {
       if (!resolved.ok) return resolved.response;
       const source = resolved.pack;
       const sourceCards = await listCardsForPack(db, source.id);
-      const copy = await createCardPack(db, {
-        pluginId: PLUGIN_ID,
-        slug: `${PLUGIN_ID}-${source.language}-${randomUUID().slice(0, 8)}`,
-        name: `${source.name} (copy)`.slice(0, 100),
-        language: source.language,
-        description: source.description
-          ? `${source.description} — duplicated copy`.slice(0, 500)
-          : 'Duplicated copy',
-        // A duplicate is ALWAYS custom — never inherit built-in status.
-        isBuiltIn: false,
+      // V4-006: pack + every card insert in ONE transaction — a mid-copy
+      // failure must not leave a half-populated pack behind.
+      const copy = await db.transaction(async (tx) => {
+        // Drizzle's PgTransaction lacks the $client member of the DbClient
+        // type; the query helpers only use the query-builder surface, which
+        // the transaction provides.
+        const txDb = tx as unknown as DbClient;
+        const created = await createCardPack(txDb, {
+          pluginId: PLUGIN_ID,
+          slug: `${PLUGIN_ID}-${source.language}-${randomUUID().slice(0, 8)}`,
+          name: `${source.name} (copy)`.slice(0, 100),
+          language: source.language,
+          description: source.description
+            ? `${source.description} — duplicated copy`.slice(0, 500)
+            : 'Duplicated copy',
+          // A duplicate is ALWAYS custom — never inherit built-in status.
+          isBuiltIn: false,
+        });
+        for (let i = 0; i < sourceCards.length; i += 1) {
+          const card = sourceCards[i]!;
+          await addCardToPack(txDb, created.id, i, card.payload, card.difficulty, card.category);
+        }
+        return created;
       });
-      for (let i = 0; i < sourceCards.length; i += 1) {
-        const card = sourceCards[i]!;
-        await addCardToPack(db, copy.id, i, card.payload, card.difficulty, card.category);
-      }
       await audit(actorUid, 'admin.cardpack.duplicate', 'card_pack', copy.id);
       return NextResponse.json({ pack: copy }, { status: 201 });
     }
@@ -324,6 +338,10 @@ async function handlePost(req: Request): Promise<NextResponse> {
     if (input.action === 'add-card') {
       const resolved = await requireHushlePack(db, input.packId);
       if (!resolved.ok) return resolved.response;
+      // V4-002: the UI hides the form for built-ins, but the API is the
+      // security boundary — a direct add-card to a built-in pack is 409.
+      const immutable = builtInImmutable(resolved.pack);
+      if (immutable) return immutable;
       const inserted = await insertCardWithOrdinalRetry(
         db,
         input.packId,

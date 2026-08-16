@@ -9,15 +9,19 @@
 # Templates are the immutable source of truth; the generated files are
 # re-rendered from scratch on EVERY run and are git-ignored.
 #
-# Usage: scripts/render-configs.sh <domain> <turn-secret> [infra-root]
+# Usage: scripts/render-configs.sh <domain> <turn-secret> [infra-root] [out-root]
 #   <domain>      public domain, e.g. lobby.example.com (validated by caller)
 #   <turn-secret> shared coturn/LiveKit credential (LF-019); hex, >= 32 chars
-#   [infra-root]  defaults to the repo's infra/ directory
+#   [infra-root]  where the *.template files live (default: repo's infra/)
+#   [out-root]    where the GENERATED files go (default: infra-root). V4-003:
+#                 install.sh renders into a staging out-root and activates
+#                 atomically only after the certificate succeeds.
 set -euo pipefail
 
-DOMAIN="${1:?usage: render-configs.sh <domain> <turn-secret> [infra-root]}"
-TURN_SECRET="${2:?usage: render-configs.sh <domain> <turn-secret> [infra-root]}"
+DOMAIN="${1:?usage: render-configs.sh <domain> <turn-secret> [infra-root] [out-root]}"
+TURN_SECRET="${2:?usage: render-configs.sh <domain> <turn-secret> [infra-root] [out-root]}"
 ROOT="${3:-$(cd "$(dirname "$0")/.." && pwd)/infra}"
+OUT="${4:-$ROOT}"
 
 # Defense in depth: a domain containing the sed delimiter or slashes
 # would corrupt the generated configs. install.sh validates too, but a
@@ -44,12 +48,13 @@ render() {
     exit 1
   fi
   # NOT sed -i: the template is never mutated; output goes to the
-  # generated (git-ignored) target.
+  # generated (git-ignored) target (possibly under a staging root).
+  mkdir -p "$(dirname "$target")"
   sed -e "s/LOBBYFORGE_DOMAIN/$DOMAIN/g" -e "s/TURN_CREDENTIAL/$TURN_SECRET/g" \
     "$template" > "$target"
   echo "rendered $(basename "$target") for $DOMAIN"
 }
 
-render "$ROOT/nginx/conf.d/app.conf.template" "$ROOT/nginx/conf.d/app.conf"
-render "$ROOT/livekit/livekit.yaml.template" "$ROOT/livekit/livekit.yaml"
-render "$ROOT/turn/turnserver.conf.template" "$ROOT/turn/turnserver.conf"
+render "$ROOT/nginx/conf.d/app.conf.template" "$OUT/nginx/conf.d/app.conf"
+render "$ROOT/livekit/livekit.yaml.template" "$OUT/livekit/livekit.yaml"
+render "$ROOT/turn/turnserver.conf.template" "$OUT/turn/turnserver.conf"

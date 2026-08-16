@@ -87,4 +87,21 @@ nc -vz your.domain 3478 && nc -vz your.domain 5349
 
 If case 4/5 fails: check `docker logs lobbyforge-turn`, confirm the
 firewall range above, and verify the rendered `livekit.yaml` carries
-`turn_servers` with your domain.
+`turn_servers` with your domain (udp 3478, tcp 3478, tls 5349).
+
+## Scope limits — read before promising corporate-network support
+
+- **TURN/TLS on 5349** is advertised to clients and covers networks that
+  block plain UDP/TCP but allow arbitrary outbound TLS ports.
+- **Networks that ONLY allow outbound 443/tcp** are NOT covered by this
+  stack: nginx already terminates 443 on this host, so TURN/TLS cannot
+  also bind there. Covering that case needs extra design — a second
+  IP/domain for TURN, or L4 routing that splits 443 traffic between
+  nginx and coturn. Do not claim "works behind any corporate firewall"
+  until that exists.
+- The coturn healthcheck proves the 3478 listener is up; a real TURN
+  allocation smoke test (credentials + egress) is the manual
+  `turnutils_uclient` step above.
+- V4-007 (known debt): all clients share one static TURN credential.
+  Alpha-scale quota limits bound the abuse surface; per-user ephemeral
+  TURN auth is a production follow-up.

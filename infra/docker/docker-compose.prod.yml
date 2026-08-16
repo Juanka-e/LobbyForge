@@ -19,6 +19,31 @@ services:
     image: nginx:1.27-alpine
     container_name: lobbyforge-nginx
     restart: unless-stopped
+    # V4-004: nginx loads certificates ONCE at startup. The certbot
+    # sidecar renews on disk every 12h — without a reload the proxy keeps
+    # serving the OLD certificate until the next restart (an outage
+    # waiting ~60-90 days out). A tiny in-container watcher polls the
+    # certificate fingerprint and reloads (config-tested) when it
+    # changes; reloads are graceful (no dropped connections).
+    # shellcheck disable=SC2016
+    command:
+      - /bin/sh
+      - -c
+      - |
+        md5sum /etc/letsencrypt/live/*/fullchain.pem > /tmp/.certsum 2>/dev/null || true
+        while :; do
+          sleep 60
+          md5sum /etc/letsencrypt/live/*/fullchain.pem > /tmp/.certsum.new 2>/dev/null || true
+          if ! cmp -s /tmp/.certsum.new /tmp/.certsum; then
+            if nginx -t; then
+              nginx -s reload && cp /tmp/.certsum.new /tmp/.certsum
+              echo "[cert-watcher] certificate changed — nginx reloaded"
+            else
+              echo "[cert-watcher] nginx -t FAILED on new certificate — keeping old config"
+            fi
+          fi
+        done &
+        exec nginx -g 'daemon off;'
     ports:
       - "80:80"
       - "443:443"
@@ -206,6 +231,14 @@ services:
       - ../turn/turnserver.conf:/etc/coturn/turnserver.conf:ro
       - ../certbot/conf:/etc/letsencrypt:ro
     command: ["-c", "/etc/coturn/turnserver.conf"]
+    # Listener liveness on 3478 (a full TURN allocation smoke test needs
+    # the credential and real network egress — see docs/VOICE_TURN.md).
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/3478'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   postgres-data:

@@ -198,4 +198,34 @@ describe('POST activity actions — LF-002 idempotency', () => {
     expect(claimActionId).toHaveBeenCalledWith('sess-1', UUID);
     expect(releaseActionId).not.toHaveBeenCalled();
   });
+
+  // ── V4-001: a Redis OUTAGE must not masquerade as "duplicate" ────
+  it('returns a retryable 503 when the idempotency store THROWS (not 409)', async () => {
+    const { callHandleAction: cha } = (await import('@/lib/plugin-context')) as unknown as {
+      callHandleAction: { mock: { calls: unknown[][] } };
+    };
+    const reducerCallsBefore = cha.mock.calls.length;
+    claimActionId.mockRejectedValueOnce(new Error('ECONNREFUSED 127.0.0.1:6379'));
+    const res = await post({ type: 'bust-forbidden', actionId: UUID, bustedBy: 'u-p3' });
+
+    expect(res.status).toBe(503);
+    const detail = (await res.json()) as { retryable?: boolean; duplicate?: boolean };
+    expect(detail.retryable).toBe(true);
+    expect(detail.duplicate).toBeUndefined();
+
+    // The reducer and the CAS write must NEVER run for an unclaimable id.
+    // (cha.mock accumulates across tests — assert it did not GROW.)
+    expect(cha.mock.calls).toHaveLength(reducerCallsBefore);
+    expect(dbFns.setGameSessionStateCAS).not.toHaveBeenCalled();
+    expect(releaseActionId).not.toHaveBeenCalled();
+  });
+
+  it('claimed=false stays the ONLY duplicate signal (409 + duplicate flag)', async () => {
+    claimActionId.mockResolvedValueOnce(false);
+    const res = await post({ type: 'bust-forbidden', actionId: UUID, bustedBy: 'u-p3' });
+    expect(res.status).toBe(409);
+    const detail = (await res.json()) as { duplicate?: boolean };
+    expect(detail.duplicate).toBe(true);
+    expect(dbFns.setGameSessionStateCAS).not.toHaveBeenCalled();
+  });
 });

@@ -233,12 +233,21 @@ async function handlePost(
     // only AFTER auth — unauthorized junk must not poison the key — and
     // RELEASED on every failure path below so an honest retry works.
     if (actionId) {
-      let claimed = false;
+      // V4-001: an EXCEPTION from the claim store is an availability
+      // problem, NOT a duplicate. The old code caught the error but left
+      // `claimed = false`, so a Redis outage turned EVERY dispatched
+      // action into a fake "duplicate" 409 — freezing the game. Fail
+      // CLOSED with a retryable 503 instead; `claimed === false` is the
+      // only duplicate signal.
+      let claimed: boolean;
       try {
         claimed = await claimActionId(sessionId, actionId);
-      } catch {
-        // Redis unavailable: degrade to at-most-once-skip (proceed without
-        // dedup) rather than failing every game action.
+      } catch (err) {
+        console.error('[activity-action] idempotency store unavailable:', (err as Error).message);
+        return NextResponse.json(
+          { error: 'Action service temporarily unavailable — please retry.', retryable: true },
+          { status: 503 }
+        );
       }
       if (!claimed) {
         return NextResponse.json(

@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+
 import type { NextResponse } from 'next/server';
 
 /**
@@ -31,8 +33,17 @@ vi.mock('@/lib/security-headers', () => ({
   applySecurityHeaders: (r: unknown) => r,
 }));
 
+// The duplicate-pack path wraps its writes in db.transaction (V4-006).
+// The mock passes the SAME pseudo-client through so the db-layer mocks
+// keep working, and the test can assert the transaction was used.
+const { txClient, transaction } = vi.hoisted(() => {
+  const txClient = { __mockDbClient: true, __isTx: true };
+  const transaction = vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(txClient));
+  return { txClient, transaction };
+});
+
 vi.mock('@/lib/db', () => ({
-  getDb: () => ({ __mockDbClient: true }),
+  getDb: () => ({ __mockDbClient: true, transaction }),
 }));
 
 vi.mock('@/lib/plugin-content-seeder', () => ({
@@ -88,6 +99,7 @@ async function post(body: unknown): Promise<Response> {
 
 beforeEach(() => {
   for (const fn of Object.values(dbFns)) fn.mockReset();
+  transaction.mockClear();
   dbFns.logAction.mockResolvedValue(undefined);
   requireInstanceAdmin.mockReset().mockResolvedValue(null);
   // Default: an editable custom hushle pack exists.
@@ -200,23 +212,68 @@ describe('POST /api/admin/card-packs', () => {
     expect(dbFns.deleteCardPack).toHaveBeenCalled();
   });
 
-  it('duplicate-pack: copies every card into a fresh custom pack', async () => {
+  it('duplicate-pack: copies every card into a fresh custom pack, atomically (V4-006)', async () => {
     dbFns.getCardPackById.mockResolvedValue(pack({ isBuiltIn: true }));
     dbFns.createCardPack.mockResolvedValue(pack({ slug: 'hushle-en-abc12345', isBuiltIn: false }));
     dbFns.listCardsForPack.mockResolvedValue([card(), card({ ordinal: 1, payload: { word: 'train', forbiddenWords: ['rail'] } })]);
 
     const res = await post({ action: 'duplicate-pack', packId: UUID });
     expect(res.status).toBe(201);
+    // Pack create + all card inserts ran INSIDE one transaction.
+    expect(transaction).toHaveBeenCalledTimes(1);
     expect(dbFns.createCardPack).toHaveBeenCalledWith(
-      expect.anything(),
+      txClient,
       expect.objectContaining({ isBuiltIn: false })
     );
     expect(dbFns.addCardToPack).toHaveBeenCalledTimes(2);
+    expect(dbFns.addCardToPack).toHaveBeenLastCalledWith(
+      txClient,
+      expect.any(String),
+      1,
+      expect.anything(),
+      expect.any(String),
+      expect.any(String)
+    );
+  });
+
+  it('duplicate-pack: a mid-copy insert failure surfaces as 500 (transaction rolls back)', async () => {
+    dbFns.getCardPackById.mockResolvedValue(pack({ isBuiltIn: true }));
+    dbFns.createCardPack.mockResolvedValue(pack({ isBuiltIn: false }));
+    dbFns.listCardsForPack.mockResolvedValue([card(), card({ ordinal: 1 })]);
+    dbFns.addCardToPack
+      .mockResolvedValueOnce(card())
+      .mockRejectedValueOnce(new Error('db went away'));
+
+    const res = await post({ action: 'duplicate-pack', packId: UUID });
+    // The route reports the failure; with a real DB the transaction
+    // ensures the half-written copy is rolled back.
+    expect(res.status).toBe(500);
+    expect(transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('add-card: 409 on a built-in pack (V4-002 — the API is the boundary, not the UI)', async () => {
+    dbFns.getCardPackById.mockResolvedValue(pack({ isBuiltIn: true }));
+    const res = await post({
+      action: 'add-card',
+      packId: UUID,
+      word: 'Injected',
+      forbiddenWords: ['x'],
+      difficulty: 'easy',
+      category: 'general',
+    });
+    expect(res.status).toBe(409);
+    expect(dbFns.addCardToPack).not.toHaveBeenCalled();
+    expect(dbFns.listCardsForPack).not.toHaveBeenCalled();
   });
 
   it('add-card: retries the ordinal on unique-violation, 409 when the race persists (NEW-005)', async () => {
     dbFns.listCardsForPack.mockResolvedValue([]);
-    const violation = new Error('duplicate key value violates unique constraint "cards_pack_id_ordinal_unique"');
+    // A postgres.js-style error carries SQLSTATE on .code — the primary
+    // classifier (message substrings are only the fallback).
+    const violation = Object.assign(
+      new Error('duplicate key value violates unique constraint'),
+      { code: '23505' }
+    );
     dbFns.addCardToPack
       .mockRejectedValueOnce(violation)
       .mockRejectedValueOnce(violation)

@@ -34,7 +34,7 @@ Honest assessment of what works today:
 | Direct messages (instance-local) | ✅ Available |
 | Multi-server lobby switching | ✅ Available (official instance) |
 | Discovery directory | 🟡 Alpha — registration/review flow works, needs real instances |
-| Hushle (Taboo-style game) | 🟡 Alpha — viewer state projection works; authoritative timer/idempotency pending |
+| Hushle (Taboo-style game) | 🟡 Alpha — viewer state projection + classic Taboo roles work; action idempotency is PARTIAL (10-min duplicate suppression per actionId, no response replay — 409+duplicate triggers a client state reconcile; authoritative timer pending) |
 | Quiz | 🔬 Experimental — basic reducer + UI, no per-player answer model |
 | Plugin SDK (bundled plugins) | ✅ Available |
 | Community plugin marketplace | ❌ Disabled by default — runs in-process without isolation (`LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED`) |
@@ -43,7 +43,7 @@ Honest assessment of what works today:
 | Backups (create/restore) | ❌ Planned — only manifest verification exists today |
 | Desktop app (Tauri 2) | 🔬 Experimental — builds and opens, real media spike pending |
 | Google OAuth login | ✅ Available (opt-in via env vars) |
-| TURN relay | ❌ Not configured by default — required for restrictive NATs |
+| TURN relay | 🟡 Production stack ships coturn (UDP 3478 + TCP + TLS 5349) — advertised via LiveKit; real restricted-network matrix still manual ([docs/VOICE_TURN.md](docs/VOICE_TURN.md)) |
 
 ## Features
 
