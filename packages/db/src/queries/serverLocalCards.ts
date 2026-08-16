@@ -11,7 +11,7 @@
  * (uniting global + local, applying the session's difficulty
  * distribution) lands in M20b alongside the admin UI.
  */
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, eq, isNull, or } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
 import { serverLocalCards } from '../schema.js';
 
@@ -19,6 +19,7 @@ export interface ServerLocalCardRow {
   id: string;
   serverId: string;
   pluginId: string;
+  language: string | null;
   category: string | null;
   payload: Record<string, unknown>;
   difficulty: string;
@@ -29,28 +30,38 @@ export interface ServerLocalCardRow {
 export interface CreateServerLocalCardInput {
   serverId: string;
   pluginId: string;
+  /** NEW-007: null = shared across all languages. */
+  language?: string | null;
   category?: string | null;
   payload: Record<string, unknown>;
   difficulty?: string;
   createdBy?: string | null;
 }
 
+/**
+ * List a server's local cards for a plugin.
+ *
+ * NEW-007: when `language` is provided the result is scoped to cards
+ * tagged with that language PLUS language-less cards (NULL = common to
+ * every deck). Without the filter, every local card is returned
+ * (admin/tooling views).
+ */
 export async function listServerLocalCards(
   db: DbClient,
   serverId: string,
-  pluginId?: string
+  pluginId?: string,
+  language?: string
 ): Promise<ServerLocalCardRow[]> {
-  const rows = pluginId
-    ? await db
-        .select()
-        .from(serverLocalCards)
-        .where(and(eq(serverLocalCards.serverId, serverId), eq(serverLocalCards.pluginId, pluginId)))
-        .orderBy(asc(serverLocalCards.difficulty), asc(serverLocalCards.createdAt))
-    : await db
-        .select()
-        .from(serverLocalCards)
-        .where(eq(serverLocalCards.serverId, serverId))
-        .orderBy(desc(serverLocalCards.createdAt));
+  const conditions = [eq(serverLocalCards.serverId, serverId)];
+  if (pluginId) conditions.push(eq(serverLocalCards.pluginId, pluginId));
+  if (language !== undefined) {
+    conditions.push(or(isNull(serverLocalCards.language), eq(serverLocalCards.language, language))!);
+  }
+  const rows = await db
+    .select()
+    .from(serverLocalCards)
+    .where(and(...conditions))
+    .orderBy(asc(serverLocalCards.difficulty), asc(serverLocalCards.createdAt));
   return rows as ServerLocalCardRow[];
 }
 
@@ -83,6 +94,7 @@ export async function createServerLocalCard(
     .values({
       serverId: input.serverId,
       pluginId: input.pluginId,
+      language: input.language ?? null,
       category: input.category ?? null,
       payload: input.payload,
       difficulty: input.difficulty ?? 'easy',

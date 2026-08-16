@@ -477,8 +477,32 @@ function PlayingView({
   const explainerName = state.currentExplainerId
     ? playerName(players, state.currentExplainerId)
     : null;
+  // Classic Taboo roles: the viewer is either the explainer, a GUESSER
+  // (same team as the explainer — must NOT see the card) or an OPPONENT
+  // (another team — watches the card and can BUST forbidden words). The
+  // server projection already nulls currentCard for guessers; the
+  // viewerTeam math below drives the role line and the BUST button.
+  const viewerTeam = state.teams.find((tm) => tm.playerIds.includes(actorUserId)) ?? null;
+  const isOpponent =
+    Boolean(viewerTeam && state.currentTeamId && viewerTeam.id !== state.currentTeamId) &&
+    !isExplainer;
 
   const card = state.currentCard;
+
+  const bustButton = useMemo(() => {
+    if (!isOpponent || !card) return null;
+    return (
+      <button
+        type="button"
+        style={{ ...dangerButtonStyle, fontSize: 15, padding: '10px 16px' }}
+        onClick={() => {
+          void dispatch({ type: 'bust-forbidden' });
+        }}
+      >
+        ⛔ {t('hushle.playing.bust')}
+      </button>
+    );
+  }, [isOpponent, card, dispatch, t]);
 
   const buttons = useMemo(() => {
     if (!isHost) return null;
@@ -565,7 +589,11 @@ function PlayingView({
             ? t('hushle.playing.explainer', { name: explainerName })
             : t('hushle.playing.noExplainer')}
           {' · '}
-          {isExplainer ? t('hushle.playing.youAreExplainer') : t('hushle.playing.youAreGuesser')}
+          {isExplainer
+            ? t('hushle.playing.youAreExplainer')
+            : isOpponent
+              ? t('hushle.playing.youAreOpponent')
+              : t('hushle.playing.youAreGuesser')}
         </p>
         <p style={{ fontSize: 12, color: '#9aa3ad', margin: 0 }}>
           {t('hushle.playing.cardsPlayed', {
@@ -576,51 +604,49 @@ function PlayingView({
       </div>
 
       {card ? (
-        isExplainer || isHost ? (
-          <div style={{ ...cardStyle, background: '#11151b' }}>
-            <p style={{ margin: '0 0 6px 0', fontSize: 12, color: '#9aa3ad' }}>
-              {t('hushle.playing.word')}
-            </p>
-            <p
-              style={{
-                margin: '0 0 12px 0',
-                fontSize: 32,
-                fontWeight: 700,
-                letterSpacing: 1,
-                color: '#e6e8eb',
-              }}
-            >
-              {card.word}
-            </p>
-            <p style={{ margin: '0 0 4px 0', fontSize: 12, color: '#9aa3ad' }}>
-              {t('hushle.playing.forbiddenWords')}
-            </p>
-            <ul
-              style={{
-                margin: 0,
-                paddingLeft: 18,
-                fontSize: 14,
-                color: '#e36049',
-              }}
-            >
-              {card.forbiddenWords.map((w) => (
-                <li key={w}>{w}</li>
-              ))}
-            </ul>
-          </div>
-        ) : (
-          <div
+        // The card is present only for the explainer and opposing-team
+        // players (server projection nulls it for guessers). Opponents
+        // additionally get the hint + BUST button rendered above/below.
+        <div style={{ ...cardStyle, background: '#11151b' }}>
+          <p style={{ margin: '0 0 6px 0', fontSize: 12, color: '#9aa3ad' }}>
+            {t('hushle.playing.word')}
+          </p>
+          <p
             style={{
-              ...cardStyle,
-              background: '#11151b',
-              fontSize: 14,
-              color: '#9aa3ad',
+              margin: '0 0 12px 0',
+              fontSize: 32,
+              fontWeight: 700,
+              letterSpacing: 1,
+              color: '#e6e8eb',
             }}
           >
-            {t('hushle.playing.youAreGuesser')} — {t('hushle.playing.hideFromGuessers')}
-          </div>
-        )
-      ) : (
+            {card.word}
+          </p>
+          <p style={{ margin: '0 0 4px 0', fontSize: 12, color: '#9aa3ad' }}>
+            {t('hushle.playing.forbiddenWords')}
+          </p>
+          <ul
+            style={{
+              margin: 0,
+              paddingLeft: 18,
+              fontSize: 14,
+              color: '#e36049',
+            }}
+          >
+            {card.forbiddenWords.map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
+          {isOpponent ? (
+            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <p style={{ margin: 0, fontSize: 12, color: '#9aa3ad' }}>
+                {t('hushle.playing.opponentHint')}
+              </p>
+              {bustButton}
+            </div>
+          ) : null}
+        </div>
+      ) : isExplainer ? (
         <div
           style={{
             ...cardStyle,
@@ -630,6 +656,17 @@ function PlayingView({
           }}
         >
           {t('hushle.playing.noCard')}
+        </div>
+      ) : (
+        <div
+          style={{
+            ...cardStyle,
+            background: '#11151b',
+            fontSize: 14,
+            color: '#9aa3ad',
+          }}
+        >
+          {t('hushle.playing.youAreGuesser')} — {t('hushle.playing.hideFromGuessers')}
         </div>
       )}
 

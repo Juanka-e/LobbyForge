@@ -176,6 +176,13 @@
       "when": 1785126400000,
       "tag": "0025_game_session_revision",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1785212800000,
+      "tag": "0026_server_local_cards_language",
+      "breakpoints": true
     }
   ]
 }

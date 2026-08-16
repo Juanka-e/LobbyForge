@@ -83,6 +83,13 @@ export const hushlePlugin: GamePlugin<HushleState, HushleAction> = {
     'correct-guess': { role: 'host' },
     pass: { role: 'host' },
     penalty: { role: 'host' },
+    /**
+     * Classic-Taboo buzzer: any player in the session may dispatch it.
+     * The host injects the authenticated actor id as `bustedBy`
+     * (actorFields) and the reducer verifies the caller sits on an
+     * OPPOSING team — teammates and the floater cannot bust.
+     */
+    'bust-forbidden': { role: 'player', actorFields: ['bustedBy'] },
     'end-turn': { role: 'host' },
     'end-game': { role: 'host' },
   },

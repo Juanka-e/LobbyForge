@@ -538,6 +538,13 @@ export const serverLocalCards = pgTable('server_local_cards', {
   id: uuid('id').primaryKey().defaultRandom(),
   serverId: uuid('server_id').notNull().references(() => servers.id, { onDelete: 'cascade' }),
   pluginId: text('plugin_id').notNull(),
+  /**
+   * NEW-007: language scope for the card. NULL means "shared across all
+   * languages" (a server's proper-noun additions fit every deck); a
+   * value like 'tr' restricts the card to packs of that language — a
+   * Turkish local word must never leak into a German deck.
+   */
+  language: text('language'),
   // Free-form tag so a server can group local cards (e.g. by theme).
   // The deck loader treats this as opaque; Hushle uses it for category
   // tags. Nullable so a quick add doesn't require picking a tag.
@@ -548,6 +555,11 @@ export const serverLocalCards = pgTable('server_local_cards', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
   serverPluginIdx: index('idx_server_local_cards_server_plugin').on(table.serverId, table.pluginId),
+  serverPluginLanguageIdx: index('idx_server_local_cards_server_plugin_language').on(
+    table.serverId,
+    table.pluginId,
+    table.language
+  ),
   serverPluginDifficultyIdx: index('idx_server_local_cards_server_plugin_difficulty').on(
     table.serverId,
     table.pluginId,

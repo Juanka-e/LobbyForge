@@ -401,6 +401,23 @@ export function hushleReducer(state: HushleState, action: HushleAction): HushleS
     case 'penalty':
       return applyCorrectPassPenalty(state, 'penalty');
 
+    case 'bust-forbidden': {
+      // Classic-Taboo buzzer. Server-authoritative actor check: the
+      // bustedBy id is injected by the host from the authenticated
+      // session (never trusted from the wire), and the reducer only
+      // accepts it when that player sits on a team OTHER than the
+      // explaining team. Teammates and the floater cannot bust.
+      if (state.phase !== 'playing') return state;
+      if (!state.currentCard) return state;
+      if (!state.currentTeamId) return state;
+      const bustedBy = action.bustedBy;
+      if (typeof bustedBy !== 'string' || bustedBy.length === 0) return state;
+      const busterTeam = state.teams.find((t) => t.playerIds.includes(bustedBy));
+      if (!busterTeam) return state;
+      if (busterTeam.id === state.currentTeamId) return state;
+      return applyCorrectPassPenalty(state, 'penalty');
+    }
+
     case 'end-turn': {
       if (state.phase !== 'playing') return state;
       const idx = nextTeamIndex(state);

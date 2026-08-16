@@ -170,6 +170,15 @@ export type HushleAction =
   | { type: 'correct-guess' }
   | { type: 'pass' }
   | { type: 'penalty' }
+  /**
+   * Classic-Taboo buzzer: a player on an OPPOSING team catches the
+   * explainer saying a forbidden word and presses BUST. Server injects
+   * the actor id via actionPolicies `actorFields` — the reducer then
+   * verifies the caller really is on another team (teammates and the
+   * floater cannot bust their own explainer). Applies the standard
+   * penalty (-1 to the explaining team) and draws the next card.
+   */
+  | { type: 'bust-forbidden'; bustedBy?: string }
   | { type: 'end-turn' }
   | { type: 'end-game' };
 

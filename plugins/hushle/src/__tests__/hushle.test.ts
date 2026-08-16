@@ -748,4 +748,69 @@ describe('@lobbyforge/hushle', () => {
     expect(new Set(drawn).size).toBe(drawn.length);
     expect(drawn.length).toBe(24);
   });
+
+  // ── Classic-Taboo buzzer (bust-forbidden) ─────────────────────────
+  async function setupBustHarness() {
+    const harness = createTestHarness<HushleState, Parameters<typeof hushlePlugin.handleAction>[2]>({
+      plugin: hushlePlugin,
+      players: ['p1', 'p2', 'p3', 'p4'],
+    });
+    await harness.performAction('p1', {
+      type: 'start-game',
+      packId: 'hushle-en-basic',
+      language: 'en',
+      cardsPerTurn: 100,
+      createdBy: 'p1',
+    });
+    await harness.performAction('p1', {
+      type: 'set-teams',
+      teams: [
+        { name: 'A', playerIds: ['p1', 'p2'] }, // p1 explains, p2 guesses
+        { name: 'B', playerIds: ['p3', 'p4'] }, // opponents
+      ],
+    });
+    const teamA = harness.getState().teams[0]!;
+    await harness.performAction('p1', { type: 'start-turn', teamId: teamA.id, explainerId: 'p1' });
+    return harness;
+  }
+
+  it('lets an opposing player bust a forbidden word (-1 and next card)', async () => {
+    const harness = await setupBustHarness();
+    const before = harness.getState();
+    const beforeScore = before.teams[0]!.score;
+    const beforeCardId = before.currentCard!.id;
+
+    // p3 is on team B (opposing) — the buzzer is valid.
+    await harness.performAction('p3', { type: 'bust-forbidden', bustedBy: 'p3' });
+
+    const after = harness.getState();
+    expect(after.teams[0]!.penaltyCount).toBe(before.teams[0]!.penaltyCount + 1);
+    expect(after.teams[0]!.score).toBe(beforeScore - 1);
+    expect(after.currentCard).not.toBeNull();
+    expect(after.currentCard!.id).not.toBe(beforeCardId);
+    expect(after.totalCardsPlayed).toBe(before.totalCardsPlayed + 1);
+  });
+
+  it('rejects a bust from a teammate of the explainer', async () => {
+    const harness = await setupBustHarness();
+    const before = JSON.stringify(harness.getState());
+    // p2 is on team A with the explainer — no self-busting.
+    await harness.performAction('p2', { type: 'bust-forbidden', bustedBy: 'p2' });
+    expect(JSON.stringify(harness.getState())).toBe(before);
+  });
+
+  it('rejects a bust from a player with no team (floater/spectator)', async () => {
+    const harness = await setupBustHarness();
+    const before = JSON.stringify(harness.getState());
+    await harness.performAction('p4', { type: 'bust-forbidden', bustedBy: 'ghost-player' });
+    expect(JSON.stringify(harness.getState())).toBe(before);
+  });
+
+  it('rejects a bust without a server-injected actor id', async () => {
+    const harness = await setupBustHarness();
+    const before = JSON.stringify(harness.getState());
+    // No bustedBy — the reducer must not trust an anonymous buzz.
+    await harness.performAction('p3', { type: 'bust-forbidden' });
+    expect(JSON.stringify(harness.getState())).toBe(before);
+  });
 });

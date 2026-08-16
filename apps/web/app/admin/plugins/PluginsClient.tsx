@@ -187,6 +187,13 @@ export default function PluginsClient({
     if (ok) setPendingDeletePack(null);
   }
 
+  async function duplicatePack(pack: CardPackView) {
+    await call(
+      { action: 'duplicate-pack', packId: pack.id },
+      `Pack duplicated as "${pack.name} (copy)" — you can now edit the copy.`
+    );
+  }
+
   return (
     <section className="mx-auto max-w-5xl pb-32">
       <header className="mb-6">
@@ -307,19 +314,45 @@ export default function PluginsClient({
                 <p className="mt-2 text-sm text-text-secondary">{selectedPack.description}</p>
               ) : null}
             </div>
-            {!selectedPack.isBuiltIn ? (
+            <div className="flex gap-2">
               <button
                 type="button"
-                onClick={() => setPendingDeletePack(selectedPack)}
+                onClick={() => duplicatePack(selectedPack)}
                 disabled={busy}
-                className="rounded-md border border-danger/40 px-3 py-1.5 text-xs text-danger transition-colors hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-md border border-border-strong px-3 py-1.5 text-xs text-text-secondary transition-colors hover:bg-surface-raised hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
               >
-                Delete pack
+                Duplicate
               </button>
-            ) : null}
+              {selectedPack.isBuiltIn ? (
+                <span
+                  className="rounded-md border border-border-subtle px-3 py-1.5 text-xs text-text-muted"
+                  title="Built-in packs are immutable — duplicate to customise"
+                >
+                  Immutable
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setPendingDeletePack(selectedPack)}
+                  disabled={busy}
+                  className="rounded-md border border-danger/40 px-3 py-1.5 text-xs text-danger transition-colors hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Delete pack
+                </button>
+              )}
+            </div>
           </div>
 
-          {/* Add-card form */}
+          {/* Add-card form (custom packs only — built-ins are immutable) */}
+          {selectedPack.isBuiltIn ? (
+            <div className="border-b border-border-subtle p-5">
+              <div className="rounded-lg border border-border-subtle bg-surface-container/50 p-3 text-sm text-text-secondary">
+                Built-in packs are immutable (the boot seeder maintains them). Use{' '}
+                <strong className="text-text-primary">Duplicate</strong> above to create an editable
+                copy with these words.
+              </div>
+            </div>
+          ) : (
           <div className="border-b border-border-subtle p-5">
             <h3 className="mb-3 text-sm font-semibold text-text-primary">Add a word</h3>
             <div className="grid gap-3 md:grid-cols-[1fr_2fr_140px_140px_auto] md:items-end">
@@ -378,6 +411,7 @@ export default function PluginsClient({
               </button>
             </div>
           </div>
+          )}
 
           {/* Card table */}
           <div className="overflow-x-auto">
@@ -474,32 +508,36 @@ export default function PluginsClient({
                         </td>
                         <td className="px-5 py-3 text-text-secondary">{card.category}</td>
                         <td className="px-5 py-3">
-                          <div className="flex justify-end gap-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingCardId(card.id);
-                                setEditDraft({
-                                  word: card.word,
-                                  forbiddenWords: card.forbiddenWords,
-                                  difficulty: card.difficulty,
-                                  category: card.category,
-                                });
-                              }}
-                              disabled={busy}
-                              className="rounded-md border border-border-strong px-3 py-1.5 text-xs text-text-secondary hover:bg-surface-raised hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => deleteCard(card.id)}
-                              disabled={busy}
-                              className="rounded-md border border-danger/40 px-3 py-1.5 text-xs text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40"
-                            >
-                              Delete
-                            </button>
-                          </div>
+                          {selectedPack.isBuiltIn ? (
+                            <span className="block text-right text-xs text-text-muted">—</span>
+                          ) : (
+                            <div className="flex justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingCardId(card.id);
+                                  setEditDraft({
+                                    word: card.word,
+                                    forbiddenWords: card.forbiddenWords,
+                                    difficulty: card.difficulty,
+                                    category: card.category,
+                                  });
+                                }}
+                                disabled={busy}
+                                className="rounded-md border border-border-strong px-3 py-1.5 text-xs text-text-secondary hover:bg-surface-raised hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => deleteCard(card.id)}
+                                disabled={busy}
+                                className="rounded-md border border-danger/40 px-3 py-1.5 text-xs text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     )

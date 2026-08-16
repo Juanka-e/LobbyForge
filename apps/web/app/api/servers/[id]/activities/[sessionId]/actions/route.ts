@@ -89,7 +89,7 @@ function validateActionPhase(pluginId: string, actionType: string, phase: string
 
   if (pluginId === 'hushle') {
     // Hushle phases: lobby, team_setup, playing, ended
-    const playingActions = ['correct-guess', 'pass', 'penalty', 'next-card', 'end-turn'];
+    const playingActions = ['correct-guess', 'pass', 'penalty', 'next-card', 'end-turn', 'bust-forbidden'];
     const lobbyActions = ['start-game', 'set-teams', 'set-explainer'];
     if (phase === 'lobby' && [...playingActions, 'end-game'].includes(actionType)) {
       return 'Game has not started yet.';

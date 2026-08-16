@@ -7,9 +7,13 @@
  *
  * Rules:
  * - Hushle: the deck (all cards) is NEVER sent to ANY viewer — including
- *   the host. Only card count metadata is included. The currentCard is
- *   visible ONLY to the currentExplainer (the person who must describe
- *   it); everyone else gets null.
+ *   the host. Only count metadata (deckSize, cardsRemaining = deck minus
+ *   used ids) is included. The currentCard is visible to:
+ *     1. the currentExplainer (they must describe it), and
+ *     2. members of OPPOSING teams (classic Taboo: opponents watch the
+ *        card to catch forbidden-word use and press BUST).
+ *   Teammates of the explaining team, the floater, the host (when not
+ *   playing) and spectators get null.
  * - Quiz: correctIndex is stripped from every question unless the phase
  *   is 'reveal' or 'ended'.
  */
@@ -26,19 +30,22 @@ export function projectActivityState(
     const phase = s.phase as string | undefined;
 
     // P0-A: NEVER send the deck to any viewer. Replace with metadata only.
+    // cardsRemaining subtracts usedCardIds — deckSize stays the full total.
     if (Array.isArray(s.deck)) {
       const deckLength = (s.deck as unknown[]).length;
-      s.deck = undefined; // strip entirely
+      const usedCount = Array.isArray(s.usedCardIds) ? new Set(s.usedCardIds as unknown[]).size : 0;
+      delete s.deck;
       s.deckSize = deckLength;
-      s.cardsRemaining = deckLength;
+      s.cardsRemaining = Math.max(0, deckLength - usedCount);
     }
 
-    // P0-B: currentCard — null (not a string placeholder) for non-explainer.
+    // P0-B: currentCard — null (not a string placeholder) for anyone who
+    // is neither the explainer nor an opposing-team player.
     if (phase !== 'ended' && s.currentCard) {
       const explainerId = s.currentExplainerId ?? s.currentExplainer ?? null;
       const isExplainer =
         viewerUserId != null && explainerId != null && String(explainerId) === viewerUserId;
-      if (!isExplainer) {
+      if (!isExplainer && !isOpposingTeamPlayer(s, viewerUserId)) {
         s.currentCard = null; // type-safe null, not '[hidden]' string
       }
     }
@@ -56,4 +63,26 @@ export function projectActivityState(
   }
 
   return s;
+}
+
+/**
+ * Classic-Taboo visibility: true when the viewer plays on a team OTHER
+ * than the currently explaining team (state.currentTeamId). Teammates
+ * of the explainer, floaters (no team) and spectators return false.
+ */
+function isOpposingTeamPlayer(
+  s: Record<string, unknown>,
+  viewerUserId: string | undefined
+): boolean {
+  if (viewerUserId == null) return false;
+  const currentTeamId = s.currentTeamId;
+  if (currentTeamId == null) return false;
+  const teams = Array.isArray(s.teams) ? (s.teams as Array<Record<string, unknown>>) : [];
+  return teams.some((team) => {
+    if (!team || typeof team !== 'object') return false;
+    const teamId = team.id;
+    if (teamId == null || String(teamId) === String(currentTeamId)) return false;
+    const playerIds = Array.isArray(team.playerIds) ? (team.playerIds as unknown[]) : [];
+    return playerIds.some((pid) => String(pid) === viewerUserId);
+  });
 }

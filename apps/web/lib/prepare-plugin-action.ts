@@ -67,9 +67,11 @@ export async function preparePluginAction(
     return { ok: false, status: 409, error: 'Card pack language is malformed' };
   }
 
+  // NEW-007: local cards are language-scoped — only cards tagged with the
+  // pack's language (or no language = common to all decks) join this deck.
   const [globalCards, localCards] = await Promise.all([
     listCardsForPack(db, pack.id),
-    listServerLocalCards(db, input.serverId, 'hushle'),
+    listServerLocalCards(db, input.serverId, 'hushle', pack.language),
   ]);
   const deck = [
     ...globalCards.map((card) =>

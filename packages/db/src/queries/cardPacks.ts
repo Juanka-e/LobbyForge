@@ -1,4 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
 import { cardPacks, cards } from '../schema.js';
 
@@ -79,18 +79,25 @@ export async function listCardPackSummaries(
 ): Promise<CardPackSummary[]> {
   const packs = await listCardPacks(db, pluginId);
   if (packs.length === 0) return [];
-  // Pull a count per pack in one extra round-trip (Postgres-friendly).
-  const countRows = await db.select({ packId: cards.packId }).from(cards);
-  const countMap = new Map<string, number>();
-  for (const row of countRows) {
-    countMap.set(row.packId, (countMap.get(row.packId) ?? 0) + 1);
-  }
+  // One aggregated round-trip (COUNT(*) GROUP BY pack_id) instead of
+  // loading every card row just to count them.
+  const countRows = await db
+    .select({ packId: cards.packId, count: sql<number>`count(*)::int` })
+    .from(cards)
+    .groupBy(cards.packId);
+  const countMap = new Map<string, number>(countRows.map((r) => [r.packId, Number(r.count)]));
   return packs.map((p) => ({ ...p, cardCount: countMap.get(p.id) ?? 0 }));
 }
 
 export async function getCardPackById(db: DbClient, id: string): Promise<CardPackRow | null> {
   const [row] = await db.select().from(cardPacks).where(eq(cardPacks.id, id)).limit(1);
   return (row as CardPackRow | undefined) ?? null;
+}
+
+/** Fetch a single card by id — used for card→pack ownership checks. */
+export async function getCardById(db: DbClient, id: string): Promise<CardRow | null> {
+  const [row] = await db.select().from(cards).where(eq(cards.id, id)).limit(1);
+  return (row as CardRow | undefined) ?? null;
 }
 
 export async function getCardPackBySlug(
