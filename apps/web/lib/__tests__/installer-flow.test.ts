@@ -105,8 +105,13 @@ function makeSandbox(): string {
   return dir;
 }
 
-/** Git Bash uses ':' separators; convert the ';' we injected. */
-function runInstallerPosix(sandbox: string, domain: string, opts: Parameters<typeof runInstaller>[2] = {}) {
+interface InstallerOpts {
+  stackRunning?: boolean;
+  certbotRc?: number;
+}
+
+/** Runs install.sh with the fake-docker bin prepended to PATH (POSIX ':'). */
+function runInstallerPosix(sandbox: string, domain: string, opts: InstallerOpts = {}) {
   const answers = `${domain}\nE2E Community\nn\nY\n`;
   const res = spawnSync('bash', ['-c', `cd "$1" && PATH="$2:$PATH" FAKE_DOCKER_PS="$3" FAKE_CERTBOT_RC="$4" bash ./install.sh`, 'run', sandbox, join(sandbox, 'bin'), opts.stackRunning ? 'lobbyforge-nginx' : '', String(opts.certbotRc ?? 0)], {
     input: answers,
