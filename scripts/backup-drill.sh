@@ -29,6 +29,12 @@ cleanup() {
   rm -rf "$WORKDIR"
 }
 trap cleanup EXIT
+# Diagnose silent set -e exits: name the failing line in the log.
+on_err() {
+  echo "DRILL FAILED at line $1 (exit $2). Container logs:" >&2
+  docker logs "$CONTAINER" --tail 20 >&2 2>&1 || true
+}
+trap 'on_err $LINENO $?' ERR
 
 step() { printf '\n== %s ==\n' "$1"; }
 
