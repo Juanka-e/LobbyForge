@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 export interface CardView {
   id: string;
@@ -71,6 +71,7 @@ export default function PluginsClient({
   // Confirm-delete state for packs (cards delete without a modal — they're
   // one click to recreate, packs are not).
   const [pendingDeletePack, setPendingDeletePack] = useState<CardPackView | null>(null);
+  const [pendingDeleteCard, setPendingDeleteCard] = useState<CardView | null>(null);
 
   const selectedPack = useMemo(
     () => packs.find((p) => p.id === selectedPackId) ?? null,
@@ -178,8 +179,8 @@ export default function PluginsClient({
     if (ok) setEditingCardId(null);
   }
 
-  async function deleteCard(cardId: string) {
-    await call({ action: 'delete-card', cardId }, 'Card deleted.');
+  async function deleteCard(cardId: string): Promise<boolean> {
+    return call({ action: 'delete-card', cardId }, 'Card deleted.');
   }
 
   async function deletePack(pack: CardPackView) {
@@ -530,7 +531,7 @@ export default function PluginsClient({
                               </button>
                               <button
                                 type="button"
-                                onClick={() => deleteCard(card.id)}
+                                onClick={() => setPendingDeleteCard(card)}
                                 disabled={busy}
                                 className="rounded-md border border-danger/40 px-3 py-1.5 text-xs text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40"
                               >
@@ -549,37 +550,111 @@ export default function PluginsClient({
         </section>
       ) : null}
 
-      {/* ── Delete-pack confirmation modal ───────────────────────── */}
+      {/* ── Confirmations ─────────────────────────────────────────── */}
+      {pendingDeleteCard ? (
+        <ConfirmModal
+          title="Delete word?"
+          body={
+            <>
+              <span className="font-medium text-text-primary">{pendingDeleteCard.word}</span> will be
+              removed from {selectedPack?.name}. Games already in progress keep their dealt cards.
+            </>
+          }
+          confirmLabel={busy ? 'Deleting...' : 'Delete word'}
+          busy={busy}
+          onCancel={() => setPendingDeleteCard(null)}
+          onConfirm={async () => {
+            const ok = await deleteCard(pendingDeleteCard.id);
+            if (ok) setPendingDeleteCard(null);
+          }}
+        />
+      ) : null}
+
       {pendingDeletePack ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-md rounded-xl border border-border-subtle bg-surface p-5 shadow-2xl">
-            <h2 className="text-lg font-semibold text-text-primary">Delete word pack?</h2>
-            <p className="mt-2 text-sm text-text-secondary">
+        <ConfirmModal
+          title="Delete word pack?"
+          body={
+            <>
               <span className="font-medium text-text-primary">{pendingDeletePack.name}</span> and its{' '}
               {pendingDeletePack.cardCount} words will be removed. Games already in progress keep
               their dealt cards, but new games will no longer offer this pack.
-            </p>
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setPendingDeletePack(null)}
-                disabled={busy}
-                className="rounded-lg border border-border-strong px-4 py-2 text-sm text-text-secondary hover:bg-surface-raised disabled:opacity-40"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => deletePack(pendingDeletePack)}
-                disabled={busy}
-                className="rounded-lg border border-danger/50 bg-danger/10 px-4 py-2 text-sm font-semibold text-danger hover:bg-danger/20 disabled:opacity-40"
-              >
-                {busy ? 'Deleting...' : 'Delete pack'}
-              </button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+          confirmLabel={busy ? 'Deleting...' : 'Delete pack'}
+          busy={busy}
+          onCancel={() => setPendingDeletePack(null)}
+          onConfirm={async () => {
+            await deletePack(pendingDeletePack);
+          }}
+        />
       ) : null}
     </section>
+  );
+}
+
+/**
+ * Accessible confirmation dialog: role="dialog" + aria-modal, Escape to
+ * cancel, initial focus on the safe (cancel) action. A full focus trap
+ * is overkill for a two-button dialog — Escape + initial focus cover the
+ * keyboard path; the overlay click target is not a close affordance on
+ * purpose (destructive actions shouldn't close on stray clicks).
+ */
+function ConfirmModal({
+  title,
+  body,
+  confirmLabel,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  body: React.ReactNode;
+  confirmLabel: string;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void | Promise<void>;
+}) {
+  const cancelRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    cancelRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCancel();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onCancel]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="w-full max-w-md rounded-xl border border-border-subtle bg-surface p-5 shadow-2xl"
+      >
+        <h2 className="text-lg font-semibold text-text-primary">{title}</h2>
+        <p className="mt-2 text-sm text-text-secondary">{body}</p>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            ref={cancelRef}
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="rounded-lg border border-border-strong px-4 py-2 text-sm text-text-secondary hover:bg-surface-raised disabled:opacity-40"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => void onConfirm()}
+            disabled={busy}
+            className="rounded-lg border border-danger/50 bg-danger/10 px-4 py-2 text-sm font-semibold text-danger hover:bg-danger/20 disabled:opacity-40"
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

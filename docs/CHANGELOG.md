@@ -2,6 +2,63 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Security audit remediation + classic Taboo + E2E pipeline - 2026-08-16
+
+### Added
+
+- Admin word-pack management for Hushle (`/admin/plugins` + `/api/admin/card-packs`):
+  create packs in any BCP-47 language, add/edit/delete words with forbidden
+  words, difficulty and category; built-in packs are immutable with a
+  one-click Duplicate-to-custom; admin mutations are audit-logged.
+- Classic Taboo rules in Hushle: opposing-team players see the current card
+  (word + forbidden words) through the canonical projector and can press
+  BUST to penalise the explaining team (-1); teammates, floaters and
+  anonymous buzzes are rejected server-side. The BUST button carries a
+  double-click guard.
+- Exactly-once activity actions (LF-002): optional `actionId` is claimed in
+  Redis (SET NX + TTL) per session, never forwarded to plugin reducers,
+  and released on every failure path.
+- TURN fallback for restrictive networks (LF-019): standalone pinned coturn
+  service (host networking, TLS certs shared with nginx), LiveKit
+  `rtc.turn_servers` (udp+tcp), per-install `LOBBYFORGE_TURN_SECRET`
+  generated once and reused across installer re-runs, firewall port
+  checklist in the installer output, and `docs/VOICE_TURN.md` with a NAT
+  test matrix.
+- Compose-stack E2E (LF-023): `e2e/compose-stack.spec.ts` runs the full
+  Hushle chain (setup → seeded packs → server → app install → start-game →
+  projection → bust rules) against real Postgres/Redis/LiveKit and the
+  production-built image; wired as a CI job plus `scripts/e2e-compose.sh`
+  and an isolated parallel-stack compose override for local runs.
+- CI production dependency audit gate (`pnpm audit --prod
+  --audit-level=moderate`).
+
+### Fixed
+
+- Admin card-pack POST mutations all returned 400: the per-action Zod
+  schemas were `.strict()` yet rejected their own `action` discriminator.
+  Rewritten as a single discriminated union with hushle ownership enforced
+  server-side, built-in immutability, ordinal-race retry and a
+  language-scoped slug fallback.
+- Lazy built-in pack seeding 500'd on every fresh production instance:
+  runtime-only `webpackIgnore` imports could not resolve extensionless
+  plugin TS imports nor the `@/lib` alias outside webpack. The seeder now
+  uses plain bundled imports and the admin route triggers seeding too.
+- Hushle `start-game` always 404'd: the host UI sends the pack SLUG while
+  the server only looked packs up by UUID. Both are now resolved.
+- Deck and current-card leakage closed for every viewer (LF-001): one
+  canonical projector across GET/action/SSE, `cardsRemaining` subtracts
+  used cards, the deck is removed with `delete`.
+- `server_local_cards` gained a language scope (migration 0026) so
+  Turkish local words never leak into German decks.
+- Installer re-runs with a new domain left nginx/LiveKit on the old one
+  (LF-010-R): configs are now rendered from git-tracked templates on every
+  run; production images pinned (certbot v2.11.0, livekit 1.8.3,
+  coturn 4.6.2); secrets are reused from an existing `.env.prod`.
+- Certbot paths are fail-closed and a running stack is detected before
+  standalone mode can fight nginx for port 80.
+- Activity creation now registers the creator as the first player, and
+  card-packs routes log errors instead of swallowing them.
+
 ## [Unreleased] - M22: Production readiness outside the app/plugin system - 2026-07-15
 
 ### Added

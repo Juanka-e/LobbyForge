@@ -96,14 +96,11 @@ async function handleGet(
     const plugin = getPluginServer(row.pluginId);
     const state = plugin?.migrateState ? plugin.migrateState(row.state) : row.state;
 
-    // LF-001: Project the state — never send raw server state to the client.
-    // The projection strips secret fields (Hushle's currentCard, Quiz's
-    // correctIndex) so a player inspecting Network tab cannot cheat.
-    // Hosts (createdBy) see full state; the Hushle card additionally goes
-    // to the currentExplainer even when they aren't the host.
-    const isHost = session.uid === row.createdBy;
-    // LF-001: EVERYONE gets the projection — including the host. Uses the
-    // canonical projector (lib/activity-projection.ts) shared across all routes.
+    // LF-001: EVERYONE gets the projection — including the host. The
+    // canonical projector (lib/activity-projection.ts, shared across all
+    // routes) strips secret fields (Hushle's deck/currentCard rules,
+    // Quiz's correctIndex) so a player inspecting the Network tab
+    // cannot cheat.
     const projectedState = projectActivityState(state, row.pluginId, session.uid);
 
     return NextResponse.json(
