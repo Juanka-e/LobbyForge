@@ -489,20 +489,34 @@ function PlayingView({
 
   const card = state.currentCard;
 
+  // Double-click guard (client side of LF-002): after pressing BUST the
+  // button stays disabled until a DIFFERENT card arrives (the bust always
+  // rotates the card), so a jittery tap can't score -1 twice. The server
+  // additionally dedups by actionId for transport-level retries.
+  const [bustedCardId, setBustedCardId] = useState<string | null>(null);
+  const bustDisabled = card !== null && bustedCardId === card.id;
+
   const bustButton = useMemo(() => {
     if (!isOpponent || !card) return null;
     return (
       <button
         type="button"
-        style={{ ...dangerButtonStyle, fontSize: 15, padding: '10px 16px' }}
+        style={{
+          ...dangerButtonStyle,
+          fontSize: 15,
+          padding: '10px 16px',
+          ...(bustDisabled ? { opacity: 0.5, cursor: 'not-allowed' } : {}),
+        }}
+        disabled={bustDisabled}
         onClick={() => {
+          setBustedCardId(card.id);
           void dispatch({ type: 'bust-forbidden' });
         }}
       >
         ⛔ {t('hushle.playing.bust')}
       </button>
     );
-  }, [isOpponent, card, dispatch, t]);
+  }, [isOpponent, card, dispatch, t, bustDisabled]);
 
   const buttons = useMemo(() => {
     if (!isHost) return null;

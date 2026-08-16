@@ -153,18 +153,18 @@ echo "   Admin token:     $ADMIN_TOKEN"
 echo "   Setup token:     $SETUP_TOKEN (remove after first-run setup)"
 echo ""
 
-# ── 4. Configure nginx domain ─────────────────────────────────────
-echo -e "${BOLD}Configuring Nginx for $DOMAIN...${NC}"
-NGINX_CONF="$SCRIPT_DIR/infra/nginx/conf.d/app.conf"
-if [ -f "$NGINX_CONF" ]; then
-  sed -i.bak "s/LOBBYFORGE_DOMAIN/$DOMAIN/g" "$NGINX_CONF"
-  echo -e "${GREEN}✓ Nginx configured.${NC}"
-fi
-
-LIVEKIT_CONF="$SCRIPT_DIR/infra/livekit/livekit.yaml"
-if [ -f "$LIVEKIT_CONF" ]; then
-  sed -i.bak "s/LOBBYFORGE_DOMAIN/$DOMAIN/g" "$LIVEKIT_CONF"
-  echo -e "${GREEN}✓ LiveKit configured.${NC}"
+# ── 4. Render nginx + LiveKit configs (LF-010-R) ──────────────────
+# The tracked *.template files are the immutable source of truth; the
+# generated configs are re-rendered from scratch on EVERY run. This is
+# what makes a re-run with a different domain correct: the old in-place
+# `sed -i` destroyed the placeholder on first run and left nginx/LiveKit
+# stuck on the previous domain.
+echo -e "${BOLD}Rendering nginx + LiveKit configs for $DOMAIN...${NC}"
+if bash "$SCRIPT_DIR/scripts/render-configs.sh" "$DOMAIN" "$SCRIPT_DIR/infra"; then
+  echo -e "${GREEN}✓ Nginx and LiveKit configured.${NC}"
+else
+  echo -e "${RED}✗ Failed to render configs from templates.${NC}"
+  exit 1
 fi
 echo ""
 
@@ -178,14 +178,18 @@ DO_CERTBOT="${DO_CERTBOT:-Y}"
 CERT_FAILED=false
 
 if [[ "$DO_CERTBOT" =~ ^[Yy]$ ]]; then
-  # LF-010: Use --standalone mode — certbot runs its own HTTP server on
-  # port 80 for the challenge (requires port 80 free; the full stack
-  # starts AFTER this succeeds). This is simpler and more reliable than
-  # webroot mode which would need a running nginx serving the challenge dir.
-  if docker run --rm \
+  # LF-010-R: `--standalone -p 80:80` needs port 80 free. If the stack is
+  # already running (nginx holds 80), standalone would fail confusingly —
+  # renewals belong to the compose certbot loop in that case.
+  if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^lobbyforge-nginx$'; then
+    echo -e "${YELLOW}⚠ The stack is already running (lobbyforge-nginx holds port 80).${NC}"
+    echo "   For a domain CHANGE: docker compose -f infra/docker/docker-compose.prod.yml down, then re-run install.sh."
+    echo "   To RENEW only:      docker compose -f infra/docker/docker-compose.prod.yml exec certbot renew"
+    CERT_FAILED=true
+  elif docker run --rm \
     -p 80:80 \
     -v "$SCRIPT_DIR/infra/certbot/conf:/etc/letsencrypt" \
-    certbot/certbot certonly --standalone \
+    certbot/certbot:v2.11.0 certonly --standalone \
     -d "$DOMAIN" \
     --non-interactive \
     --agree-tos \

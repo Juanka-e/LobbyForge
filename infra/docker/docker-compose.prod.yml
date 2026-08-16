@@ -34,7 +34,7 @@ services:
 
   # ── Certbot: Let's Encrypt certificate automation ────────────────
   certbot:
-    image: certbot/certbot:latest
+    image: certbot/certbot:v2.11.0  # LF-010-R: pinned (was :latest)
     container_name: lobbyforge-certbot
     restart: unless-stopped
     entrypoint: >
@@ -168,7 +168,7 @@ services:
 
   # ── Voice: LiveKit SFU ───────────────────────────────────────────
   livekit:
-    image: livekit/livekit-server:latest
+    image: livekit/livekit-server:1.8.3  # LF-010-R: pinned (was :latest)
     container_name: lobbyforge-livekit
     restart: unless-stopped
     command: ["--config", "/etc/livekit/livekit.yaml", "--bind", "0.0.0.0"]

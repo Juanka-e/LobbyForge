@@ -67,3 +67,9 @@ TEST_INFRA.md
 optimizasyon/
 
 
+
+# LF-010-R: generated per-install by install.sh (templates are tracked)
+infra/nginx/conf.d/app.conf
+infra/livekit/livekit.yaml
+infra/nginx/conf.d/app.conf.bak
+infra/livekit/livekit.yaml.bak

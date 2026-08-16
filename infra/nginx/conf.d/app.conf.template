@@ -1,6 +1,6 @@
 # LobbyForge web app — HTTPS reverse proxy with WebSocket support.
 #
-# Replace LOBBYFORGE_DOMAIN with your domain (e.g. lobby.example.com).
+# TEMPLATE — install.sh renders this to the sibling file (app.conf) with
 # The cert files are provisioned by certbot (see install.sh).
 
 # Redirect HTTP → HTTPS

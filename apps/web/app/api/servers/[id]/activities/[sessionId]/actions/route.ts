@@ -18,6 +18,7 @@ import { buildHttpPluginContext, callHandleAction } from '@/lib/plugin-context';
 import { withApiSecurity } from '@/lib/security-headers';
 import { publishActivityStateChange } from '@/lib/activity-bus';
 import { preparePluginAction } from '@/lib/prepare-plugin-action';
+import { claimActionId, isValidActionId, releaseActionId } from '@/lib/action-idempotency';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -90,7 +91,6 @@ function validateActionPhase(pluginId: string, actionType: string, phase: string
   if (pluginId === 'hushle') {
     // Hushle phases: lobby, team_setup, playing, ended
     const playingActions = ['correct-guess', 'pass', 'penalty', 'next-card', 'end-turn', 'bust-forbidden'];
-    const lobbyActions = ['start-game', 'set-teams', 'set-explainer'];
     if (phase === 'lobby' && [...playingActions, 'end-game'].includes(actionType)) {
       return 'Game has not started yet.';
     }
@@ -152,6 +152,10 @@ async function handlePost(
   const session = await resolveSession(req);
   if (!session.ok) return session.response;
 
+  // LF-002: set once the idempotency claim is taken; the outer catch
+  // releases it so an unexpected exception doesn't poison the retry.
+  let releaseClaim = async () => {};
+
   try {
     const server = await getServerById(getDb(), serverId);
     if (!server) {
@@ -191,7 +195,8 @@ async function handlePost(
       );
     }
     // The `type` field is required and must be a string. Other keys
-    // are forwarded to the plugin as-is.
+    // are forwarded to the plugin as-is — except `actionId`, which is
+    // the LF-002 idempotency key and is consumed here, never forwarded.
     const parseResult = ActionSchema.safeParse(body);
     if (!parseResult.success) {
       return NextResponse.json(
@@ -200,23 +205,66 @@ async function handlePost(
       );
     }
 
+    // LF-002: extract the optional idempotency key BEFORE authorization
+    // so the plugin reducer never sees it.
+    const rawActionId = body.actionId;
+    if (rawActionId !== undefined && !isValidActionId(rawActionId)) {
+      return NextResponse.json(
+        { error: 'actionId must be a UUID v4-style string' },
+        { status: 400 }
+      );
+    }
+    const actionId = rawActionId;
+    const forwardedAction: Record<string, unknown> = { ...body };
+    delete forwardedAction.actionId;
+
     const actionAuth = await authorizePluginAction({
       serverId,
       sessionId,
       actorUserId: session.uid,
       hostUserId: row.createdBy,
       plugin,
-      action: body,
+      action: forwardedAction,
       currentState: row.state as Record<string, unknown>,
     });
     if (!actionAuth.ok) return actionAuth.response;
 
-    const prepared = await preparePluginAction(getDb(), {
-      pluginId: row.pluginId,
-      serverId,
-      action: actionAuth.action,
-    });
+    // LF-002: exactly-once dispatch per (sessionId, actionId). Claimed
+    // only AFTER auth — unauthorized junk must not poison the key — and
+    // RELEASED on every failure path below so an honest retry works.
+    if (actionId) {
+      let claimed = false;
+      try {
+        claimed = await claimActionId(sessionId, actionId);
+      } catch {
+        // Redis unavailable: degrade to at-most-once-skip (proceed without
+        // dedup) rather than failing every game action.
+      }
+      if (!claimed) {
+        return NextResponse.json(
+          { error: 'Duplicate action — already processed.', duplicate: true },
+          { status: 409 }
+        );
+      }
+      const id = actionId;
+      releaseClaim = async () => {
+        await releaseActionId(sessionId, id);
+      };
+    }
+
+    let prepared: Awaited<ReturnType<typeof preparePluginAction>>;
+    try {
+      prepared = await preparePluginAction(getDb(), {
+        pluginId: row.pluginId,
+        serverId,
+        action: actionAuth.action,
+      });
+    } catch {
+      await releaseClaim();
+      return NextResponse.json({ error: 'Failed to prepare action' }, { status: 500 });
+    }
     if (!prepared.ok) {
+      await releaseClaim();
       return NextResponse.json({ error: prepared.error }, { status: prepared.status });
     }
 
@@ -254,6 +302,7 @@ async function handlePost(
       // Concurrent modification — re-read, re-migrate; the reducer runs
       // again at the top of the next iteration.
       if (!casResult.row) {
+        await releaseClaim();
         return NextResponse.json({ error: 'Session not found during CAS retry.' }, { status: 404 });
       }
       currentRev = casResult.row.revision;
@@ -263,6 +312,8 @@ async function handlePost(
     }
 
     if (!casResult.ok || !committedState) {
+      // Retryable conflict — release so the client may retry the same id.
+      await releaseClaim();
       return NextResponse.json(
         { error: 'Conflict: too many concurrent actions. Please retry.', revision: currentRev },
         { status: 409 }
@@ -293,6 +344,9 @@ async function handlePost(
       { headers: { 'Cache-Control': 'no-store' } }
     );
   } catch {
+    // Unexpected failure — release the idempotency claim so an honest
+    // client retry with the same actionId isn't rejected as a duplicate.
+    await releaseClaim();
     return NextResponse.json(
       { error: 'Failed to perform action' },
       { status: 500 }

@@ -710,7 +710,9 @@ function ActivityPanel({
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+          // LF-002: every dispatch carries a fresh idempotency key; a
+          // transport-level retry of THIS request reuses it server-side.
+          body: JSON.stringify({ actionId: crypto.randomUUID(), ...body }),
         }
       );
       if (!res.ok) {
