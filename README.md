@@ -40,7 +40,7 @@ Honest assessment of what works today:
 | Community plugin marketplace | ❌ Disabled by default — runs in-process without isolation (`LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED`) |
 | Admin panel (settings, moderation, doctor) | ✅ Available |
 | Self-host updates (one-click upgrade/rollback) | 🟡 Preview — apply/rollback gated behind maintenance+signature+backup checks |
-| Backups (create/restore) | ❌ Planned — only manifest verification exists today |
+| Backups (create/restore) | 🟡 Experimental, DB-only — real pg_dump create + destructive restore drill ([docs/BACKUP_DRILL.md](docs/BACKUP_DRILL.md)); no schedule/retention/off-host/full-instance backup yet |
 | Desktop app (Tauri 2) | 🔬 Experimental — builds and opens, real media spike pending |
 | Google OAuth login | ✅ Available (opt-in via env vars) |
 | TURN relay | 🟡 Production stack ships coturn (UDP 3478 + TCP + TLS 5349) — advertised via LiveKit; real restricted-network matrix still manual ([docs/VOICE_TURN.md](docs/VOICE_TURN.md)) |

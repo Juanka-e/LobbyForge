@@ -47,9 +47,18 @@ server {
         proxy_read_timeout 86400;  # 24h — long-lived WS connections
     }
 
-    # LiveKit signaling (WebSocket upgrade for WebRTC)
-    location /livekit {
-        proxy_pass http://livekit:7880;
+    # LiveKit signaling (WebSocket upgrade for WebRTC).
+    # V5-001: the trailing slash on proxy_pass is LOAD-BEARING. Without
+    # a URI part nginx forwards the ORIGINAL request URI, so the client
+    # path /livekit/rtc (livekit-client appends /rtc, with a /rtc/v1
+    # first attempt) reached the upstream unchanged — and LiveKit 1.8.3
+    # serves /rtc and /rtc/validate, NOT /livekit/rtc — a deterministic
+    # 404 that broke every production voice connection. With
+    # `proxy_pass http://livekit:7880/;` nginx strips the /livekit/
+    # prefix and the upstream sees /rtc. The location itself must be
+    # /livekit/ (not /livekit) so /livekitfoo does not match.
+    location /livekit/ {
+        proxy_pass http://livekit:7880/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";

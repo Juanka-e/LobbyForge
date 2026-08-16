@@ -41,6 +41,19 @@ if ! [[ "$TURN_SECRET" =~ ^[0-9a-fA-F]{32,128}$ ]]; then
   exit 1
 fi
 
+# V5-003: optional public address for coturn behind 1:1 NAT. Unset ->
+# coturn auto-detects (correct on VPSes with a public interface).
+TURN_EXTERNAL_IP="${TURN_EXTERNAL_IP:-}"
+if [ -n "$TURN_EXTERNAL_IP" ]; then
+  if ! [[ "$TURN_EXTERNAL_IP" =~ ^[0-9a-fA-F.:]+$ ]]; then
+    echo "render-configs: invalid TURN_EXTERNAL_IP '$TURN_EXTERNAL_IP'" >&2
+    exit 1
+  fi
+  EXTERNAL_IP_LINE="external-ip=$TURN_EXTERNAL_IP"
+else
+  EXTERNAL_IP_LINE="# external-ip: auto-detected (set LOBBYFORGE_TURN_EXTERNAL_IP behind 1:1 NAT)"
+fi
+
 render() {
   local template="$1" target="$2"
   if [ ! -f "$template" ]; then
@@ -50,7 +63,9 @@ render() {
   # NOT sed -i: the template is never mutated; output goes to the
   # generated (git-ignored) target (possibly under a staging root).
   mkdir -p "$(dirname "$target")"
-  sed -e "s/LOBBYFORGE_DOMAIN/$DOMAIN/g" -e "s/TURN_CREDENTIAL/$TURN_SECRET/g" \
+  sed -e "s/LOBBYFORGE_DOMAIN/$DOMAIN/g" \
+      -e "s/TURN_CREDENTIAL/$TURN_SECRET/g" \
+      -e "s|@TURN_EXTERNAL_IP_LINE@|$EXTERNAL_IP_LINE|" \
     "$template" > "$target"
   echo "rendered $(basename "$target") for $DOMAIN"
 }

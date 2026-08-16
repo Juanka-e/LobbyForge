@@ -161,6 +161,13 @@ jobs:
       - name: Run compose-stack e2e
         run: pnpm --filter @lobbyforge/web exec playwright test compose-stack.spec.ts
 
+      # V5-004: destructive backup drill against a disposable postgres —
+      # prove backup -> destroy -> restore -> verify on every push.
+      - name: Destructive backup drill
+        run: |
+          pnpm --filter @lobbyforge/db build
+          bash scripts/backup-drill.sh
+
       - name: Teardown
         if: always()
         run: docker compose -f infra/docker/docker-compose.dev.yml down -v

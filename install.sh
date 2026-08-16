@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# LobbyForge one-command installer.
+# LobbyForge installer.
 #
-# Usage:
-#   curl -fsSL https://raw.githubusercontent.com/lobbyforge/lobbyforge/main/install.sh | bash
+# Usage (clone + run — the script needs the repo's compose files,
+# templates and scripts next to it, so curl | bash does NOT work):
+#   git clone https://github.com/Juanka-e/LobbyForge.git
+#   cd LobbyForge && bash install.sh
 #
-# Or clone + run locally:
-#   git clone https://github.com/lobbyforge/lobbyforge.git
-#   cd lobbyforge && bash install.sh
+# Optional env:
+#   LOBBYFORGE_TURN_EXTERNAL_IP   public IP for coturn behind 1:1 NAT
+#                                 (unset = auto-detect)
 #
 # This script:
 #   1. Checks prerequisites (Docker, Docker Compose, curl, openssl).
@@ -124,6 +126,10 @@ LK_API_SECRET=$(reuse_env LIVEKIT_API_SECRET "$(openssl rand -hex 32)")
 # LF-019: shared coturn <-> LiveKit TURN credential (hex — render-configs
 # validates the shape before writing it into both configs).
 TURN_SECRET=$(reuse_env LOBBYFORGE_TURN_SECRET "$(openssl rand -hex 32)")
+# V5-003: coturn public address behind 1:1 NAT. Reused from an existing
+# .env.prod; export LOBBYFORGE_TURN_EXTERNAL_IP on the first run to set
+# it. Empty = coturn auto-detects (correct for public-interface VPSes).
+TURN_EXTERNAL_IP="${LOBBYFORGE_TURN_EXTERNAL_IP:-$(reuse_env LOBBYFORGE_TURN_EXTERNAL_IP '')}"
 
 echo -e "${GREEN}✓ Secrets generated.${NC}"
 echo ""
@@ -193,6 +199,7 @@ LOBBYFORGE_SESSION_SECRET=$SESSION_SECRET
 LOBBYFORGE_ADMIN_TOKEN=$ADMIN_TOKEN
 LOBBYFORGE_SETUP_TOKEN=$SETUP_TOKEN
 LOBBYFORGE_TURN_SECRET=$TURN_SECRET
+LOBBYFORGE_TURN_EXTERNAL_IP=$TURN_EXTERNAL_IP
 
 # Product
 LOBBYFORGE_DEPLOYMENT_MODE=$DEPLOYMENT_MODE
@@ -216,7 +223,7 @@ echo ""
 # `sed -i` destroyed the placeholder on first run and left nginx/LiveKit
 # stuck on the previous domain.
 echo -e "${BOLD}Rendering nginx + LiveKit + TURN configs (LF-010-R)...${NC}"
-if bash "$SCRIPT_DIR/scripts/render-configs.sh" "$DOMAIN" "$TURN_SECRET" "$SCRIPT_DIR/infra" "$STAGE_DIR/infra"; then
+if TURN_EXTERNAL_IP="$TURN_EXTERNAL_IP" bash "$SCRIPT_DIR/scripts/render-configs.sh" "$DOMAIN" "$TURN_SECRET" "$SCRIPT_DIR/infra" "$STAGE_DIR/infra"; then
   echo -e "${GREEN}✓ Nginx, LiveKit and coturn TURN configs staged.${NC}"
 else
   echo -e "${RED}✗ Failed to render configs from templates.${NC}"
@@ -267,7 +274,7 @@ fi
 if [ "$CERT_FAILED" = true ]; then
   echo ""
   echo -e "${RED}✗ TLS certificate is not available. Aborting — WebRTC voice requires HTTPS.${NC}"
-  echo "   Existing installation files were NOT modified (all writes were staged)."
+  echo "   Existing .env.prod and rendered configs were NOT modified (all writes were staged)."
   echo "   Fix the issue above and re-run: bash install.sh"
   exit 1
 fi
@@ -312,4 +319,4 @@ echo ""
 echo "  Example (ufw): ufw allow 3478/tcp; ufw allow 3478/udp; ufw allow 5349/tcp; ufw allow 5349/udp; ufw allow 49160:49200/udp; ufw allow 50000:60000/udp"
 echo ""
 echo -e "${BOLD}To stop:${NC}  docker compose -f $COMPOSE_FILE --env-file $ENV_FILE down"
-echo -e "${BOLD}To update:${NC}  docker compose -f $COMPOSE_FILE --env-file $ENV_FILE pull && docker compose -f $COMPOSE_FILE --env-file $ENV_FILE up -d --build"
+echo -e "${BOLD}To update:${NC}  git pull && bash install.sh   (re-provisions configs, reuses secrets)"

@@ -32,7 +32,7 @@ trap cleanup EXIT
 
 step() { printf '\n== %s ==\n' "$1"; }
 
-step "1/7 Disposable PostgreSQL (random host port)"
+step "1/8 Disposable PostgreSQL (random host port)"
 docker run -d --name "$CONTAINER" \
   -p 127.0.0.1::5432 \
   -e POSTGRES_PASSWORD="$PGPASSWORD" \
@@ -48,14 +48,14 @@ for i in $(seq 1 30); do
 done
 docker exec "$CONTAINER" pg_isready -U postgres -d drill >/dev/null
 
-step "2/7 Apply repo migrations"
+step "2/8 Apply repo migrations"
 if [ ! -f "$ROOT/packages/db/dist/migrate.js" ]; then
   (cd "$ROOT" && pnpm --filter @lobbyforge/db build >/dev/null)
 fi
 # The migrator resolves drizzle/meta relative to the package cwd.
 (cd "$ROOT/packages/db" && DATABASE_URL="$HOST_URL" node dist/migrate.js | tail -3)
 
-step "3/7 Insert sentinel data"
+step "3/8 Insert sentinel data"
 STAMP="$(date +%s)"
 docker exec -i "$CONTAINER" psql -U postgres -d drill -q -v ON_ERROR_STOP=1 <<SQL
 INSERT INTO card_packs (plugin_id, slug, name, language, is_built_in)
@@ -73,7 +73,7 @@ if [ "$COUNT_BEFORE" -lt 3 ]; then
   exit 1
 fi
 
-step "4/7 Backup (pg_dump -Fc + SHA-256 via lfctl)"
+step "4/8 Backup (pg_dump -Fc + SHA-256 via lfctl)"
 # LFCTL_PG_CONTAINER: lfctl runs the pg tools inside the drill container
 # via docker exec — also the documented operator mode for hosts without
 # a local postgres client install.
@@ -87,7 +87,7 @@ if [ -z "$BACKUP_FILE" ] || [ ! -f "$BACKUP_FILE" ]; then
   exit 1
 fi
 
-step "5/7 DESTROY the schema (simulated catastrophic loss)"
+step "5/8 DESTROY the schema (simulated catastrophic loss)"
 docker exec "$CONTAINER" psql -U postgres -d drill -q \
   -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' \
   -c 'DROP SCHEMA IF EXISTS drizzle CASCADE;'
@@ -95,11 +95,39 @@ COUNT_GONE="$(docker exec "$CONTAINER" psql -U postgres -d drill -tAc \
   "SELECT count(*) FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema')")"
 echo "user tables after destroy: $COUNT_GONE (expect 0)"
 
-step "6/7 Restore from backup"
+step "6/8 Restore from backup"
 node "$ROOT/scripts/lfctl.mjs" backup restore \
   --file "$BACKUP_FILE" --to "$TOOLS_URL" --json
 
-step "7/7 Verify restored data"
+step "7/8 Fail-closed checks (V5-004)"
+# Refusal must happen for the RIGHT reason - assert the message, not just
+# failure (the target may be non-empty here, which also refuses).
+assert_refused() {
+  local fragment="$1"; shift 2
+  local out
+  out="$(node "$ROOT/scripts/lfctl.mjs" backup restore "$@" --json 2>&1 || true)"
+  if printf '%s' "$out" | grep -q '"ok": *true'; then
+    echo "FAIL: restore unexpectedly succeeded" >&2
+    exit 1
+  fi
+  if ! printf '%s' "$out" | grep -qi "$fragment"; then
+    echo "FAIL: refusal reason mismatch - expected [$fragment] in: $out" >&2
+    exit 1
+  fi
+}
+# (a) A corrupted dump is refused specifically for the checksum mismatch.
+CORRUPT="$WORKDIR/corrupt.dump"
+head -c 200 "$BACKUP_FILE" > "$CORRUPT"
+cp "${BACKUP_FILE}.json" "${CORRUPT}.json"
+assert_refused 'SHA-256 mismatch' -- --file "$CORRUPT" --to "$TOOLS_URL"
+echo "corrupt dump refused (checksum mismatch): yes"
+# (b) A missing sidecar is refused by the fail-closed path itself.
+NOSIDECAR="$WORKDIR/nosidecar.dump"
+cp "$BACKUP_FILE" "$NOSIDECAR"
+assert_refused 'sidecar' -- --file "$NOSIDECAR" --to "$TOOLS_URL"
+echo "missing sidecar refused (fail-closed): yes"
+
+step "8/8 Verify restored data"
 COUNT_AFTER="$(docker exec "$CONTAINER" psql -U postgres -d drill -tAc 'SELECT count(*) FROM cards')"
 SENTINELS="$(docker exec "$CONTAINER" psql -U postgres -d drill -tAc \
   "SELECT count(*) FROM cards WHERE category='drill' AND payload->>'word' LIKE 'drill-$STAMP-%'")"
@@ -111,4 +139,4 @@ if [ "$COUNT_AFTER" != "$COUNT_BEFORE" ] || [ "$SENTINELS" != "3" ]; then
   exit 1
 fi
 
-printf '\nPASS: backup → destroy → restore → verify round-tripped %s cards incl. 3 sentinels.\n' "$COUNT_AFTER"
+printf '\nPASS: backup → destroy → restore → verify round-tripped %s cards incl. 3 sentinels; corrupt/unverified restores refused.\n' "$COUNT_AFTER"

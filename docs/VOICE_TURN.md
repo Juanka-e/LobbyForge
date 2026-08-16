@@ -41,6 +41,7 @@ break issued TURN credentials for no benefit).
 |---|---|---|
 | 80, 443 | tcp | web (nginx, HTTPS, WSS signaling) |
 | 7881 | tcp | LiveKit ICE/TCP |
+| ~~7880~~ | — | NOT public: LiveKit HTTP signaling is nginx-proxied at `wss://<domain>/livekit` (V5-005) |
 | 3478 | tcp + udp | TURN listening |
 | 5349 | tcp + udp | TURN/TLS (UDP-blocked networks) |
 | 49160-49200 | udp | TURN relay range |
@@ -88,6 +89,20 @@ nc -vz your.domain 3478 && nc -vz your.domain 5349
 If case 4/5 fails: check `docker logs lobbyforge-turn`, confirm the
 firewall range above, and verify the rendered `livekit.yaml` carries
 `turn_servers` with your domain (udp 3478, tcp 3478, tls 5349).
+
+## Certificate lifecycle (V5-002/V5-003)
+
+- **nginx** watches the fullchain fingerprint and gracefully reloads on
+  change (config-tested).
+- **coturn** cannot reload its TLS certificate in place — its watcher
+  detects the renewal and restarts the process (a seconds-long TURN
+  blip once per renewal window).
+- Behind 1:1 NAT, set `LOBBYFORGE_TURN_EXTERNAL_IP` (exported for
+  install.sh on first run; stored in `.env.prod` and reused on re-runs)
+  — it renders as coturn `external-ip`.
+- Relay targets in private/CGNAT space (10/8, 172.16/12, 192.168/16,
+  100.64/10) are denied — coturn runs in the host network namespace and
+  a credential holder must not pivot into the Docker/VPC network.
 
 ## Scope limits — read before promising corporate-network support
 

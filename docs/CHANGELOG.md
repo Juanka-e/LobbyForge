@@ -2,6 +2,47 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - 5th-audit fixes: production voice proxy, TURN lifecycle, fail-closed backup - 2026-08-16
+
+### Fixed
+
+- V5-001 (P0): production nginx forwarded `/livekit/rtc` to the upstream
+  unchanged — LiveKit (serving `/rtc`, `/rtc/validate`) 404'd it, breaking
+  EVERY production voice connection behind TLS. `location /livekit/` now
+  pairs with `proxy_pass http://livekit:7880/;` so the prefix is stripped;
+  a regression test pins the mapping and the load-bearing trailing slash.
+- V5-005: LiveKit's plaintext HTTP signaling port 7880 is no longer
+  published to the host in production (nginx proxies it internally at
+  `wss://<domain>/livekit`); 7881 (ICE/TCP) stays public.
+- V5-002: coturn now watches its certificate fingerprint and restarts
+  itself when certbot renews (coturn has no reliable reload signal) —
+  TURN/TLS no longer serves a stale certificate after ~60-90 days.
+- V5-003: coturn denies relaying to private/CGNAT ranges (10/8,
+  172.16/12, 192.168/16, 100.64/10) — with host networking a credential
+  holder could otherwise pivot into the Docker/VPC network; quota raised
+  (all clients share one username, 8 allocations would have capped the
+  whole community); optional `LOBBYFORGE_TURN_EXTERNAL_IP` for 1:1 NAT,
+  rendered into the config and reused across installer re-runs.
+- V5-004: `lfctl backup restore` is FAIL-CLOSED — a missing/malformed
+  checksum sidecar or a digest mismatch refuses the restore
+  (`--allow-unverified` is the explicit escape hatch). The drill proves
+  both refusal reasons specifically, runs on every CI push, and its
+  transcript documents a full backup → DROP SCHEMA → restore → sentinel
+  verification round trip.
+- V5-007: idempotency claims carry a random ownership token and release
+  is a Redis compare-and-delete (a stale owner can no longer delete a
+  re-claimed key); a post-commit failure no longer releases the claim
+  (retry reconciles via 409+GET instead of re-entering the reducer).
+- V5-008: admin lazy card loading is a real tri-state — load failures
+  show an error + Retry instead of masquerading as an empty pack; the
+  freshly created/duplicated pack is selected immediately.
+- V5-006: installer header no longer claims `curl | bash` (needs the
+  repo tree); example URL points at the real repo; the update hint no
+  longer suggests `docker compose pull` on a locally-built image.
+- Docs (V5-010): README backup status, SECURITY.md release/backup
+  wording, changelog "exactly-once" → duplicate suppression, TURN entry
+  now includes TLS 5349.
+
 ## [Unreleased] - Security audit remediation + classic Taboo + E2E pipeline - 2026-08-16
 
 ### Added
@@ -15,12 +56,13 @@ All notable changes to the LobbyForge monorepo skeleton.
   BUST to penalise the explaining team (-1); teammates, floaters and
   anonymous buzzes are rejected server-side. The BUST button carries a
   double-click guard.
-- Exactly-once activity actions (LF-002): optional `actionId` is claimed in
+- Duplicate suppression for activity actions (LF-002 — NOT exactly-once:
+  no response replay): optional `actionId` is claimed in
   Redis (SET NX + TTL) per session, never forwarded to plugin reducers,
   and released on every failure path.
 - TURN fallback for restrictive networks (LF-019): standalone pinned coturn
   service (host networking, TLS certs shared with nginx), LiveKit
-  `rtc.turn_servers` (udp+tcp), per-install `LOBBYFORGE_TURN_SECRET`
+  `rtc.turn_servers` (udp 3478, tcp 3478 — TLS 5349 added in the 5th-audit fixes below), per-install `LOBBYFORGE_TURN_SECRET`
   generated once and reused across installer re-runs, firewall port
   checklist in the installer output, and `docs/VOICE_TURN.md` with a NAT
   test matrix.

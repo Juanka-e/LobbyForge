@@ -51,7 +51,9 @@ export default function PluginsClient({
   const [packs, setPacks] = useState(initialPacks);
   // V4-011: cards load lazily per selected pack (?packId=…); undefined
   // means "not loaded yet", null means "loading failed".
-  const [cardsByPack, setCardsByPack] = useState<Record<string, CardView[] | null | undefined>>({});
+  const [cardsByPack, setCardsByPack] = useState<
+    Record<string, { status: 'loading' | 'ready' | 'error'; cards: CardView[] } | undefined>
+  >({});
   const [selectedPackId, setSelectedPackId] = useState<string | null>(
     initialPacks.length > 0 ? initialPacks[0]!.id : null
   );
@@ -81,12 +83,13 @@ export default function PluginsClient({
   );
 
   // Lazy card detail (V4-011): fetch the selected pack's cards once per
-  // cache invalidation; undefined = not loaded yet, null = load failed.
+  // cache invalidation. V5-008: a real tri-state — 'loading' / 'ready' /
+  // 'error' — a failed load is NO longer masked as an empty pack.
   useEffect(() => {
     if (!selectedPackId) return;
     if (cardsByPack[selectedPackId] !== undefined) return;
     let cancelled = false;
-    setCardsByPack((prev) => ({ ...prev, [selectedPackId]: null })); // loading sentinel
+    setCardsByPack((prev) => ({ ...prev, [selectedPackId]: { status: 'loading', cards: [] } }));
     (async () => {
       try {
         const res = await fetch(`/api/admin/card-packs?packId=${selectedPackId}`, {
@@ -94,9 +97,11 @@ export default function PluginsClient({
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as { cards: CardView[] };
-        if (!cancelled) setCardsByPack((prev) => ({ ...prev, [selectedPackId]: data.cards }));
+        if (!cancelled)
+          setCardsByPack((prev) => ({ ...prev, [selectedPackId]: { status: 'ready', cards: data.cards } }));
       } catch {
-        if (!cancelled) setCardsByPack((prev) => ({ ...prev, [selectedPackId]: [] }));
+        if (!cancelled)
+          setCardsByPack((prev) => ({ ...prev, [selectedPackId]: { status: 'error', cards: [] } }));
       }
     })();
     return () => {
@@ -104,9 +109,9 @@ export default function PluginsClient({
     };
   }, [selectedPackId, cardsByPack]);
 
-  const loadedCards = selectedPackId ? cardsByPack[selectedPackId] : undefined;
+  const cardState = selectedPackId ? cardsByPack[selectedPackId] : undefined;
 
-  async function reload() {
+  async function reload(): Promise<CardPackView[]> {
     const res = await fetch('/api/admin/card-packs', { credentials: 'same-origin' });
     if (!res.ok) throw new Error(`Failed to reload packs (HTTP ${res.status})`);
     const data = (await res.json()) as { packs: CardPackView[] };
@@ -116,6 +121,7 @@ export default function PluginsClient({
     } else if (!data.packs.some((p) => p.id === selectedPackId)) {
       setSelectedPackId(data.packs[0]!.id);
     }
+    return data.packs;
   }
 
   /** Drop the cached cards for a pack so the loader effect refetches. */
@@ -124,7 +130,11 @@ export default function PluginsClient({
     setCardsByPack((prev) => ({ ...prev, [packId]: undefined }));
   }
 
-  async function call(body: Record<string, unknown>, successMessage: string): Promise<boolean> {
+  async function call(
+    body: Record<string, unknown>,
+    successMessage: string,
+    selectPackId?: string
+  ): Promise<CardPackView[] | null> {
     setBusy(true);
     setMessage(null);
     try {
@@ -138,13 +148,15 @@ export default function PluginsClient({
         const detail = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(detail.error ?? `HTTP ${res.status}`);
       }
-      await reload();
-      invalidateCards(selectedPackId);
+      const reloaded = await reload();
+      const target = selectPackId ?? selectedPackId;
+      if (selectPackId) setSelectedPackId(selectPackId);
+      invalidateCards(target);
       setMessage(successMessage);
-      return true;
+      return reloaded;
     } catch (err) {
       setMessage((err as Error).message);
-      return false;
+      return null;
     } finally {
       setBusy(false);
     }
@@ -156,19 +168,28 @@ export default function PluginsClient({
       setMessage('Pack name and a valid language code (e.g. en, tr, de, pt-BR) are required.');
       return;
     }
+    const name = newPackName.trim();
     const ok = await call(
       {
         action: 'create-pack',
-        name: newPackName.trim(),
+        name,
         language,
         description: newPackDescription.trim() || undefined,
       },
-      `Pack "${newPackName.trim()}" created. Add words below.`
+      `Pack "${name}" created. Add words below.`
     );
     if (ok) {
       setNewPackName('');
       setNewPackLanguage('');
       setNewPackDescription('');
+      // V5-008: select the freshly created pack so "add words below"
+      // targets it immediately (match by unique name in the RELOADED
+      // list — reading `packs` here would be a stale-closure race).
+      const created = ok.find((p) => p.name === name);
+      if (created) {
+        setSelectedPackId(created.id);
+        invalidateCards(created.id);
+      }
     }
   }
 
@@ -215,7 +236,7 @@ export default function PluginsClient({
   }
 
   async function deleteCard(cardId: string): Promise<boolean> {
-    return call({ action: 'delete-card', cardId }, 'Card deleted.');
+    return (await call({ action: 'delete-card', cardId }, 'Card deleted.')) !== null;
   }
 
   async function deletePack(pack: CardPackView) {
@@ -224,10 +245,18 @@ export default function PluginsClient({
   }
 
   async function duplicatePack(pack: CardPackView) {
-    await call(
+    // The copy's name is deterministic — pick it out of the RELOADED
+    // summaries and select it (V5-008).
+    const copyName = `${pack.name} (copy)`.slice(0, 100);
+    const reloaded = await call(
       { action: 'duplicate-pack', packId: pack.id },
-      `Pack duplicated as "${pack.name} (copy)" — you can now edit the copy.`
+      `Pack duplicated as "${copyName}" — you can now edit the copy.`
     );
+    const copy = reloaded?.find((p) => p.name === copyName);
+    if (copy) {
+      setSelectedPackId(copy.id);
+      invalidateCards(copy.id);
+    }
   }
 
   return (
@@ -462,26 +491,33 @@ export default function PluginsClient({
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-subtle">
-                {loadedCards === null ? (
+                {cardState?.status === 'loading' || cardState === undefined ? (
                   <tr>
                     <td colSpan={5} className="px-5 py-6 text-center text-text-muted">
                       Loading words…
                     </td>
                   </tr>
-                ) : loadedCards === undefined ? (
+                ) : cardState.status === 'error' ? (
                   <tr>
-                    <td colSpan={5} className="px-5 py-6 text-center text-text-muted">
-                      Select a pack.
+                    <td colSpan={5} className="px-5 py-6 text-center">
+                      <span className="text-danger">Failed to load words.</span>{' '}
+                      <button
+                        type="button"
+                        onClick={() => invalidateCards(selectedPackId)}
+                        className="ml-2 rounded-md border border-border-strong px-3 py-1 text-xs text-text-secondary hover:bg-surface-raised"
+                      >
+                        Retry
+                      </button>
                     </td>
                   </tr>
-                ) : loadedCards.length === 0 ? (
+                ) : cardState.cards.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="px-5 py-6 text-center text-text-muted">
                       No words in this pack yet — add the first one above.
                     </td>
                   </tr>
                 ) : (
-                  loadedCards.map((card) =>
+                  cardState.cards.map((card) =>
                     editingCardId === card.id ? (
                       <tr key={card.id} className="bg-surface-container/30">
                         <td className="px-5 py-3">

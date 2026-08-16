@@ -53,6 +53,10 @@ vi.mock('@/lib/plugin-context', () => ({
   ),
 }));
 
+// The SAME class the (mocked) module exports — the route's instanceof
+// check must match the instances we reject with below.
+const { DuplicateActionError } = await import('@/lib/action-idempotency');
+
 // Fake plugin: player-policy action surface, mirrors the real registry shape.
 const fakePlugin = {
   manifest: {
@@ -80,6 +84,7 @@ const releaseActionId = vi.fn();
 vi.mock('@/lib/action-idempotency', () => ({
   claimActionId: (...args: unknown[]) => claimActionId(...args),
   releaseActionId: (...args: unknown[]) => releaseActionId(...args),
+  DuplicateActionError: class DuplicateActionError extends Error {},
   isValidActionId: (v: unknown) =>
     typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v),
 }));
@@ -103,7 +108,7 @@ const SESSION_ROW = {
 beforeEach(() => {
   process.env.LOBBYFORGE_SESSION_SECRET = SECRET;
   for (const fn of Object.values(dbFns)) fn.mockReset();
-  claimActionId.mockReset().mockResolvedValue(true);
+  claimActionId.mockReset().mockResolvedValue({ sessionId: 'sess-1', actionId: UUID, token: 'claim-token' });
   releaseActionId.mockReset().mockResolvedValue(undefined);
   dbFns.getServerById.mockResolvedValue({ ownerUserId: 'u-host' });
   dbFns.getGameSessionById.mockResolvedValue(SESSION_ROW);
@@ -136,7 +141,8 @@ async function post(body: unknown, uid = 'u-host'): Promise<Response> {
 
 describe('POST activity actions — LF-002 idempotency', () => {
   it('rejects a duplicate actionId with 409 and does not re-run the reducer', async () => {
-    claimActionId.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const dupErr = new DuplicateActionError();
+    claimActionId.mockResolvedValueOnce({ sessionId: 'sess-1', actionId: UUID, token: 't1' }).mockRejectedValueOnce(dupErr);
     const body = { type: 'bust-forbidden', actionId: UUID, bustedBy: 'u-p3' };
 
     const first = await post(body);
@@ -162,7 +168,11 @@ describe('POST activity actions — LF-002 idempotency', () => {
 
     const failed = await post(body);
     expect(failed.status).toBe(404);
-    expect(releaseActionId).toHaveBeenCalledWith('sess-1', UUID);
+    expect(releaseActionId).toHaveBeenCalledWith({
+      sessionId: 'sess-1',
+      actionId: UUID,
+      token: 'claim-token',
+    });
   });
 
   it('never forwards actionId to the plugin reducer', async () => {
@@ -220,8 +230,8 @@ describe('POST activity actions — LF-002 idempotency', () => {
     expect(releaseActionId).not.toHaveBeenCalled();
   });
 
-  it('claimed=false stays the ONLY duplicate signal (409 + duplicate flag)', async () => {
-    claimActionId.mockResolvedValueOnce(false);
+  it('DuplicateActionError stays the ONLY duplicate signal (409 + duplicate flag)', async () => {
+    claimActionId.mockRejectedValueOnce(new DuplicateActionError());
     const res = await post({ type: 'bust-forbidden', actionId: UUID, bustedBy: 'u-p3' });
     expect(res.status).toBe(409);
     const detail = (await res.json()) as { duplicate?: boolean };

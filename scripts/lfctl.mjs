@@ -17,7 +17,7 @@ Usage:
   node scripts/lfctl.mjs update rollback
   node scripts/lfctl.mjs backup verify [--manifest <path>] [--require-files] [--json]
   node scripts/lfctl.mjs backup create [--out <dir>] [--database-url <url>] [--json]
-  node scripts/lfctl.mjs backup restore --file <dump> --to <database-url> [--json]
+  node scripts/lfctl.mjs backup restore --file <dump> --to <database-url> [--allow-unverified] [--json]
   node scripts/lfctl.mjs setup token [--json]
 
 Notes:
@@ -49,6 +49,7 @@ function parseArgs(argv) {
     else if (arg === '--out') options.out = rest[++i];
     else if (arg === '--file') options.file = rest[++i];
     else if (arg === '--to') options['to'] = rest[++i];
+    else if (arg === '--allow-unverified') options['allow-unverified'] = true;
     else if (arg === '--database-url') options['database-url'] = rest[++i];
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -361,7 +362,7 @@ async function main() {
     if (action === 'restore') {
       if (!options.file) throw new Error('backup restore requires --file <path-to-dump>');
       if (!options['to']) throw new Error('backup restore requires --to <empty-database-url>');
-      const out = await backupRestore(options.file, options['to']);
+      const out = await backupRestore(options.file, options['to'], options);
       if (options.json) console.log(JSON.stringify(out, null, 2));
       else {
         console.log(`Restore ${out.ok ? 'completed' : 'FAILED'}: ${out.message}`);
@@ -494,18 +495,39 @@ async function backupCreate(options = {}) {
   return { file, sha256, sizeBytes: buf.length };
 }
 
-async function backupRestore(file, targetUrl) {
+async function backupRestore(file, targetUrl, options = {}) {
   try {
-    // Verify checksum if sidecar manifest exists.
+    // V5-004: checksum verification is FAIL-CLOSED. A missing or
+    // malformed sidecar, or a digest mismatch, refuses the restore —
+    // restoring a silently-corrupted dump over a destroyed database is
+    // the worst outcome this tool can produce. --allow-unverified is the
+    // explicit operator escape hatch (e.g. restoring a dump whose
+    // sidecar was lost).
+    const allowUnverified = options['allow-unverified'] === true;
+    let sidecar = null;
     try {
-      const sidecar = JSON.parse(await fs.readFile(`${file}.json`, 'utf8'));
-      const buf = await fs.readFile(file);
-      const actual = createHash('sha256').update(buf).digest('hex');
-      if (sidecar.sha256 && actual !== sidecar.sha256) {
-        return { ok: false, message: 'SHA-256 mismatch — dump may be corrupted.' };
+      sidecar = JSON.parse(await fs.readFile(`${file}.json`, 'utf8'));
+      if (!sidecar || typeof sidecar.sha256 !== 'string' || sidecar.sha256.length !== 64) {
+        sidecar = null;
       }
     } catch {
-      // No sidecar — proceed without checksum verification.
+      sidecar = null;
+    }
+    if (!sidecar) {
+      if (!allowUnverified) {
+        return {
+          ok: false,
+          message:
+            'Checksum sidecar missing or malformed — refusing to restore. ' +
+            'Pass --allow-unverified to restore anyway (last resort).',
+        };
+      }
+    } else {
+      const buf = await fs.readFile(file);
+      const actual = createHash('sha256').update(buf).digest('hex');
+      if (actual !== sidecar.sha256) {
+        return { ok: false, message: 'SHA-256 mismatch — dump may be corrupted.' };
+      }
     }
 
     // Safety: refuse to restore into a database that already has tables.

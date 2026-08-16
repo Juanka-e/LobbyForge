@@ -128,6 +128,38 @@ describe('scripts/render-configs.sh — LF-010-R rerun safety', () => {
   });
 });
 
+describe('rendered nginx — V5-001 LiveKit prefix strip', () => {
+  it('forwards /livekit/rtc to the upstream as /rtc (trailing slash is load-bearing)', () => {
+    const nginx = read('nginx');
+    // The location must be /livekit/ (not /livekit — that would also
+    // match /livekitfoo) and the proxy_pass URI part must strip it.
+    expect(nginx).toContain('location /livekit/ {');
+    expect(nginx).toContain('proxy_pass http://livekit:7880/;');
+    // The prefix-preserving form is the regression this test pins:
+    // proxy_pass WITHOUT a trailing slash forwards /livekit/rtc as-is,
+    // which LiveKit (serving /rtc, /rtc/validate) 404s — killing every
+    // production voice connection behind the proxy.
+    expect(nginx).not.toMatch(/location \/livekit\/ \{[^}]*proxy_pass http:\/\/livekit:7880;/s);
+    // nginx URI-part semantics, simulated: replace the matched location
+    // prefix with the proxy_pass URI.
+    const mapUpstream = (path: string) =>
+      path.replace(/^\/livekit\//, '/').replace(/^\/livekit$/, '/');
+    expect(mapUpstream('/livekit/rtc/v1')).toBe('/rtc/v1');
+    expect(mapUpstream('/livekit/rtc')).toBe('/rtc');
+    expect(mapUpstream('/livekit/rtc/validate')).toBe('/rtc/validate');
+  });
+
+  it('V5-005: does not expose LiveKit HTTP signaling publicly', () => {
+    const compose = readFileSync(join(REPO_ROOT, 'infra', 'docker', 'docker-compose.prod.yml'), 'utf8');
+    // The livekit service may publish 7881 (ICE/TCP) and the UDP media
+    // range, but 7880 (plaintext HTTP signaling) must stay internal —
+    // nginx is the only TLS terminator.
+    const livekitSection = compose.match(/  livekit:[\s\S]*?(?=\n  \w[\w-]*:)/)?.[0] ?? '';
+    expect(livekitSection).not.toMatch(/["']7880:7880["']/);
+    expect(livekitSection).toMatch(/["']7881:7881["']/);
+  });
+});
+
 describe('scripts/render-configs.sh — LF-019 TURN wiring', () => {
   it('renders the shared credential into coturn AND LiveKit turn_servers in sync', () => {
     const turn = read('turn');

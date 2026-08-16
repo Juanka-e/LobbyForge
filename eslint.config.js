@@ -13,7 +13,7 @@ export default tseslint.config(
   },
   ...tseslint.configs.recommended,
   {
-    files: ['apps/web/**/*.{js,jsx,ts,tsx}', 'app/**/*.{js,jsx,ts,tsx}', 'lib/**/*.{js,jsx,ts,tsx}'],
+    files: ['apps/web/**/*.{js,jsx,ts,tsx}', 'app/**/*.{js,jsx,ts,tsx}', 'components/**/*.{js,jsx,ts,tsx}', 'lib/**/*.{js,jsx,ts,tsx}'],
     plugins: {
       '@next/next': nextPlugin
     },

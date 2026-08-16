@@ -18,7 +18,13 @@ import { buildHttpPluginContext, callHandleAction } from '@/lib/plugin-context';
 import { withApiSecurity } from '@/lib/security-headers';
 import { publishActivityStateChange } from '@/lib/activity-bus';
 import { preparePluginAction } from '@/lib/prepare-plugin-action';
-import { claimActionId, isValidActionId, releaseActionId } from '@/lib/action-idempotency';
+import {
+  ActionClaim,
+  DuplicateActionError,
+  claimActionId,
+  isValidActionId,
+  releaseActionId,
+} from '@/lib/action-idempotency';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -153,8 +159,12 @@ async function handlePost(
   if (!session.ok) return session.response;
 
   // LF-002: set once the idempotency claim is taken; the outer catch
-  // releases it so an unexpected exception doesn't poison the retry.
+  // releases it so an unexpected exception doesn't poison the retry —
+  // UNLESS the new state already committed (V5-007): a post-commit
+  // failure must leave the claim held so the retry reconciles via
+  // 409+GET instead of re-entering the reducer.
   let releaseClaim = async () => {};
+  let committed = false;
 
   try {
     const server = await getServerById(getDb(), serverId);
@@ -234,30 +244,28 @@ async function handlePost(
     // RELEASED on every failure path below so an honest retry works.
     if (actionId) {
       // V4-001: an EXCEPTION from the claim store is an availability
-      // problem, NOT a duplicate. The old code caught the error but left
-      // `claimed = false`, so a Redis outage turned EVERY dispatched
-      // action into a fake "duplicate" 409 — freezing the game. Fail
-      // CLOSED with a retryable 503 instead; `claimed === false` is the
-      // only duplicate signal.
-      let claimed: boolean;
+      // problem, NOT a duplicate — fail CLOSED with a retryable 503.
+      // V5-007: DuplicateActionError (the claim was taken) is the ONLY
+      // duplicate signal; the claim handle carries an ownership token so
+      // release is a compare-and-delete.
+      let claim: ActionClaim;
       try {
-        claimed = await claimActionId(sessionId, actionId);
+        claim = await claimActionId(sessionId, actionId);
       } catch (err) {
+        if (err instanceof DuplicateActionError) {
+          return NextResponse.json(
+            { error: 'Duplicate action — already processed.', duplicate: true },
+            { status: 409 }
+          );
+        }
         console.error('[activity-action] idempotency store unavailable:', (err as Error).message);
         return NextResponse.json(
           { error: 'Action service temporarily unavailable — please retry.', retryable: true },
           { status: 503 }
         );
       }
-      if (!claimed) {
-        return NextResponse.json(
-          { error: 'Duplicate action — already processed.', duplicate: true },
-          { status: 409 }
-        );
-      }
-      const id = actionId;
       releaseClaim = async () => {
-        await releaseActionId(sessionId, id);
+        await releaseActionId(claim);
       };
     }
 
@@ -306,6 +314,7 @@ async function handlePost(
       casResult = await setGameSessionStateCAS(getDb(), sessionId, currentRev, attemptState) as typeof casResult;
       if (casResult.ok) {
         committedState = attemptState;
+        committed = true;
         break;
       }
       // Concurrent modification — re-read, re-migrate; the reducer runs
@@ -355,7 +364,8 @@ async function handlePost(
   } catch {
     // Unexpected failure — release the idempotency claim so an honest
     // client retry with the same actionId isn't rejected as a duplicate.
-    await releaseClaim();
+    // After a COMMITTED write the claim stays held (see above).
+    if (!committed) await releaseClaim();
     return NextResponse.json(
       { error: 'Failed to perform action' },
       { status: 500 }

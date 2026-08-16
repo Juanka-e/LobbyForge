@@ -1,6 +1,12 @@
-# LobbyForge Docs
+# LobbyForge Docs (DESIGN ARCHIVE)
 
-Bu klasör, **LobbyForge** projesinin baştan sona ürün ve teknik dokümantasyon paketidir.
+> **Status: archive.** These are the ORIGINAL planning/design documents.
+> They describe flows and endpoints that may not exist (e.g.
+> get.lobbyforge.org, --ip-only installer flags) and are NOT kept in
+> sync with the implementation. For living documentation see the repo
+> README, `docs/`, `infra/docker/README.md` and the inline code comments.
+
+Bu klasör, **LobbyForge** projesinin baştan sona ürün ve teknik dokümantasyon paketidir (tasarım arşivi).
 
 Karar seti:
 

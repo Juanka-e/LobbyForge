@@ -30,23 +30,34 @@ no-tlsv1_1
 min-port=49160
 max-port=49200
 
-# Resource limits (a small self-hosted community).
-total-quota=120
-user-quota=8
+# Resource limits. V5-003: every client shares ONE static username
+# (see VOICE_TURN.md), so user-quota counts ALL relay allocations
+# together — 8 would cap the whole community. 64/240 is an alpha-scale
+# ceiling; per-user ephemeral TURN auth is the production fix.
+total-quota=240
+user-quota=64
 stale-nonce=600
 
-# Hardening: refuse to relay to loopback/link-local/multicast ranges.
+# Hardening: refuse to relay to non-routable space. V5-003: coturn runs
+# in the HOST network namespace, so without these denys a member holding
+# the TURN credential could pivot to the Docker bridge / VPC private
+# ranges (10/8, 172.16/12, 192.168/16) and carrier-grade NAT space.
 no-multicast-peers
 denied-peer-ip=0.0.0.0-0.255.255.255
+denied-peer-ip=10.0.0.0-10.255.255.255
+denied-peer-ip=100.64.0.0-100.127.255.255
 denied-peer-ip=127.0.0.0-127.255.255.255
 denied-peer-ip=169.254.0.0-169.254.255.255
+denied-peer-ip=172.16.0.0-172.31.255.255
+denied-peer-ip=192.168.0.0-192.168.255.255
 denied-peer-ip=::1
 no-cli
 
-# If the server sits behind 1:1 NAT (cloud VM with a private interface),
-# set the public address explicitly, e.g.:
-# external-ip=203.0.113.10
-# external-ip=203.0.113.10/10.0.0.5   # public/private pair
+# V5-003: behind 1:1 NAT (cloud VM with a private interface) the public
+# address must be set explicitly. install.sh prompts for it and stores
+# it in .env.prod (LOBBYFORGE_TURN_EXTERNAL_IP); the render script
+# substitutes this placeholder (auto-detect when unset).
+@TURN_EXTERNAL_IP_LINE@
 
 log-file=stdout
 simple-log

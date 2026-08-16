@@ -199,9 +199,13 @@ services:
     command: ["--config", "/etc/livekit/livekit.yaml", "--bind", "0.0.0.0"]
     volumes:
       - ../livekit/livekit.yaml:/etc/livekit/livekit.yaml:ro
+    # V5-005: 7880 (HTTP signaling) is NOT published — nginx reaches
+    # livekit over the compose network and proxies it at
+    # wss://<domain>/livekit. Publishing it would expose a plaintext
+    # signaling/API surface that bypasses TLS. 7881 stays public for
+    # ICE/TCP; the UDP media range is direct-peer WebRTC.
     ports:
-      - "7880:7880"     # HTTP signaling (proxied by nginx in prod)
-      - "7881:7881"     # ICE/TLS
+      - "7881:7881"     # ICE/TCP fallback
       - "50000-60000:50000-60000/udp"  # RTC media range
     environment:
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY}:${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}"
@@ -230,7 +234,28 @@ services:
     volumes:
       - ../turn/turnserver.conf:/etc/coturn/turnserver.conf:ro
       - ../certbot/conf:/etc/letsencrypt:ro
-    command: ["-c", "/etc/coturn/turnserver.conf"]
+    # V5-002: coturn loads its TLS certificate at process start and has
+    # no reliable reload signal — when certbot renews, this watcher
+    # terminates turnserver so `restart: unless-stopped` brings it back
+    # with the fresh certificate (a seconds-long TURN blip once per
+    # renewal window). The watcher's parent IS turnserver after exec.
+    command:
+      - /bin/sh
+      - -c
+      - |
+        md5sum /etc/letsencrypt/live/*/fullchain.pem > /tmp/.certsum 2>/dev/null || true
+        (
+          while :; do
+            sleep 300
+            md5sum /etc/letsencrypt/live/*/fullchain.pem > /tmp/.certsum.new 2>/dev/null || true
+            if ! cmp -s /tmp/.certsum.new /tmp/.certsum; then
+              echo "[turn-cert-watcher] certificate changed — restarting coturn to load it"
+              kill -TERM "$$"
+              exit 0
+            fi
+          done
+        ) &
+        exec turnserver -c /etc/coturn/turnserver.conf
     # Listener liveness on 3478 (a full TURN allocation smoke test needs
     # the credential and real network egress — see docs/VOICE_TURN.md).
     healthcheck:

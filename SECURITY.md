@@ -22,7 +22,7 @@ mitigation within **30 days** for critical issues.
 
 ## Supported Versions
 
-Only the latest release receives security fixes. Self-hosted instances
+There are no tagged releases yet (experimental alpha); report vulnerabilities against the current `main` branch. Self-hosted instances
 should keep up to date via the built-in update system (Admin → Updates).
 
 ## Security Measures
@@ -49,4 +49,4 @@ When deploying LobbyForge on your own server:
 - [ ] Use HTTPS (certbot/Let's Encrypt) — WebRTC requires it.
 - [ ] Keep `registrationMode` on `invite_only` (the default).
 - [ ] Run the Doctor health check after deployment.
-- [ ] Configure backups via the backup manifest.
+- [ ] Configure backups: `node scripts/lfctl.mjs backup create --out backups --database-url ...` (see docs/BACKUP_DRILL.md — includes a destructive restore drill you should rehearse before trusting backups).
