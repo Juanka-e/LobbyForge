@@ -18,6 +18,7 @@ import {
 } from '@lobbyforge/db';
 import { requireInstanceAdmin } from '@/lib/admin-auth';
 import { getDb } from '@/lib/db';
+import { ensureBuiltInContentSeeded } from '@/lib/plugin-content-seeder';
 import { readGuestSession } from '@/lib/guest-session';
 import { isValidLanguageTag } from '@/lib/language-tag';
 import { withApiSecurity } from '@/lib/security-headers';
@@ -221,6 +222,9 @@ async function handleGet(req: Request): Promise<NextResponse> {
 
   try {
     const db = getDb();
+    // Fresh instance: seed the built-in packs on first admin view so the
+    // panel is never empty (the member card-packs route does the same).
+    await ensureBuiltInContentSeeded(db);
     const packs = await listCardPackSummaries(db, PLUGIN_ID);
     const packsWithCards = await Promise.all(
       packs.map(async (pack) => ({
@@ -236,7 +240,8 @@ async function handleGet(req: Request): Promise<NextResponse> {
       }))
     );
     return NextResponse.json({ packs: packsWithCards }, { headers: { 'Cache-Control': 'no-store' } });
-  } catch {
+  } catch (err) {
+    console.error('[admin/card-packs] list failed:', (err as Error).message, (err as Error).stack);
     return NextResponse.json({ error: 'Failed to load card packs' }, { status: 500 });
   }
 }

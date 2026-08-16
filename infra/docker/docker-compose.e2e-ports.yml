@@ -1,0 +1,52 @@
+# LF-023: isolated port/CONTAINER-NAME mapping for running the E2E stack
+# NEXT TO a running dev stack on the same machine. Combine with the dev
+# compose:
+#
+#   export LOBBYFORGE_SETUP_TOKEN=e2e_setup_token_default_0123456789ab
+#   docker compose -p lobbyforge-e2e \
+#     -f infra/docker/docker-compose.dev.yml \
+#     -f infra/docker/docker-compose.e2e-ports.yml \
+#     up -d --build --wait
+#   LF_E2E_BASE_URL=http://localhost:3100 \
+#     pnpm --filter @lobbyforge/web exec playwright test compose-stack.spec.ts
+#   docker compose -p lobbyforge-e2e \
+#     -f infra/docker/docker-compose.dev.yml \
+#     -f infra/docker/docker-compose.e2e-ports.yml down -v
+#
+# Published host ports, container names AND the network name all change
+# (the dev compose pins container_name, so a parallel project must
+# rename them); container-internal service DNS names are untouched. The
+# `-p lobbyforge-e2e` project name gives the stack its own fresh
+# volumes — first-run setup runs, exactly like CI.
+services:
+  postgres:
+    container_name: lobbyforge-e2e-postgres
+    ports: !override
+      - "55432:5432"
+  redis:
+    container_name: lobbyforge-e2e-redis
+    ports: !override
+      - "6390:6379"
+  livekit:
+    container_name: lobbyforge-e2e-livekit
+    ports: !override
+      - "7890:7880"
+      - "7891:7881"
+      - "7892:7882/udp"
+  web:
+    container_name: lobbyforge-e2e-web
+    # The origin guard derives allowed origins from the INTERNAL request
+    # URL (container port 3000) — an external port-mapped URL (3100)
+    # must be whitelisted explicitly.
+    environment:
+      LOBBYFORGE_APP_ORIGIN: http://localhost:3100
+    ports: !override
+      - "3100:3000"
+  ws-gateway:
+    container_name: lobbyforge-e2e-ws-gateway
+    ports: !override
+      - "3101:3001"
+
+networks:
+  default:
+    name: lobbyforge-e2e

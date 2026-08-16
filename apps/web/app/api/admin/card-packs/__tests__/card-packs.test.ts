@@ -35,6 +35,10 @@ vi.mock('@/lib/db', () => ({
   getDb: () => ({ __mockDbClient: true }),
 }));
 
+vi.mock('@/lib/plugin-content-seeder', () => ({
+  ensureBuiltInContentSeeded: vi.fn(async () => undefined),
+}));
+
 const requireInstanceAdmin = vi.fn();
 vi.mock('@/lib/admin-auth', () => ({
   requireInstanceAdmin: (...args: unknown[]) => requireInstanceAdmin(...args),

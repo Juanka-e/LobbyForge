@@ -83,7 +83,8 @@ async function handleGet(req: Request, ctx: { params: Promise<{ id: string }> })
       { cardPacks: rows.map(toJson) },
       { headers: { 'Cache-Control': 'no-store' } }
     );
-  } catch {
+  } catch (err) {
+    console.error('[card-packs] list failed:', (err as Error).message, (err as Error).stack);
     return NextResponse.json(
       { error: 'Failed to list card packs' },
       { status: 500 }

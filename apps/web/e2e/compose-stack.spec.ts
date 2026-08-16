@@ -5,13 +5,15 @@
  * job and locally via scripts/e2e-compose.sh.
  *
  * The whole Hushle chain is exercised through the real API:
- *   setup/login → admin card-packs (DB seed) → guest identity →
+ *   setup/login → admin card-packs (DB seed) → owner's bootstrap
  *   server + channels → activity → start-game (deck hydrated from the
  *   card_packs table) → projection (deck never sent, currentCard only
  *   for the explainer) → classic-Taboo bust rules.
  *
- * Guarded: skips unless LF_E2E_BASE_URL points at an external stack,
- * so `pnpm test:e2e` against the local dev server is unaffected.
+ * Guarded: skips unless LF_E2E_BASE_URL points at an external stack.
+ * On a WARM stack provisioned by someone else (a developer's instance)
+ * the chain test skips — the owner credentials are unknown; CI always
+ * runs the full chain on a fresh volume.
  */
 import { expect, test } from '@playwright/test';
 
@@ -27,23 +29,27 @@ const ORIGIN = { Origin: baseUrl };
 test.skip(!baseUrl, 'Runs only against the compose stack (set LF_E2E_BASE_URL).');
 
 test.describe('compose stack — real Postgres/Redis', () => {
+  // Serial + ordered: the chain test performs first-run setup; guest
+  // issuance is only allowed once an instance is bootstrapped, so it
+  // runs LAST.
+  test.describe.configure({ mode: 'serial' });
+
   test('health endpoint reports a green stack', async ({ request }) => {
     const res = await request.get('/api/health');
     expect(res.status()).toBe(200);
-    const body = (await res.json()) as { status?: string };
-    expect(body.status).toBeTruthy();
+    const body = (await res.json()) as { ok?: boolean; checks?: Record<string, boolean> };
+    expect(body.ok).toBe(true);
+    expect(body.checks?.web).toBe(true);
   });
 
-  test('hushle chain: setup → seeded packs → guest → server → start-game → projection → bust rules', async ({
+  test('hushle chain: setup → seeded packs → bootstrap server → start-game → projection → bust rules', async ({
     request,
-    playwright,
   }) => {
     // ── 1. First-run setup (fresh volume) or owner login (warm volume).
     // A warm instance answers 409 (already complete) or 503/403 (no
     // setup token configured) — in that case try the owner login; on a
-    // stack provisioned by someone else the login fails and the
-    // admin-only section below is skipped (CI always runs it: the
-    // volume is fresh and the setup token is exported to compose).
+    // stack provisioned by someone else the login fails and this test
+    // skips (CI always runs it: fresh volume + exported setup token).
     const setup = await request.post('/api/setup/complete', {
       headers: ORIGIN,
       data: {
@@ -57,56 +63,56 @@ test.describe('compose stack — real Postgres/Redis', () => {
         seoIndexingEnabled: false,
       },
     });
-    let haveOwnerSession = false;
+    let ownerUid: string | undefined;
+    let bootstrapServerId: string | undefined;
     if (setup.status() === 200) {
-      haveOwnerSession = true;
+      const body = (await setup.json()) as { serverId: string; setup: { ownerUserId?: string } };
+      bootstrapServerId = body.serverId;
+      ownerUid = body.setup.ownerUserId;
     } else {
       expect([409, 403, 503]).toContain(setup.status());
       const login = await request.post('/api/auth/login', {
         headers: ORIGIN,
         data: { email: OWNER_EMAIL, password: OWNER_PASSWORD },
       });
-      // 200 → this instance was set up by a previous e2e run.
-      // 401 → provisioned by someone else (e.g. a developer's warm stack).
-      expect([200, 401]).toContain(login.status());
-      haveOwnerSession = login.status() === 200;
+      test.skip(
+        login.status() !== 200,
+        'Warm stack provisioned by someone else — owner credentials unknown. Run against a fresh volume (scripts/e2e-compose.sh with -v) for the full chain.'
+      );
+      expect(login.status()).toBe(200);
     }
+    // The shared `request` context now carries the owner session cookie.
 
     // ── 2. Admin card-packs: the built-in seeder ran against real PG.
-    if (haveOwnerSession) {
-      const packsRes = await request.get('/api/admin/card-packs');
-      expect(packsRes.status()).toBe(200);
-      const { packs } = (await packsRes.json()) as {
-        packs: Array<{ slug: string; cardCount: number; isBuiltIn: boolean; cards: unknown[] }>;
+    const packsRes = await request.get('/api/admin/card-packs');
+    expect(packsRes.status()).toBe(200);
+    const { packs } = (await packsRes.json()) as {
+      packs: Array<{ slug: string; cardCount: number; isBuiltIn: boolean; cards: unknown[] }>;
+    };
+    const en = packs.find((p) => p.slug === 'hushle-en-basic');
+    const tr = packs.find((p) => p.slug === 'hushle-tr-basic');
+    expect(en?.isBuiltIn).toBe(true);
+    expect(en?.cardCount).toBe(24);
+    expect(en?.cards).toHaveLength(24);
+    expect(tr?.isBuiltIn).toBe(true);
+    expect(tr?.cardCount).toBe(24);
+
+    // ── 3. The bootstrap server (self-host: single server, the owner
+    // is its host — instance creation is official-hub-only).
+    if (!bootstrapServerId) {
+      const serversRes = await request.get('/api/servers');
+      expect(serversRes.status()).toBe(200);
+      const { servers } = (await serversRes.json()) as {
+        servers: Array<{ id: string; ownerUserId: string }>;
       };
-      const en = packs.find((p) => p.slug === 'hushle-en-basic');
-      const tr = packs.find((p) => p.slug === 'hushle-tr-basic');
-      expect(en?.isBuiltIn).toBe(true);
-      expect(en?.cardCount).toBe(24);
-      expect(en?.cards).toHaveLength(24);
-      expect(tr?.isBuiltIn).toBe(true);
-      expect(tr?.cardCount).toBe(24);
+      expect(servers.length).toBeGreaterThan(0);
+      const own = servers.find((s) => ownerUid && s.ownerUserId === ownerUid) ?? servers[0]!;
+      bootstrapServerId = own.id;
+      ownerUid = own.ownerUserId;
     }
 
-    // ── 3. A separate guest identity creates its own server (guest is
-    // that server's host — the self-host flow).
-    const guestCtx = await playwright.request.newContext({
-      baseURL: baseUrl,
-      extraHTTPHeaders: ORIGIN,
-    });
-    const guestRes = await guestCtx.post('/api/auth/guest', { data: {} });
-    expect(guestRes.status()).toBe(200);
-    const guest = (await guestRes.json()) as { guest: { uid: string } };
-    expect(guest.guest.uid).toBeTruthy();
-
-    const serverRes = await guestCtx.post('/api/servers', {
-      data: { name: 'E2E Voice Server' },
-    });
-    expect(serverRes.status()).toBe(201);
-    const { server } = (await serverRes.json()) as { server: { id: string } };
-
     // ── 4. Default channels exist (general text + Main Lounge voice).
-    const channelsRes = await guestCtx.get(`/api/servers/${server.id}/channels`);
+    const channelsRes = await request.get(`/api/servers/${bootstrapServerId}/channels`);
     expect(channelsRes.status()).toBe(200);
     const { channels } = (await channelsRes.json()) as {
       channels: Array<{ id: string; type: string; name: string }>;
@@ -114,25 +120,38 @@ test.describe('compose stack — real Postgres/Redis', () => {
     const voice = channels.find((c) => c.type === 'voice');
     expect(voice?.name).toBe('Main Lounge');
 
+    // ── 4.5 Install the Hushle app for this server (the activities
+    // route 403s until the plugin is installed AND enabled).
+    const installRes = await request.post(`/api/servers/${bootstrapServerId}/apps`, {
+      headers: ORIGIN,
+      data: { pluginId: 'hushle', enabled: true },
+    });
+    expect(installRes.status()).toBe(200);
+
     // ── 5. Start a Hushle activity in the voice channel.
-    const activityRes = await guestCtx.post(
-      `/api/servers/${server.id}/channels/${voice!.id}/activities`,
-      { data: { pluginId: 'hushle' } }
+    const activityRes = await request.post(
+      `/api/servers/${bootstrapServerId}/channels/${voice!.id}/activities`,
+      { headers: ORIGIN, data: { pluginId: 'hushle' } }
     );
     expect(activityRes.status()).toBe(201);
     const { activity } = (await activityRes.json()) as { activity: { id: string } };
 
     const action = async (body: Record<string, unknown>) => {
-      const res = await guestCtx.post(
-        `/api/servers/${server.id}/activities/${activity.id}/actions`,
-        { data: body }
+      const res = await request.post(
+        `/api/servers/${bootstrapServerId}/activities/${activity.id}/actions`,
+        { headers: ORIGIN, data: body }
       );
-      return { res, state: (res.status() === 200 ? ((await res.json()) as { activity: { state: Record<string, unknown> } }).activity.state : null) };
+      const state =
+        res.status() === 200
+          ? ((await res.json()) as { activity: { state: Record<string, unknown> } }).activity.state
+          : null;
+      return { res, state };
     };
     const getState = async () => {
-      const res = await guestCtx.get(`/api/servers/${server.id}/activities/${activity.id}`);
+      const res = await request.get(`/api/servers/${bootstrapServerId}/activities/${activity.id}`);
       expect(res.status()).toBe(200);
-      return ((await res.json()) as { activity: { state: Record<string, unknown> } }).activity.state;
+      return ((await res.json()) as { activity: { state: Record<string, unknown> } }).activity
+        .state;
     };
 
     // ── 6. start-game with the built-in EN pack slug: the deck is
@@ -141,7 +160,7 @@ test.describe('compose stack — real Postgres/Redis', () => {
       type: 'start-game',
       packId: 'hushle-en-basic',
       language: 'en',
-      createdBy: guest.guest.uid,
+      createdBy: ownerUid,
     });
     expect(start.res.status()).toBe(200);
     expect(start.state!.phase).toBe('team_setup');
@@ -151,12 +170,12 @@ test.describe('compose stack — real Postgres/Redis', () => {
     expect(start.state!.deck).toBeUndefined();
     expect(start.state!.currentCard).toBeNull();
 
-    // ── 7. Team setup + first turn. The guest explains → the card is
+    // ── 7. Team setup + first turn. The owner explains → the card is
     // visible to them, invisible deck, one card consumed.
     const teams = await action({
       type: 'set-teams',
       teams: [
-        { name: 'Team A', playerIds: [guest.guest.uid] },
+        { name: 'Team A', playerIds: [ownerUid] },
         { name: 'Team B', playerIds: ['e2e-opponent-placeholder'] },
       ],
     });
@@ -168,7 +187,7 @@ test.describe('compose stack — real Postgres/Redis', () => {
     const turn = await action({
       type: 'start-turn',
       teamId: teamAId,
-      explainerId: guest.guest.uid,
+      explainerId: ownerUid,
     });
     expect(turn.res.status()).toBe(200);
     expect(turn.state!.phase).toBe('playing');
@@ -184,23 +203,30 @@ test.describe('compose stack — real Postgres/Redis', () => {
     // currentCard: null (classic Taboo — only the explainer sees the
     // word; opponents would, but this viewer is the teammate/host).
     await action({ type: 'set-explainer', explainerId: null });
-    let hidden = await getState();
+    const hidden = await getState();
     expect(hidden.currentCard).toBeNull();
     expect(hidden.deckSize).toBe(24);
 
     // Restore the explainer → the card is visible again on a plain GET.
-    await action({ type: 'set-explainer', explainerId: guest.guest.uid });
+    await action({ type: 'set-explainer', explainerId: ownerUid });
     const visible = await getState();
     expect((visible.currentCard as { word: string } | null)?.word).toBeTruthy();
 
     // ── 9. Classic-Taboo bust rules: a TEAMMATE (the host is on Team A
     // with the explainer) cannot bust — the state must not change.
     const before = await getState();
-    const bust = await action({ type: 'bust-forbidden', bustedBy: guest.guest.uid });
+    const bust = await action({ type: 'bust-forbidden', bustedBy: ownerUid });
     expect(bust.res.status()).toBe(200);
     const after = await getState();
     expect(after).toEqual(before); // reducer rejected the self-bust
+  });
 
-    await guestCtx.dispose();
+  // Runs LAST (serial): guest issuance requires a bootstrapped instance.
+  test('guest identities can be issued', async ({ request }) => {
+    const res = await request.post('/api/auth/guest', { headers: ORIGIN, data: {} });
+    expect(res.status()).toBe(200);
+    const body = (await res.json()) as { guest: { uid: string; gid: string } };
+    expect(body.guest.uid).toBeTruthy();
+    expect(body.guest.gid).toBeTruthy();
   });
 });
