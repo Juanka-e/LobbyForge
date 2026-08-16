@@ -208,8 +208,14 @@ export async function reloadDynamicPlugin(pluginId: string): Promise<boolean> {
     // Cache-bust: append a unique version query so Node's ESM loader treats
     // this as a new module (ESM doesn't have require.cache to clear).
     const fileUrl = pathToFileURL(indexPath).href + `?v=${Date.now()}`;
-    const mod = await import(fileUrl);
-    const raw: unknown = mod?.plugin ?? mod?.default;
+    // V4-012: the bundler must NOT try to resolve this runtime-only import
+    // (it warns "Can't resolve <dynamic>" otherwise). Same pattern as
+    // lib/component-migrations.ts.
+    const mod = (await import(/* webpackIgnore: true */ fileUrl)) as {
+      plugin?: unknown;
+      default?: unknown;
+    };
+    const raw: unknown = mod.plugin ?? mod.default;
     if (!isValidGamePlugin(raw)) {
       console.warn(`[plugin-loader] reload shape validation failed for "${pluginId}"`);
       return false;

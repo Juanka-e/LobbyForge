@@ -185,6 +185,21 @@ manifest: {
 },
 ```
 
+## Custom words & server-local cards (status)
+
+Where words come from, and what is NOT wired yet (honest status, V4-009):
+
+- **Packs** live in `card_packs`/`cards` and are managed from
+  **Admin → Plugins & Word Packs** (any BCP-47 language; built-in packs are
+  immutable, Duplicate-to-custom to edit them).
+- **`server_local_cards`** (per-server extra words unioned into the deck)
+  is **infrastructure only** today: the table, the language scope
+  (migration 0026 — `NULL` = shared across all languages) and the loader
+  filter exist, but there is **no creation API/UI** and **no backfill** for
+  pre-0026 rows (they stay `NULL`/language-less, i.e. shared with every
+  deck). Adding the "server-specific words" editor is future work; until
+  then the feature is effectively dormant.
+
 ## Card decks
 
 `plugins/hushle/src/decks.ts` ships two MVP decks of 24 cards each

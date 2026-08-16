@@ -31,6 +31,9 @@ function makePipeline() {
 
 const redisMock = {
   pipeline: vi.fn(() => makePipeline()),
+  // lib/redis.ts attaches a rate-limited 'error' listener at module
+  // scope; the mock must be faithful enough for that to work.
+  on: vi.fn(),
   get: vi.fn(async (key: string) => store.get(key) ?? null),
   set: vi.fn(async (key: string, value: string) => {
     store.set(key, value);

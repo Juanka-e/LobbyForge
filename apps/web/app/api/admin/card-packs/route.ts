@@ -230,21 +230,35 @@ async function handleGet(req: Request): Promise<NextResponse> {
     // Fresh instance: seed the built-in packs on first admin view so the
     // panel is never empty (the member card-packs route does the same).
     await ensureBuiltInContentSeeded(db);
+
+    // V4-011: ?packId=<uuid> returns ONE pack's cards (lazy detail — the
+    // UI loads cards when a pack is selected). Without it the response is
+    // the pack SUMMARY list only: one COUNT-aggregated query instead of
+    // an N+1 that embedded every card of every pack.
+    const url = new URL(req.url);
+    const packId = url.searchParams.get('packId');
+    if (packId) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(packId)) {
+        return NextResponse.json({ error: 'Invalid packId' }, { status: 400 });
+      }
+      const resolved = await requireHushlePack(db, packId);
+      if (!resolved.ok) return resolved.response;
+      const cards = (await listCardsForPack(db, packId)).map(cardView);
+      return NextResponse.json({ cards }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+
     const packs = await listCardPackSummaries(db, PLUGIN_ID);
-    const packsWithCards = await Promise.all(
-      packs.map(async (pack) => ({
-        id: pack.id,
-        pluginId: pack.pluginId,
-        slug: pack.slug,
-        name: pack.name,
-        language: pack.language,
-        description: pack.description,
-        isBuiltIn: pack.isBuiltIn,
-        cardCount: pack.cardCount,
-        cards: (await listCardsForPack(db, pack.id)).map(cardView),
-      }))
-    );
-    return NextResponse.json({ packs: packsWithCards }, { headers: { 'Cache-Control': 'no-store' } });
+    const summaries = packs.map((pack) => ({
+      id: pack.id,
+      pluginId: pack.pluginId,
+      slug: pack.slug,
+      name: pack.name,
+      language: pack.language,
+      description: pack.description,
+      isBuiltIn: pack.isBuiltIn,
+      cardCount: pack.cardCount,
+    }));
+    return NextResponse.json({ packs: summaries }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err) {
     console.error('[admin/card-packs] list failed:', (err as Error).message, (err as Error).stack);
     return NextResponse.json({ error: 'Failed to load card packs' }, { status: 500 });

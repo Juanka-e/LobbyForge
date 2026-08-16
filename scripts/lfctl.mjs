@@ -432,13 +432,26 @@ main().catch((err) => {
 
 // ── Backup create / restore ──────────────────────────────────────────
 // Real pg_dump-based backup with SHA-256 checksum, and restore into an
-// empty database. Both require pg_dump/pg_restore on PATH (ships with
-// the postgres client package inside the Docker image).
+// empty database.
+//
+// pg_dump/pg_restore/psql resolution: by default they must be on PATH.
+// Set LFCTL_PG_CONTAINER=<container> to run them via `docker exec`
+// INSIDE the PostgreSQL container instead — operators don't need a host
+// pg installation (the container always ships the exact-version tools).
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 const execFileAsync = promisify(execFile);
+
+const PG_CONTAINER = process.env.LFCTL_PG_CONTAINER ?? '';
+
+async function pgExec(tool, args, options = {}) {
+  if (PG_CONTAINER) {
+    return execFileAsync('docker', ['exec', PG_CONTAINER, tool, ...args], options);
+  }
+  return execFileAsync(tool, args, options);
+}
 
 async function backupCreate(options = {}) {
   const outDir = options.out ?? 'backups';
@@ -450,7 +463,20 @@ async function backupCreate(options = {}) {
   const file = path.join(outDir, `lobbyforge-${stamp}.dump`);
 
   // pg_dump custom format (-Fc) — compressed, supports parallel restore + selective tables.
-  await execFileAsync('pg_dump', ['-Fc', '-f', file, dbUrl], { timeout: 300_000 });
+  if (PG_CONTAINER) {
+    // Container mode: stream the dump to stdout and write it host-side
+    // (the container cannot see the host output directory). encoding:
+    // 'buffer' is critical — the -Fc dump is binary and a default UTF-8
+    // string decode silently corrupts the TOC.
+    const { stdout } = await pgExec('pg_dump', ['-Fc', dbUrl], {
+      timeout: 300_000,
+      maxBuffer: 1024 * 1024 * 1024,
+      encoding: 'buffer',
+    });
+    await fs.writeFile(file, stdout);
+  } else {
+    await pgExec('pg_dump', ['-Fc', '-f', file, dbUrl], { timeout: 300_000 });
+  }
 
   const buf = await fs.readFile(file);
   const sha256 = createHash('sha256').update(buf).digest('hex');
@@ -483,13 +509,28 @@ async function backupRestore(file, targetUrl) {
     }
 
     // Safety: refuse to restore into a database that already has tables.
-    const { stdout } = await execFileAsync('psql', [targetUrl, '-tAc',
-      "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"], { timeout: 30_000 });
+    // Count EVERY non-system schema — checking only `public` let a
+    // populated `drizzle` (migrations ledger) schema slip through and
+    // collide mid-restore.
+    const { stdout } = await pgExec('psql', [targetUrl, '-tAc',
+      "SELECT count(*) FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema')"], { timeout: 30_000 });
     if (parseInt(stdout.trim(), 10) > 0) {
       return { ok: false, message: 'Target database is not empty. Restore requires an empty database.' };
     }
 
-    await execFileAsync('pg_restore', ['--no-owner', '--no-privileges', '-d', targetUrl, file], { timeout: 600_000 });
+    if (PG_CONTAINER) {
+      // Container mode: the dump lives on the host — copy it in, restore,
+      // remove it again.
+      const inContainer = '/tmp/lfctl-restore.dump';
+      await execFileAsync('docker', ['cp', file, `${PG_CONTAINER}:${inContainer}`], { timeout: 120_000 });
+      try {
+        await pgExec('pg_restore', ['--no-owner', '--no-privileges', '-d', targetUrl, inContainer], { timeout: 600_000 });
+      } finally {
+        await execFileAsync('docker', ['exec', PG_CONTAINER, 'rm', '-f', inContainer], { timeout: 30_000 }).catch(() => {});
+      }
+    } else {
+      await pgExec('pg_restore', ['--no-owner', '--no-privileges', '-d', targetUrl, file], { timeout: 600_000 });
+    }
     return { ok: true, message: 'Database restored successfully.' };
   } catch (err) {
     return { ok: false, message: err instanceof Error ? err.message : String(err) };

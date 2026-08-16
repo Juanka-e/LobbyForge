@@ -1,5 +1,5 @@
 import { cookies } from 'next/headers';
-import { listCardPackSummaries, listCardsForPack } from '@lobbyforge/db';
+import { listCardPackSummaries } from '@lobbyforge/db';
 import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
 import { getDb } from '@/lib/db';
 import SettingsShell from '@/app/SettingsShell';
@@ -30,37 +30,19 @@ export default async function PluginsSettingsPage() {
   let loadError: string | null = null;
 
   try {
+    // V4-011: summaries only — cards load lazily per selected pack via
+    // /api/admin/card-packs?packId=… (no N+1 over every card here).
     const db = getDb();
-    const summaries = await listCardPackSummaries(db);
-    packs = await Promise.all(
-      summaries.map(async (pack): Promise<CardPackView> => {
-        const cards = await listCardsForPack(db, pack.id);
-        return {
-          id: pack.id,
-          pluginId: pack.pluginId,
-          slug: pack.slug,
-          name: pack.name,
-          language: pack.language,
-          description: pack.description,
-          isBuiltIn: pack.isBuiltIn,
-          cardCount: pack.cardCount,
-          cards: cards.map(
-            (card): CardView => ({
-              id: card.id,
-              word: String(card.payload.word ?? ''),
-              forbiddenWords: Array.isArray(card.payload.forbiddenWords)
-                ? (card.payload.forbiddenWords as unknown[])
-                    .filter((w): w is string => typeof w === 'string')
-                    .join(', ')
-                : '',
-              difficulty: card.difficulty,
-              category: card.category,
-              ordinal: card.ordinal,
-            })
-          ),
-        };
-      })
-    );
+    packs = (await listCardPackSummaries(db, 'hushle')).map((pack) => ({
+      id: pack.id,
+      pluginId: pack.pluginId,
+      slug: pack.slug,
+      name: pack.name,
+      language: pack.language,
+      description: pack.description,
+      isBuiltIn: pack.isBuiltIn,
+      cardCount: pack.cardCount,
+    }));
   } catch (err) {
     loadError = (err as Error).message;
   }

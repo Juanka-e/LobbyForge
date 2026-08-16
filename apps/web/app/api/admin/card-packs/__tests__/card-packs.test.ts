@@ -108,6 +108,46 @@ beforeEach(() => {
   dbFns.listCardsForPack.mockResolvedValue([]);
 });
 
+describe('GET /api/admin/card-packs — V4-011 lazy detail', () => {
+  async function get(query = ''): Promise<Response> {
+    const { GET } = await import('../route.js');
+    const handler = GET as unknown as (req: Request) => Promise<Response>;
+    return handler(new Request(`http://localhost/api/admin/card-packs${query}`));
+  }
+
+  it('returns pack summaries WITHOUT embedding cards (no N+1)', async () => {
+    dbFns.listCardPackSummaries.mockResolvedValue([Object.assign(pack(), { cardCount: 24 })]);
+    const res = await get();
+    expect(res.status).toBe(200);
+    const { packs } = (await res.json()) as { packs: Array<Record<string, unknown>> };
+    expect(packs).toHaveLength(1);
+    expect(packs[0]).not.toHaveProperty('cards');
+    expect(packs[0]).toMatchObject({ slug: 'hushle-en-basic', cardCount: 24 });
+    expect(dbFns.listCardsForPack).not.toHaveBeenCalled();
+  });
+
+  it("?packId=<uuid> returns that pack's cards only (ownership enforced)", async () => {
+    dbFns.getCardPackById.mockResolvedValue(pack());
+    dbFns.listCardsForPack.mockResolvedValue([card()]);
+    const res = await get(`?packId=${UUID}`);
+    expect(res.status).toBe(200);
+    const { cards } = (await res.json()) as { cards: Array<Record<string, unknown>> };
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({ word: 'apple', difficulty: 'easy' });
+  });
+
+  it('?packId with a foreign-plugin pack is 404', async () => {
+    dbFns.getCardPackById.mockResolvedValue(pack({ pluginId: 'quiz' }));
+    const res = await get(`?packId=${UUID}`);
+    expect(res.status).toBe(404);
+  });
+
+  it('?packId with a non-UUID is 400', async () => {
+    const res = await get('?packId=not-a-uuid');
+    expect(res.status).toBe(400);
+  });
+});
+
 describe('POST /api/admin/card-packs', () => {
   it('rejects unauthenticated callers with 401', async () => {
     requireInstanceAdmin.mockResolvedValue(

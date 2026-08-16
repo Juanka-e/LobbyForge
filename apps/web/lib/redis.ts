@@ -8,6 +8,20 @@ export const redis =
   globalForRedis.redis ??
   new Redis(process.env.REDIS_URL || 'redis://:lobbyforge_dev@localhost:6379');
 
+// V4-012: without an 'error' listener every connection blip (e.g. Redis
+// not running during `next build` page collection) surfaces as an
+// UNHANDLED 'error' event, flooding build/test logs. Rate-limit the
+// noise to one line per minute; real outages still surface through the
+// depending features (presence, rate limits, SSE bus) failing loudly.
+let lastRedisErrorLog = 0;
+redis.on('error', (err: Error) => {
+  const now = Date.now();
+  if (now - lastRedisErrorLog > 60_000) {
+    lastRedisErrorLog = now;
+    console.warn('[redis] connection error (repeat errors suppressed for 60s):', err.message);
+  }
+});
+
 if (process.env.NODE_ENV !== 'production') globalForRedis.redis = redis;
 
 export type PresenceStatus = 'online' | 'idle' | 'dnd' | 'offline';
