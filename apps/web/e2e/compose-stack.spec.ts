@@ -84,18 +84,28 @@ test.describe('compose stack — real Postgres/Redis', () => {
     // The shared `request` context now carries the owner session cookie.
 
     // ── 2. Admin card-packs: the built-in seeder ran against real PG.
+    // V4-011: the list endpoint returns COUNT-aggregated summaries; the
+    // cards themselves come from the lazy ?packId= detail endpoint.
     const packsRes = await request.get('/api/admin/card-packs');
     expect(packsRes.status()).toBe(200);
     const { packs } = (await packsRes.json()) as {
-      packs: Array<{ slug: string; cardCount: number; isBuiltIn: boolean; cards: unknown[] }>;
+      packs: Array<{ id: string; slug: string; cardCount: number; isBuiltIn: boolean }>;
     };
     const en = packs.find((p) => p.slug === 'hushle-en-basic');
     const tr = packs.find((p) => p.slug === 'hushle-tr-basic');
     expect(en?.isBuiltIn).toBe(true);
     expect(en?.cardCount).toBe(24);
-    expect(en?.cards).toHaveLength(24);
     expect(tr?.isBuiltIn).toBe(true);
     expect(tr?.cardCount).toBe(24);
+
+    const cardsRes = await request.get(`/api/admin/card-packs?packId=${en!.id}`);
+    expect(cardsRes.status()).toBe(200);
+    const { cards } = (await cardsRes.json()) as {
+      cards: Array<{ word: string; forbiddenWords: string }>;
+    };
+    expect(cards).toHaveLength(24);
+    expect(cards[0]!.word).toBeTruthy();
+    expect(cards[0]!.forbiddenWords).toBeTruthy();
 
     // ── 3. The bootstrap server (self-host: single server, the owner
     // is its host — instance creation is official-hub-only).
