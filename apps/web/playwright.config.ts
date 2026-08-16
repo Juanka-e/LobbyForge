@@ -1,5 +1,11 @@
 import { defineConfig, devices } from '@playwright/test';
 
+// LF-023: when LF_E2E_BASE_URL is set the tests run against an
+// EXTERNAL stack (docker compose with real Postgres/Redis/LiveKit —
+// the CI e2e job). No dev server is started in that mode; the compose
+// stack under test is expected to be up already.
+const externalBaseUrl = process.env.LF_E2E_BASE_URL;
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
@@ -8,17 +14,21 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: 'html',
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: externalBaseUrl ?? 'http://localhost:3000',
     trace: 'on-first-retry',
   },
-  webServer: {
-    command: 'pnpm --filter @lobbyforge/web dev',
-    url: 'http://localhost:3000',
-    reuseExistingServer: !process.env.CI,
-    stdout: 'ignore',
-    stderr: 'pipe',
-    timeout: 120000,
-  },
+  ...(externalBaseUrl
+    ? {}
+    : {
+        webServer: {
+          command: 'pnpm --filter @lobbyforge/web dev',
+          url: 'http://localhost:3000',
+          reuseExistingServer: !process.env.CI,
+          stdout: 'ignore',
+          stderr: 'pipe',
+          timeout: 120000,
+        },
+      }),
   projects: [
     {
       name: 'chromium',

@@ -96,3 +96,53 @@ jobs:
 
       - name: Migration journal test
         run: pnpm --filter @lobbyforge/db test
+
+  # LF-023: end-to-end against the REAL compose stack — Postgres, Redis,
+  # LiveKit and the production-built web image (docker-compose.dev.yml).
+  # Runs only the compose-stack spec; the dev-server UI specs stay local
+  # (they assume a seeded dev instance).
+  e2e:
+    name: e2e (compose stack)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      LF_E2E_BASE_URL: http://localhost:3000
+      LF_E2E_SETUP_TOKEN: ci_e2e_setup_token_0123456789abcdef
+      LOBBYFORGE_SETUP_TOKEN: ci_e2e_setup_token_0123456789abcdef
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build + start the stack (migrations run, health-checked)
+        run: docker compose -f infra/docker/docker-compose.dev.yml up -d --build --wait
+
+      - name: Show stack status on failure
+        if: failure()
+        run: |
+          docker compose -f infra/docker/docker-compose.dev.yml ps || true
+          docker logs lobbyforge-web --tail 100 || true
+          docker logs lobbyforge-migrate --tail 50 || true
+
+      - name: Install Playwright chromium
+        run: pnpm --filter @lobbyforge/web exec playwright install --with-deps chromium
+
+      - name: Run compose-stack e2e
+        run: pnpm --filter @lobbyforge/web exec playwright test compose-stack.spec.ts
+
+      - name: Teardown
+        if: always()
+        run: docker compose -f infra/docker/docker-compose.dev.yml down -v

@@ -34,6 +34,7 @@ const getPluginServer = vi.fn((id: string) => (id === 'fake' ? fakePlugin : null
 vi.mock('@lobbyforge/db', () => ({
   getServerById,
   getChannelById,
+  addPlayerToSession: vi.fn(async () => ({ id: 'player-row', sessionId: 'sess', userId: 'u' })),
   isServerMember,
   getUserPermissions,
   createGameSession,

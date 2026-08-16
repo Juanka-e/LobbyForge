@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { CorePermission, hasPermission } from '@lobbyforge/core';
 import {
+  addPlayerToSession,
   createGameSession,
   getActiveGameSessionForChannel,
   getChannelById,
@@ -178,6 +179,10 @@ async function handlePost(
       createdBy: session.uid,
       state: initialState,
     });
+    // The creator is the first player — without this the session's
+    // player list stays empty and player-role action policies (and the
+    // room panel's player count) see nobody.
+    await addPlayerToSession(getDb(), created.id, session.uid);
     void logAction(getDb(), {
       serverId,
       actorUserId: session.uid,

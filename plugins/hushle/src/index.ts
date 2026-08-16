@@ -84,12 +84,16 @@ export const hushlePlugin: GamePlugin<HushleState, HushleAction> = {
     pass: { role: 'host' },
     penalty: { role: 'host' },
     /**
-     * Classic-Taboo buzzer: any player in the session may dispatch it.
-     * The host injects the authenticated actor id as `bustedBy`
-     * (actorFields) and the reducer verifies the caller sits on an
-     * OPPOSING team — teammates and the floater cannot bust.
+     * Classic-Taboo buzzer: any SERVER MEMBER may dispatch it (the
+     * route has already verified server membership). The host injects
+     * the authenticated actor id as `bustedBy` (actorFields) and the
+     * reducer verifies the caller sits on an OPPOSING team per the
+     * host-configured rosters — teammates and floaters cannot bust.
+     * ('player' role is unusable today: game_session_players is only
+     * populated for the creator, so a 'player' check would 403 real
+     * opponents.)
      */
-    'bust-forbidden': { role: 'player', actorFields: ['bustedBy'] },
+    'bust-forbidden': { role: 'member', actorFields: ['bustedBy'] },
     'end-turn': { role: 'host' },
     'end-game': { role: 'host' },
   },
