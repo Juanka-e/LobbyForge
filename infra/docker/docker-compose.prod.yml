@@ -189,6 +189,24 @@ services:
       - edge
       - internal
 
+  # ── Voice fallback: coturn TURN relay (LF-019) ────────────────────
+  # For clients behind symmetric NATs or UDP-blocking corporate
+  # networks: LiveKit advertises this server via rtc.turn_servers in
+  # livekit.yaml, and WebRTC clients fall back to it only when
+  # direct/STUN paths fail. Host networking is deliberate — mapping a
+  # 41-port UDP relay range is error-prone and breaks the external-ip
+  # negotiation. Open on the firewall: 3478+5349 (tcp/udp) and
+  # 49160-49200/udp.
+  turn:
+    image: coturn/coturn:4.6.2  # LF-019: pinned
+    container_name: lobbyforge-turn
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ../turn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+      - ../certbot/conf:/etc/letsencrypt:ro
+    command: ["-c", "/etc/coturn/turnserver.conf"]
+
 volumes:
   postgres-data:
   redis-data:

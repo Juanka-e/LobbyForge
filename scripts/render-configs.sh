@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# LF-010-R: render the nginx and LiveKit configs from their templates.
+# LF-010-R: render the nginx, LiveKit and coturn configs from their
+# templates.
 #
 # Why a standalone script: install.sh used to `sed -i` the TRACKED config
 # files in place. The first run destroyed the LOBBYFORGE_DOMAIN
@@ -8,13 +9,15 @@
 # Templates are the immutable source of truth; the generated files are
 # re-rendered from scratch on EVERY run and are git-ignored.
 #
-# Usage: scripts/render-configs.sh <domain> [infra-root]
-#   <domain>     public domain, e.g. lobby.example.com (validated by caller)
-#   [infra-root] defaults to the repo's infra/ directory
+# Usage: scripts/render-configs.sh <domain> <turn-secret> [infra-root]
+#   <domain>      public domain, e.g. lobby.example.com (validated by caller)
+#   <turn-secret> shared coturn/LiveKit credential (LF-019); hex, >= 32 chars
+#   [infra-root]  defaults to the repo's infra/ directory
 set -euo pipefail
 
-DOMAIN="${1:?usage: render-configs.sh <domain> [infra-root]}"
-ROOT="${2:-$(cd "$(dirname "$0")/.." && pwd)/infra}"
+DOMAIN="${1:?usage: render-configs.sh <domain> <turn-secret> [infra-root]}"
+TURN_SECRET="${2:?usage: render-configs.sh <domain> <turn-secret> [infra-root]}"
+ROOT="${3:-$(cd "$(dirname "$0")/.." && pwd)/infra}"
 
 # Defense in depth: a domain containing the sed delimiter or slashes
 # would corrupt the generated configs. install.sh validates too, but a
@@ -26,6 +29,14 @@ case "$DOMAIN" in
     ;;
 esac
 
+# The TURN credential is written into two rendered files (coturn static
+# user + LiveKit rtc.turn_servers). Anything that isn't plain hex could
+# inject newlines/config syntax into either file.
+if ! [[ "$TURN_SECRET" =~ ^[0-9a-fA-F]{32,128}$ ]]; then
+  echo "render-configs: turn secret must be 32-128 hex characters" >&2
+  exit 1
+fi
+
 render() {
   local template="$1" target="$2"
   if [ ! -f "$template" ]; then
@@ -34,9 +45,11 @@ render() {
   fi
   # NOT sed -i: the template is never mutated; output goes to the
   # generated (git-ignored) target.
-  sed "s/LOBBYFORGE_DOMAIN/$DOMAIN/g" "$template" > "$target"
+  sed -e "s/LOBBYFORGE_DOMAIN/$DOMAIN/g" -e "s/TURN_CREDENTIAL/$TURN_SECRET/g" \
+    "$template" > "$target"
   echo "rendered $(basename "$target") for $DOMAIN"
 }
 
 render "$ROOT/nginx/conf.d/app.conf.template" "$ROOT/nginx/conf.d/app.conf"
 render "$ROOT/livekit/livekit.yaml.template" "$ROOT/livekit/livekit.yaml"
+render "$ROOT/turn/turnserver.conf.template" "$ROOT/turn/turnserver.conf"

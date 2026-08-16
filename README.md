@@ -152,6 +152,7 @@ plugins/
 - **[docs/WEB_APP.md](docs/WEB_APP.md)** — the Next.js app in detail
 - **[docs/PLUGIN_SDK.md](docs/PLUGIN_SDK.md)** — how to write a plugin
 - **[docs/DOCTOR.md](docs/DOCTOR.md)** — health & capacity monitoring
+- **[docs/VOICE_TURN.md](docs/VOICE_TURN.md)** — production voice networking: coturn TURN fallback, firewall ports, NAT test matrix
 - **[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)** — how to contribute
 - **[docs/CHANGELOG.md](docs/CHANGELOG.md)** — full change history
 

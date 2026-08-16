@@ -14,16 +14,31 @@ rtc:
   port_range_end: 60000
   use_external_ip: true
   enable_loopback_reflection: false
+  # LF-019: standalone coturn fallback (see the `turn` service in
+  # docker-compose.prod.yml). LiveKit hands these entries to clients in
+  # the connect response; they are tried only after direct/STUN paths
+  # fail, so voice works behind symmetric NATs and UDP-blocking
+  # networks. TURN_CREDENTIAL matches turnserver.conf's static user and
+  # is substituted by scripts/render-configs.sh.
+  turn_servers:
+    - host: LOBBYFORGE_DOMAIN
+      port: 3478
+      protocol: udp
+      username: lobbyforge
+      credential: TURN_CREDENTIAL
+    - host: LOBBYFORGE_DOMAIN
+      port: 3478
+      protocol: tcp
+      username: lobbyforge
+      credential: TURN_CREDENTIAL
 
 keys:
   # Set via LIVEKIT_KEYS env var in docker-compose (format: "key: secret")
 
-# TURN server (optional — uncomment if you run coturn)
-# turn:
-#   enabled: true
-#   domain: LOBBYFORGE_DOMAIN
-#   tls_port: 5349
-#   secret: "your-turn-secret"
+# NOTE: LiveKit's built-in `turn:` block is intentionally NOT used — it
+# provisions its own certificates and would fight the stack's certbot.
+# The standalone coturn container + rtc.turn_servers above is the
+# supported TURN path.
 
 logging:
   level: info

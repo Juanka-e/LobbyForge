@@ -96,16 +96,34 @@ else
   DEPLOYMENT_MODE="self_host"
 fi
 
-# Generate secrets
+# Generate secrets. On a RE-RUN, values already present in .env.prod are
+# reused — rotating every credential each run would invalidate existing
+# sessions, admin tokens and TURN credentials for no benefit.
+reuse_env() {
+  local key="$1" generated="$2"
+  if [ -f "$ENV_FILE" ]; then
+    local prev
+    prev=$(grep -E "^${key}=" "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+    if [ -n "$prev" ]; then
+      echo "$prev"
+      return
+    fi
+  fi
+  echo "$generated"
+}
+
 echo ""
 echo -e "${BOLD}Generating secure secrets...${NC}"
-SESSION_SECRET=$(openssl rand -hex 32)
-ADMIN_TOKEN=$(openssl rand -hex 32)
-SETUP_TOKEN=$(openssl rand -hex 32)
-PG_PASSWORD=$(openssl rand -hex 16)
-REDIS_PASSWORD=$(openssl rand -hex 16)
-LK_API_KEY="devkey_$(openssl rand -hex 8)"
-LK_API_SECRET=$(openssl rand -hex 32)
+SESSION_SECRET=$(reuse_env LOBBYFORGE_SESSION_SECRET "$(openssl rand -hex 32)")
+ADMIN_TOKEN=$(reuse_env LOBBYFORGE_ADMIN_TOKEN "$(openssl rand -hex 32)")
+SETUP_TOKEN=$(reuse_env LOBBYFORGE_SETUP_TOKEN "$(openssl rand -hex 32)")
+PG_PASSWORD=$(reuse_env POSTGRES_PASSWORD "$(openssl rand -hex 16)")
+REDIS_PASSWORD=$(reuse_env REDIS_PASSWORD "$(openssl rand -hex 16)")
+LK_API_KEY=$(reuse_env LIVEKIT_API_KEY "devkey_$(openssl rand -hex 8)")
+LK_API_SECRET=$(reuse_env LIVEKIT_API_SECRET "$(openssl rand -hex 32)")
+# LF-019: shared coturn <-> LiveKit TURN credential (hex — render-configs
+# validates the shape before writing it into both configs).
+TURN_SECRET=$(reuse_env LOBBYFORGE_TURN_SECRET "$(openssl rand -hex 32)")
 
 echo -e "${GREEN}✓ Secrets generated.${NC}"
 echo ""
@@ -137,6 +155,7 @@ NEXT_PUBLIC_WS_URL=wss://$DOMAIN/ws
 LOBBYFORGE_SESSION_SECRET=$SESSION_SECRET
 LOBBYFORGE_ADMIN_TOKEN=$ADMIN_TOKEN
 LOBBYFORGE_SETUP_TOKEN=$SETUP_TOKEN
+LOBBYFORGE_TURN_SECRET=$TURN_SECRET
 
 # Product
 LOBBYFORGE_DEPLOYMENT_MODE=$DEPLOYMENT_MODE
@@ -159,9 +178,9 @@ echo ""
 # what makes a re-run with a different domain correct: the old in-place
 # `sed -i` destroyed the placeholder on first run and left nginx/LiveKit
 # stuck on the previous domain.
-echo -e "${BOLD}Rendering nginx + LiveKit configs for $DOMAIN...${NC}"
-if bash "$SCRIPT_DIR/scripts/render-configs.sh" "$DOMAIN" "$SCRIPT_DIR/infra"; then
-  echo -e "${GREEN}✓ Nginx and LiveKit configured.${NC}"
+echo -e "${BOLD}Rendering nginx + LiveKit + TURN configs (LF-010-R)...${NC}"
+if bash "$SCRIPT_DIR/scripts/render-configs.sh" "$DOMAIN" "$TURN_SECRET" "$SCRIPT_DIR/infra"; then
+  echo -e "${GREEN}✓ Nginx, LiveKit and coturn TURN configured.${NC}"
 else
   echo -e "${RED}✗ Failed to render configs from templates.${NC}"
   exit 1
@@ -238,6 +257,15 @@ echo ""
 echo -e "${BOLD}Important credentials (save these!):${NC}"
 echo "  Admin Token:  $ADMIN_TOKEN"
 echo "  Setup Token:  $SETUP_TOKEN (remove after setup!)"
+echo ""
+echo -e "${BOLD}Firewall ports required for voice (LF-019):${NC}"
+echo "  80/tcp + 443/tcp          web (nginx + HTTPS)"
+echo "  3478/tcp + 3478/udp       TURN (coturn)"
+echo "  5349/tcp + 5349/udp       TURN/TLS (UDP-blocked networks)"
+echo "  49160-49200/udp           TURN relay range"
+echo "  50000-60000/udp           LiveKit RTC media"
+echo ""
+echo "  Example (ufw): ufw allow 3478/tcp; ufw allow 3478/udp; ufw allow 5349/tcp; ufw allow 5349/udp; ufw allow 49160:49200/udp; ufw allow 50000:60000/udp"
 echo ""
 echo -e "${BOLD}To stop:${NC}  docker compose -f $COMPOSE_FILE --env-file $ENV_FILE down"
 echo -e "${BOLD}To update:${NC}  docker compose -f $COMPOSE_FILE --env-file $ENV_FILE pull && docker compose -f $COMPOSE_FILE --env-file $ENV_FILE up -d --build"

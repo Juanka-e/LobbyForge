@@ -1,0 +1,52 @@
+# coturn TURN server — LobbyForge production (LF-019).
+#
+# TEMPLATE: scripts/render-configs.sh renders this to the sibling
+# turnserver.conf with LOBBYFORGE_DOMAIN and TURN_CREDENTIAL substituted.
+# The rendered file is git-ignored.
+#
+# Firewall requirements (host network — coturn binds directly):
+#   3478/tcp + 3478/udp   TURN listening port
+#   5349/tcp + 5349/udp   TURN/TLS (falls back to TCP+TLS when UDP is blocked)
+#   49160-49200/udp       relay range (one port per relayed media stream)
+
+listening-port=3478
+tls-listening-port=5349
+
+# Authentication: long-term mechanism with a static user matching the
+# LiveKit `rtc.turn_servers` entry in livekit.yaml. LiveKit hands these
+# credentials to clients in the connect response; they are only used
+# when direct peer-to-peer / STUN paths fail.
+lt-cred-mech
+user=lobbyforge:TURN_CREDENTIAL
+realm=LOBBYFORGE_DOMAIN
+
+# TLS certificates (shared with nginx via the certbot volume).
+cert=/etc/letsencrypt/live/LOBBYFORGE_DOMAIN/fullchain.pem
+pkey=/etc/letsencrypt/live/LOBBYFORGE_DOMAIN/privkey.pem
+no-tlsv1
+no-tlsv1_1
+
+# Relay port range — keep in sync with the firewall checklist above.
+min-port=49160
+max-port=49200
+
+# Resource limits (a small self-hosted community).
+total-quota=120
+user-quota=8
+stale-nonce=600
+
+# Hardening: refuse to relay to loopback/link-local/multicast ranges.
+no-multicast-peers
+denied-peer-ip=0.0.0.0-0.255.255.255
+denied-peer-ip=127.0.0.0-127.255.255.255
+denied-peer-ip=169.254.0.0-169.254.255.255
+denied-peer-ip=::1
+no-cli
+
+# If the server sits behind 1:1 NAT (cloud VM with a private interface),
+# set the public address explicitly, e.g.:
+# external-ip=203.0.113.10
+# external-ip=203.0.113.10/10.0.0.5   # public/private pair
+
+log-file=stdout
+simple-log
