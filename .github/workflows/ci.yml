@@ -165,6 +165,8 @@ jobs:
       # prove backup -> destroy -> restore -> verify on every push.
       - name: Destructive backup drill
         run: |
+          pnpm --filter @lobbyforge/config build
+          pnpm --filter @lobbyforge/core build
           pnpm --filter @lobbyforge/db build
           bash scripts/backup-drill.sh
 
