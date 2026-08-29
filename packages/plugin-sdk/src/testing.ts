@@ -75,6 +75,21 @@ export function createTestHarness<TState = unknown, TAction = unknown>(
     getParticipants: () => options.players,
   };
 
+  // In-memory stand-in for the Postgres-backed storage sub-context —
+  // enough for reducer tests; persistence is the host's contract.
+  const storageBacking = new Map<string, unknown>();
+  const storageContext = {
+    get: async (key: string) => storageBacking.get(key),
+    set: async (key: string, value: unknown) => {
+      storageBacking.set(key, value);
+    },
+    delete: async (key: string) => storageBacking.delete(key),
+    list: async () => [...storageBacking.entries()].map(([key, value]) => ({ key, value })),
+    clear: async () => {
+      storageBacking.clear();
+    },
+  };
+
   const context: GamePluginContext<TState> = {
     actorUserId: options.players[0] ?? 'test-actor',
     players: playersContext,
@@ -86,6 +101,7 @@ export function createTestHarness<TState = unknown, TAction = unknown>(
     votes: votesContext,
     scores: scoresContext,
     voice: voiceContext,
+    storage: storageContext,
   };
 
   return {

@@ -289,6 +289,8 @@ async function handlePost(
       db: getDb(),
       sessionId,
       actorUserId: session.uid,
+      serverId,
+      pluginId: row.pluginId,
     });
     // State versioning: upgrade the persisted row to the plugin's
     // current shape before running the reducer. The reducer only

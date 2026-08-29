@@ -98,6 +98,24 @@ export interface VoiceSubContext {
   getParticipants: () => string[];
 }
 
+/**
+ * Faz E — persistent key-value storage scoped to (server, plugin).
+ * The HOST executes every operation on the plugin's behalf; community
+ * plugins never receive SQL or a DbClient. Keys are
+ * [a-zA-Z0-9._:-]{1,128}. Values are JSON; `set` replaces the whole
+ * value (no merge). Durability: PostgreSQL, not Redis — data survives
+ * restarts, and uninstall cleanup is `clear()`.
+ */
+export interface StorageSubContext {
+  get: (key: string) => Promise<unknown>;
+  set: (key: string, value: unknown) => Promise<void>;
+  delete: (key: string) => Promise<boolean>;
+  /** Every key->value in this plugin's scope (bounded by the plugin's own keyspace). */
+  list: () => Promise<Array<{ key: string; value: unknown }>>;
+  /** Wipe every key of this plugin on this server (uninstall/cleanup). */
+  clear: () => Promise<void>;
+}
+
 // Injected by the host
 export interface GamePluginContext<TState = unknown> {
   actorUserId: string;
@@ -110,6 +128,8 @@ export interface GamePluginContext<TState = unknown> {
   votes: VotesSubContext;
   scores: ScoresSubContext;
   voice: VoiceSubContext;
+  /** Persistent per-(server, plugin) storage (Faz E). */
+  storage: StorageSubContext;
 }
 
 export interface GamePluginActionPolicy {

@@ -2,6 +2,33 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Plugin storage, two-client voice E2E, security gates - 2026-08-29
+
+### Added
+
+- **Plugin Storage API (Faz E)**: `ctx.storage` — persistent Postgres
+  key-value storage scoped to (server, plugin); plugins never get SQL or
+  a DbClient, the host executes get/set/delete/list/clear on their
+  behalf. Keys constrained to [a-zA-Z0-9._:-]{1,128} (injection-shaped
+  keys rejected, tested). SDK `StorageSubContext` + in-memory fallback
+  in the test harness; wired through the action + activity-create
+  contexts (unscoped contexts degrade to a visible in-memory fallback).
+- **Two-client voice E2E (V5-008)**: two DISTINCT users (owner + a
+  guest who redeems a real invite) each mint a LiveKit token, then two
+  browser contexts run the actual livekit-client: connect, publish
+  (fake-device) microphones, SUBSCRIBE to each other's audio track and
+  round-trip data messages. Locally verified green; wired into CI. The
+  e2e-ports override now runs LiveKit natively on 7890/7892 so ICE
+  candidates actually reach THIS instance (the dev stack owns 7880-7882
+  — advertising defaults sent client packets to the wrong container);
+  the harness page is served CSP-free at the app origin via route
+  interception (Chromium LNA blocks cross-origin loopback otherwise —
+  test-only launch flags).
+- **CI security gates (V5-009)**: CodeQL (javascript-typescript,
+  security-extended) + weekly schedule, and Trivy container scan of the
+  production image failing on CRITICAL (HIGH reported; base-image HIGHs
+  are redeploy-actionable, not PR blockers).
+
 ## [Unreleased] - Role-gated private channels (0028) - 2026-08-29
 
 ### Added

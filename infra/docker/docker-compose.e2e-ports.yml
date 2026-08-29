@@ -29,10 +29,28 @@ services:
       - "6390:6379"
   livekit:
     container_name: lobbyforge-e2e-livekit
+    # ICE correctness: LiveKit must ADVERTISE ports that actually reach
+    # THIS container. The dev stack owns host 7880-7882; if this stack
+    # advertised the defaults, client ICE packets to 127.0.0.1:7882 would
+    # land on the WRONG (dev) LiveKit and the peer connection would die.
+    # So run this instance natively on 7890-7892 (identity mapping).
+    command: !override
+      [
+        "--dev",
+        "--bind", "0.0.0.0",
+        "--node-ip", "127.0.0.1",
+        "--port", "7890",
+        "--udp-port", "7892",
+      ]
+    # Healthcheck follows the custom HTTP port (base checks 7880).
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:7890/"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     ports: !override
-      - "7890:7880"
-      - "7891:7881"
-      - "7892:7882/udp"
+      - "7890:7890"
+      - "7892:7892/udp"
   web:
     container_name: lobbyforge-e2e-web
     # The origin guard derives allowed origins from the INTERNAL request

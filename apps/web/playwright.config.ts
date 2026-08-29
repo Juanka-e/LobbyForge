@@ -39,6 +39,12 @@ export default defineConfig({
             '--use-fake-ui-for-media-stream',
             '--use-fake-device-for-media-stream',
             '--auto-select-desktop-capture-source=Entire screen',
+            // The voice E2E connects from the app origin (:3100) to the
+            // LiveKit port (:7890) — both loopback, but Chromium's Local
+            // Network Access DENIES cross-origin loopback fetches in
+            // headless. Test-only bypass; no product-behavior change.
+            '--disable-web-security',
+            '--disable-features=BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessRespectPreflightResults,LocalNetworkAccessChecks',
           ],
         },
       },

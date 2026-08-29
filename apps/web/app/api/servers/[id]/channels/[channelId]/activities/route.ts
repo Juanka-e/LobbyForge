@@ -169,6 +169,8 @@ async function handlePost(
       db: getDb(),
       sessionId: 'pending',
       actorUserId: session.uid,
+      serverId,
+      pluginId: plugin.manifest.id,
     });
     const initialState = await callCreateInitialState(plugin, ctx) as Record<string, unknown>;
 

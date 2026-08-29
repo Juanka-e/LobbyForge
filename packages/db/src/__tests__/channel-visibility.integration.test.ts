@@ -82,3 +82,62 @@ describe.skipIf(!enabled)('channel visibility queries (integration)', () => {
     await setChannelRoleOverrides(db, privateChannel, [roleId]);
   });
 });
+
+describe.skipIf(!enabled)('plugin storage queries (integration)', () => {
+  const PLUGIN = 'test-plugin';
+  const KEY = 'leaderboard:v1';
+  // Own server: the visibility describe's afterAll deletes ITS server
+  // before this describe runs (per-describe hooks), so we create fresh.
+  let pServerId: string;
+  let pOwnerId: string;
+
+  beforeAll(async () => {
+    pOwnerId = randomUUID();
+    pServerId = randomUUID();
+    await sql`INSERT INTO users (id, display_name) VALUES (${pOwnerId}, 'PStoreOwner')`;
+    await sql`INSERT INTO servers (id, name, owner_user_id) VALUES (${pServerId}, 'PStore', ${pOwnerId})`;
+  });
+
+  afterAll(async () => {
+    await sql`DELETE FROM servers WHERE id = ${pServerId}`;
+    await sql`DELETE FROM users WHERE id = ${pOwnerId}`;
+  });
+
+  it('set/get round-trips and upsert replaces whole values', async () => {
+    const { createDb, setPluginData, getPluginData } = await import('../index.js');
+    const db = createDb(dsn);
+    await setPluginData(db, pServerId, PLUGIN, KEY, { top: [{ p: 'u1', s: 10 }] });
+    expect(await getPluginData(db, pServerId, PLUGIN, KEY)).toEqual({ top: [{ p: 'u1', s: 10 }] });
+    await setPluginData(db, pServerId, PLUGIN, KEY, { top: [{ p: 'u2', s: 20 }] });
+    expect(await getPluginData(db, pServerId, PLUGIN, KEY)).toEqual({ top: [{ p: 'u2', s: 20 }] });
+  });
+
+  it('keys are namespaced per plugin (no cross-plugin reads)', async () => {
+    const { createDb, setPluginData, getPluginData } = await import('../index.js');
+    const db = createDb(dsn);
+    await setPluginData(db, pServerId, PLUGIN, KEY, { mine: true });
+    expect(await getPluginData(db, serverId, 'other-plugin', KEY)).toBeUndefined();
+  });
+
+  it('delete + list + clear behave', async () => {
+    const { createDb, setPluginData, deletePluginData, listPluginData, clearPluginData, getPluginData } =
+      await import('../index.js');
+    const db = createDb(dsn);
+    await setPluginData(db, pServerId, PLUGIN, 'a', 1);
+    await setPluginData(db, pServerId, PLUGIN, 'b', 2);
+    const listed = await listPluginData(db, pServerId, PLUGIN);
+    expect(listed.length).toBeGreaterThanOrEqual(2);
+    expect(await deletePluginData(db, pServerId, PLUGIN, 'a')).toBe(true);
+    expect(await deletePluginData(db, pServerId, PLUGIN, 'missing')).toBe(false);
+    expect(await getPluginData(db, pServerId, PLUGIN, 'a')).toBeUndefined();
+    await clearPluginData(db, pServerId, PLUGIN);
+    expect(await listPluginData(db, pServerId, PLUGIN)).toEqual([]);
+  });
+
+  it('rejects malformed keys (injection-shaped)', async () => {
+    const { createDb, setPluginData } = await import('../index.js');
+    const db = createDb(dsn);
+    await expect(setPluginData(db, pServerId, PLUGIN, 'bad key; drop', 1)).rejects.toThrow();
+    await expect(setPluginData(db, pServerId, PLUGIN, 'x'.repeat(200), 1)).rejects.toThrow();
+  });
+});

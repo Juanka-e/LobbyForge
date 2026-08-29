@@ -185,6 +185,14 @@ jobs:
       - name: Run compose-stack e2e
         run: pnpm --filter @lobbyforge/web exec playwright test compose-stack.spec.ts
 
+      # V5-008: REAL two-client voice — distinct users connect, publish
+      # (fake-device) microphones and subscribe to each other over the
+      # stack's LiveKit. The e2e-ports override gives LiveKit its OWN
+      # ICE ports (7890/7892) so client packets reach THIS instance.
+      - name: Two-client voice e2e
+        run: |
+          pnpm --filter @lobbyforge/web exec playwright test voice-two-clients.spec.ts
+
       # V5-004: destructive backup drill against a disposable postgres —
       # prove backup -> destroy -> restore -> verify on every push.
       - name: Destructive backup drill

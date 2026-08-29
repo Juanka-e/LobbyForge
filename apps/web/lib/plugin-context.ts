@@ -18,12 +18,22 @@ import type {
   RegisteredGamePlugin,
 } from '@lobbyforge/plugin-sdk';
 import type { DbClient } from '@lobbyforge/db';
-import { listPlayersForSession } from '@lobbyforge/db';
+import {
+  clearPluginData,
+  deletePluginData,
+  getPluginData,
+  listPluginData,
+  listPlayersForSession,
+  setPluginData,
+} from '@lobbyforge/db';
 
 export interface BuildPluginContextInput {
   db: DbClient;
   sessionId: string;
   actorUserId: string;
+  /** Faz E: scopes ctx.storage to (serverId, pluginId). */
+  serverId?: string;
+  pluginId?: string;
 }
 
 /**
@@ -121,6 +131,33 @@ export async function buildHttpPluginContext(
     getParticipants: (): string[] => [],
   };
 
+  // Faz E — persistent Postgres storage, scoped to (serverId, pluginId).
+  // When a route can't scope (no serverId/pluginId given) the plugin
+  // gets an explicit in-memory fallback so it degrades visibly instead
+  // of silently writing to another plugin's keyspace.
+  const memoryBacking = new Map<string, unknown>();
+  const scoped = input.serverId && input.pluginId;
+  const storageContext = scoped
+    ? {
+        get: (key: string) => getPluginData(input.db, input.serverId!, input.pluginId!, key),
+        set: (key: string, value: unknown) =>
+          setPluginData(input.db, input.serverId!, input.pluginId!, key, value),
+        delete: (key: string) => deletePluginData(input.db, input.serverId!, input.pluginId!, key),
+        list: () => listPluginData(input.db, input.serverId!, input.pluginId!),
+        clear: () => clearPluginData(input.db, input.serverId!, input.pluginId!),
+      }
+    : {
+        get: async (key: string) => memoryBacking.get(key),
+        set: async (key: string, value: unknown) => {
+          memoryBacking.set(key, value);
+        },
+        delete: async (key: string) => memoryBacking.delete(key),
+        list: async () => [...memoryBacking.entries()].map(([key, value]) => ({ key, value })),
+        clear: async () => {
+          memoryBacking.clear();
+        },
+      };
+
   return {
     actorUserId: input.actorUserId,
     players: playersContext,
@@ -132,6 +169,7 @@ export async function buildHttpPluginContext(
     votes: votesContext,
     scores: scoresContext,
     voice: voiceContext,
+    storage: storageContext,
   };
 }
 
