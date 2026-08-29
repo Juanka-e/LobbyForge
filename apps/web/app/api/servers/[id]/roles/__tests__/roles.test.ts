@@ -12,8 +12,13 @@ const deleteRole = vi.fn();
 const getUserPermissions = vi.fn();
 const logAction = vi.fn().mockResolvedValue(undefined);
 
+const { getHighestRolePosition } = vi.hoisted(() => ({
+  getHighestRolePosition: vi.fn().mockResolvedValue(Number.POSITIVE_INFINITY),
+}));
+
 vi.mock('@lobbyforge/db', () => ({
   getServerById,
+  getHighestRolePosition,
   isServerMember,
   listRolesForServer,
   createRole,
@@ -173,6 +178,33 @@ describe('POST /api/servers/{id}/roles', () => {
     const res = await POST(req, { params: Promise.resolve({ id: SERVER_ID }) });
     expect(res.status).toBe(400);
     expect(createRole).not.toHaveBeenCalled();
+  });
+
+  it('accepts a single-emoji role icon (Discord-style)', async () => {
+    getServerById.mockResolvedValue(mockServer());
+    getUserPermissions.mockResolvedValue(['manage_roles']);
+    getHighestRolePosition.mockResolvedValue(Number.POSITIVE_INFINITY);
+    createRole.mockResolvedValue({
+      id: 'role-emoji',
+      serverId: SERVER_ID,
+      name: 'Gamers',
+      color: null,
+      icon: '🎮',
+      displaySeparately: false,
+      position: 0,
+      permissions: [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const { POST } = await loadListRoute();
+    const req = new Request(`https://example.test/api/servers/${SERVER_ID}/roles`, {
+      method: 'POST',
+      headers: { cookie: makeSessionCookie() },
+      body: JSON.stringify({ name: 'Gamers', icon: '🎮', permissions: [] }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ id: SERVER_ID }) });
+    expect(res.status).toBe(201);
+    expect(createRole).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ icon: '🎮' }));
   });
 
   it('rejects a name-less body with 400', async () => {

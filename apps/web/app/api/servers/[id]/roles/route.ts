@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { CorePermission, hasPermission } from '@lobbyforge/core';
 import {
   createRole,
+  getHighestRolePosition,
   getServerById,
   getUserPermissions,
   isServerMember,
@@ -13,7 +14,7 @@ import {
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
-import { ROLE_ICONS } from '@/lib/role-icons';
+import { isValidRoleIcon } from '@/lib/role-icons';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -23,7 +24,7 @@ const KNOWN_PERMISSIONS = new Set<string>(Object.values(CorePermission));
 const CreateRoleSchema = z.object({
   name: z.string().min(1).max(64),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
-  icon: z.enum(ROLE_ICONS).nullable().optional(),
+  icon: z.string().refine(isValidRoleIcon, 'Icon must be a supported Material name or a single emoji').nullable().optional(),
   displaySeparately: z.boolean().optional(),
   position: z.number().int().min(0).max(1_000_000).optional(),
   permissions: z.array(z.string()).max(64),
@@ -150,6 +151,21 @@ async function handlePost(
         { error: 'Unknown permissions in request', unknown },
         { status: 400 }
       );
+    }
+
+    // Discord-style hierarchy on CREATE: a non-owner cannot birth a role
+    // at/past their own rank (that would be gifting themselves a
+    // promotion). ADMINISTRATOR does not bypass; only the owner does.
+    const server = await getServerById(getDb(), serverId);
+    if (server && session.uid !== server.ownerUserId) {
+      const actorHighest = await getHighestRolePosition(getDb(), serverId, session.uid);
+      const requested = body.position ?? 0;
+      if (requested >= actorHighest) {
+        return NextResponse.json(
+          { error: 'You cannot create a role at or above your highest role' },
+          { status: 403 }
+        );
+      }
     }
 
     const role = await createRole(getDb(), {

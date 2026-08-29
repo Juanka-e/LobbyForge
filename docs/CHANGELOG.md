@@ -2,6 +2,38 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Discord-style roles & hierarchy + GIF banners - 2026-08-17
+
+### Added
+
+- **Role hierarchy (Discord semantics)**: a member's rank is the highest
+  position among their roles; the owner outranks everything. Assigning,
+  editing, deleting, position-moving AND creating roles are now all
+  restricted to roles STRICTLY BELOW the actor's highest — ADMINISTRATOR
+  does NOT bypass this (matching Discord); only the owner does, and only
+  the owner may change the owner's roles.
+- **Emoji role icons**: any single Unicode emoji (ZWJ sequences, flags,
+  skin tones, keycaps) is accepted alongside the legacy Material icon
+  names — validated with Extended_Pictographic property escapes, length
+  capped at 32 UTF-16 units; text/control-char/XSS payloads rejected.
+- **GIF support**: avatars, user banners AND the new server banner accept
+  animated GIF87a/GIF89a alongside PNG/JPEG/WebP.
+- **Server-side image dimension enforcement**: a zero-dependency header
+  parser reads real dimensions (PNG IHDR, GIF logical screen, WebP
+  VP8/VP8L/VP8X, JPEG SOF scan). Avatars: min 256×256; banners: min
+  960×540; both capped at 4096×4096. Polyglot defense: the declared MIME
+  must match the content-sniffed format.
+- **Server banner upload**: POST/DELETE /api/servers/\{id\}/banner
+  (MANAGE_SERVER) persisting to servers.banner_url; the lobby sidebar
+  header already renders it Discord-style behind the community name.
+  Audit-logged.
+
+### Fixed
+
+- Git-Bash heredoc corruption trap documented in-source: shell-written
+  regex files silently collapsed Unicode property escapes
+  (String.raw used to make them shell-proof).
+
 ## [Unreleased] - 5th-audit fixes: production voice proxy, TURN lifecycle, fail-closed backup - 2026-08-16
 
 ### Fixed

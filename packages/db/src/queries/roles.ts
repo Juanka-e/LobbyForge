@@ -450,3 +450,35 @@ export async function listMembersForServer(
     };
   });
 }
+
+/**
+ * Discord-style role hierarchy: a member's effective rank is the HIGHEST
+ * position among their roles. The server OWNER outranks every role
+ * (Infinity). Members with no roles rank lowest (below every role).
+ *
+ * Mutation rule enforced by the routes: you may only assign/edit/delete
+ * roles STRICTLY BELOW your own highest role. ADMINISTRATOR does NOT
+ * bypass this (matching Discord) — only ownership does.
+ */
+export async function getHighestRolePosition(
+  db: DbClient,
+  serverId: string,
+  userId: string,
+  ownerUserId?: string | null
+): Promise<number> {
+  if (ownerUserId != null && ownerUserId === userId) return Number.POSITIVE_INFINITY;
+  const rows = await db
+    .select({ position: roles.position })
+    .from(membershipRoles)
+    .innerJoin(memberships, eq(membershipRoles.membershipId, memberships.id))
+    .innerJoin(roles, eq(membershipRoles.roleId, roles.id))
+    .where(and(eq(memberships.serverId, serverId), eq(memberships.userId, userId)));
+  // Memberships.roleId is the legacy single-role column — count it too.
+  const legacy = await db
+    .select({ position: roles.position })
+    .from(memberships)
+    .innerJoin(roles, eq(memberships.roleId, roles.id))
+    .where(and(eq(memberships.serverId, serverId), eq(memberships.userId, userId)));
+  const positions = [...rows, ...legacy].map((r) => r.position);
+  return positions.length > 0 ? Math.max(...positions) : -1;
+}

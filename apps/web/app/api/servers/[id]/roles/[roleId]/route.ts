@@ -5,6 +5,7 @@ import {
   EVERYONE_ROLE_NAME,
   deleteRole,
   getRoleById,
+  getHighestRolePosition,
   getServerById,
   getUserPermissions,
   isServerMember,
@@ -15,7 +16,7 @@ import {
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
-import { ROLE_ICONS } from '@/lib/role-icons';
+import { isValidRoleIcon } from '@/lib/role-icons';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -25,7 +26,7 @@ const KNOWN_PERMISSIONS = new Set<string>(Object.values(CorePermission));
 const PatchRoleSchema = z.object({
   name: z.string().min(1).max(64).optional(),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(),
-  icon: z.enum(ROLE_ICONS).nullable().optional(),
+    icon: z.string().refine(isValidRoleIcon, 'Icon must be a supported Material name or a single emoji').nullable().optional(),
   displaySeparately: z.boolean().optional(),
   position: z.number().int().min(0).max(1_000_000).optional(),
   permissions: z.array(z.string()).max(64).optional(),
@@ -103,9 +104,29 @@ async function loadRoleForRead(serverId: string, roleId: string, userId: string)
 async function loadRoleForWrite(serverId: string, roleId: string, userId: string): Promise<AuthContext | AuthError> {
   const ctx = await loadRoleForRead(serverId, roleId, userId);
   if (!ctx.ok) return ctx;
+  const server = await getServerById(getDb(), serverId);
+  if (!server) {
+    return { ok: false, response: NextResponse.json({ error: 'Server not found' }, { status: 404 }) };
+  }
   const permissions = await getUserPermissions(getDb(), userId, serverId);
   if (!hasPermission(permissions, CorePermission.MANAGE_ROLES)) {
     return { ok: false, response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
+  }
+  // Discord-style hierarchy (applies to ADMINISTRATOR too; only the
+  // owner bypasses): you may only edit/delete roles STRICTLY BELOW your
+  // own highest role. The @everyone role is never deletable/position-
+  // editable by non-owners either.
+  if (userId !== server.ownerUserId) {
+    const actorHighest = await getHighestRolePosition(getDb(), serverId, userId);
+    if (ctx.role.position >= actorHighest) {
+      return {
+        ok: false,
+        response: NextResponse.json(
+          { error: 'You can only modify roles below your highest role' },
+          { status: 403 }
+        ),
+      };
+    }
   }
   return ctx;
 }
@@ -180,6 +201,21 @@ async function handlePatch(req: Request, ctx: { params: Promise<{ id: string; ro
           { error: 'Unknown permissions in request', unknown },
           { status: 400 }
         );
+      }
+    }
+
+    if (body.position !== undefined && access.role.position !== body.position) {
+      // Moving a role at/past the actor's own rank would let a lower
+      // member leapfrog into equivalence with (or above) their superior.
+      const server = await getServerById(getDb(), serverId);
+      if (server && session.uid !== server.ownerUserId) {
+        const actorHighest = await getHighestRolePosition(getDb(), serverId, session.uid);
+        if (body.position >= actorHighest) {
+          return NextResponse.json(
+            { error: 'You cannot move a role to a position at or above your highest role' },
+            { status: 403 }
+          );
+        }
       }
     }
 

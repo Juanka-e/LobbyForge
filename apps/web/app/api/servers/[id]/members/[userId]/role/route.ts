@@ -4,6 +4,7 @@ import { CorePermission, hasPermission } from '@lobbyforge/core';
 import {
   setMemberRoles,
   getRoleById,
+  getHighestRolePosition,
   getServerById,
   getUserPermissions,
   isServerMember,
@@ -90,10 +91,38 @@ async function handlePut(
     }
 
     const uniqueRoleIds = Array.from(new Set(body.roleIds));
-    for (const roleId of uniqueRoleIds) {
-      const role = await getRoleById(getDb(), roleId);
-      if (!role || role.serverId !== serverId) {
-        return NextResponse.json({ error: 'Role not found in this server' }, { status: 404 });
+
+    // Discord-style hierarchy:
+    //  - Only the OWNER may change the owner's roles (admins cannot).
+    //  - ADMINISTRATOR does NOT bypass ranking: everyone else may only
+    //    assign roles STRICTLY BELOW their own highest role.
+    if (targetUserId === server.ownerUserId && session.uid !== server.ownerUserId) {
+      return NextResponse.json(
+        { error: "Only the server owner can change the owner's roles" },
+        { status: 403 }
+      );
+    }
+    if (session.uid !== server.ownerUserId) {
+      const actorHighest = await getHighestRolePosition(getDb(), serverId, session.uid);
+      for (const roleId of uniqueRoleIds) {
+        const role = await getRoleById(getDb(), roleId);
+        if (!role || role.serverId !== serverId) {
+          return NextResponse.json({ error: 'Role not found in this server' }, { status: 404 });
+        }
+        if (role.position >= actorHighest) {
+          return NextResponse.json(
+            { error: `You can only assign roles below your highest role (role "${role.name}" is at or above it)` },
+            { status: 403 }
+          );
+        }
+      }
+    } else {
+      // Owner assigns freely — still verify the roles exist in this server.
+      for (const roleId of uniqueRoleIds) {
+        const role = await getRoleById(getDb(), roleId);
+        if (!role || role.serverId !== serverId) {
+          return NextResponse.json({ error: 'Role not found in this server' }, { status: 404 });
+        }
       }
     }
 

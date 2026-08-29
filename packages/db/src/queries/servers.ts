@@ -17,6 +17,7 @@ export interface ServerRow {
   slug: string | null;
   ownerUserId: string;
   iconUrl: string | null;
+  bannerUrl: string | null;
   defaultLocale: string;
   isPublic: boolean;
   createdAt: Date;
@@ -120,4 +121,25 @@ export async function listServersForUser(
  */
 export async function softDeleteServer(db: DbClient, id: string, now: Date = new Date()): Promise<void> {
   await db.update(servers).set({ deletedAt: now }).where(eq(servers.id, id));
+}
+
+/**
+ * Update a server's banner image URL (the lobby sidebar header renders it
+ * behind the community name, Discord-style). The route layer enforces
+ * image validation (content-sniffed format + dimensions); this persists.
+ */
+export async function updateServerBannerUrl(
+  db: DbClient,
+  serverId: string,
+  bannerUrl: string | null
+): Promise<ServerRow> {
+  const updated = await db
+    .update(servers)
+    .set({ bannerUrl })
+    .where(eq(servers.id, serverId))
+    .returning();
+  if (!updated[0]) {
+    throw new Error(`Server ${serverId} not found`);
+  }
+  return updated[0] as ServerRow;
 }
