@@ -63,12 +63,8 @@ jobs:
       - name: Build image
         run: docker build -t lobbyforge-web:scan .
 
+      # Run the official Trivy image directly against the Docker socket —
+      # the trivy-action wrapper's binary-install step proved flaky here.
       - name: Trivy vulnerability scan
-        uses: aquasecurity/trivy-action@v0.33.1
-        with:
-          image-ref: lobbyforge-web:scan
-          format: table
-          exit-code: '1'
-          severity: CRITICAL
-          ignore-unfixed: true
-          vuln-type: os,library
+        run: |
+          docker run --rm             -v /var/run/docker.sock:/var/run/docker.sock             aquasec/trivy:0.65.0             image --exit-code 1 --severity CRITICAL --ignore-unfixed             --scanners vuln             lobbyforge-web:scan
