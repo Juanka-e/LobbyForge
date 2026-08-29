@@ -135,6 +135,8 @@ export const memberships = pgTable('memberships', {
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   roleId: uuid('role_id').references(() => roles.id),
   nickname: text('nickname'),
+  /** MODERATE_MEMBERS timeout: mute from text+voice until this instant. */
+  timedOutUntil: timestamp('timed_out_until', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
   uniqueServerUser: unique('memberships_server_id_user_id_unique').on(table.serverId, table.userId),

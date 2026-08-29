@@ -14,8 +14,11 @@ const getUserPermissions = vi.fn();
 const getBlockedUserIds = vi.fn().mockResolvedValue(new Set<string>());
 const logAction = vi.fn().mockResolvedValue(undefined);
 
+const getActiveMemberTimeout = vi.fn().mockResolvedValue(null);
+
 vi.mock('@lobbyforge/db', () => ({
   getServerById,
+  getActiveMemberTimeout,
   isServerMember,
   getChannelById,
   createMessage,
@@ -52,6 +55,7 @@ beforeEach(() => {
   updateMessage.mockReset();
   softDeleteMessage.mockReset();
   getUserPermissions.mockReset();
+  getActiveMemberTimeout.mockReset().mockResolvedValue(null);
   logAction.mockReset();
   logAction.mockResolvedValue(undefined);
 });
@@ -362,7 +366,7 @@ describe('PATCH /api/servers/{id}/channels/{channelId}/messages/{messageId}', ()
       deletedAt: null,
     });
     isServerMember.mockResolvedValue(true);
-    getUserPermissions.mockResolvedValue(['send_messages']);
+    getUserPermissions.mockResolvedValue(['send_messages', 'read_message_history', 'mention_everyone']);
     mockChannelAlive();
     getMessageById.mockResolvedValue(
       mockMessageRow({ userId: '00000000-0000-0000-0000-000000000088' })
@@ -474,7 +478,7 @@ describe('PATCH /api/servers/{id}/channels/{channelId}/messages/{messageId}', ()
       deletedAt: null,
     });
     isServerMember.mockResolvedValue(true);
-    getUserPermissions.mockResolvedValue(['send_messages']);
+    getUserPermissions.mockResolvedValue(['send_messages', 'read_message_history', 'mention_everyone']);
     mockChannelAlive();
     getMessageById.mockResolvedValue(mockMessageRow());
     const { PATCH } = await loadItemRoute();
@@ -517,7 +521,7 @@ describe('DELETE /api/servers/{id}/channels/{channelId}/messages/{messageId}', (
       deletedAt: null,
     });
     isServerMember.mockResolvedValue(true);
-    getUserPermissions.mockResolvedValue(['send_messages']);
+    getUserPermissions.mockResolvedValue(['send_messages', 'read_message_history', 'mention_everyone']);
     mockChannelAlive();
     getMessageById.mockResolvedValue(
       mockMessageRow({ userId: '00000000-0000-0000-0000-000000000088' })
@@ -549,5 +553,80 @@ describe('DELETE /api/servers/{id}/channels/{channelId}/messages/{messageId}', (
     const json = (await res.json()) as { ok: boolean };
     expect(json.ok).toBe(true);
     expect(softDeleteMessage).toHaveBeenCalledWith(expect.anything(), MESSAGE_ID);
+  });
+});
+
+describe('POST message permission gates (role upgrade batch)', () => {
+  it('403 for a timed-out member (MODERATE_MEMBERS)', async () => {
+    mockServerAlive();
+    mockChannelAlive();
+    getUserPermissions.mockResolvedValue(['send_messages', 'mention_everyone']);
+    getActiveMemberTimeout.mockResolvedValue(new Date(Date.now() + 60_000));
+    const { POST } = await import('../route.js');
+    const res = await POST(
+      new Request('https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: makeSessionCookie() },
+        body: JSON.stringify({ content: 'hello' }),
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID }) }
+    );
+    expect(res.status).toBe(403);
+    expect(createMessage).not.toHaveBeenCalled();
+  });
+
+  it('403 when mentioning @everyone without MENTION_EVERYONE', async () => {
+    mockServerAlive();
+    mockChannelAlive();
+    getUserPermissions.mockResolvedValue(['send_messages']);
+    const { POST } = await import('../route.js');
+    const res = await POST(
+      new Request('https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: makeSessionCookie() },
+        body: JSON.stringify({ content: 'hi @everyone' }),
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID }) }
+    );
+    expect(res.status).toBe(403);
+    expect(createMessage).not.toHaveBeenCalled();
+  });
+
+  it('allows @everyone with the permission', async () => {
+    mockServerAlive();
+    mockChannelAlive();
+    getUserPermissions.mockResolvedValue(['send_messages', 'mention_everyone']);
+    createMessage.mockResolvedValue({
+      id: 'm1', channelId: 'ch-1', userId: '00000000-0000-0000-0000-000000000001',
+      content: 'hi @everyone', metadata: {}, createdAt: new Date(), updatedAt: new Date(), deletedAt: null,
+    });
+    const { POST } = await import('../route.js');
+    const res = await POST(
+      new Request('https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: makeSessionCookie() },
+        body: JSON.stringify({ content: 'hi @everyone' }),
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID }) }
+    );
+    expect(res.status).toBe(201);
+    expect(createMessage).toHaveBeenCalled();
+  });
+});
+
+describe('GET message history permission gate', () => {
+  it('403 when the member lacks READ_MESSAGE_HISTORY', async () => {
+    mockServerAlive();
+    mockChannelAlive();
+    getUserPermissions.mockResolvedValue(['send_messages']);
+    const { GET } = await import('../route.js');
+    const res = await GET(
+      new Request('https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}/messages', {
+        headers: { cookie: makeSessionCookie() },
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID }) }
+    );
+    expect(res.status).toBe(403);
+    expect(listMessagesForChannel).not.toHaveBeenCalled();
   });
 });

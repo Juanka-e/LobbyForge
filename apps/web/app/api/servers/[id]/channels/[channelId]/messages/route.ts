@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { MessageContentSchema } from '@lobbyforge/core';
 import {
   createMessage,
+  getActiveMemberTimeout,
   getChannelById,
   getServerById,
   getBlockedUserIds,
@@ -140,6 +141,15 @@ async function handleGet(
     const access = await assertMemberAndChannel(serverId, channelId, session.uid);
     if (!access.ok) return access.response;
 
+    // READ_MESSAGE_HISTORY: membership alone is not enough — a role can
+    // revoke history (write-only channels, announcement-style rooms).
+    const historyAuth = await authorizeServerPermission(
+      session.uid,
+      serverId,
+      CorePermission.READ_MESSAGE_HISTORY
+    );
+    if (!historyAuth.ok) return historyAuth.response;
+
     // Optional `before` cursor for pagination: ISO-8601 timestamp.
     // The list query always orders newest-first, so "before" is a
     // "give me messages older than this" pagination.
@@ -221,6 +231,28 @@ async function handlePost(
     // @everyone default role seeded on server creation.
     const auth = await authorizeServerPermission(session.uid, serverId, CorePermission.SEND_MESSAGES);
     if (!auth.ok) return auth.response;
+
+    // MODERATE_MEMBERS timeout: timed-out members cannot send messages
+    // until the timeout expires (cleared with the same endpoint).
+    const activeTimeout = await getActiveMemberTimeout(getDb(), serverId, session.uid);
+    if (activeTimeout) {
+      return NextResponse.json(
+        { error: 'You are timed out in this server', until: activeTimeout.toISOString() },
+        { status: 403 }
+      );
+    }
+
+    // MENTION_EVERYONE: @everyone in the content requires the explicit
+    // permission (notification-spam control, Discord semantics).
+    const mentionsEveryone = /(^|\s)@everyone\b/i.test(body.content);
+    if (mentionsEveryone) {
+      const mentionAuth = await authorizeServerPermission(
+        session.uid,
+        serverId,
+        CorePermission.MENTION_EVERYONE
+      );
+      if (!mentionAuth.ok) return mentionAuth.response;
+    }
     const metadataError = validateUserMetadata(body.metadata);
     if (metadataError) return metadataError;
 

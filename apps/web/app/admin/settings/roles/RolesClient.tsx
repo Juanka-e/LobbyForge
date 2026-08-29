@@ -44,14 +44,18 @@ const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: 'create_invite', label: 'Invite People' },
       { key: 'kick_members', label: 'Kick Members' },
       { key: 'ban_members', label: 'Ban Members' },
+      { key: 'moderate_members', label: 'Timeout Members' },
     ],
   },
   {
     label: 'Text Channels',
     permissions: [
       { key: 'send_messages', label: 'Send Messages' },
+      { key: 'read_message_history', label: 'Read Message History' },
+      { key: 'mention_everyone', label: 'Mention @everyone' },
       { key: 'manage_messages', label: 'Manage Messages' },
-      { key: 'add_reactions', label: 'Add Reactions' },
+      // NOTE: 'add_reactions' intentionally hidden — the reactions
+      // feature has no API yet; a visible no-op toggle misleads admins.
     ],
   },
   {
@@ -59,8 +63,10 @@ const PERMISSION_GROUPS: PermissionGroup[] = [
     permissions: [
       { key: 'connect_voice', label: 'Join Voice Rooms' },
       { key: 'speak', label: 'Speak' },
+      { key: 'stream', label: 'Camera & Screen Share' },
       { key: 'mute_members', label: 'Mute Members' },
-      { key: 'deafen_members', label: 'Deafen Members' },
+      // NOTE: 'deafen_members' hidden — no deafen-others endpoint exists
+      // (self-deafen is a local client preference, permission-free).
     ],
   },
   {

@@ -27,6 +27,7 @@ export interface MembershipRow {
   userId: string;
   roleId: string | null;
   nickname: string | null;
+  timedOutUntil: Date | null;
   createdAt: Date;
 }
 
@@ -364,4 +365,39 @@ export async function listMemberSummariesForServer(
     displayName: row.displayName || row.globalDisplayName,
     roles: (rolesByMembership.get(membershipId) ?? []).sort((a, b) => b.position - a.position),
   }));
+}
+
+/**
+ * MODERATE_MEMBERS: set/clear a member's timeout (muted from text AND
+ * voice until the given instant). `until = null` clears an active
+ * timeout. Returns the updated row.
+ */
+export async function setMemberTimeout(
+  db: DbClient,
+  serverId: string,
+  userId: string,
+  until: Date | null
+): Promise<MembershipRow> {
+  const [row] = await db
+    .update(memberships)
+    .set({ timedOutUntil: until })
+    .where(and(eq(memberships.serverId, serverId), eq(memberships.userId, userId)))
+    .returning();
+  if (!row) throw new Error(`setMemberTimeout: user ${userId} is not a member of server ${serverId}`);
+  return row as MembershipRow;
+}
+
+/** Active (non-expired) timeout for a member, or null. */
+export async function getActiveMemberTimeout(
+  db: DbClient,
+  serverId: string,
+  userId: string
+): Promise<Date | null> {
+  const [row] = await db
+    .select({ timedOutUntil: memberships.timedOutUntil })
+    .from(memberships)
+    .where(and(eq(memberships.serverId, serverId), eq(memberships.userId, userId)))
+    .limit(1);
+  const until = row?.timedOutUntil ?? null;
+  return until && until.getTime() > Date.now() ? until : null;
 }

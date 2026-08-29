@@ -2,6 +2,34 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Role permission upgrade: STREAM, timeouts, history/mention gates - 2026-08-17
+
+### Added
+
+- **STREAM permission** (role-level camera & screen-share gating): the
+  LiveKit token route now intersects server-wide toggles with the
+  MEMBER's role permissions — "only role X may share a screen" works.
+  Without SPEAK a member joins listen-only; a timed-out member keeps
+  listen access but loses the microphone.
+- **MODERATE_MEMBERS timeout** — the step between a warning and a
+  kick/ban: `PUT /api/servers/{id}/members/{userId}/timeout` (28-day
+  cap, null clears). Enforcement on message send AND mic publish.
+  Hierarchy applies (only members strictly below your highest role; the
+  owner can never be timed out). Migration 0027 adds
+  `memberships.timed_out_until` and backfills every existing @everyone
+  role with the new baseline permissions so current servers keep their
+  behaviour.
+- **READ_MESSAGE_HISTORY** gate on the message list (write-only /
+  announcement-style channels become possible).
+- **MENTION_EVERYONE** gate on `@everyone` in message content.
+
+### Changed
+
+- Roles UI: new permission toggles (Timeout Members, Read Message
+  History, Mention @everyone, Camera & Screen Share). `add_reactions`
+  and `deafen_members` are HIDDEN from the UI until their features ship
+  (no-op toggles mislead admins; enum keys stay reserved).
+
 ## [Unreleased] - Discord-style roles & hierarchy + GIF banners - 2026-08-17
 
 ### Added

@@ -8,10 +8,14 @@ import {
   requireLiveKitCredentials,
   type LiveKitGrants,
 } from '@/lib/livekit';
-import { getEffectiveServerVoiceSettings } from '@lobbyforge/db';
+import {
+  getActiveMemberTimeout,
+  getEffectiveServerVoiceSettings,
+  getUserPermissions,
+} from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import {
-  CorePermission,
+  CorePermission, hasPermission,
   requireChannelInServer,
   requireMaterializedSession,
   requireServerMember,
@@ -115,9 +119,13 @@ async function handler(req: Request): Promise<NextResponse> {
     }
   }
 
+  const memberPermissions = await getUserPermissions(getDb(), session.uid, body.serverId);
+  const activeTimeout = await getActiveMemberTimeout(getDb(), body.serverId, session.uid);
   const allowedPublishSources = buildAllowedPublishSources(
     { allowCamera: effectiveAllowCamera, allowScreenShare: effectiveAllowScreenShare },
-    body.canPublishSources
+    body.canPublishSources,
+    memberPermissions,
+    activeTimeout !== null
   );
   const grants: LiveKitGrants = {
     room,
@@ -173,13 +181,30 @@ export const POST = withApiSecurity(handler, {
   rateLimit: { identifier: 'livekit-token', config: { windowMs: 60_000, maxRequests: 30 } },
 });
 
+/**
+ * Per-MEMBER publish sources = server-wide toggles ∩ the member's ROLE
+ * permissions ∩ their moderation state:
+ *  - SPEAK gates the microphone (no SPEAK → listen-only participant).
+ *  - STREAM gates camera AND screen-share (a moderator/role can restrict
+ *    exactly who may turn on a camera or share a screen — role-level,
+ *    not just the owner's server-wide switch).
+ *  - An active MODERATE_MEMBERS timeout strips the microphone (the
+ *    timed-out member can still listen).
+ */
 function buildAllowedPublishSources(
   settings: { allowCamera: boolean; allowScreenShare: boolean },
-  requested?: Array<'camera' | 'microphone' | 'screen-share' | 'screen-share-audio'>
+  requested: Array<'camera' | 'microphone' | 'screen-share' | 'screen-share-audio'> | undefined,
+  memberPerms: string[],
+  timedOut: boolean
 ): Array<'camera' | 'microphone' | 'screen-share' | 'screen-share-audio'> {
-  const allowed = new Set<'camera' | 'microphone' | 'screen-share' | 'screen-share-audio'>(['microphone']);
-  if (settings.allowCamera) allowed.add('camera');
-  if (settings.allowScreenShare) {
+  const allowed = new Set<'camera' | 'microphone' | 'screen-share' | 'screen-share-audio'>();
+  if (hasPermission(memberPerms, CorePermission.SPEAK) && !timedOut) {
+    allowed.add('microphone');
+  }
+  if (settings.allowCamera && hasPermission(memberPerms, CorePermission.STREAM)) {
+    allowed.add('camera');
+  }
+  if (settings.allowScreenShare && hasPermission(memberPerms, CorePermission.STREAM)) {
     allowed.add('screen-share');
     allowed.add('screen-share-audio');
   }

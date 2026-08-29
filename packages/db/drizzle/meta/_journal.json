@@ -183,6 +183,13 @@
       "when": 1785212800000,
       "tag": "0026_server_local_cards_language",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1785299200000,
+      "tag": "0027_member_timeout_and_permission_baseline",
+      "breakpoints": true
     }
   ]
 }

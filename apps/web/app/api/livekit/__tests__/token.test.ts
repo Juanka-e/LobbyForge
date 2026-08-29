@@ -21,16 +21,27 @@ vi.mock('livekit-server-sdk', () => ({
 }));
 
 vi.mock('@/lib/api-auth', () => ({
-  CorePermission: { CONNECT_VOICE: 'connect_voice' },
+  CorePermission: {
+    CONNECT_VOICE: 'connect_voice',
+    SPEAK: 'speak',
+    STREAM: 'stream',
+  },
+  hasPermission: (perms: string[], required: string) => perms.includes(required),
   requireMaterializedSession,
   requireServerMember,
   requireChannelInServer,
   requireServerPermission,
 }));
 
+const getUserPermissions = vi.fn();
+const getActiveMemberTimeout = vi.fn();
+
 vi.mock('@lobbyforge/db', () => ({
   getEffectiveServerVoiceSettings,
+  getUserPermissions,
+  getActiveMemberTimeout,
 }));
+
 
 vi.mock('@/lib/db', () => ({
   getDb: () => ({ __mockDb: true }),
@@ -68,6 +79,11 @@ beforeEach(() => {
   requireChannelInServer.mockReset();
   requireServerPermission.mockReset();
   getEffectiveServerVoiceSettings.mockReset();
+  getUserPermissions.mockReset();
+  getActiveMemberTimeout.mockReset();
+  // Full baseline member by default (all publish sources allowed).
+  getUserPermissions.mockResolvedValue(['connect_voice', 'speak', 'stream']);
+  getActiveMemberTimeout.mockResolvedValue(null);
 
   requireMaterializedSession.mockReturnValue({
     ok: true,
@@ -127,6 +143,67 @@ describe('POST /api/livekit/token voice media policy', () => {
         grants: expect.objectContaining({
           canPublishSources: ['microphone'],
         }),
+      })
+    );
+  });
+});
+
+describe('POST /api/livekit/token role-gated publish sources', () => {
+  it('strips the microphone when the member lacks SPEAK (listen-only)', async () => {
+    getUserPermissions.mockResolvedValue(['connect_voice', 'stream']);
+    const { POST } = await loadRoute();
+    const res = await POST(
+      makeRequest({
+        serverId: SERVER_ID,
+        channelId: CHANNEL_ID,
+        canPublishSources: ['microphone', 'camera'],
+      }),
+      {}
+    );
+    expect(res.status).toBe(200);
+    expect(issueLiveKitToken).toHaveBeenCalledWith(
+      expect.objectContaining({
+        grants: expect.objectContaining({ canPublishSources: ['camera'] }),
+      })
+    );
+  });
+
+  it('strips camera AND screen-share when the member lacks STREAM', async () => {
+    getUserPermissions.mockResolvedValue(['connect_voice', 'speak']);
+    const { POST } = await loadRoute();
+    const res = await POST(
+      makeRequest({
+        serverId: SERVER_ID,
+        channelId: CHANNEL_ID,
+        canPublishSources: ['microphone', 'camera', 'screen-share', 'screen-share-audio'],
+      }),
+      {}
+    );
+    expect(res.status).toBe(200);
+    expect(issueLiveKitToken).toHaveBeenCalledWith(
+      expect.objectContaining({
+        grants: expect.objectContaining({ canPublishSources: ['microphone'] }),
+      })
+    );
+  });
+
+  it('a timed-out member keeps listen access but loses the microphone', async () => {
+    getUserPermissions.mockResolvedValue(['connect_voice', 'speak', 'stream']);
+    getActiveMemberTimeout.mockResolvedValue(new Date(Date.now() + 60_000));
+    const { POST } = await loadRoute();
+    const res = await POST(
+      makeRequest({
+        serverId: SERVER_ID,
+        channelId: CHANNEL_ID,
+        canPublishSources: ['microphone', 'screen-share'],
+      }),
+      {}
+    );
+    expect(res.status).toBe(200);
+    // Timeout mutes the person; streaming stays available.
+    expect(issueLiveKitToken).toHaveBeenCalledWith(
+      expect.objectContaining({
+        grants: expect.objectContaining({ canPublishSources: ['screen-share'] }),
       })
     );
   });

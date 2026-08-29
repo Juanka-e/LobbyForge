@@ -57,8 +57,11 @@ export const ADMIN_ROLE_NAME = 'Owner';
  */
 export const DEFAULT_EVERYONE_PERMISSIONS: CorePermissionT[] = [
   CorePermission.SEND_MESSAGES,
+  CorePermission.READ_MESSAGE_HISTORY,
+  CorePermission.MENTION_EVERYONE,
   CorePermission.CONNECT_VOICE,
   CorePermission.SPEAK,
+  CorePermission.STREAM,
   CorePermission.ADD_REACTIONS,
   CorePermission.CREATE_INVITE,
 ];
