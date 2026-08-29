@@ -64,7 +64,7 @@ jobs:
         run: docker build -t lobbyforge-web:scan .
 
       - name: Trivy vulnerability scan
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.33.1
         with:
           image-ref: lobbyforge-web:scan
           format: table
