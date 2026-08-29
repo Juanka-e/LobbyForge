@@ -8,7 +8,7 @@ import {
   isServerMember,
 } from '@lobbyforge/db';
 import {
-  requireChannelInServer,
+  requireVisibleChannelInServer,
   requireMaterializedSession,
   requireServerMember,
 } from '@/lib/api-auth';
@@ -68,7 +68,7 @@ async function handlePost(req: Request): Promise<NextResponse> {
   try {
     const member = await requireServerMember(session.uid, body.serverId);
     if (!member.ok) return member.response;
-    const channel = await requireChannelInServer(body.channelId, body.serverId);
+    const channel = await requireVisibleChannelInServer(session.uid, body.channelId, body.serverId);
     if (!channel.ok) return channel.response;
     await setUserPresence(session.uid, body.serverId, body.channelId, body.status, 90, body.activity);
     // Push the presence change to every WS subscriber on this server.

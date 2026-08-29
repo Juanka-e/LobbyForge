@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { CorePermission, hasPermission, type CorePermission as CorePermissionT } from '@lobbyforge/core';
 import { getChannelById, getServerById, getUserPermissions, isServerMember } from '@lobbyforge/db';
+import { authorizeChannelVisibility } from '@/lib/permissions';
 import { getDb } from '@/lib/db';
 import { readGuestSession, type GuestPayload } from '@/lib/guest-session';
 
@@ -58,6 +59,30 @@ export async function requireChannelInServer(
     return { ok: false, response: NextResponse.json({ error: 'Channel not found in this server' }, { status: 404 }) };
   }
   return { ok: true, channel };
+}
+
+/**
+ * requireChannelInServer PLUS role-gated visibility (0028): the caller
+ * must be able to SEE the channel (owner / manage_channels always pass).
+ * Voice tokens, activities and other channel-scoped actions sit behind
+ * this so a private room cannot be joined by guessing its id.
+ */
+export async function requireVisibleChannelInServer(
+  userId: string,
+  channelId: string,
+  serverId: string
+): Promise<ApiResult<{ channel: NonNullable<Awaited<ReturnType<typeof getChannelById>>> }>> {
+  const found = await requireChannelInServer(channelId, serverId);
+  if (!found.ok) return found;
+  const server = await getServerById(getDb(), serverId);
+  const visibility = await authorizeChannelVisibility(
+    userId,
+    serverId,
+    channelId,
+    server?.ownerUserId ?? null
+  );
+  if (!visibility.ok) return { ok: false, response: visibility.response };
+  return found;
 }
 
 export async function requireServerPermission(

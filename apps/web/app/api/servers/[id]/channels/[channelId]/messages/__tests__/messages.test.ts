@@ -36,6 +36,22 @@ vi.mock('@/lib/security-headers', () => ({
   applySecurityHeaders: (r: unknown) => r,
 }));
 
+const authorizeChannelVisibility = vi.fn().mockResolvedValue({ ok: true });
+vi.mock('@/lib/permissions', () => ({
+  // CorePermission.SEND_MESSAGES -> 'send_messages' (lower-snake ids).
+  CorePermission: new Proxy({}, { get: (_t, key: string) => key.toLowerCase() }),
+  authorizeServerPermission: async (_uid: string, _sid: string, required: string) => {
+    // Derive from the mocked getUserPermissions — mirrors the real helper
+    // closely enough for these route tests.
+    const perms = await getUserPermissions();
+    if (perms.includes('administrator') || perms.includes(required)) return { ok: true };
+    return { ok: false, response: Response.json({ error: 'Forbidden' }, { status: 403 }) };
+  },
+  hasPermission: (perms: string[], required: string) =>
+    perms.includes('administrator') || perms.includes(required),
+  authorizeChannelVisibility: (...args: unknown[]) => authorizeChannelVisibility(...args),
+}));
+
 vi.mock('@/lib/db', () => ({
   getDb: () => ({ __mockDbClient: true }),
 }));
@@ -628,5 +644,42 @@ describe('GET message history permission gate', () => {
     );
     expect(res.status).toBe(403);
     expect(listMessagesForChannel).not.toHaveBeenCalled();
+  });
+});
+
+describe('channel visibility gate (0028)', () => {
+  it('403 when the member cannot see the channel (private room)', async () => {
+    mockServerAlive();
+    mockChannelAlive();
+    getUserPermissions.mockResolvedValue(['send_messages']);
+    authorizeChannelVisibility.mockResolvedValueOnce({
+      ok: false,
+      response: Response.json({ error: 'You do not have access to this channel' }, { status: 403 }),
+    });
+    const { GET } = await loadListRoute();
+    const res = await GET(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}/messages`, {
+        headers: { cookie: makeSessionCookie() },
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID }) }
+    );
+    expect(res.status).toBe(403);
+    expect(listMessagesForChannel).not.toHaveBeenCalled();
+  });
+
+  it('owner/manage_channels bypass the gate (visibility ok)', async () => {
+    mockServerAlive();
+    mockChannelAlive();
+    getUserPermissions.mockResolvedValue(['administrator']);
+    authorizeChannelVisibility.mockResolvedValue({ ok: true });
+    listMessagesForChannel.mockResolvedValue([]);
+    const { GET } = await loadListRoute();
+    const res = await GET(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}/messages`, {
+        headers: { cookie: makeSessionCookie() },
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID }) }
+    );
+    expect(res.status).toBe(200);
   });
 });

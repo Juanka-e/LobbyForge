@@ -18,6 +18,7 @@ vi.mock('@/lib/api-auth', () => ({
   requireMaterializedSession,
   requireServerMember,
   requireChannelInServer,
+  requireVisibleChannelInServer: requireChannelInServer,
 }));
 vi.mock('@/lib/redis', () => ({
   setUserPresence,

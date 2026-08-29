@@ -1,7 +1,9 @@
 import { cookies } from 'next/headers';
 import {
+  getAllChannelRoleOverridesForServer,
   getInstanceSetupStatus,
   listChannelsForServer,
+  listRolesBriefForServer,
   listServersForUser,
   type ChannelRow,
 } from '@lobbyforge/db';
@@ -40,6 +42,8 @@ export default async function ChannelsSettingsPage() {
 
   let serverId: string | null = null;
   let channels: ChannelRow[] = [];
+  let channelOverrides = new Map<string, string[]>();
+  let roles: Array<{ id: string; name: string; position: number }> = [];
   let loadError: string | null = null;
 
   if (userId) {
@@ -49,6 +53,16 @@ export default async function ChannelsSettingsPage() {
       if (firstServer) {
         serverId = firstServer.id;
         channels = await listChannelsForServer(db, firstServer.id, { limit: 200 });
+        roles = await listRolesBriefForServer(db, firstServer.id);
+        // Seed the editor with each channel's current override set.
+        const overrideRows = await getAllChannelRoleOverridesForServer(db, firstServer.id);
+        const byChannel = new Map<string, string[]>();
+        for (const row of overrideRows) {
+          const list = byChannel.get(row.channelId) ?? [];
+          list.push(row.roleId);
+          byChannel.set(row.channelId, list);
+        }
+        channelOverrides = byChannel;
       }
     } catch (err) {
       loadError = (err as Error).message;
@@ -59,7 +73,11 @@ export default async function ChannelsSettingsPage() {
     <SettingsShell scope="community">
       <ChannelsClient
         serverId={serverId}
-        initialChannels={channels.map(toChannelView)}
+        initialChannels={channels.map((c) => ({
+          ...toChannelView(c),
+          visibleToRoleIds: channelOverrides.get(c.id) ?? [],
+        }))}
+        roles={roles}
         loadError={loadError}
       />
     </SettingsShell>

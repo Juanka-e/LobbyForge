@@ -4,8 +4,10 @@ import { ChannelNameSchema } from '@lobbyforge/core';
 import {
   createChannel,
   getServerById,
+  getUserPermissions,
   isServerMember,
   listChannelsForServer,
+  listVisibleChannelsForMember,
   logAction,
   type ChannelRow,
   type ChannelType,
@@ -13,7 +15,7 @@ import {
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
-import { CorePermission, authorizeServerPermission } from '@/lib/permissions';
+import { CorePermission, authorizeServerPermission, hasPermission } from '@/lib/permissions';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -74,7 +76,7 @@ async function assertServerAndMembership(
   serverId: string,
   userId: string
 ): Promise<
-  | { ok: true }
+  | { ok: true; server: NonNullable<Awaited<ReturnType<typeof getServerById>>> }
   | { ok: false; response: NextResponse }
 > {
   if (!serverId || typeof serverId !== 'string') {
@@ -92,7 +94,7 @@ async function assertServerAndMembership(
   if (!member) {
     return { ok: false, response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
   }
-  return { ok: true };
+  return { ok: true, server };
 }
 
 async function handleGet(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<NextResponse> {
@@ -105,7 +107,16 @@ async function handleGet(req: Request, ctx: { params: Promise<{ id: string }> })
     const access = await assertServerAndMembership(serverId, session.uid);
     if (!access.ok) return access.response;
 
-    const channels = await listChannelsForServer(getDb(), serverId, { limit: 200 });
+    // Role-gated visibility (0028): plain members see only channels they
+    // can access; the owner and MANAGE_CHANNELS (administrator
+    // short-circuits it) see everything so private rooms stay manageable.
+    const permissions = await getUserPermissions(getDb(), session.uid, serverId);
+    const canManage =
+      access.server.ownerUserId === session.uid ||
+      hasPermission(permissions, CorePermission.MANAGE_CHANNELS);
+    const channels = canManage
+      ? await listChannelsForServer(getDb(), serverId, { limit: 200 })
+      : await listVisibleChannelsForMember(getDb(), serverId, session.uid);
     return NextResponse.json(
       { channels: channels.map(toJson) },
       { headers: { 'Cache-Control': 'no-store' } }

@@ -15,7 +15,11 @@ import {
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
-import { CorePermission, authorizeServerPermission } from '@/lib/permissions';
+import {
+  CorePermission,
+  authorizeChannelVisibility,
+  authorizeServerPermission,
+} from '@/lib/permissions';
 import { publishChatMessage } from '@/lib/chat-bus';
 
 export const dynamic = 'force-dynamic';
@@ -125,6 +129,14 @@ async function assertMemberAndChannel(
   if (channel.serverId !== serverId) {
     return { ok: false, response: NextResponse.json({ error: 'Channel not found' }, { status: 404 }) };
   }
+  // Role-gated visibility (0028) — owner/manage_channels bypass inside.
+  const visibility = await authorizeChannelVisibility(
+    userId,
+    serverId,
+    channelId,
+    server.ownerUserId ?? null
+  );
+  if (!visibility.ok) return visibility;
   return { ok: true };
 }
 

@@ -15,7 +15,7 @@
 import { NextResponse } from 'next/server';
 import { CorePermission, hasPermission, type CorePermission as CorePermissionT } from '@lobbyforge/core';
 import { getDb } from '@/lib/db';
-import { getUserPermissions } from '@lobbyforge/db';
+import { canMemberAccessChannel, getUserPermissions } from '@lobbyforge/db';
 
 export type AuthorizeResult =
   | { ok: true; permissions: string[] }
@@ -56,4 +56,31 @@ export async function authorizeServerPermission(
 
 // Re-export the permission constants so the route files can pull them
 // from a single import.
-export { CorePermission };
+export { CorePermission, hasPermission };
+
+/**
+ * Role-gated channel visibility (0028): can this member access the
+ * channel? Owner and MANAGE_CHANNELS (administrator short-circuits it)
+ * always pass; everyone else needs an empty override set or a listed
+ * role. Use in every channel-scoped content route.
+ */
+export async function authorizeChannelVisibility(
+  userId: string,
+  serverId: string,
+  channelId: string,
+  ownerUserId: string | null
+): Promise<{ ok: true } | { ok: false; response: NextResponse }> {
+  if (ownerUserId && ownerUserId === userId) return { ok: true };
+  const permissions = await getUserPermissions(getDb(), userId, serverId);
+  if (hasPermission(permissions, CorePermission.MANAGE_CHANNELS)) {
+    return { ok: true };
+  }
+  const allowed = await canMemberAccessChannel(getDb(), serverId, channelId, userId);
+  if (!allowed) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'You do not have access to this channel' }, { status: 403 }),
+    };
+  }
+  return { ok: true };
+}

@@ -13,6 +13,14 @@ export interface ChannelView {
   pluginId: string | null;
   topic: string | null;
   createdAt: string;
+  /** Role ids that can see this channel; null = inherited (unknown). */
+  visibleToRoleIds?: string[] | null;
+}
+
+export interface RoleBrief {
+  id: string;
+  name: string;
+  position: number;
 }
 
 interface ApiChannelResponse {
@@ -34,16 +42,22 @@ const EMPTY_FORM = { name: '', type: 'text' as ChannelType, topic: '' };
 export default function ChannelsClient({
   serverId,
   initialChannels,
+  roles,
   loadError,
 }: {
   serverId: string | null;
   initialChannels: ChannelView[];
+  roles: RoleBrief[];
   loadError: string | null;
 }) {
   const [channels, setChannels] = useState(initialChannels);
   const [form, setForm] = useState(EMPTY_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState({ name: '', topic: '' });
+  const [editDraft, setEditDraft] = useState<{ name: string; topic: string; roleIds: string[] }>({
+    name: '',
+    topic: '',
+    roleIds: [],
+  });
   const [busyId, setBusyId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [message, setMessage] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
@@ -102,8 +116,22 @@ export default function ChannelsClient({
 
   function beginEdit(channel: ChannelView) {
     setEditingId(channel.id);
-    setEditDraft({ name: channel.name, topic: channel.topic ?? '' });
+    setEditDraft({
+      name: channel.name,
+      topic: channel.topic ?? '',
+      roleIds: channel.visibleToRoleIds ?? [],
+    });
     setMessage(null);
+  }
+
+  /** undefined = inherited; [] would mean "hidden from everyone". */
+  function toggleDraftRole(roleId: string) {
+    setEditDraft((d) => ({
+      ...d,
+      roleIds: d.roleIds.includes(roleId)
+        ? d.roleIds.filter((r) => r !== roleId)
+        : [...d.roleIds, roleId],
+    }));
   }
 
   async function saveEdit(channel: ChannelView) {
@@ -121,7 +149,11 @@ export default function ChannelsClient({
         {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, topic: editDraft.topic.trim() || null }),
+          body: JSON.stringify({
+            name,
+            topic: editDraft.topic.trim() || null,
+            visibleToRoleIds: editDraft.roleIds,
+          }),
         }
       );
       const data = (await response.json().catch(() => ({}))) as ApiChannelResponse;
@@ -270,7 +302,9 @@ export default function ChannelsClient({
           editingId={editingId}
           editDraft={editDraft}
           busyId={busyId}
+          roles={roles}
           onDraftChange={setEditDraft}
+          onToggleRole={toggleDraftRole}
           onBeginEdit={beginEdit}
           onCancelEdit={() => setEditingId(null)}
           onSaveEdit={saveEdit}
@@ -285,7 +319,9 @@ export default function ChannelsClient({
           editingId={editingId}
           editDraft={editDraft}
           busyId={busyId}
+          roles={roles}
           onDraftChange={setEditDraft}
+          onToggleRole={toggleDraftRole}
           onBeginEdit={beginEdit}
           onCancelEdit={() => setEditingId(null)}
           onSaveEdit={saveEdit}
@@ -301,7 +337,9 @@ export default function ChannelsClient({
             editingId={editingId}
             editDraft={editDraft}
             busyId={busyId}
+            roles={roles}
             onDraftChange={setEditDraft}
+            onToggleRole={toggleDraftRole}
             onBeginEdit={beginEdit}
             onCancelEdit={() => setEditingId(null)}
             onSaveEdit={saveEdit}
@@ -322,7 +360,9 @@ function ChannelGroup({
   editingId,
   editDraft,
   busyId,
+  roles,
   onDraftChange,
+  onToggleRole,
   onBeginEdit,
   onCancelEdit,
   onSaveEdit,
@@ -334,9 +374,11 @@ function ChannelGroup({
   allChannels: ChannelView[];
   empty: string;
   editingId: string | null;
-  editDraft: { name: string; topic: string };
+  roles: RoleBrief[];
+  editDraft: { name: string; topic: string; roleIds: string[] };
   busyId: string | null;
-  onDraftChange: (draft: { name: string; topic: string }) => void;
+  onDraftChange: (draft: { name: string; topic: string; roleIds: string[] }) => void;
+  onToggleRole: (roleId: string) => void;
   onBeginEdit: (channel: ChannelView) => void;
   onCancelEdit: () => void;
   onSaveEdit: (channel: ChannelView) => void;
@@ -399,12 +441,44 @@ function ChannelGroup({
                           rows={2}
                           className="w-full resize-none rounded-lg border border-border-subtle bg-surface-container px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-primary-container"
                         />
+                        <div>
+                          <p className="text-xs text-text-muted mb-1.5">
+                            Visible to roles — leave empty for everyone (private channel when roles are selected)
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {roles.map((role) => {
+                              const selected = editDraft.roleIds.includes(role.id);
+                              return (
+                                <button
+                                  key={role.id}
+                                  type="button"
+                                  onClick={() => onToggleRole(role.id)}
+                                  className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                                    selected
+                                      ? 'border-primary bg-primary/15 text-text-primary font-medium'
+                                      : 'border-border-subtle bg-surface-container text-text-secondary hover:bg-surface-raised'
+                                  }`}
+                                >
+                                  {role.name}
+                                </button>
+                              );
+                            })}
+                            {roles.length === 0 ? (
+                              <span className="text-xs text-text-muted">No roles to restrict with yet.</span>
+                            ) : null}
+                          </div>
+                        </div>
                       </div>
                     ) : (
                       <>
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-sm text-text-primary font-medium truncate">{channel.name}</span>
                           <TypeBadge type={channel.type} />
+                          {channel.visibleToRoleIds && channel.visibleToRoleIds.length > 0 ? (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] bg-secondary-container/20 text-text-secondary border border-border-strong font-medium tracking-wide">
+                              🔒 {channel.visibleToRoleIds.length} role{channel.visibleToRoleIds.length > 1 ? 's' : ''}
+                            </span>
+                          ) : null}
                         </div>
                         {channel.topic ? (
                           <p className="text-xs text-text-muted mt-0.5 break-words">{channel.topic}</p>

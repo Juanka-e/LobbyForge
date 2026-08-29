@@ -30,6 +30,7 @@ vi.mock('@/lib/api-auth', () => ({
   requireMaterializedSession,
   requireServerMember,
   requireChannelInServer,
+  requireVisibleChannelInServer: requireChannelInServer,
   requireServerPermission,
 }));
 

@@ -2,6 +2,26 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Role-gated private channels (0028) - 2026-08-29
+
+### Added
+
+- **Private channels (Discord-style role gating)**: a channel with role
+  overrides is visible ONLY to holders of those roles (plus the owner
+  and manage_channels/administrator); a channel with no overrides stays
+  visible to everyone. Managed from Admin -> Channels via a role-chip
+  picker ("leave empty for everyone"); gated channels show a lock badge.
+- Enforcement across the surface: the channel LIST is filtered per
+  member, and messages (read+write), LiveKit voice tokens, activities,
+  typing, voice-mute and presence all 403 for members who cannot see
+  the channel — a private room cannot be joined by guessing its id.
+- `PATCH /api/servers/{id}/channels/{channelId}` accepts
+  `visibleToRoleIds` ([] clears back to everyone); roles validated to
+  belong to the server.
+- Integration tests against a REAL migrated Postgres (override joins
+  across legacy + multi-role membership, inheritance, replacement
+  semantics) — wired into CI alongside the unit suites.
+
 ## [Unreleased] - Role permission upgrade: STREAM, timeouts, history/mention gates - 2026-08-17
 
 ### Added

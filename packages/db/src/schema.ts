@@ -85,6 +85,22 @@ export const serverAccessPolicies = pgTable('server_access_policies', {
   uniqueServerAccessPolicy: unique('server_access_policies_server_id_unique').on(table.serverId),
 }));
 
+// CHANNEL ROLE OVERRIDES (0028) — role-gated channel visibility.
+// No rows for a channel => the channel is visible to every member
+// (inherited). One or more rows => visible ONLY to holders of those
+// roles (plus the owner and members with manage_channels/administrator,
+// enforced at the route layer). This is the "private channel" primitive.
+export const channelRoleOverrides = pgTable('channel_role_overrides', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  channelId: uuid('channel_id').notNull().references(() => channels.id, { onDelete: 'cascade' }),
+  roleId: uuid('role_id').notNull().references(() => roles.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  channelRoleUnique: unique('channel_role_overrides_channel_role_unique').on(table.channelId, table.roleId),
+  channelIdx: index('idx_channel_role_overrides_channel').on(table.channelId),
+  roleIdx: index('idx_channel_role_overrides_role').on(table.roleId),
+}));
+
 // CHANNELS TABLE
 export const channels = pgTable('channels', {
   id: uuid('id').primaryKey().defaultRandom(),

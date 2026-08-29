@@ -115,6 +115,18 @@ jobs:
       - name: Migration journal test
         run: pnpm --filter @lobbyforge/db test
 
+      # 0028 visibility queries against a REAL migrated postgres — proves
+      # the SQL (override joins, inheritance, replacement) not just mocks.
+      - name: Channel visibility integration (real Postgres)
+        run: |
+          docker run -d --name lf-pg-test -e POSTGRES_PASSWORD=t -e POSTGRES_DB=d postgres:16-alpine
+          for i in $(seq 1 30); do docker exec lf-pg-test pg_isready -U postgres -d d >/dev/null 2>&1 && s=1 && sleep 2 && docker exec lf-pg-test pg_isready -U postgres -d d >/dev/null 2>&1 && break; s=0; sleep 1; done
+          [ "${s:-0}" = "1" ] || { docker logs lf-pg-test; exit 1; }
+          cd packages/db
+          DATABASE_URL="postgres://postgres:t@127.0.0.1:5432/d" node dist/migrate.js
+          TEST_DATABASE_URL="postgres://postgres:t@127.0.0.1:5432/d" pnpm vitest run src/__tests__/channel-visibility.integration.test.ts
+          docker rm -f lf-pg-test
+
   # LF-023: end-to-end against the REAL compose stack — Postgres, Redis,
   # LiveKit and the production-built web image (docker-compose.dev.yml).
   # Runs only the compose-stack spec; the dev-server UI specs stay local

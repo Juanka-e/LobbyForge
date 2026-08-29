@@ -16,7 +16,7 @@ import {
 import { getDb } from '@/lib/db';
 import {
   CorePermission, hasPermission,
-  requireChannelInServer,
+  requireVisibleChannelInServer,
   requireMaterializedSession,
   requireServerMember,
   requireServerPermission,
@@ -57,7 +57,7 @@ async function handler(req: Request): Promise<NextResponse> {
 
   const member = await requireServerMember(session.uid, body.serverId);
   if (!member.ok) return member.response;
-  const channel = await requireChannelInServer(body.channelId, body.serverId);
+  const channel = await requireVisibleChannelInServer(session.uid, body.channelId, body.serverId);
   if (!channel.ok) return channel.response;
   if (channel.channel.type !== 'voice' && channel.channel.type !== 'stage') {
     return NextResponse.json({ error: 'Channel is not a voice room' }, { status: 400 });

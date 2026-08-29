@@ -16,6 +16,7 @@ vi.mock('@/lib/api-auth', async () => {
     ...actual,
     requireServerMember: (...args: unknown[]) => mockRequireServerMember(...args),
     requireChannelInServer: (...args: unknown[]) => mockRequireChannelInServer(...args),
+    requireVisibleChannelInServer: (...args: unknown[]) => mockRequireChannelInServer(...args.slice(1)),
     requireServerPermission: (...args: unknown[]) => mockRequireServerPermission(...args),
   };
 });

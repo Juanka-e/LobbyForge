@@ -6,7 +6,7 @@ import { withApiSecurity } from '@/lib/security-headers';
 import { getRoomServiceClient } from '@/lib/livekit';
 import {
   CorePermission,
-  requireChannelInServer,
+  requireVisibleChannelInServer,
   requireMaterializedSession,
   requireServerMember,
   requireServerPermission,
@@ -39,7 +39,7 @@ async function handlePost(
     if (!member.ok) return member.response;
     const targetMember = await requireServerMember(targetUserId, serverId);
     if (!targetMember.ok) return targetMember.response;
-    const channel = await requireChannelInServer(channelId, serverId);
+    const channel = await requireVisibleChannelInServer(session.uid, channelId, serverId);
     if (!channel.ok) return channel.response;
     if (channel.channel.type !== 'voice' && channel.channel.type !== 'stage') {
       return NextResponse.json({ error: 'Channel is not a voice room' }, { status: 400 });

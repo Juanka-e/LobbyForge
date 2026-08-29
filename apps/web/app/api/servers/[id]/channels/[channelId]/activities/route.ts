@@ -18,7 +18,7 @@ import { readGuestSession } from '@/lib/guest-session';
 import { getPluginServer } from '@/lib/plugin-server-registry';
 import { callCreateInitialState, buildHttpPluginContext } from '@/lib/plugin-context';
 import { withApiSecurity } from '@/lib/security-headers';
-import { requireChannelInServer } from '@/lib/api-auth';
+import { requireVisibleChannelInServer } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -126,7 +126,7 @@ async function handlePost(
     if (!hasPermission(permissions, CorePermission.START_ACTIVITY)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
-    const channel = await requireChannelInServer(channelId, serverId);
+    const channel = await requireVisibleChannelInServer(session.uid, channelId, serverId);
     if (!channel.ok) return channel.response;
     if (channel.channel.type !== 'voice' && channel.channel.type !== 'stage') {
       return NextResponse.json({ error: 'Activities can only start in voice or stage channels' }, { status: 400 });

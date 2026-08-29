@@ -9,6 +9,7 @@ const getTypingUsers = vi.fn();
 vi.mock('@/lib/api-auth', () => ({
   requireMaterializedSession,
   requireChannelInServer,
+  requireVisibleChannelInServer: requireChannelInServer,
 }));
 vi.mock('@/lib/redis', () => ({ setTyping, getTypingUsers }));
 vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));

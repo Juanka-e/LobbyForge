@@ -26,6 +26,7 @@ export * from './queries/instanceSettings.js';
 export * from './queries/systemUpdates.js';
 export * from './queries/cardPacks.js';
 export * from './queries/serverLocalCards.js';
+export * from './queries/channelVisibility.js';
 export * from './queries/componentMigrations.js';
 export * from './queries/dmChannels.js';
 export { sql, eq, and, or, desc, asc } from 'drizzle-orm';

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireMaterializedSession } from '@/lib/api-auth';
-import { requireChannelInServer } from '@/lib/api-auth';
+import { requireVisibleChannelInServer } from '@/lib/api-auth';
 import { getTypingUsers, setTyping } from '@/lib/redis';
 import { withApiSecurity } from '@/lib/security-headers';
 import { readGuestSession } from '@/lib/guest-session';
@@ -31,7 +31,7 @@ async function handlePost(
   if (!session.ok) return session.response;
 
   try {
-    const channel = await requireChannelInServer(channelId, serverId);
+    const channel = await requireVisibleChannelInServer(session.session.uid, channelId, serverId);
     if (!channel.ok) return channel.response;
     const secret = getSessionSecret();
     const guest = readGuestSession(req.headers.get('cookie'), secret);
@@ -52,7 +52,7 @@ async function handleGet(
   if (!session.ok) return session.response;
 
   try {
-    const channel = await requireChannelInServer(channelId, serverId);
+    const channel = await requireVisibleChannelInServer(session.session.uid, channelId, serverId);
     if (!channel.ok) return channel.response;
     const typers = await getTypingUsers(serverId, channelId, session.session.uid);
     return NextResponse.json({ typers }, { headers: { 'Cache-Control': 'no-store' } });

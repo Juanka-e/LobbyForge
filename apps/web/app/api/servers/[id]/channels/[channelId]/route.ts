@@ -4,6 +4,8 @@ import { ChannelNameSchema } from '@lobbyforge/core';
 import {
   deleteChannel,
   getChannelById,
+  listRolesBriefForServer,
+  setChannelRoleOverrides,
   getServerById,
   isServerMember,
   logAction,
@@ -22,6 +24,12 @@ const PatchChannelSchema = z.object({
   name: ChannelNameSchema.optional(),
   topic: z.string().max(512).nullable().optional(),
   position: z.number().int().min(0).optional(),
+  /**
+   * Role-gated visibility (0028): the ONLY roles that can see this
+   * channel. [] clears every override (visible to all members again).
+   * Roles are validated to belong to this server.
+   */
+  visibleToRoleIds: z.array(z.string().uuid()).max(64).optional(),
 });
 
 function getSessionSecret(): string {
@@ -166,6 +174,22 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
       ...(body.topic !== undefined ? { topic: body.topic } : {}),
       ...(body.position !== undefined ? { position: body.position } : {}),
     });
+
+    if (body.visibleToRoleIds !== undefined) {
+      // Every referenced role must belong to this server — a foreign
+      // role id would silently never match anyone.
+      const serverRoles = await listRolesBriefForServer(getDb(), serverId);
+      const known = new Set(serverRoles.map((r) => r.id));
+      const unknown = body.visibleToRoleIds.filter((id) => !known.has(id));
+      if (unknown.length > 0) {
+        return NextResponse.json(
+          { error: 'visibleToRoleIds contains roles not in this server', unknown },
+          { status: 400 }
+        );
+      }
+      await setChannelRoleOverrides(getDb(), channelId, body.visibleToRoleIds);
+    }
+
     void logAction(getDb(), {
       serverId,
       actorUserId: session.uid,
@@ -176,6 +200,9 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
         ...(body.name !== undefined ? { name: body.name } : {}),
         ...(body.topic !== undefined ? { topic: body.topic } : {}),
         ...(body.position !== undefined ? { position: body.position } : {}),
+        ...(body.visibleToRoleIds !== undefined
+          ? { visibleToRoleIds: body.visibleToRoleIds }
+          : {}),
       },
     }).catch((err) => console.error('[audit] channel.update failed:', (err as Error).message));
     return NextResponse.json(
