@@ -1,6 +1,6 @@
 -- MODERATE_MEMBERS (timeout): the step between a warning and a kick/ban.
 -- NULL / past = not timed out. Enforced on message send AND mic publish.
-ALTER TABLE "memberships" ADD COLUMN "timed_out_until" timestamp with timezone;
+ALTER TABLE "memberships" ADD COLUMN "timed_out_until" timestamptz;
 
 -- Permission baseline backfill: newly introduced @everyone permissions
 -- (stream, read_message_history, mention_everyone) are appended to every
