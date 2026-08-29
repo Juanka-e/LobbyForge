@@ -31,6 +31,10 @@ FROM node:22-bookworm-slim AS runtime
 # PostgreSQL client tools for lfctl backup create/restore (pg_dump, pg_restore, psql)
 RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client && rm -rf /var/lib/apt/lists/*
 
+# The base image's bundled npm is unused (corepack + pnpm only) and its
+# dependency manifests ship vulnerable tar versions (CVE-2026-59873).
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
+
 RUN corepack enable && corepack prepare pnpm@10.12.1 --activate
 WORKDIR /app
 ENV NODE_ENV=production
