@@ -45,7 +45,9 @@ COPY --from=builder /app /app
 # store the builder already populated — same lockfile, no network.
 # Workspace symlinks (@lobbyforge/db etc.) are recreated against the
 # packages' built dist/, which the COPY above preserved.
-RUN rm -rf /app/node_modules     && pnpm install --prod --frozen-lockfile --offline --ignore-scripts --store-dir /pnpm-store
+# Remove EVERY node_modules (root AND per-package — the builder copy
+# leaves nested ones with dev-only transitive deps like tar@7.4.3).
+RUN find /app -name node_modules -type d -prune -exec rm -rf {} +     && pnpm install --prod --frozen-lockfile --offline --ignore-scripts --store-dir /pnpm-store
 
 # Run as non-root — the node image ships with a `node` user (uid 1000).
 RUN chown -R node:node /app
