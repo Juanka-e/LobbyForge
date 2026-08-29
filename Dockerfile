@@ -4,7 +4,8 @@ RUN corepack enable && corepack prepare pnpm@10.12.1 --activate
 WORKDIR /app
 
 COPY . .
-RUN pnpm install --frozen-lockfile
+# Fixed store dir so the runtime stage can reuse the cache offline.
+RUN pnpm install --frozen-lockfile --store-dir /pnpm-store
 
 ARG NEXT_PUBLIC_LIVEKIT_URL=http://localhost:7880
 ARG NEXT_PUBLIC_WS_URL=ws://localhost:3001
@@ -34,13 +35,17 @@ RUN corepack enable && corepack prepare pnpm@10.12.1 --activate
 WORKDIR /app
 ENV NODE_ENV=production
 
+COPY --from=builder /pnpm-store /pnpm-store
 COPY --from=builder /app /app
 
-# Strip devDependencies from the RUNTIME image (security scan finding:
-# vitest/happy-dom/tar CRITICALs were shipping because the builder's
-# full node_modules was copied). Everything the runtime needs (next,
-# drizzle, postgres, ws-gateway) is a regular dependency.
-RUN pnpm prune --prod
+# Strip devDependencies from the RUNTIME image (Trivy CRITICAL gate:
+# vitest/happy-dom/tar CVEs were shipping because the builder's full
+# node_modules was copied). `pnpm prune` proved pathologically slow in
+# CI (>1h); instead rebuild node_modules PROD-ONLY, offline, from the
+# store the builder already populated — same lockfile, no network.
+# Workspace symlinks (@lobbyforge/db etc.) are recreated against the
+# packages' built dist/, which the COPY above preserved.
+RUN rm -rf /app/node_modules     && pnpm install --prod --frozen-lockfile --offline --ignore-scripts --store-dir /pnpm-store
 
 # Run as non-root — the node image ships with a `node` user (uid 1000).
 RUN chown -R node:node /app
