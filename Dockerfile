@@ -36,6 +36,12 @@ ENV NODE_ENV=production
 
 COPY --from=builder /app /app
 
+# Strip devDependencies from the RUNTIME image (security scan finding:
+# vitest/happy-dom/tar CRITICALs were shipping because the builder's
+# full node_modules was copied). Everything the runtime needs (next,
+# drizzle, postgres, ws-gateway) is a regular dependency.
+RUN pnpm prune --prod
+
 # Run as non-root — the node image ships with a `node` user (uid 1000).
 RUN chown -R node:node /app
 USER node
