@@ -52,8 +52,9 @@ describe.skipIf(!enabled)('channel visibility queries (integration)', () => {
 
   afterAll(async () => {
     await sql`DELETE FROM servers WHERE id = ${serverId}`;
-    await sql`DELETE FROM users WHERE id IN (${serverOwner}, ${memberNoRole}, ${memberWithRole})`;
-    await sql.end();
+    await sql`DELETE FROM users WHERE id IN (${serverOwner}, ${memberNoRole}, ${memberWithRole})}`;
+    // NOTE: no sql.end() here — the plugin-storage describe below runs
+    // AFTER this one and shares this connection.
   });
 
   it('canMemberAccessChannel: open channel = everyone; gated = only role holders', async () => {
@@ -101,6 +102,8 @@ describe.skipIf(!enabled)('plugin storage queries (integration)', () => {
   afterAll(async () => {
     await sql`DELETE FROM servers WHERE id = ${pServerId}`;
     await sql`DELETE FROM users WHERE id = ${pOwnerId}`;
+    // Last suite out closes the shared connection.
+    await sql.end();
   });
 
   it('set/get round-trips and upsert replaces whole values', async () => {
