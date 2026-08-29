@@ -51,7 +51,10 @@ COPY --from=builder /app /app
 # packages' built dist/, which the COPY above preserved.
 # Remove EVERY node_modules (root AND per-package — the builder copy
 # leaves nested ones with dev-only transitive deps like tar@7.4.3).
-RUN find /app -name node_modules -type d -prune -exec rm -rf {} +     && pnpm install --prod --frozen-lockfile --offline --ignore-scripts --store-dir /pnpm-store
+# Then DROP the store — it holds the builder's DEV packages too
+# (vitest/happy-dom/tar tarballs) and Trivy scans it like any other
+# directory in the image layer.
+RUN find /app -name node_modules -type d -prune -exec rm -rf {} +     && pnpm install --prod --frozen-lockfile --offline --ignore-scripts --store-dir /pnpm-store     && rm -rf /pnpm-store
 
 # Run as non-root — the node image ships with a `node` user (uid 1000).
 RUN chown -R node:node /app
