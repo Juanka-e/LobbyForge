@@ -52,7 +52,7 @@ describe.skipIf(!enabled)('channel visibility queries (integration)', () => {
 
   afterAll(async () => {
     await sql`DELETE FROM servers WHERE id = ${serverId}`;
-    await sql`DELETE FROM users WHERE id IN (${serverOwner}, ${memberNoRole}, ${memberWithRole})}`;
+    await sql`DELETE FROM users WHERE id IN (${serverOwner}, ${memberNoRole}, ${memberWithRole})`;
     // NOTE: no sql.end() here — the plugin-storage describe below runs
     // AFTER this one and shares this connection.
   });
