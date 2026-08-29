@@ -48,11 +48,27 @@ HOSTPORT="$(docker port "$CONTAINER" 5432/tcp | head -1 | sed 's/.*://')"
 HOST_URL="postgres://postgres:${PGPASSWORD}@127.0.0.1:${HOSTPORT}/drill"
 echo "container: $CONTAINER  host port: $HOSTPORT"
 
-for i in $(seq 1 30); do
-  if docker exec "$CONTAINER" pg_isready -U postgres -d drill >/dev/null 2>&1; then break; fi
-  sleep 1
+# Postgres's entrypoint starts a TEMPORARY server for initdb, accepts
+# connections, then SHUTS IT DOWN and starts the real one — a single
+# successful pg_isready can hit that transient server (exactly what
+# flaked CI: the loop broke on the temp server, the verify line hit the
+# shutdown window). Require TWO consecutive successes.
+READY=0
+for i in $(seq 1 60); do
+  if docker exec "$CONTAINER" pg_isready -U postgres -d drill >/dev/null 2>&1; then
+    READY=$((READY + 1))
+    if [ "$READY" -ge 2 ]; then break; fi
+    sleep 1
+  else
+    READY=0
+    sleep 1
+  fi
 done
-docker exec "$CONTAINER" pg_isready -U postgres -d drill >/dev/null
+if [ "$READY" -lt 2 ]; then
+  echo "FAIL: postgres did not become steadily ready" >&2
+  docker logs "$CONTAINER" --tail 20 >&2 || true
+  exit 1
+fi
 
 step "2/8 Apply repo migrations"
 if [ ! -f "$ROOT/packages/db/dist/migrate.js" ]; then
