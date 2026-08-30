@@ -31,10 +31,6 @@ FROM node:22-bookworm-slim AS runtime
 # PostgreSQL client tools for lfctl backup create/restore (pg_dump, pg_restore, psql)
 RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client && rm -rf /var/lib/apt/lists/*
 
-# The base image's bundled npm is unused (corepack + pnpm only) and its
-# dependency manifests ship vulnerable tar versions (CVE-2026-59873).
-RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
-
 RUN corepack enable && corepack prepare pnpm@10.12.1 --activate
 WORKDIR /app
 ENV NODE_ENV=production
@@ -51,10 +47,14 @@ COPY --from=builder /app /app
 # packages' built dist/, which the COPY above preserved.
 # Remove EVERY node_modules (root AND per-package — the builder copy
 # leaves nested ones with dev-only transitive deps like tar@7.4.3).
-# Then DROP the store — it holds the builder's DEV packages too
-# (vitest/happy-dom/tar tarballs) and Trivy scans it like any other
-# directory in the image layer.
-RUN find /app -name node_modules -type d -prune -exec rm -rf {} +     && pnpm install --prod --frozen-lockfile --offline --ignore-scripts --store-dir /pnpm-store     && rm -rf /pnpm-store
+# Wipe EVERY node_modules (root AND per-package — the builder copy
+# leaves nested ones with dev-only transitive deps), rebuild PROD-ONLY
+# offline from the builder's store, then drop the store (it also holds
+# DEV tarballs) AND the package managers themselves — pnpm's corepack
+# download bundles a vulnerable tar (CVE-2026-59873) and npm's manifests
+# ship more. The runtime needs NODE only; the web service invokes
+# next's bin directly.
+RUN find /app -name node_modules -type d -prune -exec rm -rf {} +     && pnpm install --prod --frozen-lockfile --offline --ignore-scripts --store-dir /pnpm-store     && rm -rf /pnpm-store               /usr/local/lib/node_modules/npm               /usr/local/bin/npm /usr/local/bin/npx               /root/.cache/node/corepack
 
 # Run as non-root — the node image ships with a `node` user (uid 1000).
 RUN chown -R node:node /app
@@ -62,6 +62,8 @@ USER node
 
 EXPOSE 3000 3001
 
-# Start only the Next.js web server. The ws-gateway runs as a separate
-# Docker Compose service with its own CMD override.
-CMD ["pnpm", "--filter", "@lobbyforge/web", "start"]
+# Start only the Next.js web server (direct node invocation — no pnpm
+# in the runtime image). The ws-gateway runs as a separate Compose
+# service with its own CMD override.
+WORKDIR /app/apps/web
+CMD ["node", "node_modules/next/dist/bin/next", "start"]

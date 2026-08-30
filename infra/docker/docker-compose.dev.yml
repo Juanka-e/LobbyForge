@@ -95,7 +95,9 @@ services:
     image: lobbyforge-app:dev
     container_name: lobbyforge-web
     restart: unless-stopped
-    command: ["pnpm", "--filter", "@lobbyforge/web", "start"]
+    # Direct next bin (the runtime image ships no pnpm).
+    working_dir: /app/apps/web
+    command: ["node", "node_modules/next/dist/bin/next", "start"]
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-lobbyforge}:${POSTGRES_PASSWORD:-lobbyforge_dev}@postgres:5432/${POSTGRES_DB:-lobbyforge}
