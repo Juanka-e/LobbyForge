@@ -3,6 +3,18 @@
 All notable changes to the LobbyForge monorepo skeleton.
 
 ## [Unreleased] - Plugin storage, two-client voice E2E, security gates - 2026-08-29
+### Fixed (same batch)
+
+- The runtime Docker image no longer ships devDependencies OR package
+  managers: the Trivy CRITICAL gate caught vitest/happy-dom/tar CVEs
+  (builder's full node_modules was copied wholesale), then a second
+  layer — corepack's downloaded pnpm bundles its own vulnerable tar.
+  The runtime now rebuilds node_modules prod-only OFFLINE from the
+  builder's pnpm store, then strips the store, npm and the corepack
+  cache; the web service invokes next's bin directly (no pnpm at
+  runtime). Trivy: **0 findings** (CRITICAL, ignore-unfixed), verified
+  against a stack running this image (both e2e suites green).
+
 
 ### Added
 
