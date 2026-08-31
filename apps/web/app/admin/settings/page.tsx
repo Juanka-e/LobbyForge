@@ -12,6 +12,7 @@ import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
 import { getSessionSecret } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
+import InstanceLogoCard from './InstanceLogoCard';
 import SettingsShell from '@/app/SettingsShell';
 
 export const dynamic = 'force-dynamic';
@@ -104,6 +105,7 @@ export default async function CommunitySettingsOverviewPage() {
     <SettingsShell scope="community">
       <OverviewBody
         instanceName={setup.instanceName}
+        instanceLogoUrl={setup.instanceLogoUrl}
         stats={stats}
         recentAudit={recentAudit}
       />
@@ -113,10 +115,12 @@ export default async function CommunitySettingsOverviewPage() {
 
 function OverviewBody({
   instanceName,
+  instanceLogoUrl,
   stats,
   recentAudit,
 }: {
   instanceName: string;
+  instanceLogoUrl: string | null;
   stats: Stats | null;
   recentAudit: { id: string; action: string; actorLabel: string; createdAt: Date }[];
 }) {
@@ -165,6 +169,8 @@ function OverviewBody({
           <Stat label="Invites" value={stats ? String(stats.invites) : '—'} />
         </div>
       </section>
+
+      <InstanceLogoCard initialLogoUrl={instanceLogoUrl} />
 
       <section>
         <h3 className="font-label-sm text-text-muted uppercase tracking-wider mb-4">

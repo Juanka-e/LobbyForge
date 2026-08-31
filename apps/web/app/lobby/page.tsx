@@ -6,6 +6,7 @@ import { isOfficialDeployment } from '@/lib/deployment-mode';
 import {
   getEffectiveInstanceAccessSettings,
   getInstanceBootstrapStatus,
+  getInstanceSetupStatus,
   listServersForUser,
   ensureServerMembership,
   seedDefaultRoles,
@@ -89,6 +90,8 @@ interface ChatMessage {
 interface LobbyData {
   serverName: string;
   serverBannerUrl: string | null;
+  /** Instance logo (self-host branding; null on the official hub). */
+  instanceLogoUrl: string | null;
   serverId: string | null;
   /** All servers the user has joined — drives the ServerRail switcher.
    * Empty in demo mode. */
@@ -387,6 +390,7 @@ async function loadLiveData(
   return {
     serverName: '', // filled in by caller
     serverBannerUrl: null, // filled in by caller
+    instanceLogoUrl: null,
     serverId,
     joinedServers: [], // filled in by the caller after listing all servers
     textChannels,
@@ -432,6 +436,8 @@ export default async function LobbyPage({
   const hasUser = userId !== null;
   if (!isOfficial && !hasUser) redirect('/login');
   const setupStatus = !isOfficial ? await getInstanceBootstrapStatus(getDb()) : null;
+  // Self-host branding: the instance logo from /setup (admin-changeable).
+  const instanceLogo = !isOfficial ? await getInstanceSetupStatus(getDb()).then((st) => st.instanceLogoUrl) : null;
 
   let serverName = isOfficial
     ? 'LobbyForge Hub'
@@ -474,6 +480,7 @@ export default async function LobbyPage({
         if (liveData) {
           liveData.serverName = serverName;
           liveData.serverBannerUrl = (srv as { bannerUrl?: string | null }).bannerUrl ?? null;
+          liveData.instanceLogoUrl = instanceLogo;
           liveData.joinedServers = joinedServerList;
         }
       }
@@ -490,6 +497,7 @@ export default async function LobbyPage({
   const data: LobbyData = liveData ?? {
     serverName,
     serverBannerUrl: null,
+    instanceLogoUrl: null,
     serverId: null,
     joinedServers: [],
     textChannels: DEMO_CHANNELS.filter((c) => c.category === 'text'),
@@ -760,9 +768,19 @@ function Sidebar({
         <div className="relative">
         <button className="h-16 px-4 flex items-center justify-between hover:bg-surface-container transition-colors duration-150 w-full text-left group">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-8 h-8 rounded-lg bg-secondary-container flex items-center justify-center flex-shrink-0 font-bold text-text-primary">
-              {serverName.charAt(0).toUpperCase()}
-            </div>
+            {data.instanceLogoUrl ? (
+              // Instance logo (self-host branding) — also the favicon source.
+              // eslint-disable-next-line @next/next/no-img-element -- data URL
+              <img
+                src={data.instanceLogoUrl}
+                alt=""
+                className="w-8 h-8 rounded-lg object-cover flex-shrink-0"
+              />
+            ) : (
+              <div className="w-8 h-8 rounded-lg bg-secondary-container flex items-center justify-center flex-shrink-0 font-bold text-text-primary">
+                {serverName.charAt(0).toUpperCase()}
+              </div>
+            )}
             <span className="font-label-sm text-text-primary font-semibold whitespace-nowrap truncate">
               {serverName}
             </span>

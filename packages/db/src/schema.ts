@@ -301,6 +301,8 @@ export const instanceSettings = pgTable('instance_settings', {
   id: uuid('id').primaryKey().defaultRandom(),
   instanceId: text('instance_id').unique().notNull(),
   instanceName: text('instance_name').notNull(),
+  /** Instance logo (image data URL; validated by the upload route). */
+  instanceLogoUrl: text('instance_logo_url'),
   domain: text('domain'),
   publicKey: text('public_key'),
   privateKeyEncrypted: text('private_key_encrypted'),

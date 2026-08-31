@@ -39,6 +39,17 @@ export const AVATAR_LIMITS: ImageLimits = {
   maxDataUrlBytes: 6 * 1024 * 1024 * 2,
 };
 
+/** Logos: square-ish, small — rendered at 24-40px but kept generous
+ *  for retina; animated GIF logos allowed like every other image. */
+export const LOGO_LIMITS: ImageLimits = {
+  minWidth: 64,
+  minHeight: 64,
+  maxWidth: 1024,
+  maxHeight: 1024,
+  maxBytes: 2 * 1024 * 1024,
+  maxDataUrlBytes: 2 * 1024 * 1024 * 2,
+};
+
 export const BANNER_LIMITS: ImageLimits = {
   minWidth: 960,
   minHeight: 540,

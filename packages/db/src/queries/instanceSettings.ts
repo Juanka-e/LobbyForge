@@ -181,6 +181,7 @@ export async function setInstanceMaintenance(
 export interface InstanceSetupStatus {
   instanceId: string;
   instanceName: string;
+  instanceLogoUrl: string | null;
   setupCompletedAt: Date | null;
   bootstrapVersion: number;
   ownerUserId: string | null;
@@ -208,6 +209,7 @@ export async function getInstanceSetupStatus(
     .select({
       instanceId: instanceSettings.instanceId,
       instanceName: instanceSettings.instanceName,
+      instanceLogoUrl: instanceSettings.instanceLogoUrl,
       setupCompletedAt: instanceSettings.setupCompletedAt,
       bootstrapVersion: instanceSettings.bootstrapVersion,
       ownerUserId: instanceSettings.ownerUserId,
@@ -219,6 +221,7 @@ export async function getInstanceSetupStatus(
   return {
     instanceId,
     instanceName: DEFAULT_INSTANCE_NAME,
+    instanceLogoUrl: null,
     setupCompletedAt: null,
     bootstrapVersion: 1,
     ownerUserId: null,
@@ -307,6 +310,7 @@ export async function completeInstanceSetup(
     .returning({
       instanceId: instanceSettings.instanceId,
       instanceName: instanceSettings.instanceName,
+      instanceLogoUrl: instanceSettings.instanceLogoUrl,
       setupCompletedAt: instanceSettings.setupCompletedAt,
       bootstrapVersion: instanceSettings.bootstrapVersion,
       ownerUserId: instanceSettings.ownerUserId,
@@ -330,6 +334,7 @@ export async function completeInstanceSetup(
     .returning({
       instanceId: instanceSettings.instanceId,
       instanceName: instanceSettings.instanceName,
+      instanceLogoUrl: instanceSettings.instanceLogoUrl,
       setupCompletedAt: instanceSettings.setupCompletedAt,
       bootstrapVersion: instanceSettings.bootstrapVersion,
       ownerUserId: instanceSettings.ownerUserId,
@@ -486,4 +491,27 @@ export async function getOrCreateOwnerUser(
     .returning({ id: users.id, displayName: users.displayName });
   if (!created) throw new Error('getOrCreateOwnerUser: insert returned no rows');
   return created;
+}
+
+/**
+ * Update the instance logo (image data URL — validated by the API
+ * route) or clear it with null. Used by the admin panel; the setup
+ * wizard seeds it at bootstrap time.
+ */
+export async function setInstanceLogoUrl(
+  db: DbClient,
+  logoUrl: string | null,
+  instanceId: string = DEFAULT_INSTANCE_ID
+): Promise<string | null> {
+  const [updated] = await db
+    .update(instanceSettings)
+    .set({ instanceLogoUrl: logoUrl, updatedAt: new Date() })
+    .where(eq(instanceSettings.instanceId, instanceId))
+    .returning({ instanceLogoUrl: instanceSettings.instanceLogoUrl });
+  if (updated) return updated.instanceLogoUrl;
+  const [inserted] = await db
+    .insert(instanceSettings)
+    .values({ instanceId, instanceName: DEFAULT_INSTANCE_NAME, instanceLogoUrl: logoUrl })
+    .returning({ instanceLogoUrl: instanceSettings.instanceLogoUrl });
+  return inserted?.instanceLogoUrl ?? null;
 }

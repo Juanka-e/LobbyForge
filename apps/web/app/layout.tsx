@@ -4,7 +4,7 @@ import { cookies } from 'next/headers';
 import { Geist } from 'next/font/google';
 import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
 import { readMaintenanceSnapshot } from '@/lib/maintenance-guard';
-import { getEffectiveInstanceAccessSettings } from '@lobbyforge/db';
+import { getEffectiveInstanceAccessSettings, getInstanceSetupStatus } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import 'material-symbols/outlined.css';
 import './globals.css';
@@ -16,10 +16,18 @@ const geist = Geist({ subsets: ['latin'], variable: '--font-geist' });
 export async function generateMetadata(): Promise<Metadata> {
   const settings = await getEffectiveInstanceAccessSettings(getDb()).catch(() => null);
   const indexing = settings?.seoIndexingEnabled ?? false;
+  // Self-host branding: the instance logo doubles as the favicon (data
+  // URL icons are valid in modern browsers; GIF logos animate there).
+  const logo = await getInstanceSetupStatus(getDb())
+    .then((st) => st.instanceLogoUrl)
+    .catch(() => null);
   return {
     title: settings?.seoTitle || 'LobbyForge',
     description: settings?.seoDescription || 'Self-hostable voice-first community platform.',
     robots: { index: indexing, follow: indexing },
+    ...(logo
+      ? { icons: { icon: [{ url: logo, type: 'image/gif' }] } }
+      : {}),
   };
 }
 
