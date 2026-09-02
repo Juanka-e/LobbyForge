@@ -56,11 +56,7 @@ Honest assessment of what works today:
 - **Doctor** — built-in health monitoring + capacity profiling.
 - **Privacy-first defaults** — SEO off, invite-only registration, no telemetry, strict security headers (CSP with nonce, HSTS, Fetch-Metadata CSRF).
 - **i18n** — English + Turkish; community translations welcome.
-- **Native desktop client** — [Tauri 2](https://v2.tauri.app) shell (experimental). See [docs/DESKTOP.md](docs/DESKTOP.md) and [docs/DESKTOP_GAP_ANALYSIS.md](docs/DESKTOP_GAP_ANALYSIS.md).
-  - **Unsigned alpha notice:** installers are NOT code-signed or notarized yet.
-    - **Windows:** SmartScreen will show "Windows protected your PC" — click *More info → Run anyway*.
-    - **macOS:** Gatekeeper blocks the app — right-click → *Open*, or run `xattr -cr /Applications/LobbyForge.app` after dragging it to Applications.
-    - Signing certificates are tracked as DP-03 in the gap analysis.
+- **Native desktop client (optional)** — the web app is fully functional on its own; the [Tauri 2](https://v2.tauri.app) shell is an **opt-in extra** for members who want a native window, tray and global push-to-talk. Nothing to enable server-side — see the [Desktop app (optional)](#desktop-app-optional) section below.
 
 ## Tech stack
 
@@ -149,6 +145,35 @@ plugins/
   vampire-village/  Werewolf/Mafia-style social deduction
   watch-party/  Synchronized video watching
 ```
+
+## Desktop app (optional)
+
+The web app is the product — every feature (voice, games, admin, permissions)
+works in the browser. The native shell is an **optional client** that members
+install individually; **instance owners configure nothing**.
+
+**Who is it for?** Members who want a native window, system tray, and the
+global push-to-talk hotkey (Ctrl+Space) while another app has focus.
+
+**How a member sets it up (one-time, ~30 seconds):**
+
+1. Download the installer for your OS from the
+   [GitHub releases](https://github.com/Juanka-e/LobbyForge/releases) page.
+2. Install and launch it.
+3. Enter your community's URL (e.g. `https://my.lobbyforge.dev`) — the same
+   address you use in the browser. That's it; the URL is remembered.
+
+One installer works with **any** LobbyForge instance — there is no
+per-instance build or server-side switch. Switching communities is just
+entering a different URL.
+
+**Status: experimental alpha.** Installers are not code-signed yet, so:
+- **Windows:** SmartScreen shows "Windows protected your PC" — *More info → Run anyway*.
+- **macOS:** Gatekeeper blocks unsigned apps — right-click → *Open*, or run
+  `xattr -cr /Applications/LobbyForge.app` after dragging to Applications.
+
+Details: [docs/DESKTOP.md](docs/DESKTOP.md) ·
+[docs/DESKTOP_GAP_ANALYSIS.md](docs/DESKTOP_GAP_ANALYSIS.md)
 
 ## Documentation
 
