@@ -7,7 +7,12 @@ export interface DesktopConfig {
   enableTray: boolean;
   globalPushToTalk: boolean;
   startMinimized: boolean;
-  autoUpdate: boolean;
+  /**
+   * DP-04: the autoUpdate flag was a visible no-op — no updater plugin
+   * is wired (needs signed update artifacts first). Removed until the
+   * updater ships; re-adding it is a one-line change after
+   * tauri-plugin-updater + a signing key exist.
+   */
 }
 
 export function defaultDesktopConfig(): DesktopConfig {
@@ -17,7 +22,6 @@ export function defaultDesktopConfig(): DesktopConfig {
     enableTray: true,
     globalPushToTalk: true,
     startMinimized: false,
-    autoUpdate: true,
   };
 }
 

@@ -98,3 +98,55 @@ jobs:
             account server.
           releaseDraft: true
           prerelease: false
+
+      # tauri-action only uploads to a RELEASE when tagName is set; on
+      # manual runs we must attach the bundles to the workflow run
+      # ourselves so the smoke job (and humans) can download them.
+      - name: Upload installers as run artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: LobbyForge-${{ matrix.platform }}
+          path: |
+            apps/desktop/src-tauri/target/release/bundle/**/*.msi
+            apps/desktop/src-tauri/target/release/bundle/**/*.exe
+            apps/desktop/src-tauri/target/release/bundle/**/*.dmg
+            apps/desktop/src-tauri/target/release/bundle/**/*.app.tar.gz
+            apps/desktop/src-tauri/target/release/bundle/**/*.AppImage
+            apps/desktop/src-tauri/target/release/bundle/**/*.deb
+          if-no-files-found: error
+
+  # DP-17: install-and-run smoke on Windows. Catches the class of bugs
+  # the gap analysis found (missing mic permissions, dead PTT bridge) —
+  # a build that compiles is not a build that RUNS.
+  smoke:
+    name: Windows install smoke
+    needs: publish
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - name: Download the NSIS installer artifact
+        uses: actions/download-artifact@v5
+        with:
+          pattern: LobbyForge*
+          merge-multiple: true
+
+      - name: Install silently
+        shell: powershell
+        run: |
+          $exe = Get-ChildItem -Recurse -Filter "*-setup.exe" | Select-Object -First 1
+          if (-not $exe) { throw "NSIS installer not found in artifacts" }
+          Start-Process -FilePath $exe.FullName -ArgumentList "/S" -Wait -NoNewWindow
+
+      - name: Launch and verify the process stays alive
+        shell: powershell
+        run: |
+          $exe = "LobbyForge.exe"
+          $proc = Start-Process -FilePath "$env:LOCALAPPDATA\Programs\LobbyForge\$exe" -PassThru -ErrorAction SilentlyContinue
+          if (-not $proc) {
+            # NSIS default may install elsewhere — search.
+            $proc = Start-Process -FilePath (Get-ChildItem "C:\Program Files*","$env:LOCALAPPDATA" -Recurse -Filter $exe -ErrorAction SilentlyContinue | Select-Object -First 1).FullName -PassThru
+          }
+          Start-Sleep -Seconds 8
+          if ($proc.HasExited) { throw "LobbyForge exited during startup (exit code $($proc.ExitCode))" }
+          "Process alive: OK"
+          Stop-Process -Id $proc.Id -Force

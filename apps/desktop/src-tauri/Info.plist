@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- DP-01: voice-first product — without these, getUserMedia
+         crashes/refuses on macOS. -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>LobbyForge needs microphone access for voice rooms and push-to-talk.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>LobbyForge needs camera access for video in voice rooms.</string>
+    <key>NSUserNotificationsUsageDescription</key>
+    <string>LobbyForge sends notifications for mentions and voice activity.</string>
+</dict>
+</plist>

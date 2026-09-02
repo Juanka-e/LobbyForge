@@ -12,6 +12,7 @@ use tauri::{
     tray::TrayIconBuilder,
     Emitter, Manager, WebviewWindow,
 };
+use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri_plugin_store::StoreExt;
 
@@ -95,17 +96,48 @@ fn disconnect_instance(
         let _ = store.delete(INSTANCE_URL_KEY);
         let _ = store.save();
     }
-    let _ = window.eval("window.__lobbyforgeNavigate(null)");
+    // DP-16: actually navigate BACK. The shell's connect screen is the
+    // app's local entry point — a plain webview_url reset lands on the
+    // bundled index.html and reloads shell.js cleanly.
+    let _ = window.eval("window.location.href = 'index.html'");
     *state.instance_url.lock().unwrap() = None;
     let _ = window.set_title("LobbyForge");
     Ok(())
 }
 
-/// Emit a push-to-talk event to the webview (forwarded by the global
-/// shortcut handler). The instance web app listens for these.
+/// DP-05: read a boolean shell setting from the store (defaults true).
+fn shell_flag(app: &tauri::AppHandle, key: &str, default: bool) -> bool {
+    app.store(STORE_FILE)
+        .ok()
+        .and_then(|store| store.get(key))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(default)
+}
+
+/// DP-02: forward push-to-talk into the CURRENT page. The instance web
+/// app listens for `postMessage({type:'lobbyforge:ptt'})` — but the old
+/// bridge (shell.js converting a Tauri event) is unloaded by the remote
+/// navigation, and the remote origin has no `__TAURI__` (IPC stays
+/// closed). `window.eval` runs on ANY page, so the shortcut keeps
+/// working after connecting to an instance.
 fn emit_ptt(window: &WebviewWindow, pressed: bool) {
     let payload = serde_json::json!({ "pressed": pressed });
-    let _ = window.emit("lobbyforge://ptt", payload);
+    // Keep the Tauri event for the local connect screen…
+    let _ = window.emit("lobbyforge://ptt", payload.clone());
+    // …and postMessage into the page for the remote instance.
+    let _ = window.eval(&format!(
+        "window.postMessage({{source:window,type:'lobbyforge:ptt',pressed:{}}},'*')",
+        pressed
+    ));
+}
+
+/// DP-06: forward a shortcut action (mute/deafen/settings) to the page.
+/// Same eval bridge — the web app decides what to do with each type.
+fn emit_shortcut(window: &WebviewWindow, action: &str) {
+    let _ = window.eval(&format!(
+        "window.postMessage({{source:window,type:'lobbyforge:shortcut',action:{:?}}},'*')",
+        action
+    ));
 }
 
 fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
@@ -149,19 +181,68 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_deep_link::init())
         .manage(ShellState::default())
+
         .setup(|app| {
-            // Tray.
-            let _ = build_tray(app.handle());
+            // DP-07: session handoff deep links. The browser redirects to
+            // lobbyforge://session/complete?code&state&instance after the
+            // user logs into their instance; forward the URL into the page
+            // — the web app validates it (TS `parseDesktopSessionHandoff`)
+            // and exchanges the one-time code for a session cookie.
+            let dl_handle = app.handle().clone();
+            let _ = app.deep_link().on_open_url(move |event| {
+                if let Some(url) = event.urls().first() {
+                    let url_str = url.to_string();
+                    if let Some(window) = dl_handle.get_webview_window("main") {
+                        let _ = window.eval(&format!(
+                            "window.postMessage({{source:window,type:'lobbyforge:handoff',url:{:?}}},'*')",
+                            url_str
+                        ));
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                }
+            });
+
+            // DP-05: tray and shortcuts honour the persisted shell config
+            // (the DesktopConfig the TS side exposes; store keys mirror it).
+            let enable_tray = shell_flag(app.handle(), "enableTray", true);
+            let global_ptt = shell_flag(app.handle(), "globalPushToTalk", true);
+
+            if enable_tray {
+                let _ = build_tray(app.handle());
+            }
 
             // Global push-to-talk shortcut: hold Ctrl+Space to talk.
             // Releases emit pressed=false. The instance web app is the
             // consumer; the shell only forwards the key state.
-            let app_handle = app.handle().clone();
-            let _ = app.global_shortcut().on_shortcut("Control+Space", move |_app, _shortcut, event| {
-                if let Some(window) = app_handle.get_webview_window("main") {
-                    emit_ptt(&window, event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed);
-                }
-            });
+            if global_ptt {
+                let app_handle = app.handle().clone();
+                let _ = app.global_shortcut().on_shortcut("Control+Space", move |_app, _shortcut, event| {
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        emit_ptt(&window, event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed);
+                    }
+                });
+            }
+
+            // DP-06: the remaining DEFAULT_SHORTCUTS were never
+            // registered — dead config. Wire them through the same eval
+            // bridge; the web app maps actions to its own toggles.
+            for (accel, action) in [
+                ("Control+Shift+M", "toggleMute"),
+                ("Control+Shift+D", "toggleDeafen"),
+                ("Control+Comma", "openSettings"),
+            ] {
+                let app_handle = app.handle().clone();
+                let action_owned = action.to_string();
+                let _ = app.global_shortcut().on_shortcut(accel, move |_app, _shortcut, event| {
+                    if event.state != tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        return;
+                    }
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        emit_shortcut(&window, &action_owned);
+                    }
+                });
+            }
 
             // Restore the saved instance URL and navigate on launch.
             if let Ok(store) = app.store(STORE_FILE) {

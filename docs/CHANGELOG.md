@@ -2,6 +2,56 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Desktop gap-analysis remediation (DP-01..DP-17) - 2026-09-02
+
+### Fixed (desktop — see docs/DESKTOP_GAP_ANALYSIS.md)
+
+- **DP-02 (P0)**: global push-to-talk works AFTER connecting to an
+  instance. The old bridge (shell.js converting a Tauri event) died with
+  the remote navigation and the remote origin has no `__TAURI__`; the
+  shortcut now ALSO injects a postMessage via `window.eval` (runs on any
+  page, no IPC surface opened).
+- **DP-01 (P0)**: macOS ships NSMicrophoneUsageDescription /
+  NSCameraUsageDescription (Info.plist file-path form — tauri-utils 2.9
+  expects a PATH, not an inline map) + audio-input entitlements; without
+  them getUserMedia refuses on macOS (voice = product core).
+- **DP-06**: all four DEFAULT_SHORTCUTS are now registered (mute,
+  deafen, settings were dead config) and forwarded to the page through
+  the same eval bridge.
+- **DP-05**: tray + PTT honour the persisted shell config
+  (enableTray / globalPushToTalk store keys).
+- **DP-16**: `disconnect_instance` actually navigates back to the local
+  connect screen (was a no-op comment).
+- **DP-08**: bundle.targets "all" (was msi/nsis-only — local mac/linux
+  builds produced nothing while CI built them via tauri-action).
+- **DP-04**: the `autoUpdate` config flag is REMOVED — no updater plugin
+  exists; a visible no-op toggle lies to users.
+- **DP-15**: shell CSP drops `script-src 'unsafe-inline'` (all shell
+  scripts are external files).
+- **DP-09**: real LobbyForge icon set (voice-arc mark over a forge bar
+  on the app gradient) generated via `tauri icon` — replaces the
+  template Tauri icons everywhere.
+
+### Added
+
+- **DP-07 — desktop session handoff (the flow, not just the parser)**:
+  `POST /api/auth/desktop-session` mints a single-use code (Redis,
+  5-min TTL) after credential validation; the OS-level
+  `lobbyforge://session/complete` deep link is registered
+  (plugins.deep-link.desktop.schemes) and the shell's `on_open_url`
+  handler forwards it into the page;
+  `POST .../complete` burns the code and issues the real session
+  cookie. 8 route tests (mint/TTL, no-enumeration 401, burn+cookie,
+  replay-401, expired-401, gone-account-401, malformed).
+- **DP-17**: Windows install smoke job — downloads the NSIS artifact,
+  installs silently, launches, fails if the process exits during
+  startup. Installers are ALSO uploaded as run artifacts now
+  (tauri-action attaches nothing without a tagName — that's why the
+  first "successful" run produced zero artifacts).
+- **DP-03**: README carries honest unsigned-alpha instructions
+  (SmartScreen "More info → Run anyway"; macOS `xattr -cr`) until
+  signing certificates exist.
+
 ## [Unreleased] - Plugin storage, two-client voice E2E, security gates - 2026-08-29
 ### Fixed (same batch)
 

@@ -56,7 +56,11 @@ Honest assessment of what works today:
 - **Doctor** — built-in health monitoring + capacity profiling.
 - **Privacy-first defaults** — SEO off, invite-only registration, no telemetry, strict security headers (CSP with nonce, HSTS, Fetch-Metadata CSRF).
 - **i18n** — English + Turkish; community translations welcome.
-- **Native desktop client** — [Tauri 2](https://v2.tauri.app) shell (experimental). See [docs/DESKTOP.md](docs/DESKTOP.md).
+- **Native desktop client** — [Tauri 2](https://v2.tauri.app) shell (experimental). See [docs/DESKTOP.md](docs/DESKTOP.md) and [docs/DESKTOP_GAP_ANALYSIS.md](docs/DESKTOP_GAP_ANALYSIS.md).
+  - **Unsigned alpha notice:** installers are NOT code-signed or notarized yet.
+    - **Windows:** SmartScreen will show "Windows protected your PC" — click *More info → Run anyway*.
+    - **macOS:** Gatekeeper blocks the app — right-click → *Open*, or run `xattr -cr /Applications/LobbyForge.app` after dragging it to Applications.
+    - Signing certificates are tracked as DP-03 in the gap analysis.
 
 ## Tech stack
 
