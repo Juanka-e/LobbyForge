@@ -1,16 +1,26 @@
 # Voice networking: TURN fallback (LF-019)
 
-LobbyForge voice uses LiveKit (WebRTC). Most clients connect directly or
-via STUN; a minority — symmetric NATs, mobile carriers, corporate
-networks that block UDP — need a TURN relay. The production stack ships
+LobbyForge voice runs on **LiveKit, an SFU (Selective Forwarding Unit)**
+— every client's media ALWAYS flows through the LiveKit server, which
+receives N upstream streams and redistributes ~N×(N−1) downstream
+copies. There is no client-to-client P2P mesh; server bandwidth is
+consumed even without TURN. TURN is an *additional* relay for the
+minority whose direct client→SFU ICE path fails (symmetric NATs, mobile
+carriers, corporate networks that block UDP). The production stack ships
 a standalone **coturn** container for exactly that case.
+
+**Capacity implication:** in an N-person room where everyone listens to
+everyone, expect roughly N uplink + N×(N−1) downlink audio streams on
+the SFU. Screen-share/video multiplies this. Measure with real devices
+before opening a public server (LF-028).
 
 ## How the pieces fit
 
 ```
-client ── try direct/STUN ──► LiveKit (udp 50000-60000)
+client ── ICE: client-to-SFU direct ──► LiveKit SFU (udp 50000-60000)
+   │        (all media relays THROUGH the SFU either way)
    │
-   └── fallback (only on failure) ──► coturn TURN (3478, relay 49160-49200/udp)
+   └── direct path fails ──► coturn TURN (3478, relay 49160-49200/udp)
                                         ▲
                        LiveKit advertises the TURN server to clients via
                        rtc.turn_servers in livekit.yaml (connect response)

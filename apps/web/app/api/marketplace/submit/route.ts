@@ -61,7 +61,12 @@ async function handlePost(req: Request): Promise<NextResponse> {
       },
       { status: 201 }
     );
-  } catch {
+  } catch (err) {
+    // SEC-006: a plugin-ID takeover is a conflict, not a server error.
+    if (err instanceof Error && err.name === 'PluginIdTakenError') {
+      return NextResponse.json({ error: err.message }, { status: 409 });
+    }
+    console.error('[marketplace/submit] failed:', (err as Error).message);
     return NextResponse.json({ error: 'Failed to submit plugin' }, { status: 500 });
   }
 }

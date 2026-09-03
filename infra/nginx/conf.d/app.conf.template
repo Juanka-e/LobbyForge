@@ -3,7 +3,19 @@
 # TEMPLATE — install.sh renders this to the sibling file (app.conf) with
 # The cert files are provisioned by certbot (see install.sh).
 
-# Redirect HTTP → HTTPS
+# Default vhost — reject any request with a Host we don't serve
+# (SEC-011: without this, an arbitrary Host header fell through to the
+# app vhost and $host-based redirects could point at external domains).
+server {
+    listen 80 default_server;
+    listen 443 ssl default_server;
+    server_name _;
+    ssl_certificate /etc/letsencrypt/live/LOBBYFORGE_DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/LOBBYFORGE_DOMAIN/privkey.pem;
+    return 444; # close without a response
+}
+
+# Redirect HTTP → HTTPS (canonical domain ONLY — not $host)
 server {
     listen 80;
     server_name LOBBYFORGE_DOMAIN;
@@ -14,7 +26,7 @@ server {
     }
 
     location / {
-        return 301 https://$host$request_uri;
+        return 301 https://LOBBYFORGE_DOMAIN$request_uri;
     }
 }
 

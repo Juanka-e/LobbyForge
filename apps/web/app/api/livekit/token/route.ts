@@ -80,9 +80,12 @@ async function handler(req: Request): Promise<NextResponse> {
 
   // Enforce per-room limits (defaultUserLimit, maxCameraUsersPerRoom,
   // maxScreenShareUsersPerRoom). These require a LiveKit participant list,
-  // so only fetch it when at least one limit is configured. Fail open on
-  // error — a transient LiveKit outage should not lock users out of voice;
-  // the connection itself will fail loudly if LiveKit is truly down.
+  // so only fetch it when at least one limit is configured.
+  // VOICE-003: the defaultUserLimit is a HARD capacity cap — if we
+  // cannot count the room we cannot honor it, and fail-open would let
+  // every requester in during an API blip. Fail CLOSED (503, retryable)
+  // for the room-cap check; camera/screen-share caps degrade to OFF
+  // (safer: fewer publishers, never more).
   let effectiveAllowCamera = voiceSettings.allowCamera;
   let effectiveAllowScreenShare = voiceSettings.allowScreenShare;
   const hasLimitConfig =
@@ -114,8 +117,19 @@ async function handler(req: Request): Promise<NextResponse> {
           effectiveAllowScreenShare = false;
         }
       }
-    } catch {
-      // Fail open — see comment above.
+    } catch (err) {
+      // VOICE-003: the ROOM CAP is a hard limit — fail closed when we
+      // cannot count. Camera/screen-share caps degrade to denied (a
+      // safer default than allowing unbounded publishers).
+      console.error('[livekit/token] participant count failed:', (err as Error).message);
+      if (voiceSettings.defaultUserLimit != null) {
+        return NextResponse.json(
+          { error: 'Voice room capacity cannot be verified — retry shortly.', retryable: true },
+          { status: 503 }
+        );
+      }
+      if (voiceSettings.maxCameraUsersPerRoom != null) effectiveAllowCamera = false;
+      if (voiceSettings.maxScreenShareUsersPerRoom != null) effectiveAllowScreenShare = false;
     }
   }
 

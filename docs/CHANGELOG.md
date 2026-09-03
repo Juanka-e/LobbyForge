@@ -2,6 +2,45 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - 6th-audit wave 2: remaining P1s + P2s - 2026-09-03
+
+### Fixed (P1)
+
+- **SEC-006 marketplace plugin-ID takeover**: the pluginId is now an
+  IDENTITY, not a slot — the first publisher owns it; a submit from a
+  different user throws PluginIdTakenError → 409 (tested). A legitimate
+  new version from the owner resets reviewStatus to pending (changed
+  code must be re-reviewed).
+- **VOICE-003 voice limits fail-open**: the hard room cap
+  (defaultUserLimit) fails CLOSED (retryable 503) when the participant
+  count cannot be verified — fail-open would have admitted everyone
+  during an API blip; camera/screen-share caps degrade to DENIED
+  (fewer publishers, never more). 3 tests including the replaced
+  fail-open one.
+- **SEC-009 plugin download TOCTOU/DNS-rebinding**: the connection is
+  now PINNED to the pre-verified IPs via node:https Agent's custom
+  `lookup` (re-resolution is refused; SNI/cert validation keep the
+  original hostname). Private-range coverage expanded: IPv4 CGNAT
+  100.64/10 + 192.0.0.0/24 + 198.18.0.0/15; IPv6 site-local,
+  multicast, documentation, NAT64, discard-only.
+
+### Fixed (P2)
+
+- **SEC-011 host-header redirect**: default vhost returns 444 for any
+  Host we don't serve; the HTTP→HTTPS redirect uses the canonical
+  domain, not $host.
+- **OPS-003 update path**: `git pull && bash install.sh` against a
+  running same-domain stack now offers a menu — update (rebuild +
+  recreate + migrations) / renew certs / exit — instead of exiting with
+  "nothing to install". Scenario-2 installer test updated to the menu.
+- **OPS-005 domain validation**: full DNS label rules (1-63 chars per
+  label, alphanumeric start/end, hyphens inside only, FQDN ≤ 253);
+  `a..b.com` and `bad-.com` now rejected (verified).
+- **DOC-001 SFU reality**: the voice doc no longer implies
+  client-to-client P2P — LiveKit is an SFU; all media flows through
+  the server (N up + N×(N-1) down in a full-listen room); TURN is an
+  additional relay layer. Capacity-implication note added.
+
 ## [Unreleased] - 6th-audit P0/P1 remediation (SEC/OPS) - 2026-09-03
 
 ### Fixed — the three P0 release blockers

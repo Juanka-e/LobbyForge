@@ -80,9 +80,10 @@ if [ -z "$DOMAIN" ]; then
   echo -e "${RED}✗ Domain is required for HTTPS/WebRTC.${NC}"
   exit 1
 fi
-# LF-010: Reject domains that would break sed/nginx config (/, &, \, spaces).
-if ! [[ "$DOMAIN" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
-  echo -e "${RED}✗ Invalid domain "$DOMAIN" — only letters, digits, dots, and hyphens allowed.${NC}"
+# LF-010/OPS-005: full DNS label validation — each label 1-63 chars,
+# alphanumeric first/last, letters/digits/hyphens only, total FQDN <= 253.
+if ! [[ "$DOMAIN" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$ ]] || [ ${#DOMAIN} -gt 253 ]; then
+  echo -e "${RED}✗ Invalid domain "$DOMAIN" — each label must be 1-63 chars, alphanumeric start/end, hyphens inside only (max 253 total).${NC}"
   exit 1
 fi
 
@@ -152,13 +153,32 @@ fi
 
 if [ "$STACK_RUNNING" = true ]; then
   if [ -n "$EXISTING_DOMAIN" ] && [ "$EXISTING_DOMAIN" = "$DOMAIN" ]; then
-    echo -e "${GREEN}✓ Stack already running on $DOMAIN — nothing to install.${NC}"
+    echo -e "${GREEN}✓ Stack already running on $DOMAIN.${NC}"
     echo ""
-    echo "  Renew certificates:   docker compose -f $COMPOSE_FILE --env-file $ENV_FILE exec certbot certbot renew"
-    echo "  (nginx auto-reloads within ~60s of a certificate change; no restart needed.)"
+    echo -e "${BOLD}What do you want to do?${NC}"
+    echo "  1) Update to the code in this checkout (build new images, recreate services, run migrations)"
+    echo "  2) Renew TLS certificates only"
+    echo "  3) Nothing — exit"
     echo ""
-    echo "  Restart/reconfigure:  docker compose -f $COMPOSE_FILE --env-file $ENV_FILE down, then re-run install.sh"
-    exit 0
+    read -rp "$(echo -e ${BOLD}'Choice [1/2/3]: '${NC})" STACK_ACTION
+    STACK_ACTION="${STACK_ACTION:-3}"
+    case "$STACK_ACTION" in
+      1)
+        echo -e "${BOLD}Updating (this rebuilds images + recreates services; brief downtime per service)...${NC}"
+        docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build
+        echo -e "${GREEN}✓ Update applied.${NC}"
+        exit 0
+        ;;
+      2)
+        docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" exec certbot certbot renew
+        echo "(nginx auto-reloads within ~60s of a certificate change; no restart needed.)"
+        exit 0
+        ;;
+      *)
+        echo "No changes made."
+        exit 0
+        ;;
+    esac
   fi
   echo -e "${RED}✗ The stack is RUNNING (lobbyforge-nginx) but this run targets '$DOMAIN'${NC}"
   echo "   while the existing installation targets '${EXISTING_DOMAIN:-<unknown>}'."
@@ -319,4 +339,4 @@ echo ""
 echo "  Example (ufw): ufw allow 3478/tcp; ufw allow 3478/udp; ufw allow 5349/tcp; ufw allow 5349/udp; ufw allow 49160:49200/udp; ufw allow 50000:60000/udp"
 echo ""
 echo -e "${BOLD}To stop:${NC}  docker compose -f $COMPOSE_FILE --env-file $ENV_FILE down"
-echo -e "${BOLD}To update:${NC}  git pull && bash install.sh   (re-provisions configs, reuses secrets)"
+echo -e "${BOLD}To update:${NC}  git pull && bash install.sh  (a running same-domain stack offers: update / renew / exit)"

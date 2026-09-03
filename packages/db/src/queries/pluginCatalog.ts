@@ -96,12 +96,38 @@ export async function getCatalogEntry(
   return (row as PluginCatalogRow) ?? null;
 }
 
-/** Submit a plugin for review (or update an existing submission). */
+/** Thrown when a different publisher tries to take over a plugin ID. */
+export class PluginIdTakenError extends Error {
+  constructor(pluginId: string) {
+    super(`Plugin ID "${pluginId}" is already published by another publisher.`);
+    this.name = 'PluginIdTakenError';
+  }
+}
+
+/**
+ * Submit a plugin for review (or update an existing submission).
+ *
+ * SEC-006: the pluginId is an IDENTITY, not a slot — the FIRST publisher
+ * owns it. A submit from a different user is a takeover attempt (point
+ * the bundle URL of an approved plugin at their own code) and throws
+ * PluginIdTakenError. A legitimate new version from the OWNER resets
+ * reviewStatus to pending (changed code must be re-reviewed).
+ */
 export async function submitPluginForReview(
   db: DbClient,
   input: SubmitPluginInput,
   publisherUserId?: string
 ): Promise<PluginCatalogRow> {
+  // SEC-006 ownership check BEFORE the upsert.
+  const existing = await db
+    .select({ publisherUserId: pluginCatalog.publisherUserId })
+    .from(pluginCatalog)
+    .where(eq(pluginCatalog.pluginId, input.pluginId))
+    .limit(1);
+  const currentOwner = existing[0]?.publisherUserId ?? null;
+  if (currentOwner && publisherUserId && currentOwner !== publisherUserId) {
+    throw new PluginIdTakenError(input.pluginId);
+  }
   const values = {
     pluginId: input.pluginId,
     name: input.name,
@@ -126,6 +152,8 @@ export async function submitPluginForReview(
     .onConflictDoUpdate({
       target: pluginCatalog.pluginId,
       set: {
+        // SEC-006: changed code needs re-review.
+        reviewStatus: 'pending',
         name: values.name,
         version: values.version,
         summary: values.summary,

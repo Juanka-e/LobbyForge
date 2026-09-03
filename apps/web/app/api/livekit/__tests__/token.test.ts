@@ -262,7 +262,7 @@ describe('POST /api/livekit/token room limits', () => {
     );
   });
 
-  it('fails open (still mints token) when listParticipants throws', async () => {
+  it('VOICE-003: fails CLOSED (503) when a hard room cap cannot be verified', async () => {
     getEffectiveServerVoiceSettings.mockResolvedValue({
       allowCamera: true,
       allowScreenShare: true,
@@ -275,8 +275,8 @@ describe('POST /api/livekit/token room limits', () => {
     listParticipants.mockRejectedValue(new Error('LiveKit unreachable'));
     const { POST } = await loadRoute();
     const res = await POST(makeRequest({ serverId: SERVER_ID, channelId: CHANNEL_ID }), {});
-    expect(res.status).toBe(200);
-    expect(issueLiveKitToken).toHaveBeenCalled();
+    expect(res.status).toBe(503);
+    expect(issueLiveKitToken).not.toHaveBeenCalled();
   });
 
   it('returns serverVoiceSettings (requirePushToTalk + startMuted) in the response', async () => {
@@ -294,5 +294,57 @@ describe('POST /api/livekit/token room limits', () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.serverVoiceSettings).toEqual({ requirePushToTalk: true, startMuted: true });
+  });
+});
+
+describe('POST /api/livekit/token VOICE-003 limit failure policy', () => {
+  it('VOICE-003: 503 (fail-closed) when the room cap cannot be verified', async () => {
+    getEffectiveServerVoiceSettings.mockResolvedValue({
+      allowCamera: true,
+      allowScreenShare: true,
+      requirePushToTalk: false,
+      startMuted: false,
+      defaultUserLimit: 8, // HARD cap configured
+      maxCameraUsersPerRoom: null,
+      maxScreenShareUsersPerRoom: null,
+    });
+    listParticipants.mockRejectedValue(new Error('livekit api down'));
+    getUserPermissions.mockResolvedValue(['connect_voice', 'speak', 'stream']);
+    getActiveMemberTimeout.mockResolvedValue(null);
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest({ serverId: SERVER_ID, channelId: CHANNEL_ID }), {});
+    expect(res.status).toBe(503);
+    expect(issueLiveKitToken).not.toHaveBeenCalled();
+  });
+
+  it('VOICE-003: camera/screen caps degrade to DENIED (not open) on counting failure', async () => {
+    getEffectiveServerVoiceSettings.mockResolvedValue({
+      allowCamera: true,
+      allowScreenShare: true,
+      requirePushToTalk: false,
+      startMuted: false,
+      defaultUserLimit: null, // no hard cap → no 503
+      maxCameraUsersPerRoom: 2,
+      maxScreenShareUsersPerRoom: 1,
+    });
+    listParticipants.mockRejectedValue(new Error('livekit api down'));
+    getUserPermissions.mockResolvedValue(['connect_voice', 'speak', 'stream']);
+    getActiveMemberTimeout.mockResolvedValue(null);
+    const { POST } = await loadRoute();
+    const res = await POST(
+      makeRequest({
+        serverId: SERVER_ID,
+        channelId: CHANNEL_ID,
+        canPublishSources: ['microphone', 'camera', 'screen-share'],
+      }),
+      {}
+    );
+    expect(res.status).toBe(200);
+    // Microphone survives; camera and screen-share degrade to denied.
+    expect(issueLiveKitToken).toHaveBeenCalledWith(
+      expect.objectContaining({
+        grants: expect.objectContaining({ canPublishSources: ['microphone'] }),
+      })
+    );
   });
 });

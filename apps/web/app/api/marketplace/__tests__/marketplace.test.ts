@@ -177,3 +177,29 @@ describe('POST /api/marketplace/review', () => {
     expect(reviewPlugin).not.toHaveBeenCalled();
   });
 });
+
+describe('POST /api/marketplace/submit — SEC-006 ownership', () => {
+  it('maps PluginIdTakenError to 409 (ID takeover rejected as conflict)', async () => {
+    const takeover = new Error('Plugin ID "hushle" is already published by another publisher.');
+    takeover.name = 'PluginIdTakenError';
+    submitPluginForReview.mockRejectedValueOnce(takeover);
+    const { POST } = await import('../submit/route.js');
+    const res = await POST(
+      new Request('https://example.test/api/marketplace/submit', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          pluginId: 'hushle',
+          name: 'Evil Clone',
+          version: '1.0.0',
+          type: 'game',
+          publisher: 'Mallory',
+        }),
+      }),
+      {}
+    );
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toContain('another publisher');
+  });
+});

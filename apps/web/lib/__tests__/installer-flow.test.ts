@@ -111,8 +111,13 @@ interface InstallerOpts {
 }
 
 /** Runs install.sh with the fake-docker bin prepended to PATH (POSIX ':'). */
-function runInstallerPosix(sandbox: string, domain: string, opts: InstallerOpts = {}) {
-  const answers = `${domain}\nE2E Community\nn\nY\n`;
+function runInstallerPosix(
+  sandbox: string,
+  domain: string,
+  opts: InstallerOpts = {},
+  extraInput = ''
+) {
+  const answers = `${domain}\nE2E Community\nn\nY\n${extraInput}`;
   const res = spawnSync('bash', ['-c', `cd "$1" && PATH="$2:$PATH" FAKE_DOCKER_PS="$3" FAKE_CERTBOT_RC="$4" bash ./install.sh`, 'run', sandbox, join(sandbox, 'bin'), opts.stackRunning ? 'lobbyforge-nginx' : '', String(opts.certbotRc ?? 0)], {
     input: answers,
     encoding: 'utf8',
@@ -155,15 +160,18 @@ describe('install.sh — V4-003 safe activation', () => {
     expect(content(sandbox, 'infra/turn/turnserver.conf')).toContain('realm=first.example.com');
   });
 
-  it('scenario 2: RUNNING stack + SAME domain → renew hint, NOTHING modified', () => {
+  it('scenario 2: RUNNING stack + SAME domain → action menu; exit changes NOTHING', () => {
     const sandbox = makeSandbox();
     sandboxes.push(sandbox);
     expect(runInstallerPosix(sandbox, 'same.example.com').rc).toBe(0);
     const before = fileState(sandbox);
 
-    const { rc, out } = runInstallerPosix(sandbox, 'same.example.com', { stackRunning: true });
+    // OPS-003: the installer now offers update/renew/exit; answer exit.
+    const { rc, out } = runInstallerPosix(sandbox, 'same.example.com', { stackRunning: true }, '3\n');
     expect(rc, out).toBe(0);
-    expect(out).toContain('renew');
+    expect(out).toContain('Update to the code in this checkout');
+    expect(out).toContain('Renew TLS certificates only');
+    expect(out).toContain('No changes made');
     expect(fileState(sandbox)).toEqual(before); // byte-for-byte untouched
   });
 

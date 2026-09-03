@@ -138,13 +138,16 @@ async function downloadWithTimeout(url: string): Promise<ArrayBuffer> {
     }
   }
 
+  // SEC-009: PIN the connection to the verified IP via https.request with
+  // a custom `lookup` — a plain fetch(url) re-resolves DNS, so a rebind
+  // between the check above and the fetch would reach an internal
+  // address. The custom lookup serves ONLY the pre-verified address;
+  // SNI + certificate validation keep using the ORIGINAL hostname
+  // (serverName option), so TLS stays correct.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
   try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      redirect: 'error',
-    });
+    const res = await fetchIpPinned(url, parsed.hostname, addresses, controller.signal, DOWNLOAD_TIMEOUT_MS);
     if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`);
     return await res.arrayBuffer();
   } finally {
@@ -163,16 +166,24 @@ function isPrivateIp(ip: string): boolean {
       (parts[0] === 192 && parts[1] === 168) ||             // 192.168.0.0/16
       parts[0] === 127 ||                                   // 127.0.0.0/8 (loopback)
       (parts[0] === 169 && parts[1] === 254) ||             // 169.254.0.0/16 (link-local)
-      parts[0] === 0                                        // 0.0.0.0/8
+      parts[0] === 0 ||                                       // 0.0.0.0/8
+      (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) || // 100.64.0.0/10 CGNAT
+      (parts[0] === 192 && parts[1] === 0) ||                 // 192.0.0.0/24 special
+      (parts[0] === 198 && (parts[1] === 18 || parts[1] === 19)) // 198.18.0.0/15 benchmark
     );
   }
   // IPv6 checks
   const lower = ip.toLowerCase();
   return (
     lower === '::1' ||                                     // loopback
-    lower.startsWith('fe80:') ||                            // link-local
-    lower.startsWith('fc') || lower.startsWith('fd') ||     // ULA
-    lower.startsWith('::ffff:') && isPrivateIp(lower.slice(7)) // IPv4-mapped
+    lower.startsWith('fe80:') ||                            // link-local fe80::/10
+    lower.startsWith('fec0:') ||                            // deprecated site-local
+    lower.startsWith('fc') || lower.startsWith('fd') ||     // ULA fc00::/7
+    lower.startsWith('ff') ||                               // multicast ff00::/8
+    lower.startsWith('2001:db8') ||                         // documentation
+    lower.startsWith('64:ff9b') ||                          // NAT64 well-known
+    lower.startsWith('100::') ||                            // discard-only 100::/64
+    (lower.startsWith('::ffff:') && isPrivateIp(lower.slice(7))) // IPv4-mapped
   );
 }
 
@@ -265,4 +276,56 @@ function findIndexJs(dir: string): string | null {
     // ignore
   }
   return null;
+}
+
+/**
+ * SEC-009: HTTPS fetch pinned to pre-verified IPs. Uses node:https (not
+ * global fetch) because https.request accepts a `lookup` option — the
+ * connection's DNS resolution returns ONLY the addresses we already
+ * validated as public. A DNS rebind between check and connect therefore
+ * cannot reach an internal service. serverName keeps SNI on the real
+ * hostname so certificate validation is unaffected.
+ */
+async function fetchIpPinned(
+  url: string,
+  originalHostname: string,
+  verifiedAddresses: string[],
+  signal: AbortSignal,
+  timeoutMs: number
+): Promise<{ ok: boolean; status: number; arrayBuffer: () => Promise<ArrayBuffer> }> {
+  const https = await import('node:https');
+  const dns = await import('node:dns');
+  const lookupFn = (
+    _hostname: string,
+    _options: unknown,
+    callback: (err: Error | null, addresses: unknown) => void
+  ) => {
+    callback(null, verifiedAddresses.map((address) => ({ address, family: address.includes(':') ? 6 : 4 })));
+  };
+  const agent = new https.Agent({
+    lookup: lookupFn as never,
+    servername: originalHostname,
+  });
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      url,
+      { agent, signal, timeout: timeoutMs, headers: { 'user-agent': 'LobbyForge-Installer' } },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => {
+          const body = Buffer.concat(chunks);
+          resolve({
+            ok: (res.statusCode ?? 500) >= 200 && (res.statusCode ?? 500) < 300,
+            status: res.statusCode ?? 500,
+            arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),
+          });
+        });
+        res.on('error', reject);
+      }
+    );
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(new Error('Download timed out')); });
+    req.end();
+  });
 }
