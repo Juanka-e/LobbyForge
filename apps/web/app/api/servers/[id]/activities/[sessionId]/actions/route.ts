@@ -16,6 +16,7 @@ import { getPluginServer } from '@/lib/plugin-server-registry';
 import { projectActivityState } from '@/lib/activity-projection';
 import { buildHttpPluginContext, callHandleAction } from '@/lib/plugin-context';
 import { withApiSecurity } from '@/lib/security-headers';
+import { authorizeSessionChannelVisibility } from '@/lib/permissions';
 import { publishActivityStateChange } from '@/lib/activity-bus';
 import { preparePluginAction } from '@/lib/prepare-plugin-action';
 import {
@@ -185,6 +186,11 @@ async function handlePost(
       return NextResponse.json({ error: 'Activity not found' }, { status: 404 });
     }
 
+    // SEC-002: the session's channel may be private (role-gated) —
+    // membership alone is not enough; owner/manage_channels bypass.
+    const visibility = await authorizeSessionChannelVisibility(session.uid, serverId, row, server.ownerUserId);
+    if (!visibility.ok) return visibility.response;
+
     const plugin = getPluginServer(row.pluginId);
     if (!plugin) {
       // A session exists for a plugin we no longer ship. We can't
@@ -342,11 +348,18 @@ async function handlePost(
 
     // Push the committed state to any open SSE subscriptions on this session.
     // Fire-and-forget — a Redis blip must not fail the action.
+    // SEC-001: NO state on the bus — subscribers load + project per
+    // viewer. The summary carries only public counts (never secret
+    // fields), so even a compromised fanout cannot leak cards/answers.
+    const deckSize = Array.isArray((committedState as { deck?: unknown }).deck)
+      ? ((committedState as { deck?: unknown[] }).deck as unknown[]).length
+      : undefined;
     publishActivityStateChange({
       serverId,
       sessionId,
       status: (casResult.row as { status?: string })?.status ?? row.status,
-      state: committedState,
+      revision: (casResult.row as { revision?: number })?.revision,
+      publicSummary: deckSize !== undefined ? { deckSize } : undefined,
     });
     void logAction(getDb(), {
       serverId,

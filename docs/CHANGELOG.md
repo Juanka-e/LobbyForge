@@ -2,6 +2,57 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - 6th-audit P0/P1 remediation (SEC/OPS) - 2026-09-03
+
+### Fixed — the three P0 release blockers
+
+- **SEC-001 — raw game state leaked over WebSocket**: the Redis activity
+  bus shipped the CANONICAL state to every subscriber — a normal
+  member's WS frames contained Hushle's deck/currentCard and Quiz's
+  correctIndex. The bus wire format now carries ONLY status/revision/
+  counts (regression test asserts the raw payload contains no
+  currentCard/forbiddenWords/correctIndex); the ws-gateway loads the
+  session and applies the CANONICAL projector per subscriber (moved to
+  @lobbyforge/core so REST/SSE/WS share one implementation); the SSE
+  route does the same on live events. Fail-closed: projection errors
+  never forward unprojected state.
+- **SEC-002 — private-channel rules skipped on WS + activity APIs**:
+  gateway chat/activity-state topics now load the channel (directly, or
+  via the session's channelId) and enforce role-gated visibility —
+  owner/manage_channels bypass, same as REST. Every activity lifecycle
+  route (list/GET/action/SSE/end) gates through
+  authorizeSessionChannelVisibility; the LIST route's visibility gap is
+  closed. 5 gateway negative tests (private chat, session-in-private-
+  channel, cross-server session, manage bypass, presence stays
+  membership-only).
+- **OPS-001 — coturn restart loop**: the inline multi-line watcher
+  collided with the image entrypoint's eval semantics (first line ran
+  inside a command substitution; ~5-min restart cycles). The watcher is
+  now a separate POSIX-sh script mounted read-only, invoked via an
+  explicit entrypoint override.
+
+### Fixed — high-priority (P1)
+
+- **SEC-005 — OAuth open redirect**: protocol-relative (%2F%2Fevil) and
+  backslash payloads no longer survive — sanitizeOAuthRedirect enforces
+  a single-leading-slash same-origin path on BOTH the start route
+  (write) and the callback (read; the cookie is client-writable
+  storage). 4 fuzz-style tests.
+- **SEC-004 — XFF spoofing**: nginx now sends X-Forwarded-For
+  $remote_addr (NOT $proxy_add_x_forwarded_for, which preserved the
+  attacker's chain); web + ws-gateway extract the LAST chain entry (the
+  trusted-proxy-observed hop) instead of the attacker-controllable
+  first.
+- **SEC-003 — revoked sessions kept open realtime**: the WS handshake
+  checks the Redis revocation set (fail-open only when Redis itself is
+  down — REST stays the strict fail-closed gate); the SSE stream
+  re-checks revocation on every keepalive tick.
+- **OPS-002 — backup verifier trusted the manifest**: it now streams
+  the REAL file's SHA-256 and stat-size and compares against the
+  manifest (existence alone proved nothing). Positive + tampered-file
+  tests. Also RT-001: the SSE cancel() path now runs the SAME
+  idempotent cleanup as abort (interval + Redis subscription released).
+
 ## [Unreleased] - Desktop gap-analysis remediation (DP-01..DP-17) - 2026-09-02
 
 ### Fixed (desktop — see docs/DESKTOP_GAP_ANALYSIS.md)

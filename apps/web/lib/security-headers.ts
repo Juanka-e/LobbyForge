@@ -194,7 +194,11 @@ export function resolveClientAddress(
     return req.headers.get('cf-connecting-ip')?.trim() || 'unknown';
   }
   if (mode === 'x-forwarded-for') {
-    return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+    // SEC-004: nginx is configured to send ONLY $remote_addr, but if a
+    // chain ever leaks through, the LAST entry is the hop the trusted
+    // proxy observed — the FIRST is attacker-controllable.
+    const chain = req.headers.get('x-forwarded-for')?.split(',').map((x) => x.trim()).filter(Boolean);
+    return chain?.[chain.length - 1] ?? 'unknown';
   }
   // In production behind a reverse proxy (Nginx), warn loudly if the trusted
   // proxy is not configured — without it, ALL clients share one rate-limit bucket.

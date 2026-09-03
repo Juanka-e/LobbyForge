@@ -18,6 +18,7 @@ import { readGuestSession } from '@/lib/guest-session';
 import { getPluginServer } from '@/lib/plugin-server-registry';
 import { callCreateInitialState, buildHttpPluginContext } from '@/lib/plugin-context';
 import { withApiSecurity } from '@/lib/security-headers';
+import { authorizeChannelVisibility } from '@/lib/permissions';
 import { requireVisibleChannelInServer } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
@@ -96,6 +97,15 @@ async function handleGet(
     if (!channel || channel.serverId !== serverId) {
       return NextResponse.json({ error: 'Channel not found' }, { status: 404 });
     }
+    // SEC-002: private-channel rules — the earlier requireVisibleChannelInServer
+    // import was only used on CREATE; the list path leaked summaries.
+    const visibility = await authorizeChannelVisibility(
+      session.uid,
+      serverId,
+      channelId,
+      server.ownerUserId
+    );
+    if (!visibility.ok) return visibility.response;
     const sessions = await listGameSessionsForChannel(getDb(), channelId);
     return NextResponse.json(
       { activities: sessions.map(toSummary) },

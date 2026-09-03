@@ -84,3 +84,21 @@ export async function authorizeChannelVisibility(
   }
   return { ok: true };
 }
+
+/**
+ * SEC-002: authorize a member against an ACTIVITY SESSION's channel —
+ * the session's channelId carries the private-channel rules. Used by
+ * every activity lifecycle route (GET/action/SSE/end) so a UUID-guessed
+ * session in a gated channel yields 403.
+ */
+export async function authorizeSessionChannelVisibility(
+  userId: string,
+  serverId: string,
+  session: { serverId: string; channelId: string },
+  ownerUserId: string | null
+): Promise<{ ok: true } | { ok: false; response: NextResponse }> {
+  if (session.serverId !== serverId) {
+    return { ok: false, response: NextResponse.json({ error: 'Activity not found' }, { status: 404 }) };
+  }
+  return authorizeChannelVisibility(userId, serverId, session.channelId, ownerUserId);
+}

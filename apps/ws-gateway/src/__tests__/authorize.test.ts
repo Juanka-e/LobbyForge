@@ -11,11 +11,19 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   getServerById: vi.fn(),
   isServerMember: vi.fn(),
+  getGameSessionById: vi.fn(),
+  getUserPermissions: vi.fn(),
+  canMemberAccessChannel: vi.fn(),
+  isDmChannelParticipant: vi.fn(),
 }));
 
 vi.mock('@lobbyforge/db', () => ({
   getServerById: mocks.getServerById,
   isServerMember: mocks.isServerMember,
+  getGameSessionById: mocks.getGameSessionById,
+  getUserPermissions: mocks.getUserPermissions,
+  canMemberAccessChannel: mocks.canMemberAccessChannel,
+  isDmChannelParticipant: mocks.isDmChannelParticipant,
 }));
 
 import { authorizeTopicSubscribe } from '../authorize.js';
@@ -43,11 +51,20 @@ function mockServer(overrides: Partial<{ ownerUserId: string; deletedAt: Date | 
 beforeEach(() => {
   mocks.getServerById.mockReset();
   mocks.isServerMember.mockReset();
+  mocks.getGameSessionById.mockReset();
+  mocks.getUserPermissions.mockReset().mockResolvedValue([]);
+  mocks.canMemberAccessChannel.mockReset().mockResolvedValue(true);
+  mocks.isDmChannelParticipant.mockReset();
 });
 
 describe('authorizeTopicSubscribe', () => {
   it('accepts a topic whose server the user owns', async () => {
     mocks.getServerById.mockResolvedValue(mockServer({ ownerUserId: USER_ID }));
+    // SEC-002: even for the OWNER, an activity-state topic resolves the
+    // session (to find its channel) — mock a consistent one.
+    mocks.getGameSessionById.mockResolvedValue({
+      id: 'abc', serverId: SERVER_ID, channelId: 'ch-1', pluginId: 'hushle',
+    });
     const result = await authorizeTopicSubscribe(fakeDb, USER_ID, `activity-state:${SERVER_ID}:abc`);
     expect(result.ok).toBe(true);
     expect(mocks.isServerMember).not.toHaveBeenCalled();
@@ -80,5 +97,59 @@ describe('authorizeTopicSubscribe', () => {
     const result = await authorizeTopicSubscribe(fakeDb, USER_ID, 'bogus:srv:abc');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe('unknown_topic');
+  });
+});
+
+describe('authorizeTopicSubscribe — SEC-002 channel visibility', () => {
+  const CHANNEL_ID = 'ch-1';
+  const SESSION_ID = 'sess-1';
+
+  it('rejects a chat topic for a channel the member cannot SEE (private room)', async () => {
+    mocks.getServerById.mockResolvedValue(mockServer());
+    mocks.isServerMember.mockResolvedValue(true);
+    mocks.getUserPermissions.mockResolvedValue([]);            // no manage bypass
+    mocks.canMemberAccessChannel.mockResolvedValue(false);    // gated channel
+    const result = await authorizeTopicSubscribe(fakeDb, USER_ID, `chat:${SERVER_ID}:${CHANNEL_ID}`);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe('forbidden');
+  });
+
+  it('rejects an activity-state topic when the session lives in a private channel', async () => {
+    mocks.getServerById.mockResolvedValue(mockServer());
+    mocks.isServerMember.mockResolvedValue(true);
+    mocks.getGameSessionById.mockResolvedValue({
+      id: SESSION_ID, serverId: SERVER_ID, channelId: CHANNEL_ID, pluginId: 'hushle',
+    });
+    mocks.getUserPermissions.mockResolvedValue([]);
+    mocks.canMemberAccessChannel.mockResolvedValue(false);
+    const result = await authorizeTopicSubscribe(fakeDb, USER_ID, `activity-state:${SERVER_ID}:${SESSION_ID}`);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe('forbidden');
+    expect(mocks.canMemberAccessChannel).toHaveBeenCalledWith(fakeDb, SERVER_ID, CHANNEL_ID, USER_ID);
+  });
+
+  it('rejects an activity-state topic whose session belongs to another server', async () => {
+    mocks.getServerById.mockResolvedValue(mockServer());
+    mocks.isServerMember.mockResolvedValue(true);
+    mocks.getGameSessionById.mockResolvedValue({ id: SESSION_ID, serverId: 'OTHER', channelId: CHANNEL_ID });
+    const result = await authorizeTopicSubscribe(fakeDb, USER_ID, `activity-state:${SERVER_ID}:${SESSION_ID}`);
+    expect(result.ok).toBe(false);
+  });
+
+  it('manage_channels bypasses the channel gate', async () => {
+    mocks.getServerById.mockResolvedValue(mockServer());
+    mocks.isServerMember.mockResolvedValue(true);
+    mocks.getUserPermissions.mockResolvedValue(['manage_channels']);
+    const result = await authorizeTopicSubscribe(fakeDb, USER_ID, `chat:${SERVER_ID}:${CHANNEL_ID}`);
+    expect(result.ok).toBe(true);
+    expect(mocks.canMemberAccessChannel).not.toHaveBeenCalled();
+  });
+
+  it('presence topics stay membership-only (no channel scope)', async () => {
+    mocks.getServerById.mockResolvedValue(mockServer());
+    mocks.isServerMember.mockResolvedValue(true);
+    const result = await authorizeTopicSubscribe(fakeDb, USER_ID, `presence:${SERVER_ID}`);
+    expect(result.ok).toBe(true);
+    expect(mocks.canMemberAccessChannel).not.toHaveBeenCalled();
   });
 });

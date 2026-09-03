@@ -41,6 +41,14 @@ const subscribeActivityStateChange = Object.assign(vi.fn(
   __onError: undefined as ((err: Error) => void) | undefined,
 });
 
+vi.mock('@/lib/permissions', () => ({
+  authorizeSessionChannelVisibility: async () => ({ ok: true }),
+}));
+
+vi.mock('@/lib/session-tracker', () => ({
+  isSessionRevoked: async () => false,
+}));
+
 vi.mock('@/lib/activity-bus', () => ({
   subscribeActivityStateChange,
   publishActivityStateChange: vi.fn(),

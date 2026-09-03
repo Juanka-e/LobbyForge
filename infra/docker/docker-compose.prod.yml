@@ -234,28 +234,17 @@ services:
     volumes:
       - ../turn/turnserver.conf:/etc/coturn/turnserver.conf:ro
       - ../certbot/conf:/etc/letsencrypt:ro
-    # V5-002: coturn loads its TLS certificate at process start and has
-    # no reliable reload signal — when certbot renews, this watcher
-    # terminates turnserver so `restart: unless-stopped` brings it back
-    # with the fresh certificate (a seconds-long TURN blip once per
-    # renewal window). The watcher's parent IS turnserver after exec.
-    command:
-      - /bin/sh
-      - -c
-      - |
-        md5sum /etc/letsencrypt/live/*/fullchain.pem > /tmp/.certsum 2>/dev/null || true
-        (
-          while :; do
-            sleep 300
-            md5sum /etc/letsencrypt/live/*/fullchain.pem > /tmp/.certsum.new 2>/dev/null || true
-            if ! cmp -s /tmp/.certsum.new /tmp/.certsum; then
-              echo "[turn-cert-watcher] certificate changed — restarting coturn to load it"
-              kill -TERM "$$"
-              exit 0
-            fi
-          done
-        ) &
-        exec turnserver -c /etc/coturn/turnserver.conf
+    # OPS-001: the previous INLINE multi-line watcher collided with the
+    # coturn image entrypoint's eval semantics (first line ran inside a
+    # command substitution; the rest executed as separate commands) and
+    # cycled the container ~every 5 minutes. The watcher is now a
+    # separate POSIX-sh script (mounted read-only) invoked as a single
+    # command argument, and the entrypoint is overridden explicitly.
+    entrypoint: ["/bin/sh", "/usr/local/bin/cert-watcher.sh"]
+    volumes:
+      - ../turn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+      - ../turn/cert-watcher.sh:/usr/local/bin/cert-watcher.sh:ro
+      - ../certbot/conf:/etc/letsencrypt:ro
     # Listener liveness on 3478 (a full TURN allocation smoke test needs
     # the credential and real network egress — see docs/VOICE_TURN.md).
     healthcheck:

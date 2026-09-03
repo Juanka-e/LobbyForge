@@ -107,13 +107,46 @@ async function verifyArtifact(
   checks.push(check(`${idPrefix}.sha256`, SHA256_RE.test(artifact.sha256), `${idPrefix} has a SHA-256 digest.`));
   checks.push(check(`${idPrefix}.size`, artifact.sizeBytes > 0, `${idPrefix} has non-zero size.`));
   if (options.requireFileExists) {
-    checks.push(
-      check(
-        `${idPrefix}.exists`,
-        await fileExists(artifact.path, options.baseDir),
-        `${idPrefix} artifact exists on disk.`
-      )
-    );
+    // OPS-002: existence alone proved nothing — hash the REAL file and
+    // compare against the manifest, plus stat-size equality. This is
+    // what stands between a corrupted backup and a restore attempt.
+    const exists = await fileExists(artifact.path, options.baseDir);
+    checks.push(check(`${idPrefix}.exists`, exists, `${idPrefix} artifact exists on disk.`));
+    if (exists && options.baseDir) {
+      const path = await import('node:path');
+      const { createHash } = await import('node:crypto');
+      const { createReadStream } = await import('node:fs');
+      const abs = path.resolve(options.baseDir, artifact.path);
+      try {
+        const actual = await new Promise<string>((resolve, reject) => {
+          const hash = createHash('sha256');
+          const stream = createReadStream(abs);
+          stream.on('data', (chunk) => hash.update(chunk));
+          stream.on('end', () => resolve(hash.digest('hex')));
+          stream.on('error', reject);
+        });
+        checks.push(
+          check(
+            `${idPrefix}.sha256.match`,
+            actual === artifact.sha256,
+            `${idPrefix} file digest matches the manifest.`
+          )
+        );
+        const { stat } = await import('node:fs/promises');
+        const stats = await stat(abs);
+        checks.push(
+          check(
+            `${idPrefix}.size.match`,
+            stats.size === artifact.sizeBytes,
+            `${idPrefix} file size matches the manifest.`
+          )
+        );
+      } catch (err) {
+        checks.push(
+          check(`${idPrefix}.sha256.match`, false, `${idPrefix} could not be read: ${(err as Error).message}`)
+        );
+      }
+    }
   }
 }
 

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { sanitizeOAuthRedirect } from '@/lib/oauth-redirect';
 import { withApiSecurity } from '@/lib/security-headers';
 import { buildGoogleAuthUrl, isGoogleOAuthConfigured } from '@/lib/oauth-google';
 import { randomBytes } from 'node:crypto';
@@ -17,7 +18,7 @@ async function handleGet(req: Request): Promise<NextResponse> {
 
   // Generate a state token and set it as a short-lived cookie.
   const state = randomBytes(32).toString('hex');
-  const redirect = new URL(req.url).searchParams.get('redirect') ?? '/lobby';
+  const redirect = sanitizeOAuthRedirect(new URL(req.url).searchParams.get('redirect'));
   const authUrl = buildGoogleAuthUrl(state);
 
   const res = NextResponse.redirect(authUrl);

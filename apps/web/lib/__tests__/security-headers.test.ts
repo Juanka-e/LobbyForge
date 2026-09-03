@@ -45,8 +45,10 @@ describe('resolveClientAddress', () => {
     expect(resolveClientAddress(request, 'none')).toBe('unknown');
   });
 
-  it('uses only the explicitly configured proxy header', () => {
-    expect(resolveClientAddress(request, 'x-forwarded-for')).toBe('203.0.113.10');
+  it('uses the LAST proxy-chain entry — the trusted-proxy-observed hop (SEC-004)', () => {
+    // '203.0.113.10' is the attacker-controllable FIRST entry; the
+    // trusted proxy appends the real address '10.0.0.2' LAST.
+    expect(resolveClientAddress(request, 'x-forwarded-for')).toBe('10.0.0.2');
     expect(resolveClientAddress(request, 'cloudflare')).toBe('198.51.100.20');
   });
 });

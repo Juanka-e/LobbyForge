@@ -52,15 +52,36 @@ describe('backup verifier', () => {
     expect(result.checks.find((item) => item.id === 'databaseDump.sha256')?.ok).toBe(false);
   });
 
-  it('can require the backup artifact to exist', async () => {
+  it('verifies the REAL file digest and size when requireFileExists (OPS-002)', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'lf-backup-'));
-    await writeFile(path.join(dir, 'postgres.dump'), 'backup');
-    const result = await verifyBackupManifest(baseManifest, {
+    const content = 'backup';
+    const { createHash } = await import('node:crypto');
+    const realSha = createHash('sha256').update(content).digest('hex');
+    const manifest: BackupManifest = {
+      ...baseManifest,
+      databaseDump: { path: 'postgres.dump', sha256: realSha, sizeBytes: content.length },
+    };
+    await writeFile(path.join(dir, 'postgres.dump'), content);
+    const result = await verifyBackupManifest(manifest, {
       baseDir: dir,
       requireFileExists: true,
       now: new Date('2026-06-11T11:00:00.000Z'),
     });
     expect(result.ok).toBe(true);
+    expect(result.checks.find((c) => c.id === 'databaseDump.sha256.match')?.ok).toBe(true);
+    expect(result.checks.find((c) => c.id === 'databaseDump.size.match')?.ok).toBe(true);
+  });
+
+  it('FAILS when the real file digest does not match the manifest', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'lf-backup-'));
+    await writeFile(path.join(dir, 'postgres.dump'), 'tampered-content');
+    const result = await verifyBackupManifest(baseManifest, {
+      baseDir: dir,
+      requireFileExists: true,
+      now: new Date('2026-06-11T11:00:00.000Z'),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.checks.find((c) => c.id === 'databaseDump.sha256.match')?.ok).toBe(false);
   });
 
   it('rejects malformed manifests', () => {

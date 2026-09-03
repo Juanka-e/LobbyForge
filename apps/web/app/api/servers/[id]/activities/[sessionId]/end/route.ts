@@ -10,6 +10,7 @@ import {
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
+import { authorizeSessionChannelVisibility } from '@/lib/permissions';
 import { publishActivityStateChange } from '@/lib/activity-bus';
 
 export const dynamic = 'force-dynamic';
@@ -65,6 +66,11 @@ async function handlePost(
       return NextResponse.json({ error: 'Activity not found' }, { status: 404 });
     }
 
+    // SEC-002: the session's channel may be private (role-gated) —
+    // membership alone is not enough; owner/manage_channels bypass.
+    const visibility = await authorizeSessionChannelVisibility(session.uid, serverId, row, server.ownerUserId);
+    if (!visibility.ok) return visibility.response;
+
     // The host can end its own session; otherwise the caller needs
     // START_ACTIVITY.
     const isHost = row.createdBy === session.uid;
@@ -81,7 +87,8 @@ async function handlePost(
         serverId,
         sessionId,
         status: ended.status,
-        state: ended.state,
+        // SEC-001: no canonical state on the bus — ended state is public
+        // (scores only), but consistency says every publisher stays lean.
         publicSummary: ended.publicSummary,
       });
     }

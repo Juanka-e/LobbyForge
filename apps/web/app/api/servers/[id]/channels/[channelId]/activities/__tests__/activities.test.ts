@@ -49,6 +49,15 @@ vi.mock('@lobbyforge/db', () => ({
   logAction,
 }));
 
+vi.mock('@/lib/permissions', () => ({
+  CorePermission: new Proxy({}, { get: (_t, key: string) => key }),
+  hasPermission: (perms: string[], required: string) =>
+    perms.includes('administrator') || perms.includes(required),
+  authorizeServerPermission: async (_u: string, _s: string, _r: string) => ({ ok: true }),
+  authorizeChannelVisibility: async () => ({ ok: true }),
+  authorizeSessionChannelVisibility: async () => ({ ok: true }),
+}));
+
 vi.mock('@/lib/plugin-server-registry', () => ({
   getPluginServer,
 }));

@@ -12,11 +12,14 @@
  */
 import { WebSocketServer, type WebSocket } from 'ws';
 import * as http from 'node:http';
-import { validateGuestFromHeaders, type ResolvedGuest } from './auth.js';
+import { isGuestSessionRevoked, validateGuestFromHeaders, type ResolvedGuest } from './auth.js';
 import { authorizeTopicSubscribe } from './authorize.js';
 import { ConnectionSubscriptions } from './subscriptions.js';
 import { ClientMessageSchema, type ServerMessage } from './protocol.js';
 import { getDb } from './db.js';
+
+import { projectActivityState } from '@lobbyforge/core';
+import { getGameSessionById, getPluginInstall } from '@lobbyforge/db';
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const SUBSCRIBE_RATE_LIMIT_WINDOW_MS = 60_000;
@@ -78,6 +81,47 @@ export function isAllowedWsOrigin(originHeader: string | undefined): boolean {
   return configuredOrigins().has(origin);
 }
 
+/**
+ * SEC-001: load the session, run the CANONICAL projector for THIS
+ * viewer, and forward the projected state. The bus payload itself
+ * carries no state — this is the only place a WS subscriber gets one.
+ */
+async function forwardProjectedActivity(
+  socket: WebSocket,
+  topic: string,
+  authz: { serverId: string; resourceId: string },
+  data: { status?: string; revision?: number; publicSummary?: Record<string, unknown> },
+  viewerUserId: string
+): Promise<void> {
+  try {
+    const row = await getGameSessionById(getDb() as never, authz.resourceId);
+    if (!row || row.serverId !== authz.serverId) {
+      // Session vanished or belongs elsewhere — the subscriber just
+      // gets the lean event (no state).
+      send(socket, { type: 'event', topic, data, at: new Date().toISOString() });
+      return;
+    }
+    const install = await getPluginInstall(getDb() as never, authz.serverId, row.pluginId).catch(() => null);
+    const pluginId = install?.pluginId ?? row.pluginId;
+    const projected = projectActivityState(row.state, pluginId, viewerUserId);
+    send(socket, {
+      type: 'event',
+      topic,
+      data: {
+        status: data.status ?? row.status,
+        revision: data.revision,
+        publicSummary: data.publicSummary,
+        state: projected,
+      },
+      at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.warn(`[ws-gateway] activity projection failed: ${(err as Error).message}`);
+    // Fail CLOSED for state — never forward unprojected state.
+    send(socket, { type: 'event', topic, data, at: new Date().toISOString() });
+  }
+}
+
 function send(socket: WebSocket, msg: ServerMessage): void {
   if (socket.readyState !== socket.OPEN) return;
   try {
@@ -123,11 +167,10 @@ export function createGateway(): { wss: WebSocketServer; close: () => Promise<vo
     verifyClient: (info: { origin: string; secure: boolean; req: import('http').IncomingMessage }) => {
       if (!isAllowedWsOrigin(info.origin)) return false;
       // Per-IP connection cap — prevents DoS via unauthenticated WS floods.
-      // Use x-forwarded-for only when behind a trusted proxy (production Nginx).
+      // SEC-004: LAST XFF entry (the trusted-proxy-observed hop), never
+      // the first (client-controllable in a forwarded chain).
       const ip = process.env.NODE_ENV === 'production'
-        ? (info.req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim()
-          || info.req.socket.remoteAddress
-          || 'unknown')
+        ? trustedClientIp(info.req.headers, info.req.socket.remoteAddress)
         : (info.req.socket.remoteAddress || 'unknown');
       const count = ipConnectionCounts.get(ip) ?? 0;
       if (count >= MAX_CONNECTIONS_PER_IP) {
@@ -163,11 +206,25 @@ export function createGateway(): { wss: WebSocketServer; close: () => Promise<vo
     }
   }, HEARTBEAT_INTERVAL_MS);
 
-  wss.on('connection', (socket, req) => {
+  /**
+ * SEC-004: extract the client IP safely. nginx now sends
+ * X-Forwarded-For: $remote_addr ONLY (no chain), but defensively take
+ * the LAST comma-separated entry — the address the TRUSTED proxy
+ * observed — instead of the first, which an attacker controls when a
+ * chain leaks through.
+ */
+function trustedClientIp(headers: import('http').IncomingMessage['headers'], socketRemote: string | undefined): string {
+  const raw = headers['x-forwarded-for']?.toString();
+  if (raw) {
+    const parts = raw.split(',').map((x) => x.trim()).filter(Boolean);
+    if (parts.length > 0) return parts[parts.length - 1]!;
+  }
+  return socketRemote || 'unknown';
+}
+
+wss.on('connection', async (socket, req) => {
     const connectionIp = process.env.NODE_ENV === 'production'
-      ? (req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim()
-        || req.socket.remoteAddress
-        || 'unknown')
+      ? trustedClientIp(req.headers, req.socket.remoteAddress)
       : (req.socket.remoteAddress || 'unknown');
 
     // Single-fire cleanup — prevents counter leak/double-decrement when
@@ -186,6 +243,11 @@ export function createGateway(): { wss: WebSocketServer; close: () => Promise<vo
 
     const cookieHeader = req.headers.cookie;
     const auth = validateGuestFromHeaders(cookieHeader);
+    // SEC-003: a revoked session must not open (or keep) a socket.
+    if (auth.ok && (await isGuestSessionRevoked(auth.guest.uid, auth.guest.gid))) {
+      socket.close(1008, 'session revoked');
+      return;
+    }
     if (!auth.ok) {
       send(socket, {
         type: 'error',
@@ -274,6 +336,16 @@ export function createGateway(): { wss: WebSocketServer; close: () => Promise<vo
           state.subs.add(msg.topic, (raw) => {
             try {
               const data = JSON.parse(raw);
+              // SEC-001: the bus payload carries NO canonical state (the
+              // publisher only sends status/revision/publicSummary). For
+              // activity-state topics we load the session and project it
+              // for THIS viewer — the same projector the REST routes
+              // use — so no subscriber ever sees another player's
+              // secrets (Hushle deck/cards, Quiz correctIndex).
+              if (authz.kind === 'activity-state') {
+                void forwardProjectedActivity(socket, msg.topic, authz, data, state.guest.uid);
+                return;
+              }
               send(socket, {
                 type: 'event',
                 topic: msg.topic,

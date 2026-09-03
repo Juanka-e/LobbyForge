@@ -35,6 +35,8 @@ import {
 } from '@/lib/security-headers';
 import { getPluginServer } from '@/lib/plugin-server-registry';
 import { projectActivityState } from '@/lib/activity-projection';
+import { isSessionRevoked } from '@/lib/session-tracker';
+import { authorizeSessionChannelVisibility } from '@/lib/permissions';
 import { subscribeActivityStateChange } from '@/lib/activity-bus';
 
 export const dynamic = 'force-dynamic';
@@ -64,7 +66,7 @@ function applySecurityHeaders(response: Response): Response {
 }
 
 async function resolveSession(req: Request): Promise<
-  | { ok: true; uid: string }
+  | { ok: true; uid: string; gid: string }
   | { ok: false; response: Response }
 > {
   const secret = getSessionSecret();
@@ -81,7 +83,7 @@ async function resolveSession(req: Request): Promise<
       }),
     };
   }
-  return { ok: true, uid: session.uid };
+  return { ok: true, uid: session.uid, gid: session.gid };
 }
 
 function sse(eventName: string, data: unknown): string {
@@ -124,6 +126,17 @@ async function handleStream(
     if (row.serverId !== serverId) {
       return applySecurityHeaders(jsonError(404, { error: 'Activity not found' }));
     }
+
+    // SEC-002: the session's channel may be private (role-gated) —
+    // membership alone is not enough; owner/manage_channels bypass.
+    const visibility = await authorizeSessionChannelVisibility(
+      session.uid,
+      serverId,
+      row,
+      server.ownerUserId
+    );
+    if (!visibility.ok) return applySecurityHeaders(visibility.response);
+
     const plugin = getPluginServer(row.pluginId);
     const initialState = plugin?.migrateState ? plugin.migrateState(row.state) : row.state;
 
@@ -133,6 +146,8 @@ async function handleStream(
 
     const encoder = new TextEncoder();
     let closed = false;
+    // RT-001: shared cleanup ref — set by start(), callable from cancel().
+    let abortRef: (() => void) | null = null;
 
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -157,12 +172,25 @@ async function handleStream(
           sessionId,
           (msg) => {
             if (closed) return;
-            const projectedMsg = projectActivityState(msg.state, row.pluginId, session.uid);
-            controller.enqueue(
-              encoder.encode(
-                sse('state', { status: msg.status, state: projectedMsg, at: msg.at })
-              )
-            );
+            // SEC-001: the bus no longer carries state — LOAD the session
+            // and project it for THIS viewer (same as the ws-gateway).
+            void (async () => {
+              try {
+                const fresh = await getGameSessionById(getDb(), sessionId);
+                if (!fresh) {
+                  controller.enqueue(encoder.encode(sse('state', { status: msg.status, state: null, at: msg.at })));
+                  return;
+                }
+                const projectedMsg = projectActivityState(fresh.state, row.pluginId, session.uid);
+                controller.enqueue(
+                  encoder.encode(
+                    sse('state', { status: msg.status, state: projectedMsg, at: msg.at, revision: msg.revision })
+                  )
+                );
+              } catch {
+                // Fail closed — never send unprojected state.
+              }
+            })();
           },
           (err) => {
             if (closed) return;
@@ -177,7 +205,11 @@ async function handleStream(
         });
 
         const keepAlive = setInterval(() => {
-          if (closed) return;
+            if (closed) return;
+            // SEC-003: a revoked session must not keep an OPEN stream.
+            void isSessionRevoked(session.uid, session.gid).then((revoked) => {
+              if (revoked && !closed) abort();
+            });
           try {
             controller.enqueue(encoder.encode(`: ping\n\n`));
           } catch {
@@ -185,6 +217,9 @@ async function handleStream(
           }
         }, 30_000);
 
+        // RT-001: ONE idempotent cleanup for abort, cancel, error and
+        // revocation — the old cancel() only set closed=true and leaked
+        // the interval + Redis subscription.
         const abort = () => {
           if (closed) return;
           closed = true;
@@ -198,9 +233,11 @@ async function handleStream(
         };
 
         req.signal.addEventListener('abort', abort);
+        abortRef = abort;
+        return abort;
       },
       cancel() {
-        closed = true;
+        abortRef?.();
       },
     });
 

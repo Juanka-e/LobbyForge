@@ -71,9 +71,19 @@ async function getSubscriber(): Promise<Redis> {
   }
 }
 
-interface ActivityStateMessage {
+/**
+ * SEC-001: the wire payload carries NO game state. The old shape shipped
+ * the canonical `state` to every subscriber — a normal member's WS frames
+ * contained Hushle's deck/currentCard and Quiz's correctIndex. The bus is
+ * a raw fanout channel; anything on it reaches everyone. Consumers that
+ * need state load the session and project it per viewer
+ * (projectActivityState) — see the SSE route and the ws-gateway.
+ */
+export interface ActivityStateMessage {
   status: string;
-  state: Record<string, unknown>;
+  /** Revision for optimistic-concurrency awareness (no content). */
+  revision?: number;
+  /** Optional ALREADY-PROJECTED, viewer-agnostic summary (counts only). */
   publicSummary?: Record<string, unknown>;
   at: string;
 }
@@ -86,12 +96,12 @@ export function publishActivityStateChange(input: {
   serverId: string;
   sessionId: string;
   status: string;
-  state: Record<string, unknown>;
+  revision?: number;
   publicSummary?: Record<string, unknown>;
 }): void {
   const payload: ActivityStateMessage = {
     status: input.status,
-    state: input.state,
+    revision: input.revision,
     publicSummary: input.publicSummary,
     at: new Date().toISOString(),
   };

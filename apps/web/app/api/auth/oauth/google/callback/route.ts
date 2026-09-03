@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { sanitizeOAuthRedirect } from '@/lib/oauth-redirect';
 import { withApiSecurity } from '@/lib/security-headers';
 import { exchangeGoogleCode, isGoogleOAuthConfigured } from '@/lib/oauth-google';
 import {
@@ -46,9 +47,12 @@ async function handleGet(req: Request): Promise<NextResponse> {
     return NextResponse.redirect(new URL('/login?error=state_mismatch', req.url));
   }
 
-  const redirect = req.headers.get('cookie')
-    ?.match(/lf_oauth_redirect=([^;]+)/)?.[1]
-    ?.replace(/%2F/g, '/') ?? '/lobby';
+  // SEC-005: the cookie is client-writable storage — sanitize on read,
+  // not just on write (a tampered lf_oauth_redirect must not become an
+  // open redirect at `new URL(redirect, req.url)`).
+  const redirect = sanitizeOAuthRedirect(
+    req.headers.get('cookie')?.match(/lf_oauth_redirect=([^;]+)/)?.[1] ?? null
+  );
 
   try {
     // Exchange code → verify ID token → get Google user info.

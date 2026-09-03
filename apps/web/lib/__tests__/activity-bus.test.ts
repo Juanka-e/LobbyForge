@@ -94,13 +94,14 @@ function flush(): Promise<void> {
 }
 
 describe('publishActivityStateChange', () => {
-  it('publishes status + state + at to the session topic', async () => {
+  it('publishes status + revision + at — and NEVER any game state (SEC-001)', async () => {
     const { publishActivityStateChange } = await import('../activity-bus.js');
     publishActivityStateChange({
       serverId: SERVER_ID,
       sessionId: SESSION_ID,
       status: 'running',
-      state: { turn: 2 },
+      revision: 7,
+      publicSummary: { deckSize: 24 },
     });
     await flush();
     expect(publish).toHaveBeenCalledTimes(1);
@@ -108,7 +109,14 @@ describe('publishActivityStateChange', () => {
     expect(topic).toBe(TOPIC);
     const parsed = JSON.parse(raw);
     expect(parsed.status).toBe('running');
-    expect(parsed.state).toEqual({ turn: 2 });
+    expect(parsed.revision).toBe(7);
+    expect(parsed.publicSummary).toEqual({ deckSize: 24 });
+    // SEC-001 regression: the raw wire payload must contain no state
+    // blob at all — the bus is a fanout channel to every subscriber.
+    expect(parsed.state).toBeUndefined();
+    expect(raw).not.toContain('currentCard');
+    expect(raw).not.toContain('forbiddenWords');
+    expect(raw).not.toContain('correctIndex');
     // `at` is injected server-side — assert it is a valid ISO date, not an exact value.
     expect(typeof parsed.at).toBe('string');
     expect(new Date(parsed.at).getTime()).not.toBeNaN();
@@ -123,7 +131,6 @@ describe('publishActivityStateChange', () => {
         serverId: SERVER_ID,
         sessionId: SESSION_ID,
         status: 'running',
-        state: {},
       })
     ).not.toThrow();
     await flush();

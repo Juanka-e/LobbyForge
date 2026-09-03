@@ -10,6 +10,7 @@ import { asc, inArray } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
+import { authorizeSessionChannelVisibility } from '@/lib/permissions';
 import { getPluginServer } from '@/lib/plugin-server-registry';
 import { projectActivityState } from '@/lib/activity-projection';
 
