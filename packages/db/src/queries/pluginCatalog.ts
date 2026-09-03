@@ -128,6 +128,12 @@ export async function submitPluginForReview(
   if (currentOwner && publisherUserId && currentOwner !== publisherUserId) {
     throw new PluginIdTakenError(input.pluginId);
   }
+  // Legacy/migrated rows with a NULL publisher are locked: an
+  // authenticated submit cannot squat an official-looking entry; an
+  // admin must claim it first.
+  if (currentOwner === null && publisherUserId) {
+    throw new PluginIdTakenError(input.pluginId);
+  }
   const values = {
     pluginId: input.pluginId,
     name: input.name,
@@ -151,6 +157,12 @@ export async function submitPluginForReview(
     .values(values)
     .onConflictDoUpdate({
       target: pluginCatalog.pluginId,
+      // SEC-006: the update applies ONLY when the existing row belongs to
+      // this publisher — a concurrent submit from another user that raced
+      // past the pre-check SELECT cannot overwrite the row.
+      setWhere: publisherUserId
+        ? eq(pluginCatalog.publisherUserId, publisherUserId)
+        : sql`false`, // null-publisher path never updates (locked rows)
       set: {
         // SEC-006: changed code needs re-review.
         reviewStatus: 'pending',

@@ -53,22 +53,41 @@ export function validateGuestFromHeaders(cookieHeader: string | undefined | null
  * handshake (and periodically on live sockets) so "log out everywhere"
  * disconnects gateway subscribers too, not just REST callers.
  */
-export async function isGuestSessionRevoked(uid: string, gid: string): Promise<boolean> {
-  // Lazy import keeps unit tests Redis-free; production always has it.
+// SEC-003: ONE shared client for revocation lookups — a per-call
+// connect/disconnect burned a connection slot per handshake (DoS surface).
+let revokedClient: { sismember: (key: string, member: string) => Promise<number> } | null = null;
+let revokedClientFailed = false;
+
+async function getRevokedClient() {
+  if (revokedClient) return revokedClient;
+  if (revokedClientFailed) return null; // don't retry every heartbeat
   try {
     const RedisMod = await import('ioredis');
-    const Redis = ('default' in RedisMod ? RedisMod.default : RedisMod) as unknown as new (url: string) => { sismember: (key: string, member: string) => Promise<number>; disconnect: () => void };
-    const key = `lf:${process.env.NODE_ENV || 'dev'}:session-revoked:${uid}`;
+    const Redis = ('default' in RedisMod ? RedisMod.default : RedisMod) as unknown as new (
+      url: string
+    ) => { sismember: (key: string, member: string) => Promise<number>; on: (e: string, cb: () => void) => void };
     const client = new Redis(process.env.REDIS_URL || 'redis://:lobbyforge_dev@localhost:6379');
-    try {
-      const member = await client.sismember(key, gid);
-      return member === 1;
-    } finally {
-      client.disconnect();
-    }
+    client.on('error', () => { revokedClient = null; revokedClientFailed = true; });
+    revokedClient = client;
+    return client;
   } catch {
+    revokedClientFailed = true;
+    return null;
+  }
+}
+
+export async function isGuestSessionRevoked(uid: string, gid: string): Promise<boolean> {
+  const client = await getRevokedClient();
+  if (!client) {
     // Redis unavailable: fail OPEN on the realtime path (the REST layer
     // is the strict fail-closed gate); the handshake HMAC still applies.
+    return false;
+  }
+  try {
+    const key = `lf:${process.env.NODE_ENV || 'dev'}:session-revoked:${uid}`;
+    const member = await client.sismember(key, gid);
+    return member === 1;
+  } catch {
     return false;
   }
 }

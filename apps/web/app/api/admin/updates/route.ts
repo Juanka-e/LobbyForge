@@ -174,7 +174,9 @@ async function handlePost(req: Request): Promise<NextResponse> {
     const { manifest, baseDir } = await loadBackupManifest();
     const backup = await verifyBackupManifest(manifest, {
       baseDir,
-      requireFileExists: body.requireFileExists === true,
+      // OPS-002: server policy — apply MUST verify the real file hash;
+      // the client flag is ignored on the execution paths.
+      requireFileExists: true,
     });
     return NextResponse.json({ backup }, { headers: { 'Cache-Control': 'no-store' } });
   }
@@ -185,7 +187,8 @@ async function handlePost(req: Request): Promise<NextResponse> {
   const { manifest, baseDir } = await loadBackupManifest();
   const backup = await verifyBackupManifest(manifest, {
     baseDir,
-    requireFileExists: body.requireFileExists === true,
+    // OPS-002: same mandatory verification for rollback.
+    requireFileExists: true,
   });
   const maintenance = await getEffectiveInstanceMaintenance(getDb());
   const run = buildUpdateExecutionPreview(plan, backup, {

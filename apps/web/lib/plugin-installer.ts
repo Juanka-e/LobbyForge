@@ -176,14 +176,16 @@ function isPrivateIp(ip: string): boolean {
   const lower = ip.toLowerCase();
   return (
     lower === '::1' ||                                     // loopback
-    lower.startsWith('fe80:') ||                            // link-local fe80::/10
+    /^fe[89ab]:/.test(lower) ||                            // link-local fe80::/10 (fe80-febf)
     lower.startsWith('fec0:') ||                            // deprecated site-local
     lower.startsWith('fc') || lower.startsWith('fd') ||     // ULA fc00::/7
     lower.startsWith('ff') ||                               // multicast ff00::/8
     lower.startsWith('2001:db8') ||                         // documentation
     lower.startsWith('64:ff9b') ||                          // NAT64 well-known
     lower.startsWith('100::') ||                            // discard-only 100::/64
-    (lower.startsWith('::ffff:') && isPrivateIp(lower.slice(7))) // IPv4-mapped
+    (lower.startsWith('::ffff:') && isPrivateIp(lower.slice(7))) || // IPv4-mapped
+    /^0:0:0:0:0:ffff:/.test(lower) ||                      // IPv4-mapped (expanded hex)
+    /^::ffff:0:/.test(lower)                                // IPv4-translated
   );
 }
 
@@ -306,13 +308,26 @@ async function fetchIpPinned(
     lookup: lookupFn as never,
     servername: originalHostname,
   });
+  // SEC-009: cap bytes DURING the stream — the old code buffered the
+  // entire response and checked the size only at the end, so a hostile
+  // manifest server could balloon web-process memory with an infinite
+  // body. Destroy the request the moment the cap is crossed.
+  const MAX_STREAM_BYTES = 16 * 1024 * 1024; // 16 MiB hard ceiling
   return new Promise((resolve, reject) => {
+    let received = 0;
+    const chunks: Buffer[] = [];
     const req = https.request(
       url,
       { agent, signal, timeout: timeoutMs, headers: { 'user-agent': 'LobbyForge-Installer' } },
       (res) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('data', (chunk: Buffer) => {
+          received += chunk.length;
+          if (received > MAX_STREAM_BYTES) {
+            req.destroy(new Error('Download exceeds the 16 MiB cap'));
+            return;
+          }
+          chunks.push(chunk);
+        });
         res.on('end', () => {
           const body = Buffer.concat(chunks);
           resolve({

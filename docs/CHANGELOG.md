@@ -2,6 +2,51 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - 7th-audit (re-audit) remediation wave 3 - 2026-09-04
+
+### Fixed
+
+- **OPS-006 duplicate compose key**: docker-compose.prod.yml's turn
+  service had TWO `volumes:` mappings — YAML silently keeps the last,
+  so the cert mount (and any earlier entry) was dropped from the
+  rendered config. Merged into one block; a new `compose-config` CI job
+  now runs `docker compose config` on every push so this class of
+  regression fails the build, not the deploy.
+- **SEC-002 GET gap**: the activity-session GET handler imported
+  authorizeSessionChannelVisibility but never called it — membership
+  alone could read a session sitting in a role-gated channel. Now
+  enforced (owner/manage_channels bypass, same policy as action/SSE/
+  end); 2 new tests cover the plain-member 403 and the owner bypass.
+- **SEC-003 WS revocation hardening (3 parts)**: (1) revoked-gid
+  handshakes leaked an IP rate-limit slot — now released on rejection;
+  (2) isGuestSessionRevoked uses a SHARED Redis client instead of
+  connect-per-call (revocation-check floods no longer mint
+  connections); (3) the heartbeat loop re-checks revocation for live
+  sockets, so logout closes already-established WebSockets.
+- **SEC-006 concurrent plugin-ID takeover**: the read-then-upsert race
+  (two publishers, same pluginId, NULL owner row) is closed atomically
+  — the conditional upsert carries `setWhere` on the publisher, and a
+  NULL-owner locked row rejects a different publisher outright.
+- **SEC-009 download memory-bomb + IPv6 gaps**: the IP-pinned plugin
+  download enforces a 16 MiB streaming cap (destroy mid-chunk) instead
+  of trusting Content-Length; link-local fe80::/10 covered in full;
+  IPv4-mapped/translated IPv6 forms are expanded and checked.
+- **SEC-004 spoofable session IPs**: resolveClientIp no longer trusts
+  x-forwarded-for implicitly in production — only with an explicit
+  LOBBYFORGE_TRUSTED_PROXY=x-forwarded-for opt-in, and then the LAST
+  hop (the one the proxy appended), never the client-controllable
+  first entry.
+- **OPS-002 optional verifier**: the admin update apply/rollback paths
+  now ALWAYS require the file-exists server-side check; the client
+  flag in the request body is ignored.
+- **RT-001 SSE enqueue leak**: a failed ping enqueue aborted the
+  closed flag but leaked the interval + Redis subscription; the catch
+  now aborts the stream for real.
+- **CODE-001 literal NUL byte**: oauth-redirect.ts contained a raw
+  0x00 inside a RegExp character class (written through a tool that
+  converted the escape); now a clean `\u0000` escape. Repo-wide scan
+  confirms no NUL bytes remain in any source file.
+
 ## [Unreleased] - 6th-audit wave 2: remaining P1s + P2s - 2026-09-03
 
 ### Fixed (P1)

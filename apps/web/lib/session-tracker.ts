@@ -95,9 +95,15 @@ export function resolveClientIp(req: Request): string {
   const cfIp = req.headers.get('cf-connecting-ip');
 
   if (trusted === 'cloudflare' && cfIp) return cfIp.trim();
-  if (xff && (trusted === 'x-forwarded-for' || process.env.NODE_ENV === 'production')) {
-    // x-forwarded-for: "client, proxy1, proxy2" — first is the client
-    return xff.split(',')[0].trim();
+  if (xff && trusted === 'x-forwarded-for') {
+    // SEC-004 consistency: nginx sends ONLY $remote_addr (a single
+    // value); if a chain ever leaks through, the LAST entry is the hop
+    // the trusted proxy observed — the first is attacker-controllable.
+    // Production WITHOUT the explicit trusted-proxy opt-in no longer
+    // trusts XFF at all (the audit found the old code accepted it
+    // implicitly, recording spoofed session IPs in other topologies).
+    const chain = xff.split(',').map((x) => x.trim()).filter(Boolean);
+    return chain[chain.length - 1] ?? 'unknown';
   }
   if (realIp && trusted) return realIp.trim();
   return 'unknown';

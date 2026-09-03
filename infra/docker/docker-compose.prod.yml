@@ -231,9 +231,6 @@ services:
     container_name: lobbyforge-turn
     restart: unless-stopped
     network_mode: host
-    volumes:
-      - ../turn/turnserver.conf:/etc/coturn/turnserver.conf:ro
-      - ../certbot/conf:/etc/letsencrypt:ro
     # OPS-001: the previous INLINE multi-line watcher collided with the
     # coturn image entrypoint's eval semantics (first line ran inside a
     # command substitution; the rest executed as separate commands) and

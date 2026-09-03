@@ -89,14 +89,16 @@ describe('resolveClientIp', () => {
     expect(resolveClientIp(req({ 'cf-connecting-ip': '203.0.113.5' }))).toBe('203.0.113.5');
   });
 
-  it('reads x-forwarded-for when trusted proxy is x-forwarded-for', () => {
+  it('reads the LAST x-forwarded-for hop when trusted proxy is x-forwarded-for (SEC-004)', () => {
     process.env.LOBBYFORGE_TRUSTED_PROXY = 'x-forwarded-for';
-    expect(resolveClientIp(req({ 'x-forwarded-for': '198.51.100.7, 10.0.0.1' }))).toBe('198.51.100.7');
+    // The first entry is client-controllable; only the hop the trusted
+    // proxy appended is trustworthy.
+    expect(resolveClientIp(req({ 'x-forwarded-for': '198.51.100.7, 10.0.0.1' }))).toBe('10.0.0.1');
   });
 
-  it('trusts x-forwarded-for in production even without an explicit proxy setting', () => {
+  it('ignores x-forwarded-for in production without an explicit trusted-proxy opt-in (SEC-004)', () => {
     (process.env as Record<string, string | undefined>).NODE_ENV = 'production';
-    expect(resolveClientIp(req({ 'x-forwarded-for': '198.51.100.9' }))).toBe('198.51.100.9');
+    expect(resolveClientIp(req({ 'x-forwarded-for': '198.51.100.9' }))).toBe('unknown');
   });
 
   it('reads x-real-ip when a trusted proxy is configured', () => {

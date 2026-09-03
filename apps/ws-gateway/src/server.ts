@@ -203,6 +203,21 @@ export function createGateway(): { wss: WebSocketServer; close: () => Promise<vo
       } catch {
         /* swallow */
       }
+      // SEC-003: re-check revocation on LIVE sockets each heartbeat —
+      // logout must close an already-open WS, not just block new ones.
+      if (state.guest) {
+        void isGuestSessionRevoked(state.guest.uid, state.guest.gid)
+          .then((revoked) => {
+            if (revoked) {
+              try {
+                client.close(1008, 'session revoked');
+              } catch {
+                /* already closed */
+              }
+            }
+          })
+          .catch(() => { /* fail-open; REST stays the strict gate */ });
+      }
     }
   }, HEARTBEAT_INTERVAL_MS);
 
@@ -244,7 +259,11 @@ wss.on('connection', async (socket, req) => {
     const cookieHeader = req.headers.cookie;
     const auth = validateGuestFromHeaders(cookieHeader);
     // SEC-003: a revoked session must not open (or keep) a socket.
+    // The early return MUST release the IP slot — the audit found a
+    // revoked-cookie client could re-handshake forever and pin all 10
+    // slots of its NAT IP (DoS on legitimate users behind the same IP).
     if (auth.ok && (await isGuestSessionRevoked(auth.guest.uid, auth.guest.gid))) {
+      releaseIpSlot();
       socket.close(1008, 'session revoked');
       return;
     }

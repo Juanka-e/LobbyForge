@@ -66,6 +66,41 @@ jobs:
       - name: Build Docker image
         run: docker build -t lobbyforge-web:ci .
 
+  # Production compose config gate (OPS-006 class regressions): parses
+  # docker-compose.prod.yml with dummy-but-complete env and fails on
+  # duplicate keys, invalid interpolation or unresolvable mounts —
+  # catches in one second what only surfaced at deploy time before.
+  compose-config:
+    name: Production compose config
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Validate docker-compose.prod.yml
+        run: |
+          # env_file targets expect ../../.env.prod at the repo root; the
+          # install script creates the real one, CI only needs it to exist
+          # with the required interpolation vars resolvable.
+          cat > .env.prod <<'EOF'
+          DATABASE_URL=postgres://ci:ci@postgres:5432/ci
+          REDIS_URL=redis://:ci@redis:6379
+          LOBBYFORGE_SESSION_SECRET=ci-secret-ci-secret-ci-secret
+          LIVEKIT_API_KEY=cikey
+          LIVEKIT_API_SECRET=cisecretcisecretcisecret
+          NEXT_PUBLIC_LIVEKIT_URL=wss://ci.example.com:7880
+          NEXT_PUBLIC_WS_URL=wss://ci.example.com/ws
+          TURN_AUTH_SECRET=cisecret
+          EOF
+          export POSTGRES_PASSWORD=ci POSTGRES_USER=ci POSTGRES_DB=ci
+          export REDIS_PASSWORD=ci LIVEKIT_API_KEY=cikey
+          export LIVEKIT_API_SECRET=cisecretcisecretcisecret
+          export TURN_AUTH_SECRET=cisecret ACME_EMAIL=ci@example.com
+          export LOBBYFORGE_DOMAIN=ci.example.com
+          export NEXT_PUBLIC_LIVEKIT_URL=wss://ci.example.com:7880
+          export NEXT_PUBLIC_WS_URL=wss://ci.example.com/ws
+          docker compose -f infra/docker/docker-compose.prod.yml config --quiet
+
   # Production dependency audit gate — Dependabot handles updates; this
   # stops a merge that reintroduces a known moderate+ vulnerability in
   # production dependencies (dev-only advisories are out of scope).

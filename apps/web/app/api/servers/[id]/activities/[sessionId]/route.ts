@@ -74,6 +74,18 @@ async function handleGet(
       // by guessing the sessionId.
       return NextResponse.json({ error: 'Activity not found' }, { status: 404 });
     }
+
+    // SEC-002: private-channel rules — membership alone is not enough;
+    // the session's channel may be role-gated. Owner/manage_channels
+    // bypass (same policy as action/SSE/end).
+    const visibility = await authorizeSessionChannelVisibility(
+      session.uid,
+      serverId,
+      row,
+      server.ownerUserId
+    );
+    if (!visibility.ok) return visibility.response;
+
     const players = await listPlayersForSession(getDb(), sessionId);
     // Join with users to include the display name in the player list so
     // the plugin's renderClient can show "Explainer: Alice" instead of

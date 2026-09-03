@@ -207,13 +207,19 @@ async function handleStream(
         const keepAlive = setInterval(() => {
             if (closed) return;
             // SEC-003: a revoked session must not keep an OPEN stream.
-            void isSessionRevoked(session.uid, session.gid).then((revoked) => {
-              if (revoked && !closed) abort();
-            });
+            void isSessionRevoked(session.uid, session.gid)
+              .then((revoked) => {
+                if (revoked && !closed) abort();
+              })
+              .catch(() => { /* Redis down — REST stays the strict gate */ });
           try {
             controller.enqueue(encoder.encode(`: ping\n\n`));
           } catch {
-            closed = true;
+            // RT-001: a failed enqueue means the stream is gone — run
+            // the shared cleanup (the old closed=true alone leaked the
+            // interval + Redis subscription because abort() early-returns
+            // on closed).
+            abort();
           }
         }, 30_000);
 
