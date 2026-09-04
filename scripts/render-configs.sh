@@ -33,9 +33,11 @@ case "$DOMAIN" in
     ;;
 esac
 
-# The TURN credential is written into two rendered files (coturn static
-# user + LiveKit rtc.turn_servers). Anything that isn't plain hex could
-# inject newlines/config syntax into either file.
+# The TURN secret seeds coturn's static-auth-secret (turnserver.conf,
+# VOICE-001 REST auth). The web app reads the SAME value from
+# .env.prod (LOBBYFORGE_TURN_SECRET) to mint per-user time-limited
+# credentials. Anything that isn't plain hex could inject newlines into
+# the generated config.
 if ! [[ "$TURN_SECRET" =~ ^[0-9a-fA-F]{32,128}$ ]]; then
   echo "render-configs: turn secret must be 32-128 hex characters" >&2
   exit 1
@@ -64,7 +66,7 @@ render() {
   # generated (git-ignored) target (possibly under a staging root).
   mkdir -p "$(dirname "$target")"
   sed -e "s/LOBBYFORGE_DOMAIN/$DOMAIN/g" \
-      -e "s/TURN_CREDENTIAL/$TURN_SECRET/g" \
+      -e "s/TURN_SECRET/$TURN_SECRET/g" \
       -e "s|@TURN_EXTERNAL_IP_LINE@|$EXTERNAL_IP_LINE|" \
     "$template" > "$target"
   echo "rendered $(basename "$target") for $DOMAIN"

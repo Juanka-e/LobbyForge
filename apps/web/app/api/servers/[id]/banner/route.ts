@@ -11,6 +11,7 @@ import {
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { BANNER_LIMITS, checkImageDataUrl } from '@/lib/image-validation';
+import { checkUserImageQuota, quotaExceededResponse } from '@/lib/upload-quota';
 import { withApiSecurity } from '@/lib/security-headers';
 
 export const dynamic = 'force-dynamic';
@@ -55,11 +56,12 @@ async function resolveSession(req: Request): Promise<
   return { ok: true, uid: session.uid };
 }
 
-/** Membership + MANAGE_SERVER gate (banner is a server-level setting). */
+/** Membership + MANAGE_SERVER gate (banner is a server-level setting).
+ * Returns a NextResponse when denied, else the server row. */
 async function requireBannerManager(
   serverId: string,
   actorUserId: string
-): Promise<NextResponse | null> {
+): Promise<NextResponse | { server: { ownerUserId: string } }> {
   const server = await getServerById(getDb(), serverId);
   if (!server) {
     return NextResponse.json({ error: 'Server not found' }, { status: 404 });
@@ -73,7 +75,7 @@ async function requireBannerManager(
   if (!hasPermission(permissions, CorePermission.MANAGE_SERVER)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
-  return null;
+  return { server };
 }
 
 async function handlePost(
@@ -85,8 +87,8 @@ async function handlePost(
   if (!session.ok) return session.response;
 
   try {
-    const denied = await requireBannerManager(serverId, session.uid);
-    if (denied) return denied;
+    const gate = await requireBannerManager(serverId, session.uid);
+    if (gate instanceof NextResponse) return gate;
 
     let body: z.infer<typeof BannerPayloadSchema>;
     try {
@@ -101,6 +103,10 @@ async function handlePost(
       if (!check.ok) {
         return NextResponse.json({ error: check.error ?? 'Invalid banner image.' }, { status: 400 });
       }
+      // SEC-010: server banners count against the OWNER's image quota
+      // (they own the stored bytes); null = removal, frees budget.
+      const quota = await checkUserImageQuota(gate.server.ownerUserId, body.dataUrl.length);
+      if (!quota.ok) return quotaExceededResponse(quota);
     }
 
     const updated = await updateServerBannerUrl(getDb(), serverId, body.dataUrl);
@@ -135,8 +141,8 @@ async function handleDelete(
   if (!session.ok) return session.response;
 
   try {
-    const denied = await requireBannerManager(serverId, session.uid);
-    if (denied) return denied;
+    const gate = await requireBannerManager(serverId, session.uid);
+    if (gate instanceof NextResponse) return gate;
 
     const updated = await updateServerBannerUrl(getDb(), serverId, null);
     void logAction(getDb(), {

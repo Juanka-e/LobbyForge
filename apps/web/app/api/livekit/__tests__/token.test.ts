@@ -297,6 +297,51 @@ describe('POST /api/livekit/token room limits', () => {
   });
 });
 
+describe('POST /api/livekit/token VOICE-001 ephemeral TURN credentials', () => {
+  const realSecret = process.env.LOBBYFORGE_TURN_SECRET;
+  const realBase = process.env.NEXT_PUBLIC_BASE_URL;
+
+  it('includes per-user ephemeral iceServers when TURN is configured', async () => {
+    process.env.LOBBYFORGE_TURN_SECRET = 'ab'.repeat(32);
+    process.env.NEXT_PUBLIC_BASE_URL = 'https://voice.example.com';
+    try {
+      const { POST } = await loadRoute();
+      const res = await POST(makeRequest({ serverId: SERVER_ID, channelId: CHANNEL_ID }), {});
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.iceServers).toHaveLength(1);
+      const ice = json.iceServers[0];
+      // udp + tcp + TURN/TLS trio on the stack domain, username carries
+      // the caller's identity (coturn user-quota counts per user).
+      expect(ice.urls).toEqual([
+        'turn:voice.example.com:3478?transport=udp',
+        'turn:voice.example.com:3478?transport=tcp',
+        'turns:voice.example.com:5349?transport=tcp',
+      ]);
+      expect(ice.username).toContain('00000000-0000-0000-0000-000000000099');
+      expect(ice.credential).toMatch(/^[A-Za-z0-9+/=]+$/); // base64 HMAC
+    } finally {
+      if (realSecret === undefined) delete process.env.LOBBYFORGE_TURN_SECRET;
+      else process.env.LOBBYFORGE_TURN_SECRET = realSecret;
+      if (realBase === undefined) delete process.env.NEXT_PUBLIC_BASE_URL;
+      else process.env.NEXT_PUBLIC_BASE_URL = realBase;
+    }
+  });
+
+  it('omits iceServers entirely when TURN is not deployed', async () => {
+    delete process.env.LOBBYFORGE_TURN_SECRET;
+    try {
+      const { POST } = await loadRoute();
+      const res = await POST(makeRequest({ serverId: SERVER_ID, channelId: CHANNEL_ID }), {});
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.iceServers).toBeUndefined();
+    } finally {
+      if (realSecret !== undefined) process.env.LOBBYFORGE_TURN_SECRET = realSecret;
+    }
+  });
+});
+
 describe('POST /api/livekit/token VOICE-003 limit failure policy', () => {
   it('VOICE-003: 503 (fail-closed) when the room cap cannot be verified', async () => {
     getEffectiveServerVoiceSettings.mockResolvedValue({

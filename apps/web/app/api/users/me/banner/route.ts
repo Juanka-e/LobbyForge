@@ -5,6 +5,7 @@ import { getDb } from '@/lib/db';
 import { requireMaterializedSession } from '@/lib/api-auth';
 import { withApiSecurity } from '@/lib/security-headers';
 import { BANNER_LIMITS, checkImageDataUrl } from '@/lib/image-validation';
+import { checkUserImageQuota, quotaExceededResponse } from '@/lib/upload-quota';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -39,6 +40,9 @@ async function handlePost(req: Request): Promise<NextResponse> {
     if (!check.ok) {
       return NextResponse.json({ error: check.error ?? 'Invalid banner image.' }, { status: 400 });
     }
+    // SEC-010: aggregate quota (null = banner REMOVAL, frees budget).
+    const quota = await checkUserImageQuota(session.session.uid, body.dataUrl.length);
+    if (!quota.ok) return quotaExceededResponse(quota);
   }
 
   const updated = await updateUserBanner(getDb(), session.session.uid, body.dataUrl);

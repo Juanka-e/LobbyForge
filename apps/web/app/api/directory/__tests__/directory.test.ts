@@ -7,11 +7,17 @@ const upsertRegistryInstance = vi.fn();
 const heartbeatRegistryInstance = vi.fn();
 
 vi.mock('@/lib/api-auth', () => ({ requireMaterializedSession }));
-vi.mock('@lobbyforge/db', () => ({
-  listPublicRegistryInstances,
-  upsertRegistryInstance,
-  heartbeatRegistryInstance,
-}));
+vi.mock('@lobbyforge/db', () => {
+  // The route does `instanceof RegistryInstanceOwnedError` — the mock must
+  // expose the SAME class the test rejects with.
+  class RegistryInstanceOwnedError extends Error {}
+  return {
+    listPublicRegistryInstances,
+    upsertRegistryInstance,
+    heartbeatRegistryInstance,
+    RegistryInstanceOwnedError,
+  };
+});
 vi.mock('@lobbyforge/registry', () => ({
   normalizeRegistryInstanceUrl: (url: string) => {
     // Real-ish validation: must start with https:// and be a bare origin.
@@ -90,6 +96,43 @@ describe('POST /api/directory/register', () => {
     expect(res.status).toBe(201);
     const json = (await res.json()) as { isListed: boolean; message: string };
     expect(json.message).toContain('review');
+  });
+
+  it('passes the acting user as the ownership claim (SEC-007)', async () => {
+    upsertRegistryInstance.mockResolvedValue({
+      instanceId: 'inst-2', isListed: false, isVerified: false, id: 'y',
+    });
+    const { POST } = await import('../register/route.js');
+    await POST(
+      new Request('https://example.test/api/directory/register', {
+        method: 'POST',
+        body: JSON.stringify(validBody),
+      }),
+      {}
+    );
+    expect(upsertRegistryInstance).toHaveBeenCalledWith(
+      { __mockDb: true },
+      expect.objectContaining({ actorUserId: UID })
+    );
+  });
+
+  it('maps an ownership rejection to 403 (SEC-007)', async () => {
+    // The route checks `instanceof RegistryInstanceOwnedError` against its
+    // own @lobbyforge/db import — reject with that same mocked class.
+    const dbMod = await import('@lobbyforge/db');
+    const OwnedError = (dbMod as unknown as {
+      RegistryInstanceOwnedError: new () => Error;
+    }).RegistryInstanceOwnedError;
+    upsertRegistryInstance.mockRejectedValue(new OwnedError());
+    const { POST } = await import('../register/route.js');
+    const res = await POST(
+      new Request('https://example.test/api/directory/register', {
+        method: 'POST',
+        body: JSON.stringify(validBody),
+      }),
+      {}
+    );
+    expect(res.status).toBe(403);
   });
 
   it('rejects a non-HTTPS domain', async () => {

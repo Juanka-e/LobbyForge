@@ -22,18 +22,27 @@ client ── ICE: client-to-SFU direct ──► LiveKit SFU (udp 50000-60000)
    │
    └── direct path fails ──► coturn TURN (3478, relay 49160-49200/udp)
                                         ▲
-                       LiveKit advertises the TURN server to clients via
-                       rtc.turn_servers in livekit.yaml (connect response)
+                       The web app mints a per-user, time-limited TURN
+                       credential with each LiveKit token (VOICE-001) and
+                       the client applies it via rtcConfig.iceServers.
 ```
 
-- `infra/turn/turnserver.conf.template` — coturn config (rendered per
-  install with your domain + shared credential; git-ignored output).
-- `infra/livekit/livekit.yaml.template` — `rtc.turn_servers` entries
-  (udp + tcp) with the same static user `lobbyforge`.
+- `infra/turn/turnserver.conf.template` — coturn config in REST-auth
+  mode (`use-auth-secret` + `static-auth-secret`); rendered per install
+  with your domain + secret (git-ignored output).
+- `apps/web/lib/turn-credentials.ts` — derives the coturn REST-auth
+  credential pair: `username = ${unixExpiry}:${userId}`,
+  `credential = base64(HMAC-SHA1(secret, username))`. The token
+  endpoint (`/api/livekit/token`) ships one alongside every LiveKit
+  token (1h, matching the token TTL).
+- `infra/livekit/livekit.yaml.template` — NO `turn_servers` entries:
+  LiveKit's config only accepts a STATIC credential, which used to hand
+  every community member one permanent relay credential. Do not re-add
+  it.
 - `infra/docker/docker-compose.prod.yml` — the `turn` service
-  (`coturn/coturn:4.6.2`, pinned), host networking so the UDP relay
+  (`coturn/coturn:4.17.2`, pinned), host networking so the UDP relay
   range binds directly.
-- `scripts/render-configs.sh` — renders both files; the credential is
+- `scripts/render-configs.sh` — renders the configs; the secret is
   validated as 32-128 hex chars so it can never inject config syntax.
 
 LiveKit's built-in `turn:` block is intentionally NOT used — it
@@ -90,15 +99,20 @@ connection quality in the room UI.
 Quick relay smoke checks from a laptop:
 
 ```bash
-# TURN allocation on 3478/udp and 3478/tcp (expect "Allocate" success in coturn logs)
-turnutils_uclient -u lobbyforge -w "$LOBBYFORGE_TURN_SECRET" -p 3478 -v your.domain
+# Derive a REST-auth credential with the stack secret, then allocate on
+# 3478/udp (expect "Allocate" success in coturn logs). coturn has NO
+# static user anymore — a raw -u/-w pair cannot be used directly.
+EXP=$(( $(date +%s) + 300 )); USER="$EXP:smoketest"
+PASS=$(printf '%s' "$USER" | openssl dgst -sha1 -hmac "$LOBBYFORGE_TURN_SECRET" -binary | base64)
+turnutils_uclient -u "$USER" -w "$PASS" -p 3478 -v your.domain
 # Listening ports are up
 nc -vz your.domain 3478 && nc -vz your.domain 5349
 ```
 
 If case 4/5 fails: check `docker logs lobbyforge-turn`, confirm the
-firewall range above, and verify the rendered `livekit.yaml` carries
-`turn_servers` with your domain (udp 3478, tcp 3478, tls 5349).
+firewall range above, and verify the token endpoint returns
+`iceServers` (the client only falls back to coturn when it carries
+them — udp 3478, tcp 3478, tls 5349).
 
 ## Certificate lifecycle (V5-002/V5-003)
 
@@ -127,6 +141,7 @@ firewall range above, and verify the rendered `livekit.yaml` carries
 - The coturn healthcheck proves the 3478 listener is up; a real TURN
   allocation smoke test (credentials + egress) is the manual
   `turnutils_uclient` step above.
-- V4-007 (known debt): all clients share one static TURN credential.
-  Alpha-scale quota limits bound the abuse surface; per-user ephemeral
-  TURN auth is a production follow-up.
+- ~~V4-007 (known debt): all clients share one static TURN credential.~~
+  FIXED (VOICE-001): coturn runs in REST-auth mode; every voice client
+  receives a per-user credential that expires with its LiveKit token,
+  and coturn's `user-quota` counts allocations per user again.

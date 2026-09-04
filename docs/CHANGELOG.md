@@ -2,6 +2,46 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - 7th-audit remediation wave 4: remaining security findings - 2026-09-04
+
+### Fixed
+
+- **SEC-007 directory instance ownership**: registry_instances had no
+  owner — any authenticated user could upsert over an existing,
+  admin-listed instance (name/domain swap = discovery phishing
+  vector). Migration 0030 adds owner_user_id; the first registrant
+  owns the entry, upserts from anyone else throw
+  RegistryInstanceOwnedError → 403. Legacy NULL-owner rows are claimed
+  once by the first updater, then locked. 3 new tests.
+- **SEC-010 unbounded image storage**: every upload endpoint checked a
+  per-request size but nothing bounded the TOTAL data-URL bytes one
+  account could pin in Postgres. New per-user quota (24 MiB) counts
+  avatar + profile banner + owned server banners and rejects with 413
+  (removals always pass); the instance logo stays uncapped — it is a
+  single self-replacing 2 MB-max row.
+- **VOICE-001 permanent shared TURN credential**: coturn ran a static
+  `lobbyforge:<secret>` user and livekit.yaml handed that SAME
+  credential to every community member via rtc.turn_servers — anyone
+  who ever joined a voice channel could relay forever. coturn now runs
+  REST-auth (`use-auth-secret`); /api/livekit/token mints a per-user
+  time-limited credential (`expiry:userId` + HMAC-SHA1, 1h = token
+  TTL) and clients apply it via rtcConfig.iceServers; livekit.yaml
+  ships NO static turn_servers anymore (regression-tested), and
+  coturn's user-quota counts per user again (8). Docs + smoke-test
+  recipe updated.
+- **VOICE-002 stale pinned images**: livekit-server 1.8.3 → 1.13.6
+  (1.10 fixed gRPC CVE-2026-33186; 1.12+ hardened TURN auth; 1.13.6
+  adds signal body limits + per-participant TURN allocation caps);
+  coturn 4.6.2 → 4.17.2 (security fixes across 4.10-4.14; DTLS
+  opt-in does not affect our TLS listener). Dev stack already floats
+  latest; the two-client voice e2e in CI exercises the new images.
+
+### Verified (no change needed)
+
+- **OPS-004 WS readiness**: the ws-gateway already serves /health on
+  :3001 and docker-compose.prod.yml has a wget healthcheck wired to
+  it — closed in an earlier wave; re-confirmed.
+
 ## [Unreleased] - 7th-audit (re-audit) remediation wave 3 - 2026-09-04
 
 ### Fixed

@@ -1,9 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const updateUserBanner = vi.fn();
+const getUserStoredImageBytes = vi.fn();
 const requireMaterializedSession = vi.fn();
 
-vi.mock('@lobbyforge/db', () => ({ updateUserBanner }));
+vi.mock('@lobbyforge/db', () => ({
+  updateUserBanner,
+  getUserStoredImageBytes,
+  USER_IMAGE_QUOTA_BYTES: 24 * 1024 * 1024,
+}));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __testDb: true }) }));
 vi.mock('@/lib/api-auth', () => ({ requireMaterializedSession }));
 vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));
@@ -13,6 +18,7 @@ beforeEach(() => {
     id: '00000000-0000-0000-0000-000000000001',
     bannerUrl: 'data:image/png;base64,' + 'a'.repeat(80),
   });
+  getUserStoredImageBytes.mockReset().mockResolvedValue(0);
   requireMaterializedSession.mockReset().mockReturnValue({
     ok: true,
     session: {
@@ -79,6 +85,40 @@ describe('POST /api/users/me/banner', () => {
 
     expect(response.status).toBe(400);
     expect(updateUserBanner).not.toHaveBeenCalled();
+  });
+
+  it('SEC-010: rejects the upload when the aggregate image quota is blown', async () => {
+    const webp = Buffer.alloc(40);
+    webp.write('RIFF', 0);
+    webp.writeUInt32LE(16, 4);
+    webp.write('WEBP', 8);
+    webp.write('VP8L', 12);
+    webp[20] = 0x2f;
+    const bits = ((1280 - 1) & 0x3fff) | (((720 - 1) & 0x3fff) << 14);
+    webp[21] = bits & 0xff;
+    webp[22] = (bits >> 8) & 0xff;
+    webp[23] = (bits >> 16) & 0xff;
+    webp[24] = (bits >> 24) & 0xff;
+    const dataUrl = 'data:image/webp;base64,' + webp.toString('base64');
+    // Already at the ceiling — this upload must be refused BEFORE persist.
+    getUserStoredImageBytes.mockResolvedValue(24 * 1024 * 1024);
+
+    const response = await post({ dataUrl });
+
+    expect(response.status).toBe(413);
+    const json = await response.json();
+    expect(json.quotaBytes).toBe(24 * 1024 * 1024);
+    expect(updateUserBanner).not.toHaveBeenCalled();
+  });
+
+  it('SEC-010: removal (null) never hits the quota and always succeeds', async () => {
+    getUserStoredImageBytes.mockResolvedValue(24 * 1024 * 1024);
+
+    const response = await post({ dataUrl: null });
+
+    expect(response.status).toBe(200);
+    expect(updateUserBanner).toHaveBeenCalled();
+    expect(getUserStoredImageBytes).not.toHaveBeenCalled();
   });
 
   it('allows removing the banner', async () => {

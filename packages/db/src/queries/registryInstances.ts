@@ -15,6 +15,14 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
 import { registryInstances } from '../schema.js';
 
+/** SEC-007: the instance entry belongs to another user — upsert refused. */
+export class RegistryInstanceOwnedError extends Error {
+  constructor(public readonly ownerMismatch: true) {
+    super('This directory instance is owned by another user');
+    this.name = 'RegistryInstanceOwnedError';
+  }
+}
+
 export interface RegistryInstanceRow {
   id: string;
   instanceId: string;
@@ -35,6 +43,7 @@ export interface RegistryInstanceRow {
   doctorScore: number | null;
   lastHeartbeatAt: Date | null;
   createdAt: Date;
+  ownerUserId: string | null;
 }
 
 /** List public, listed, non-blocked instances for the discovery directory. */
@@ -82,13 +91,34 @@ export interface UpsertRegistryInstanceInput {
   tags?: string[];
   features?: string[];
   publicKey: string;
+  /** SEC-007: the acting user — must be the existing owner to update. */
+  actorUserId: string;
 }
 
-/** Register or update an instance in the directory (upsert on instanceId). */
+/**
+ * Register or update an instance in the directory (upsert on instanceId).
+ *
+ * Ownership (SEC-007): the FIRST registrant becomes the row's owner. An
+ * upsert from any other user throws RegistryInstanceOwnedError instead of
+ * overwriting a listed instance's name/domain (discovery-phishing guard).
+ * Rows created before the owner column existed (owner NULL) are claimed by
+ * the first updater — the legitimate operator registers before an attacker
+ * in practice, and admins can still moderate via setRegistryInstanceListing.
+ */
 export async function upsertRegistryInstance(
   db: DbClient,
   input: UpsertRegistryInstanceInput
 ): Promise<RegistryInstanceRow> {
+  const [existing] = await db
+    .select({ ownerUserId: registryInstances.ownerUserId })
+    .from(registryInstances)
+    .where(eq(registryInstances.instanceId, input.instanceId))
+    .limit(1);
+
+  if (existing && existing.ownerUserId !== null && existing.ownerUserId !== input.actorUserId) {
+    throw new RegistryInstanceOwnedError(true);
+  }
+
   const values = {
     instanceId: input.instanceId,
     name: input.name,
@@ -99,6 +129,7 @@ export async function upsertRegistryInstance(
     tags: input.tags ?? [],
     features: input.features ?? [],
     publicKey: input.publicKey,
+    ownerUserId: existing ? existing.ownerUserId ?? input.actorUserId : input.actorUserId,
   };
   const [row] = await db
     .insert(registryInstances)
@@ -113,6 +144,8 @@ export async function upsertRegistryInstance(
         languages: values.languages,
         tags: values.tags,
         features: values.features,
+        // Claim legacy NULL-owner rows exactly once; never steal a set owner.
+        ownerUserId: sql`coalesce(${registryInstances.ownerUserId}, excluded.owner_user_id)`,
       },
     })
     .returning();

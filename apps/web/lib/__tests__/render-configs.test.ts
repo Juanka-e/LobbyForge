@@ -7,9 +7,10 @@
  * domain left nginx/LiveKit on the OLD domain while .env.prod carried
  * the new one.
  *
- * LF-019: the coturn TURN config renders the shared credential alongside
- * the domain, and LiveKit's rtc.turn_servers entries stay in sync with
- * turnserver.conf's static user.
+ * LF-019 + VOICE-001: the coturn TURN config renders in REST-auth mode
+ * (use-auth-secret + static-auth-secret) and LiveKit's config contains
+ * NO static turn_servers credential — the web app mints per-user,
+ * time-limited credentials instead (lib/turn-credentials.ts).
  *
  * Runs the real scripts/render-configs.sh via bash against a temp
  * fixture that mirrors the infra/ layout.
@@ -84,7 +85,7 @@ describe('scripts/render-configs.sh — LF-010-R rerun safety', () => {
     expect(read('nginx')).toContain('/etc/letsencrypt/live/first.example.com/fullchain.pem');
     for (const part of ['nginx', 'livekit', 'turn'] as const) {
       expect(read(part)).not.toContain('LOBBYFORGE_DOMAIN');
-      expect(read(part)).not.toContain('TURN_CREDENTIAL');
+      expect(read(part)).not.toContain('TURN_SECRET');
     }
   });
 
@@ -160,27 +161,26 @@ describe('rendered nginx — V5-001 LiveKit prefix strip', () => {
   });
 });
 
-describe('scripts/render-configs.sh — LF-019 TURN wiring', () => {
-  it('renders the shared credential into coturn AND LiveKit turn_servers in sync', () => {
+describe('scripts/render-configs.sh — LF-019 + VOICE-001 TURN wiring', () => {
+  it('renders coturn in REST-auth mode and NEVER ships a static credential', () => {
     const turn = read('turn');
-    expect(turn).toContain(`user=lobbyforge:${TURN_SECRET}`);
+    expect(turn).toContain('use-auth-secret');
+    expect(turn).toContain(`static-auth-secret=${TURN_SECRET}`);
     expect(turn).toContain('realm=third.example.com');
     expect(turn).toContain('listening-port=3478');
     expect(turn).toContain('min-port=49160');
     expect(turn).toContain('max-port=49200');
+    // VOICE-001: the static shared user is GONE — every member used to
+    // receive this permanent credential via LiveKit's connect response.
+    expect(turn).not.toContain('user=lobbyforge');
+    expect(turn).not.toContain('user-quota=64'); // per-user quota restored
 
+    // LiveKit must not advertise static turn_servers — the web app mints
+    // per-user ephemeral credentials instead (see lib/turn-credentials).
     const livekit = read('livekit');
-    expect(livekit).toContain('turn_servers:');
-    expect(livekit).toContain('host: third.example.com');
-    expect(livekit).toContain('username: lobbyforge');
-    expect(livekit).toContain(`credential: ${TURN_SECRET}`);
-    // UDP, TCP and TURN/TLS (5349) fallbacks are all advertised to
-    // clients (V4-005 — a listener without an ICE advertisement is
-    // unreachable by WebRTC clients).
-    expect(livekit.match(/protocol: udp/g)).toHaveLength(1);
-    expect(livekit.match(/protocol: tcp/g)).toHaveLength(1);
-    expect(livekit).toContain('port: 5349');
-    expect(livekit).toContain('protocol: tls');
+    expect(livekit).not.toContain('turn_servers:');
+    expect(livekit).not.toContain(`credential: ${TURN_SECRET}`);
+    expect(livekit).not.toContain('username: lobbyforge');
   });
 
   it('rejects a non-hex turn secret before writing anything', () => {

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { upsertRegistryInstance } from '@lobbyforge/db';
+import { RegistryInstanceOwnedError, upsertRegistryInstance } from '@lobbyforge/db';
 import { normalizeRegistryInstanceUrl } from '@lobbyforge/registry';
 import { requireMaterializedSession } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
@@ -60,6 +60,8 @@ async function handlePost(req: Request): Promise<NextResponse> {
       tags: body.tags ?? [],
       features: body.features ?? [],
       publicKey: body.publicKey,
+      // SEC-007: only the first registrant may update the entry.
+      actorUserId: sessionResult.session.uid,
     });
     return NextResponse.json(
       {
@@ -76,7 +78,13 @@ async function handlePost(req: Request): Promise<NextResponse> {
       },
       { status: 201 }
     );
-  } catch {
+  } catch (err) {
+    if (err instanceof RegistryInstanceOwnedError) {
+      return NextResponse.json(
+        { error: 'This instance is registered by another user' },
+        { status: 403 }
+      );
+    }
     return NextResponse.json({ error: 'Failed to register instance' }, { status: 500 });
   }
 }

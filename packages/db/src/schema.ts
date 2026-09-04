@@ -344,6 +344,10 @@ export const registryInstances = pgTable('registry_instances', {
   tags: jsonb('tags').default([]).notNull(),
   features: jsonb('features').default([]).notNull(),
   publicKey: text('public_key').notNull(),
+  // SEC-007: the first registrant owns the directory entry; upserts from
+  // any other user are rejected (discovery-phishing guard). NULL = legacy
+  // row predating ownership — claimed by the first updater, then locked.
+  ownerUserId: uuid('owner_user_id').references((): AnyPgColumn => users.id, { onDelete: 'set null' }),
   isVerified: boolean('is_verified').default(false).notNull(),
   isListed: boolean('is_listed').default(false).notNull(),
   isBlocked: boolean('is_blocked').default(false).notNull(),

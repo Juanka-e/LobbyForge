@@ -126,6 +126,8 @@ interface TokenResponse {
   identity: string;
   room: string;
   expiresAt: number;
+  // VOICE-001: per-user ephemeral TURN credentials (coturn REST auth).
+  iceServers?: RTCIceServer[];
   serverVoiceSettings?: {
     requirePushToTalk: boolean;
     startMuted: boolean;
@@ -675,7 +677,14 @@ export function LobbyVoiceProvider({
           });
         });
 
-        await room.connect(livekitUrl, token.token, { autoSubscribe: false });
+        // VOICE-001: apply the server-issued ephemeral TURN servers so
+        // ICE can fall back to coturn (direct/STUN still tried first).
+        await room.connect(livekitUrl, token.token, {
+          autoSubscribe: false,
+          ...(token.iceServers?.length
+            ? { rtcConfig: { iceServers: token.iceServers } }
+            : {}),
+        });
         if (connectTokenRef.current !== myToken) {
           // Superseded — clean up the room we just connected.
           void room.disconnect();

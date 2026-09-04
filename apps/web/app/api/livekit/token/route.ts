@@ -23,6 +23,7 @@ import {
 } from '@/lib/api-auth';
 import { withApiSecurity } from '@/lib/security-headers';
 import { liveKitRoomName } from '@/lib/livekit-room';
+import { getEphemeralTurnIceServers } from '@/lib/turn-credentials';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -159,6 +160,11 @@ async function handler(req: Request): Promise<NextResponse> {
       grants,
       metadata,
     });
+    // VOICE-001: per-user, time-limited TURN credentials ride with the
+    // token (coturn REST auth) — clients apply them via rtcConfig. Null
+    // when TURN is not deployed (dev stacks); livekit.yaml no longer
+    // advertises a static turn_servers credential at all.
+    const turnIceServers = getEphemeralTurnIceServers(identity);
     return NextResponse.json(
       {
         token,
@@ -168,6 +174,7 @@ async function handler(req: Request): Promise<NextResponse> {
         channelId: body.channelId,
         ttlSeconds: LIVEKIT_TOKEN_TTL_SECONDS,
         expiresAt: session.exp,
+        ...(turnIceServers ? { iceServers: [turnIceServers] } : {}),
         // Client-side voice policy (honor-system). The client uses these to
         // force push-to-talk mode and/or start muted, overriding the user's
         // own preferences. Hard limits (user/camera/screen-share caps) are

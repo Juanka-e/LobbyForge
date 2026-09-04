@@ -34,7 +34,14 @@ import { getPlugin } from '@/lib/plugin-registry';
 import { getRealtimeClient } from '@/lib/realtime-client';
 
 type Guest = { gid: string; uid: string | null; name: string };
-type Token = { token: string; identity: string; room: string; expiresAt: number };
+type Token = {
+  token: string;
+  identity: string;
+  room: string;
+  expiresAt: number;
+  // VOICE-001: per-user ephemeral TURN credentials (coturn REST auth).
+  iceServers?: RTCIceServer[];
+};
 type Status =
   | { kind: 'idle' }
   | { kind: 'busy' }
@@ -168,7 +175,12 @@ function RoomView({ roomName }: { roomName: string }) {
         room.on(RoomEvent.ParticipantDisconnected, () => collectParticipants(room));
         room.on(RoomEvent.ActiveSpeakersChanged, () => collectParticipants(room));
 
-        await room.connect(livekitUrl, token.token);
+        // VOICE-001: server-issued ephemeral TURN servers (ICE fallback).
+        await room.connect(livekitUrl, token.token, {
+          ...(token.iceServers?.length
+            ? { rtcConfig: { iceServers: token.iceServers } }
+            : {}),
+        });
         if (cancelled) {
           await room.disconnect();
           return;

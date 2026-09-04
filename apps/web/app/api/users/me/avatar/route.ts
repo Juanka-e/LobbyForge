@@ -5,6 +5,7 @@ import { getDb } from '@/lib/db';
 import { requireMaterializedSession } from '@/lib/api-auth';
 import { withApiSecurity } from '@/lib/security-headers';
 import { AVATAR_LIMITS, checkImageDataUrl } from '@/lib/image-validation';
+import { checkUserImageQuota, quotaExceededResponse } from '@/lib/upload-quota';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -45,6 +46,12 @@ async function handlePost(req: Request): Promise<NextResponse> {
 
   // Production: hand off to object storage / CDN. For this milestone we
   // persist the data URL directly so the round-trip works end-to-end.
+  // SEC-010: aggregate per-user image quota (avatar + banners + owned
+  // server banners) — the per-request cap alone let one account pin
+  // unbounded bytes by rotating uploads.
+  const quota = await checkUserImageQuota(session.session.uid, body.dataUrl.length);
+  if (!quota.ok) return quotaExceededResponse(quota);
+
   const updated = await updateUserAvatar(getDb(), session.session.uid, body.dataUrl);
   return NextResponse.json(
     { avatarUrl: updated.avatarUrl },

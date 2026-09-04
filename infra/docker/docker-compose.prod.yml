@@ -193,7 +193,9 @@ services:
 
   # ── Voice: LiveKit SFU ───────────────────────────────────────────
   livekit:
-    image: livekit/livekit-server:1.8.3  # LF-010-R: pinned (was :latest)
+    image: livekit/livekit-server:1.13.6  # LF-010-R pinned; VOICE-002: 1.8.3 -> 1.13.6
+    #   (1.10 fixed grpc CVE-2026-33186; 1.12+ hardened TURN auth; 1.13.6
+    #   adds signal body limits + per-participant TURN allocation caps)
     container_name: lobbyforge-livekit
     restart: unless-stopped
     command: ["--config", "/etc/livekit/livekit.yaml", "--bind", "0.0.0.0"]
@@ -227,7 +229,9 @@ services:
   # negotiation. Open on the firewall: 3478+5349 (tcp/udp) and
   # 49160-49200/udp.
   turn:
-    image: coturn/coturn:4.6.2  # LF-019: pinned
+    image: coturn/coturn:4.17.2  # LF-019 pinned; VOICE-002: 4.6.2 -> 4.17.2
+    #   (security fixes landed across 4.10-4.14; DTLS listeners are
+    #   opt-in from 4.17 — our TLS listener on 5349 is unaffected)
     container_name: lobbyforge-turn
     restart: unless-stopped
     network_mode: host

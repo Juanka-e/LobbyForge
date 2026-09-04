@@ -156,7 +156,10 @@ describe('install.sh — V4-003 safe activation', () => {
     expect(rc, out).toBe(0);
     expect(content(sandbox, '.env.prod')).toContain('NEXT_PUBLIC_BASE_URL=https://first.example.com');
     expect(content(sandbox, 'infra/nginx/conf.d/app.conf')).toContain('server_name first.example.com;');
-    expect(content(sandbox, 'infra/livekit/livekit.yaml')).toContain('host: first.example.com');
+    // VOICE-001: livekit.yaml no longer carries static turn_servers —
+    // the domain proof here is the rendered TURN secret wiring instead.
+    expect(content(sandbox, 'infra/livekit/livekit.yaml')).not.toContain('turn_servers:');
+    expect(content(sandbox, 'infra/turn/turnserver.conf')).toContain('use-auth-secret');
     expect(content(sandbox, 'infra/turn/turnserver.conf')).toContain('realm=first.example.com');
   });
 
@@ -208,7 +211,7 @@ describe('install.sh — V4-003 safe activation', () => {
     expect(rc, out).toBe(0);
     expect(content(sandbox, '.env.prod')).toContain('https://new.example.com');
     expect(content(sandbox, 'infra/nginx/conf.d/app.conf')).toContain('server_name new.example.com;');
-    expect(content(sandbox, 'infra/livekit/livekit.yaml')).toContain('host: new.example.com');
+    expect(content(sandbox, 'infra/livekit/livekit.yaml')).not.toContain('turn_servers:');
     expect(content(sandbox, 'infra/turn/turnserver.conf')).toContain('realm=new.example.com');
     // Staging must not leak into the live tree.
     expect(out).not.toContain('.install-staging');
