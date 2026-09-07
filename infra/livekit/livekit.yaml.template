@@ -13,7 +13,11 @@ rtc:
   port_range_start: 50000
   port_range_end: 60000
   use_external_ip: true
-  enable_loopback_reflection: false
+  # VOICE-002: `enable_loopback_reflection` was REMOVED in livekit
+  # 1.13 — keeping it crash-loops the server on config parse ("field
+  # enable_loopback_reflection not found in type config.RTCConfig").
+  # Loopback candidates are not reflected by default in 1.13+, which is
+  # the same hardening the old flag expressed.
   # LF-019 + VOICE-001: TURN fallback is the standalone coturn container
   # (see the `turn` service in docker-compose.prod.yml), but LiveKit does
   # NOT advertise it here anymore. rtc.turn_servers only accepts a STATIC
