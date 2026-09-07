@@ -54,6 +54,15 @@ services:
     depends_on:
       web:
         condition: service_healthy
+      # TEST-001: nginx's config statically proxies web, ws-gateway AND
+      # livekit — if any of the three is missing, its DNS name fails to
+      # resolve at config load and nginx crash-loops ("host not found in
+      # upstream"). Depending on all three makes a partial `up nginx`
+      # correct and full deploys deterministic.
+      ws-gateway:
+        condition: service_healthy
+      livekit:
+        condition: service_healthy
     networks:
       - edge
 
