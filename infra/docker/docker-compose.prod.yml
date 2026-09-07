@@ -193,7 +193,10 @@ services:
 
   # ── Voice: LiveKit SFU ───────────────────────────────────────────
   livekit:
-    image: livekit/livekit-server:1.13.6  # LF-010-R pinned; VOICE-002: 1.8.3 -> 1.13.6
+    image: livekit/livekit-server:v1.13.6  # LF-010-R pinned; VOICE-002: 1.8.3 -> 1.13.6
+    #   (1.10 fixed grpc CVE-2026-33186; 1.12+ hardened TURN auth; 1.13.6
+    #   adds signal body limits + per-participant TURN allocation caps).
+    #   Docker tags are v-prefixed (a bare 1.13.6 does not exist).
     #   (1.10 fixed grpc CVE-2026-33186; 1.12+ hardened TURN auth; 1.13.6
     #   adds signal body limits + per-participant TURN allocation caps)
     container_name: lobbyforge-livekit
