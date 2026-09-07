@@ -153,6 +153,10 @@ jobs:
           LIVEKIT_API_KEY=cikey
           LIVEKIT_API_SECRET=cisecretcisecretcisecret
           NEXT_PUBLIC_BASE_URL=https://ci.example.com
+          # migrate.js reads DATABASE_URL (LF_DB_URL in the compose file
+          # is the ws-gateway's var) — point it at the compose-internal
+          # postgres exactly like install.sh does for a real deploy.
+          DATABASE_URL=postgres://lobbyforge:ci@postgres:5432/lobbyforge
           EOF
           # Interpolation vars for docker compose (build args + services).
           echo "POSTGRES_PASSWORD=ci" >> .env.prod
@@ -174,6 +178,7 @@ jobs:
         run: |
           docker compose -f infra/docker/docker-compose.prod.yml ps || true
           docker logs lobbyforge-nginx --tail 50 || true
+          docker logs lobbyforge-migrate --tail 50 || true
           docker logs lobbyforge-web --tail 100 || true
 
       - name: Install Playwright chromium
