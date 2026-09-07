@@ -221,7 +221,10 @@ services:
       - "7881:7881"     # ICE/TCP fallback
       - "50000-60000:50000-60000/udp"  # RTC media range
     environment:
-      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY}:${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}"
+      # VOICE-002: livekit 1.13 parses keys STRICTLY — the pair must be
+      # exactly "key: secret", space included. The space-less form
+      # crash-loops the server at boot.
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}"
     healthcheck:
       # TEST-001: the livekit image is busybox-based — wget is an
       # applet, not on PATH. Invoke it explicitly.
