@@ -74,3 +74,6 @@ infra/livekit/livekit.yaml
 infra/nginx/conf.d/app.conf.bak
 infra/livekit/livekit.yaml.bak
 infra/turn/turnserver.conf
+# Local TLS debugging: self-signed certs written where the certbot
+# volume would serve them (TEST-001 local repro)
+infra/certbot/

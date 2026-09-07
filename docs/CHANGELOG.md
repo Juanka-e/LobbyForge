@@ -2,7 +2,7 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
-## [Unreleased] - 7th-audit remediation wave 5: final findings - 2026-09-04
+## [Unreleased] - 7th-audit remediation wave 5: final findings - 2026-09-07
 
 ### Added
 
@@ -26,6 +26,27 @@ All notable changes to the LobbyForge monorepo skeleton.
   single-instance plugin immediately exits — the login handoff was
   silently lost. The single-instance callback now relays the URL
   through the same postMessage bridge as the deep-link event.
+- **Six real deploy bugs the TLS e2e flushed out** (none of them
+  reachable from the dev stack, all of them live in every fresh
+  production install):
+  1. livekit-server docker tags are v-prefixed — bare `1.13.6` does
+     not exist on Docker Hub.
+  2. the prod migrate one-shot ran from `/app`, so drizzle's
+     `./drizzle` never resolved and migrations exited 1 — web (which
+     waits on migrate) never started on ANY fresh install.
+  3. web + ws-gateway healthchecks used `wget`, absent from
+     node:22-bookworm-slim — every check failed instantly and
+     `up --wait` never converged. Probes now use node's global fetch.
+  4. the livekit healthcheck needed `busybox wget` (applet, not on
+     PATH in the livekit image).
+  5. livekit 1.13 removed `rtc.enable_loopback_reflection` — the
+     template kept the field and livekit crash-looped at config parse.
+  6. livekit 1.13 parses keys strictly (`"key: secret"`, space
+     included) — the space-less LIVEKIT_KEYS interpolation crash-looped
+     the server; and nginx's config statically proxies THREE upstreams
+     but only depended on web, so a stack gap made nginx exit at
+     config load ("host not found in upstream") — nginx now depends on
+     web + ws-gateway + livekit, all healthy.
 
 ### Security
 
