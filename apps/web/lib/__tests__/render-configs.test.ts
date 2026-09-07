@@ -155,7 +155,10 @@ describe('rendered nginx — V5-001 LiveKit prefix strip', () => {
     // The livekit service may publish 7881 (ICE/TCP) and the UDP media
     // range, but 7880 (plaintext HTTP signaling) must stay internal —
     // nginx is the only TLS terminator.
-    const livekitSection = compose.match(/  livekit:[\s\S]*?(?=\n  \w[\w-]*:)/)?.[0] ?? '';
+    // Anchor to the SERVICE key at column 0 — nginx's depends_on now
+    // also mentions `livekit:` (indented), which the loose pattern
+    // would match first.
+    const livekitSection = compose.match(/^  livekit:[\s\S]*?(?=^  \w[\w-]*:)/m)?.[0] ?? '';
     expect(livekitSection).not.toMatch(/["']7880:7880["']/);
     expect(livekitSection).toMatch(/["']7881:7881["']/);
   });
