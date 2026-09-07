@@ -198,6 +198,19 @@ jobs:
       - name: Run prod-TLS e2e
         run: pnpm --filter @lobbyforge/web exec playwright test prod-tls.spec.ts
 
+      - name: Diagnose the edge on e2e failure
+        if: failure()
+        run: |
+          echo "=== containers ==="
+          docker ps -a --format '{{.Names}} {{.Status}}' | grep lobbyforge || true
+          echo "=== nginx state ==="
+          docker inspect lobbyforge-nginx --format 'status={{.State.Status}} restarts={{.RestartCount}} oom={{.State.OOMKilled}}' || true
+          echo "=== nginx logs (tail 100) ==="
+          docker logs lobbyforge-nginx --tail 100 2>&1 || true
+          echo "=== edge probes from the runner ==="
+          curl -sv --max-time 10 https://127.0.0.1/api/health -H 'Host: ci.example.com' 2>&1 | tail -20 || true
+          curl -sv --max-time 10 http://127.0.0.1/ -H 'Host: ci.example.com' 2>&1 | tail -8 || true
+
       - name: Teardown
         if: always()
         run: |
