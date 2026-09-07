@@ -145,8 +145,13 @@ services:
     image: lobbyforge-web:latest
     container_name: lobbyforge-migrate
     restart: "no"
-    working_dir: /app
-    command: ["node", "packages/db/dist/migrate.js"]
+    # TEST-001 caught a real deploy bug: with working_dir /app the
+    # migrator resolved './drizzle' to /app/drizzle (missing) and the
+    # one-shot exited 1 — web (which waits on migrate completing
+    # successfully) never started on ANY fresh install. Run from the
+    # package root like the dev stack does; ./drizzle then resolves.
+    working_dir: /app/packages/db
+    command: ["node", "dist/migrate.js"]
     env_file:
       - ../../.env.prod
     depends_on:
