@@ -38,6 +38,28 @@ LobbyForge implements defense-in-depth:
 - **Rate limiting**: Redis-backed (fails closed), per-route limits.
 - **Update signatures**: Ed25519-signed manifests required for self-host updates.
 - **Input validation**: Zod schemas on every API route.
+- **TURN relay credentials**: per-user, time-limited (coturn REST auth) —
+  no permanent shared TURN secret exists.
+
+## Marketplace plugins — dynamic execution is DISABLED (SEC-008)
+
+Third-party plugin bundles (`plugins/installed/…`) are NOT executed by
+default. Two independent gates must BOTH agree before any dynamic
+plugin code runs, and both default to closed:
+
+1. `POST /api/marketplace/install` refuses (503) unless
+   `LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED=true`.
+2. The boot-time loader (`lib/plugin-loader.ts`) skips the
+   `plugins/installed/` walk entirely without the same flag.
+
+**Do not enable the flag.** The plugin execution model is in-process:
+`createInitialState` / `handleAction` are synchronous in the SDK
+contract, so genuine isolation requires moving execution into
+`worker_threads` (or an external process) with an async RPC bridge —
+an intentional protocol migration, not a config change. Until that
+lands, an approved-but-malicious bundle would run with full host
+process privileges (DB pool, Redis, secrets). Both gates are pinned by
+regression tests; removing either is a security review, not a chore.
 
 ## Self-Host Security Checklist
 

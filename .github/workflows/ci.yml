@@ -101,6 +101,112 @@ jobs:
           export NEXT_PUBLIC_WS_URL=wss://ci.example.com/ws
           docker compose -f infra/docker/docker-compose.prod.yml config --quiet
 
+  # TEST-001: production TLS e2e — the REAL prod stack (nginx + web +
+  # ws-gateway + livekit + postgres + redis, rendered configs, boot
+  # migrations) behind an nginx TLS edge with a self-signed cert. The
+  # dev-stack e2e job above proves the app; this job proves the edge a
+  # production user hits: HTTPS termination, the HTTP→HTTPS redirect,
+  # and the WSS /ws upgrade into the gateway.
+  e2e-prod-tls:
+    name: e2e (production TLS edge)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      LF_E2E_BASE_URL: https://ci.example.com
+      LF_E2E_TLS: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Self-signed certificate + rendered configs + .env.prod
+        run: |
+          DOMAIN=ci.example.com
+          # Cert at the exact path the certbot volume serves — nginx's
+          # rendered config points here.
+          CERT_DIR=infra/certbot/conf/live/$DOMAIN
+          mkdir -p "$CERT_DIR"
+          openssl req -x509 -newkey rsa:2048 -sha256 -days 2 -nodes \
+            -keyout "$CERT_DIR/privkey.pem" \
+            -out "$CERT_DIR/fullchain.pem" \
+            -subj "/CN=$DOMAIN" -addext "subjectAltName=DNS:$DOMAIN"
+          # Rendered (git-ignored) configs from the same templates the
+          # installer uses — the stack under test is byte-identical to
+          # a deploy.
+          bash scripts/render-configs.sh "$DOMAIN" "$(printf 'a%.0s' $(seq 1 64))" infra infra
+          cat > .env.prod <<'EOF'
+          LOBBYFORGE_SESSION_SECRET=ci-tls-secret-ci-tls-secret-ci-tls
+          LOBBYFORGE_ADMIN_TOKEN=ci-tls-admin-token-0123456789abcdef
+          LIVEKIT_API_KEY=cikey
+          LIVEKIT_API_SECRET=cisecretcisecretcisecret
+          NEXT_PUBLIC_BASE_URL=https://ci.example.com
+          EOF
+          # Interpolation vars for docker compose (build args + services).
+          echo "POSTGRES_PASSWORD=ci" >> .env.prod
+          echo "REDIS_PASSWORD=ci" >> .env.prod
+          echo "TURN_AUTH_SECRET=$(printf 'a%.0s' $(seq 1 64))" >> .env.prod
+          echo "ACME_EMAIL=ci@example.com" >> .env.prod
+          echo "LOBBYFORGE_DOMAIN=$DOMAIN" >> .env.prod
+          echo "NEXT_PUBLIC_LIVEKIT_URL=wss://$DOMAIN/livekit" >> .env.prod
+          echo "NEXT_PUBLIC_WS_URL=wss://$DOMAIN/ws" >> .env.prod
+
+      - name: Start the production stack (TLS edge)
+        run: |
+          docker compose -f infra/docker/docker-compose.prod.yml \
+            -f infra/docker/docker-compose.prod-ci.yml \
+            --env-file .env.prod up -d --build --wait nginx livekit
+
+      - name: Show stack status on failure
+        if: failure()
+        run: |
+          docker compose -f infra/docker/docker-compose.prod.yml ps || true
+          docker logs lobbyforge-nginx --tail 50 || true
+          docker logs lobbyforge-web --tail 100 || true
+
+      - name: Install Playwright chromium
+        run: pnpm --filter @lobbyforge/web exec playwright install --with-deps chromium
+
+      - name: Run prod-TLS e2e
+        run: pnpm --filter @lobbyforge/web exec playwright test prod-tls.spec.ts
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose -f infra/docker/docker-compose.prod.yml \
+            -f infra/docker/docker-compose.prod-ci.yml down -v || true
+
+  # DESK-001: the desktop shell's Rust side had no CI — a broken build
+  # surfaced only when someone ran tauri dev locally. Compile-gate it on
+  # the same Windows runner the verify matrix already uses.
+  desktop-rust:
+    name: Desktop shell (cargo check)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: cargo check
+        run: cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml
+
   # Production dependency audit gate — Dependabot handles updates; this
   # stops a merge that reintroduces a known moderate+ vulnerability in
   # production dependencies (dev-only advisories are out of scope).

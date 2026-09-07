@@ -1,0 +1,19 @@
+# TEST-001: CI profile for the PRODUCTION stack TLS e2e.
+#
+# Runs the same images and the same rendered configs as a real deploy,
+# with two runner-friendly tweaks:
+#   - livekit publishes NO host ports (nothing connects from the host in
+#     this test — nginx still resolves the container on the edge
+#     network, which is what its proxy_pass needs; the 10k-port UDP RTC
+#     range is not bound on a shared runner)
+#   - coturn/certbot are simply not started (`up nginx livekit` — no
+#     service depends on them); the TLS certificate is a self-signed
+#     CI cert written to the path the certbot volume would serve.
+#
+# Usage (from repo root, with .env.prod + rendered configs in place):
+#   docker compose -f infra/docker/docker-compose.prod.yml \
+#     -f infra/docker/docker-compose.prod-ci.yml up -d --build --wait \
+#     nginx livekit
+services:
+  livekit:
+    ports: !override []

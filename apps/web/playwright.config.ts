@@ -6,6 +6,11 @@ import { defineConfig, devices } from '@playwright/test';
 // stack under test is expected to be up already.
 const externalBaseUrl = process.env.LF_E2E_BASE_URL;
 
+// TEST-001: prod-TLS mode targets the production compose stack with a
+// self-signed certificate on a CI domain — accept it, and map the
+// domain to loopback inside the browser (the runner has no DNS for it).
+const tlsMode = !!process.env.LF_E2E_TLS;
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
@@ -15,6 +20,7 @@ export default defineConfig({
   reporter: 'html',
   use: {
     baseURL: externalBaseUrl ?? 'http://localhost:3000',
+    ignoreHTTPSErrors: tlsMode,
     trace: 'on-first-retry',
   },
   ...(externalBaseUrl
@@ -45,6 +51,9 @@ export default defineConfig({
             // headless. Test-only bypass; no product-behavior change.
             '--disable-web-security',
             '--disable-features=BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessRespectPreflightResults,LocalNetworkAccessChecks',
+            ...(tlsMode
+              ? ['--host-resolver-rules=MAP ci.example.com 127.0.0.1']
+              : []),
           ],
         },
       },

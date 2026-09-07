@@ -165,12 +165,35 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// DP-07: forward a session-handoff deep link into the CURRENT page.
+/// Used by BOTH delivery paths: the deep-link plugin event (app already
+/// running, OS routed the URL) and the single-instance argv relay
+/// (DESK-001: on Windows/Linux a second launch carries the URL as a
+/// command-line argument — without the relay the handoff is lost).
+fn forward_handoff(window: &WebviewWindow, url_str: &str) {
+    let _ = window.eval(&format!(
+        "window.postMessage({{source:window,type:'lobbyforge:handoff',url:{:?}}},'*')",
+        url_str
+    ));
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             // Focus the existing window when a second instance is launched.
             if let Some(window) = app.get_webview_window("main") {
+                // DESK-01: relay a deep link that arrived as argv on the
+                // SECOND launch — the deep-link plugin only fires its
+                // event in the process the OS opened, which single-
+                // instance immediately exits. Without this the
+                // lobbyforge://session/complete handoff from a browser
+                // login would silently vanish.
+                if let Some(url) = args.iter().find(|a| a.starts_with("lobbyforge://")) {
+                    forward_handoff(&window, url);
+                }
                 let _ = window.show();
                 let _ = window.set_focus();
             }
@@ -191,14 +214,8 @@ pub fn run() {
             let dl_handle = app.handle().clone();
             let _ = app.deep_link().on_open_url(move |event| {
                 if let Some(url) = event.urls().first() {
-                    let url_str = url.to_string();
                     if let Some(window) = dl_handle.get_webview_window("main") {
-                        let _ = window.eval(&format!(
-                            "window.postMessage({{source:window,type:'lobbyforge:handoff',url:{:?}}},'*')",
-                            url_str
-                        ));
-                        let _ = window.show();
-                        let _ = window.set_focus();
+                        forward_handoff(&window, &url.to_string());
                     }
                 }
             });

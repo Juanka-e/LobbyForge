@@ -2,6 +2,41 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - 7th-audit remediation wave 5: final findings - 2026-09-04
+
+### Added
+
+- **TEST-001 production TLS e2e (CI)**: a new `e2e-prod-tls` job boots
+  the REAL production compose stack (nginx + web + ws-gateway + livekit
+  + postgres + redis, rendered configs, boot migrations) behind an
+  nginx TLS edge with a self-signed certificate, then proves the edge a
+  production user hits: HTTPS health through nginx, the HTTP→HTTPS
+  redirect, the landing page over HTTPS, and the WSS /ws upgrade into
+  the gateway (opens, then closes 4401 unauthenticated). A CI compose
+  override keeps the 10k-port RTC UDP range off the shared runner.
+- **DESK-001 desktop compile gate (CI)**: `desktop-rust` runs cargo
+  check for the Tauri shell on the Windows runner — the Rust side had
+  no CI and broke only at local `tauri dev`.
+
+### Fixed
+
+- **DESK-001 deep-link argv relay**: on Windows/Linux a
+  `lobbyforge://session/complete?…` link opened while the app runs
+  arrives as a command-line argument in a SECOND process, which the
+  single-instance plugin immediately exits — the login handoff was
+  silently lost. The single-instance callback now relays the URL
+  through the same postMessage bridge as the deep-link event.
+
+### Security
+
+- **SEC-008 pinned + documented**: dynamic plugin execution stays
+  disabled by default. New regression tests pin BOTH gates (the
+  marketplace install 503 and the boot loader's no-op-without-flag,
+  asserting zero filesystem access), and SECURITY.md now states the
+  isolation requirement explicitly: the SDK contract is synchronous,
+  so real isolation means a worker-thread/process RPC migration — an
+  intentional protocol change, not a config flip.
+
 ## [Unreleased] - 7th-audit remediation wave 4: remaining security findings - 2026-09-04
 
 ### Fixed
