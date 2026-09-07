@@ -180,6 +180,11 @@ jobs:
           docker logs lobbyforge-nginx --tail 50 || true
           docker logs lobbyforge-migrate --tail 50 || true
           docker logs lobbyforge-web --tail 100 || true
+          docker logs lobbyforge-livekit --tail 50 || true
+          docker inspect --format '{{json .State.Health}}' lobbyforge-livekit || true
+          # What does :7880 actually answer? (busybox wget shows the
+          # status line with -S)
+          docker exec lobbyforge-livekit busybox wget -S -O /dev/null http://localhost:7880/ || true
 
       - name: Install Playwright chromium
         run: pnpm --filter @lobbyforge/web exec playwright install --with-deps chromium
