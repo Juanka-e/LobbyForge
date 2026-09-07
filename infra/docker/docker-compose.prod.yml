@@ -223,7 +223,9 @@ services:
     environment:
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY}:${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:7880/"]
+      # TEST-001: the livekit image is busybox-based — wget is an
+      # applet, not on PATH. Invoke it explicitly.
+      test: ["CMD", "busybox", "wget", "-qO-", "http://localhost:7880/"]
       interval: 10s
       timeout: 5s
       retries: 10
