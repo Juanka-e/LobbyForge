@@ -189,6 +189,12 @@ jobs:
       - name: Install Playwright chromium
         run: pnpm --filter @lobbyforge/web exec playwright install --with-deps chromium
 
+      - name: Point ci.example.com at loopback
+        # The browser resolves the domain via --host-resolver-rules, but
+        # Playwright's request contexts resolve in the Node process —
+        # /etc/hosts covers both.
+        run: echo "127.0.0.1 ci.example.com" | sudo tee -a /etc/hosts
+
       - name: Run prod-TLS e2e
         run: pnpm --filter @lobbyforge/web exec playwright test prod-tls.spec.ts
 
