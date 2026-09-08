@@ -37,6 +37,7 @@ import { getPluginServer } from '@/lib/plugin-server-registry';
 import { projectActivityState } from '@/lib/activity-projection';
 import { isSessionRevoked } from '@/lib/session-tracker';
 import { authorizeSessionChannelVisibility } from '@/lib/permissions';
+import { denyActivityStreamAccess } from '@/lib/activity-stream-authorization';
 import { subscribeActivityStateChange } from '@/lib/activity-bus';
 
 export const dynamic = 'force-dynamic';
@@ -212,20 +213,17 @@ async function handleStream(
                 if (revoked && !closed) abort();
               })
               .catch(() => { /* Redis down — REST stays the strict gate */ });
-            // LF-SEC-003 (SSE half): access can change MID-STREAM — kick,
-            // role removal, channel-policy edits. Re-run the SAME
-            // visibility + membership gate as stream open every
-            // keepalive; a definitive denial closes the stream (a
-            // transient DB error does NOT — REST stays the strict gate,
-            // and flapping every stream on a DB blip would be worse).
-            void authorizeSessionChannelVisibility(
-              session.uid,
-              serverId,
-              row,
-              server.ownerUserId
-            )
-              .then((visibility) => {
-                if (!visibility.ok && !closed) abort();
+            // LF-SEC-003 (SSE half, 9th-audit): the OLD recheck ran
+            // ONLY channel visibility — which skips membership and
+            // treats no-override channels as open to everyone, so a
+            // KICKED user's stream kept flowing. The canonical helper
+            // re-checks membership + session binding + visibility on
+            // every keepalive. A definitive denial closes the stream
+            // (a transient DB error does NOT — REST stays the strict
+            // gate, and flapping streams on a DB blip would be worse).
+            void denyActivityStreamAccess(session.uid, { serverId, channelId: null, session: row })
+              .then((denial) => {
+                if (denial && !closed) abort();
               })
               .catch(() => { /* transient — keep the stream */ });
           try {

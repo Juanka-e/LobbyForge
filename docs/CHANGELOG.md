@@ -2,6 +2,66 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - 9th-audit remediation - 2026-09-09
+
+### Fixed
+
+- **Desktop session swapping (P1)**: the handoff listener now binds to
+  `event.source === window` + `event.origin === location.origin` — the
+  shell injects the callback INSIDE the page, so a genuine handoff
+  always satisfies both; no external window can. One consume attempt
+  per page load. (The old listener accepted any postMessage: an
+  attacker could feed their own code+state into the victim's tab and
+  swap the victim onto the attacker's session.)
+- **SSE post-kick access (P1)**: new canonical
+  denyActivityStreamAccess (server + owner-or-MEMBERSHIP + session
+  binding + channel visibility) drives BOTH stream-open and the 30s
+  revalidation. The old recheck ran visibility-only, whose underlying
+  canMemberAccessChannel returns true for everyone on no-override
+  channels — a kicked user's stream kept flowing. 5 tests incl. the
+  kicked-user regression.
+- **WS authorization durability (P1)**: Redis Pub/Sub is fire-and-forget
+  — a lost invalidation left stale authorization forever. The gateway
+  now ALSO runs a periodic FULL reauthorization of every live topic
+  (default 30s, WS_REAUTH_INTERVAL_MS) with access_revoked + removal on
+  denial. role DELETE now publishes the same server-policy invalidation
+  PATCH does (it strips permissions from every holder too).
+- **Channel metadata leak + permission bug (P1)**: GET
+  /channels/:channelId applies the same visibility policy as the list
+  (404 — existence never leaks); PATCH/DELETE no longer require
+  OWNERSHIP before the real MANAGE_CHANNELS check (moderators with the
+  permission were 403'd).
+- **Machine endpoints 403 in production (P2)**: new
+  withMachineApiSecurity (method/body/rate/headers — NO browser origin
+  guard; strong machine auth inside the handler is the contract). The
+  Ed25519 heartbeat and the plugin-storage endpoint use it: signed
+  lfctl heartbeats reached originGuard's "Missing request origin" 403
+  before verification ever ran.
+- **DM reply integrity (P2)**: replyToId must reference a message in
+  the SAME conversation (400 otherwise) — cross-channel reply targets
+  broke DB integrity and would leak on future hydration.
+- **Heartbeat replay window (P3)**: nonce TTL now covers the full
+  timestamp acceptance window (2×skew + slack) — a captured heartbeat
+  can no longer outlive its nonce.
+- **Plugin worker isolation (findings 4+5)**: plugin code now executes
+  in a dedicated worker_thread with **env: {}** (no worker secret is
+  readable — not even the RPC token), heap/young-gen caps, and
+  **terminate() on timeout** — a `while(true)` plugin is killed, not
+  merely out-raced (Promise timeouts can't fire on a blocked loop; the
+  test proves termination + service health). Storage access switched
+  from a global worker token to HOST-MINTED scoped capabilities
+  (HMAC(serverId|pluginId|expiry), 120s TTL): the worker only relays
+  them, and the endpoint verifies capability-vs-request-scope — a
+  stolen relay cannot address any other keyspace. 6 capability tests +
+  the infinite-loop termination test.
+
+### Added
+
+- **cargo-audit CI job** (RustSec scan of the desktop Cargo.lock — the
+  Node-side gates cover a different dependency graph).
+- **Third-party image Trivy scans** for the pinned nginx/redis/
+  postgres/livekit/coturn/certbot images the production stack deploys.
+
 ## [Unreleased] - 8th-audit acceptance-criteria sweep - 2026-09-08
 
 ### Added

@@ -5,7 +5,7 @@
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node -e \"require('fs').copyFileSync('src/executor.mjs','dist/executor.mjs')\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "start": "node dist/index.js"

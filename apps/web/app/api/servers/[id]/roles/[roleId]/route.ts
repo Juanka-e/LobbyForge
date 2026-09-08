@@ -285,6 +285,14 @@ async function handleDelete(req: Request, ctx: { params: Promise<{ id: string; r
     }
 
     await deleteRole(getDb(), roleId);
+    // 9th-audit: DELETE also strips permissions from every holder —
+    // publish the same server-wide invalidation PATCH does.
+    const { publishAccessInvalidation } = await import('@/lib/access-invalidation');
+    publishAccessInvalidation({
+      kind: 'server-policy',
+      serverId,
+      reason: 'roles_permissions_changed',
+    });
     void logAction(getDb(), {
       serverId,
       actorUserId: session.uid,

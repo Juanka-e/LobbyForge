@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import {
   clearPluginData,
@@ -9,7 +9,7 @@ import {
   setPluginData,
 } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
-import { withApiSecurity } from '@/lib/security-headers';
+import { withMachineApiSecurity } from '@/lib/security-headers';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -35,24 +35,34 @@ const StorageOpSchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('clear'), serverId: z.string().uuid(), pluginId: z.string().min(2).max(128) }),
 ]);
 
-function tokenOk(req: Request): boolean {
-  const expected = process.env.LOBBYFORGE_PLUGIN_STORAGE_TOKEN;
-  if (!expected || expected.length < 32) return false;
-  const provided = req.headers.get('x-lf-plugin-storage-token') ?? '';
+/** Verify a host-minted capability against the request's OWN scope. */
+function capabilityOk(req: Request, serverId: string, pluginId: string): boolean {
+  const secret = process.env.LOBBYFORGE_PLUGIN_STORAGE_TOKEN;
+  if (!secret || secret.length < 32) return false;
+  const capability = req.headers.get('x-lf-plugin-capability') ?? '';
+  const dot = capability.indexOf('.');
+  if (dot <= 0) return false;
+  const expiry = Number(capability.slice(0, dot));
+  const mac = capability.slice(dot + 1);
+  if (!Number.isSafeInteger(expiry) || expiry < Math.floor(Date.now() / 1000)) return false;
+  const expected = createHmac('sha256', secret).update(`${serverId}|${pluginId}|${expiry}`).digest('base64url');
+  // Constant-time compare (hash-first avoids length leaks).
   const a = createHash('sha256').update(expected).digest();
-  const b = createHash('sha256').update(provided).digest();
+  const b = createHash('sha256').update(mac).digest();
   return timingSafeEqual(a, b);
 }
 
 async function handlePost(req: Request): Promise<NextResponse> {
-  if (!tokenOk(req)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
   let body: z.infer<typeof StorageOpSchema>;
   try {
     body = StorageOpSchema.parse(await req.json());
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  }
+  // The capability must match the request's OWN scope — the worker
+  // relays host-minted ones, so a stolen relay grants nothing else.
+  if (!capabilityOk(req, body.serverId, body.pluginId)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   const db = getDb();
   try {
@@ -81,10 +91,11 @@ async function handlePost(req: Request): Promise<NextResponse> {
   }
 }
 
-export const POST = withApiSecurity(handlePost, {
+// 9th-audit: MACHINE endpoint — called by the plugin-worker's storage
+// proxy with the capability token; no browser Origin.
+export const POST = withMachineApiSecurity(handlePost, {
   allowedMethods: ['POST'],
   maxBodyBytes: 256 * 1024,
   rateLimit: { identifier: 'internal-plugin-storage', config: { windowMs: 60_000, maxRequests: 600 } },
-  sessionRevocation: 'bypass',
   maintenanceMode: 'bypass',
 });

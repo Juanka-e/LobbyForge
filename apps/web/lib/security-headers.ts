@@ -370,3 +370,50 @@ export function withApiSecurity<TContext = unknown>(
 
 // Re-export the header-name tuple so tests can assert against it.
 export const SECURITY_HEADERS = SECURITY_HEADER_NAMES;
+
+/**
+ * 9th-audit: machine-to-machine API wrapper. The browser origin guard
+ * is a CSRF defence for cookie-authenticated callers — but signed
+ * machine callers (the lfctl Ed25519 heartbeat, the plugin-worker's
+ * storage capability proxy) legitimately send NO Origin header, and in
+ * production withApiSecurity 403'd them before their own strong
+ * authentication ever ran.
+ *
+ * Machine APIs keep EVERYTHING else (method allowlist, bounded body
+ * limits, rate limiting, security headers, maintenance mode) and MUST
+ * provide their own cryptographic authentication inside the handler —
+ * that is the explicit contract of using this wrapper.
+ */
+export function withMachineApiSecurity<TContext = unknown>(
+  handler: (req: Request, ctx: TContext) => Promise<NextResponse> | NextResponse,
+  options: {
+    allowedMethods: string[];
+    rateLimit?: { identifier: string; config: RateLimitConfig };
+    maintenanceMode?: 'enforce' | 'bypass';
+    maxBodyBytes?: number;
+  }
+) {
+  return async (req: Request, ctx: TContext): Promise<NextResponse> => {
+    const notAllowed = methodAllowlist(req, options.allowedMethods);
+    if (notAllowed) return applySecurityHeaders(notAllowed);
+    // No originGuard by design — machine authentication happens in the
+    // handler (Ed25519 signature / capability token).
+    const guarded = await enforceBodyLimit(req, options.maxBodyBytes);
+    if (guarded instanceof NextResponse) return applySecurityHeaders(guarded);
+    const boundedReq = guarded;
+    if (options.maintenanceMode !== 'bypass') {
+      const maintenance = await maintenanceResponseForRequest(req);
+      if (maintenance) return applySecurityHeaders(maintenance);
+    }
+    if (options.rateLimit) {
+      const result = await distributedRateLimit(
+        rateLimitKey(req, options.rateLimit.identifier),
+        options.rateLimit.config
+      );
+      const blocked = rateLimitResponse(result, options.rateLimit.identifier);
+      if (blocked) return applySecurityHeaders(blocked);
+    }
+    const response = await handler(boundedReq, ctx);
+    return applySecurityHeaders(response);
+  };
+}

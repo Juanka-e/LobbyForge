@@ -178,7 +178,8 @@ services:
       PLUGIN_WORKER_PORT: "7101"
       PLUGINS_DIR: /app/plugins/installed
       PLUGIN_WORKER_TOKEN: ${LOBBYFORGE_PLUGIN_WORKER_TOKEN:?Set LOBBYFORGE_PLUGIN_WORKER_TOKEN}
-      PLUGIN_STORAGE_TOKEN: ${LOBBYFORGE_PLUGIN_STORAGE_TOKEN:?Set LOBBYFORGE_PLUGIN_STORAGE_TOKEN}
+      # 9th-audit: NO storage secret here — the worker only relays
+      # host-minted scoped capabilities.
       # The storage-capability proxy target — the web container on the
       # internal network. nginx never routes /api/internal/*.
       PLUGIN_HOST_ORIGIN: http://web:3000

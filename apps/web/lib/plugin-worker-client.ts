@@ -8,7 +8,29 @@
  * methods transparently package the host ctx into the SNAPSHOT
  * envelope the worker rebuilds on its side.
  */
+import { createHmac } from 'node:crypto';
 import type { GamePluginContext, RegisteredGamePlugin } from '@lobbyforge/plugin-sdk';
+
+/**
+ * 9th-audit: storage capabilities are SCOPED and short-lived. The host
+ * mints HMAC(serverId|pluginId|expiry) over the shared secret; the
+ * worker only RELAYS it and the endpoint verifies it against the
+ * request's own scope — so a malicious plugin that steals the relayed
+ * string still cannot address any other (serverId, pluginId) keyspace,
+ * and the worker process never holds a global storage token at all.
+ */
+const CAPABILITY_TTL_SECONDS = 120;
+
+export function mintStorageCapability(
+  serverId: string,
+  pluginId: string,
+  secret: string,
+  nowMs = Date.now()
+): string {
+  const expiry = Math.floor(nowMs / 1000) + CAPABILITY_TTL_SECONDS;
+  const mac = createHmac('sha256', secret).update(`${serverId}|${pluginId}|${expiry}`).digest('base64url');
+  return `${expiry}.${mac}`;
+}
 
 /** Dynamic execution is only allowed through the isolated worker. */
 export function workerRuntimeConfigured(): boolean {
@@ -64,12 +86,18 @@ function extractEnvelope(ctx: GamePluginContext, pluginId: string) {
   const players = ctx.players
     .list()
     .map((id) => ctx.players.get(id) ?? { id, name: id });
+  const serverId = scope.serverId ?? '';
+  const scopedPluginId = scope.pluginId ?? pluginId;
+  const secret = process.env.LOBBYFORGE_PLUGIN_STORAGE_TOKEN || '';
   return {
     actorUserId: ctx.actorUserId,
     players,
     voiceParticipants: ctx.voice.getParticipants(),
-    serverId: scope.serverId ?? '',
-    pluginId: scope.pluginId ?? pluginId,
+    serverId,
+    pluginId: scopedPluginId,
+    // Host-minted, (serverId, pluginId)-bound, short-TTL capability —
+    // the worker relays it; it is NOT a global secret.
+    storageCapability: serverId && secret ? mintStorageCapability(serverId, scopedPluginId, secret) : '',
   };
 }
 

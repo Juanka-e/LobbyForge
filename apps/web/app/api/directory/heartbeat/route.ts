@@ -6,7 +6,7 @@ import {
 } from '@lobbyforge/db';
 import { redis } from '@/lib/redis';
 import { getDb } from '@/lib/db';
-import { withApiSecurity } from '@/lib/security-headers';
+import { withMachineApiSecurity } from '@/lib/security-headers';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -34,7 +34,11 @@ export const runtime = 'nodejs';
  * behavior, not an oversight.
  */
 const MAX_SKEW_SECONDS = 300;
-const NONCE_TTL_SECONDS = 300;
+// 9th-audit: the nonce must outlive the FULL acceptance window of the
+// signed timestamp — a nonce that expires while the timestamp is still
+// within ±skew allowed replaying a captured heartbeat. TTL covers
+// future-skew + past-skew + clock drift slack.
+const NONCE_TTL_SECONDS = 2 * MAX_SKEW_SECONDS + 60;
 
 const StatsSchema = z.object({
   onlineUsers: z.number().int().min(0).max(1_000_000).optional(),
@@ -139,7 +143,10 @@ async function handlePost(req: Request): Promise<NextResponse> {
   }
 }
 
-export const POST = withApiSecurity(handlePost, {
+// 9th-audit: MACHINE endpoint — the signed lfctl sender sends no
+// browser Origin; the Ed25519 signature inside the handler IS the
+// authentication.
+export const POST = withMachineApiSecurity(handlePost, {
   allowedMethods: ['POST'],
   maxBodyBytes: 2048,
   rateLimit: { identifier: 'directory-heartbeat', config: { windowMs: 60_000, maxRequests: 10 } },

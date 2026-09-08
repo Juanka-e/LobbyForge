@@ -116,6 +116,19 @@ export async function isDmChannelParticipant(
   return row.userAId === userId || row.userBId === userId;
 }
 
+/** Fetch a single DM message (reply-target validation). */
+export async function getDmMessageById(
+  db: DbClient,
+  messageId: string
+): Promise<DmMessageRow | null> {
+  const [row] = await db
+    .select()
+    .from(dmMessages)
+    .where(eq(dmMessages.id, messageId))
+    .limit(1);
+  return (row as DmMessageRow) ?? null;
+}
+
 /**
  * LF-SEC-006: canonical DM access decision, shared by REST and the WS
  * gateway so the policy cannot diverge.

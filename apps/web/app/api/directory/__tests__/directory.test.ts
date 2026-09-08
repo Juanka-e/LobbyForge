@@ -28,7 +28,10 @@ vi.mock('@lobbyforge/registry', () => ({
   },
 }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
-vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));
+vi.mock('@/lib/security-headers', () => ({
+  withApiSecurity: (handler: unknown) => handler,
+  withMachineApiSecurity: (handler: unknown) => handler,
+}));
 
 // LF-SEC-007: heartbeat replay guard — in-memory Redis mock.
 const redisSet = vi.fn().mockResolvedValue('OK');

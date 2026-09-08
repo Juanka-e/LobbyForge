@@ -157,6 +157,16 @@ const REVOCATION_UNAVAILABLE_GRACE_MS = parseInt(
   process.env.WS_REVOCATION_GRACE_MS || String(60_000),
   10
 );
+
+/** 9th-audit: Redis Pub/Sub is fire-and-forget — a lost invalidation
+ * message would leave stale authorization alive indefinitely. As
+ * defense-in-depth the gateway re-runs the FULL subscription
+ * authorization for every live topic on this cadence (default 30s),
+ * independently of any event arriving. */
+const PERIODIC_REAUTH_INTERVAL_MS = parseInt(
+  process.env.WS_REAUTH_INTERVAL_MS || String(30_000),
+  10
+);
 const ipConnectionCounts = new Map<string, number>();
 
 export function createGateway(): { wss: WebSocketServer; server: http.Server; close: () => Promise<void> } {
@@ -197,6 +207,38 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
   httpServer.listen(getEnvPort(), getEnvHost());
 
   const connections = new WeakMap<WebSocket, ConnectionState>();
+
+  // 9th-audit: periodic FULL reauthorization of every live topic —
+  // catches anything the (lossy) Pub/Sub invalidation missed. Shares
+  // the invalidation sweep's re-check + removal logic.
+  const periodicReauth = setInterval(() => {
+    for (const client of wss.clients) {
+      const state = connections.get(client);
+      if (!state?.guest) continue;
+      for (const topic of state.subs.topics()) {
+        void (async () => {
+          try {
+            const authz = await authorizeTopicSubscribe(getDb(), state.guest!.uid, topic);
+            if (authz.ok) return;
+          } catch {
+            // Transient DB error — the next sweep retries; do NOT mass-
+            // disconnect on a blip.
+            return;
+          }
+          if (client.readyState === client.OPEN) {
+            send(client, {
+              type: 'access_revoked',
+              topic,
+              reason: 'periodic_reauthorization',
+              at: new Date().toISOString(),
+            });
+          }
+          state.subs.remove(topic);
+        })();
+      }
+    }
+  }, Math.max(5_000, PERIODIC_REAUTH_INTERVAL_MS));
+
   const heartbeat = setInterval(() => {
     for (const client of wss.clients) {
       const state = connections.get(client);
@@ -501,6 +543,7 @@ function trustedClientIp(headers: import('http').IncomingMessage['headers'], soc
     server: httpServer,
     close: async () => {
       clearInterval(heartbeat);
+      clearInterval(periodicReauth);
       stopInvalidationListener();
       for (const client of wss.clients) {
         try {

@@ -15,7 +15,7 @@ import {
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
-import { CorePermission, authorizeServerPermission } from '@/lib/permissions';
+import { CorePermission, authorizeChannelVisibility, authorizeServerPermission } from '@/lib/permissions';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -82,7 +82,8 @@ async function loadAndAuthorize(
   serverId: string,
   channelId: string,
   userId: string,
-  requireOwner: boolean
+  requireMembership: boolean,
+  applyVisibility = false
 ): Promise<
   | { ok: true; channel: ChannelRow; isOwner: boolean }
   | { ok: false; response: NextResponse }
@@ -97,11 +98,7 @@ async function loadAndAuthorize(
   }
 
   const isOwner = server.ownerUserId === userId;
-  if (requireOwner && !isOwner) {
-    return { ok: false, response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
-  }
-  if (!isOwner) {
-    // For non-owner reads, also require membership.
+  if (requireMembership && !isOwner) {
     const member = await isServerMember(getDb(), userId, serverId);
     if (!member) {
       return { ok: false, response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
@@ -117,6 +114,22 @@ async function loadAndAuthorize(
     // 404 (not 403) so we don't leak that the channel exists at all.
     return { ok: false, response: NextResponse.json({ error: 'Channel not found' }, { status: 404 }) };
   }
+
+  // 9th-audit: private-channel METADATA is confidential too — a plain
+  // member who somehow knows a hidden channel's id must not read its
+  // name/topic/pluginId. Same visibility policy as the channel LIST;
+  // 404 (not 403) so existence never leaks.
+  if (applyVisibility && !isOwner) {
+    const visibility = await authorizeChannelVisibility(
+      userId,
+      serverId,
+      channelId,
+      server.ownerUserId ?? null
+    );
+    if (!visibility.ok) {
+      return { ok: false, response: NextResponse.json({ error: 'Channel not found' }, { status: 404 }) };
+    }
+  }
   return { ok: true, channel, isOwner };
 }
 
@@ -127,13 +140,13 @@ async function handleGet(req: Request, ctx: RouteContext): Promise<NextResponse>
   if (!session.ok) return session.response;
 
   try {
-    const access = await loadAndAuthorize(serverId, channelId, session.uid, false);
+    const access = await loadAndAuthorize(serverId, channelId, session.uid, false, true);
     if (!access.ok) return access.response;
     return NextResponse.json(
       { channel: toJson(access.channel) },
       { headers: { 'Cache-Control': 'no-store' } }
     );
-  } catch {
+  } catch (err) {
     return NextResponse.json(
       { error: 'Failed to load channel' },
       { status: 500 }
@@ -148,13 +161,12 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
   if (!session.ok) return session.response;
 
   try {
+    // 9th-audit fix: mutations need MEMBERSHIP + the real
+    // MANAGE_CHANNELS permission — the old requireOwner gate 403'd
+    // moderators who legitimately hold the permission.
     const access = await loadAndAuthorize(serverId, channelId, session.uid, true);
     if (!access.ok) return access.response;
 
-    // The M11 "owner-only" check is now a real MANAGE_CHANNELS permission
-    // check. The owner gets it implicitly via getUserPermissions' server
-    // ownership shortcut, so a freshly created server still has its
-    // "general" channel editable by the owner.
     const auth = await authorizeServerPermission(session.uid, serverId, CorePermission.MANAGE_CHANNELS);
     if (!auth.ok) return auth.response;
 

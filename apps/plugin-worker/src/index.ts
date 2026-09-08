@@ -28,7 +28,9 @@
 import * as http from 'node:http';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { Worker } from 'node:worker_threads';
+import { createHmac } from 'node:crypto';
 import type { GamePlugin, GamePluginContext } from '@lobbyforge/plugin-sdk';
 
 const PORT = parseInt(process.env.PLUGIN_WORKER_PORT || '7101', 10);
@@ -38,10 +40,14 @@ const HOST = process.env.PLUGIN_WORKER_HOST || '0.0.0.0';
 const pluginsDir = () => resolve(process.env.PLUGINS_DIR || './plugins/installed');
 const rpcToken = () => process.env.PLUGIN_WORKER_TOKEN || '';
 const hostOrigin = () => (process.env.PLUGIN_HOST_ORIGIN || '').replace(/\/$/, '');
-const storageToken = () => process.env.PLUGIN_STORAGE_TOKEN || '';
+// 9th-audit: the worker holds NO storage secret at all. The HOST mints
+// per-RPC scoped capabilities (HMAC(serverId|pluginId|expiry) over a
+// secret only the web app has) and the worker merely RELAYS them; the
+// endpoint verifies capability-vs-scope. A malicious plugin reading
+// this process's entire env gains nothing storage-related.
 
 /** Per-call wall clock; the host client also enforces its own timeout. */
-const CALL_BUDGET_MS = 10_000;
+const CALL_BUDGET_MS = parseInt(process.env.PLUGIN_CALL_BUDGET_MS || String(10_000), 10);
 const MAX_RESULT_BYTES = 4 * 1024 * 1024;
 
 interface PlayerSnapshot {
@@ -60,6 +66,7 @@ interface CtxEnvelope {
 
 interface LoadedPlugin {
   plugin: GamePlugin<unknown, unknown, unknown>;
+  pluginPath: string;
 }
 
 const loaded = new Map<string, LoadedPlugin>();
@@ -100,7 +107,63 @@ async function loadFromDisk(pluginId: string): Promise<LoadedPlugin | null> {
   const raw = mod?.plugin ?? mod?.default;
   if (!isValidGamePlugin(raw)) return null;
   if (raw.manifest.id !== pluginId) return null;
-  return { plugin: raw };
+  return { plugin: raw, pluginPath: indexPath };
+}
+
+/**
+ * 9th-audit (findings 4+5): run ONE plugin op in a dedicated
+ * worker_thread with an EMPTY environment and hard resource limits,
+ * terminated on timeout. The plugin can neither read worker secrets
+ * (env is {}) nor block the service forever (terminate kills the
+ * loop). Returns the op result; rejects on error/timeout.
+ */
+function runInExecutorThread(payload: {
+  pluginPath: string;
+  op: 'createInitialState' | 'handleAction' | 'migrateState';
+  ctx: CtxEnvelope;
+  state?: unknown;
+  action?: unknown;
+  raw?: unknown;
+  storageCapability: string;
+  storageEndpoint: string;
+}): Promise<unknown> {
+  return new Promise<unknown>((resolve, reject) => {
+    const worker = new Worker(resolveExecutorPath(), {
+      workerData: payload,
+      env: {}, // NO worker secrets reach untrusted code
+      resourceLimits: { maxOldGenerationSizeMb: 128, maxYoungGenerationSizeMb: 32 },
+    });
+    const timer = setTimeout(() => {
+      void worker.terminate().catch(() => undefined);
+      reject(new Error('plugin call exceeded its execution budget (thread terminated)'));
+    }, CALL_BUDGET_MS);
+    worker.on('message', (msg: { result?: unknown; error?: string; log?: string }) => {
+      if (msg.log !== undefined) {
+        console.info(`[plugin-executor] ${msg.log}`);
+        return;
+      }
+      clearTimeout(timer);
+      void worker.terminate().catch(() => undefined);
+      if (msg.error) reject(new Error(msg.error));
+      else resolve(msg.result);
+    });
+    worker.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    worker.on('exit', (code) => {
+      clearTimeout(timer);
+      if (code !== 0 && code !== 1) reject(new Error(`executor exited with code ${code}`));
+    });
+  });
+}
+
+function resolveExecutorPath(): string {
+  // Plain-JS executor — sibling of this module in BOTH layouts:
+  // dist/index.js → dist/executor.mjs (copied at build), and
+  // src/index.ts under vitest → src/executor.mjs. Returned as a plain
+  // PATH STRING (Worker(URL) misbehaves under some loaders).
+  return fileURLToPath(new URL('./executor.mjs', import.meta.url));
 }
 
 async function getPlugin(pluginId: string): Promise<LoadedPlugin | null> {
@@ -111,100 +174,8 @@ async function getPlugin(pluginId: string): Promise<LoadedPlugin | null> {
   return fresh;
 }
 
-/**
- * Storage capability proxy — runs in the WORKER on the plugin's behalf,
- * executes on the HOST. Scoped to the envelope's (serverId, pluginId),
- * so one plugin can never reach another plugin's keyspace.
- */
-function storageContext(env: CtxEnvelope) {
-  const call = async (op: string, args: Record<string, unknown> = {}): Promise<unknown> => {
-    const res = await fetch(`${hostOrigin()}/api/internal/plugin-storage`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-lf-plugin-storage-token': storageToken(),
-      },
-      body: JSON.stringify({ op, serverId: env.serverId, pluginId: env.pluginId, ...args }),
-    });
-    if (!res.ok) {
-      throw new Error(`plugin-storage ${op} failed: HTTP ${res.status}`);
-    }
-    return (await res.json()) as unknown;
-  };
-  return {
-    get: async (key: string) =>
-      ((await call('get', { key })) as { value: unknown }).value,
-    set: async (key: string, value: unknown) => void (await call('set', { key, value })),
-    delete: async (key: string) =>
-      Boolean(((await call('delete', { key })) as { deleted: boolean }).deleted),
-    list: async () =>
-      ((await call('list')) as { items: Array<{ key: string; value: unknown }> }).items,
-    clear: async () => void (await call('clear')),
-  };
-}
 
-/** Build the plugin-visible context from the SNAPSHOT envelope. */
-function buildCtx(env: CtxEnvelope): GamePluginContext {
-  return {
-    actorUserId: env.actorUserId,
-    players: {
-      list: () => env.players.map((p) => p.id),
-      get: (playerId: string) => env.players.find((p) => p.id === playerId),
-    },
-    messages: {
-      // Same contract as the in-process runtime: the host persists the
-      // returned state; mid-call channel posts are logged, not sent.
-      sendGameMessage: async (message: string) => {
-        console.info(`[plugin-worker] ${env.pluginId}@${env.serverId}: ${message}`);
-      },
-    },
-    state: {
-      save: async (_state: unknown) => {
-        /* host persists the returned state after the call — no-op */
-      },
-    },
-    cache: {
-      get: async () => undefined,
-      set: async () => undefined,
-    },
-    pubsub: {
-      publish: async () => undefined,
-      subscribe: async () => undefined,
-    },
-    timer: {
-      start: async () => undefined,
-      stop: async () => undefined,
-    },
-    votes: {
-      create: async () => undefined,
-    },
-    scores: {
-      add: async () => undefined,
-    },
-    voice: {
-      getParticipants: () => env.voiceParticipants,
-    },
-    storage: storageContext(env),
-  } as GamePluginContext;
-}
 
-function withBudget<T>(fn: () => Promise<T>): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('plugin call exceeded its budget')), CALL_BUDGET_MS);
-    fn()
-      .then(
-        (value) => {
-          clearTimeout(timer);
-          resolve(value);
-        },
-        (err) => {
-          clearTimeout(timer);
-          reject(err);
-        }
-      )
-      .catch(() => undefined);
-  });
-}
 
 function json(res: http.ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -263,27 +234,22 @@ async function handleRpc(rawBody: Buffer): Promise<{ status: number; body: unkno
     const loadedPlugin = await getPlugin(pluginId);
     if (!loadedPlugin) return { status: 404, body: { error: `Plugin "${pluginId}" not loaded` } };
 
+    const envelope = msg.ctx as CtxEnvelope;
+    // Host-minted scoped capability rides the RPC envelope.
+    const capability = String(msg.storageCapability ?? '');
+    const storageEndpoint = `${hostOrigin()}/api/internal/plugin-storage`;
+
     try {
-      let result: unknown;
-      if (op === 'createInitialState') {
-        const ctx = buildCtx(msg.ctx as CtxEnvelope);
-        result = await withBudget(() =>
-          Promise.resolve(loadedPlugin.plugin.createInitialState(ctx))
-        );
-      } else if (op === 'handleAction') {
-        const ctx = buildCtx(msg.ctx as CtxEnvelope);
-        result = await withBudget(() =>
-          Promise.resolve(loadedPlugin.plugin.handleAction(ctx, msg.state, msg.action))
-        );
-      } else {
-        result = await withBudget(() =>
-          Promise.resolve(
-            loadedPlugin.plugin.migrateState
-              ? loadedPlugin.plugin.migrateState(msg.raw)
-              : msg.raw
-          )
-        );
-      }
+      const result = await runInExecutorThread({
+        pluginPath: loadedPlugin.pluginPath,
+        op,
+        ctx: envelope,
+        state: msg.state,
+        action: msg.action,
+        raw: msg.raw,
+        storageCapability: capability,
+        storageEndpoint,
+      });
       const serialized = JSON.stringify(result ?? null);
       if (serialized.length > MAX_RESULT_BYTES) {
         return { status: 413, body: { error: 'Plugin result exceeds the size cap' } };

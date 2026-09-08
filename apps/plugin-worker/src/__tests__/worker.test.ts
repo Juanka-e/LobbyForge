@@ -43,6 +43,29 @@ export const plugin = {
 };
 `;
 
+// 9th-audit finding 5: a synchronous infinite loop must be KILLED by
+// the executor-thread terminate, not merely out-raced.
+const HANG_PLUGIN = `
+export const plugin = {
+  manifest: {
+    id: 'hang-plugin',
+    name: 'Hang',
+    version: '1.0.0',
+    type: 'game',
+    minAppVersion: '0.1.0',
+    permissions: [],
+    locales: ['en'],
+    entryClient: './client.js',
+  },
+  createInitialState: () => {
+    while (true) { /* blocks the executor event loop forever */ }
+  },
+  handleAction: (ctx, state) => state,
+  migrateState: (raw) => raw,
+  renderClient: () => null,
+};
+`;
+
 const STORAGE_PLUGIN = `
 export const plugin = {
   manifest: {
@@ -75,8 +98,10 @@ beforeAll(async () => {
   // path segments (RUNNER~1) that break the module runner's file URLs.
   pluginsDir = resolve(__dirname, '..', '..', '.plugin-fixtures');
   writePlugin('fixture-plugin', FIXTURE_PLUGIN);
+  writePlugin('hang-plugin', HANG_PLUGIN);
   writePlugin('storage-plugin', STORAGE_PLUGIN);
   process.env.PLUGINS_DIR = pluginsDir;
+  process.env.PLUGIN_CALL_BUDGET_MS = '2000'; // fast terminate in tests
   process.env.PLUGIN_WORKER_TOKEN = RPC_TOKEN;
   process.env.PLUGIN_HOST_ORIGIN = 'http://127.0.0.1:1'; // unreachable by design
   process.env.PLUGIN_STORAGE_TOKEN = 'storage-token';
@@ -99,7 +124,7 @@ async function rpc(body: unknown, headers: Record<string, string> = {}): Promise
     headers: { 'content-type': 'application/json', 'x-lf-worker-token': RPC_TOKEN, ...headers },
     body: JSON.stringify(body),
   });
-  if (res.status === 400) {
+  if (res.status >= 400) {
     // Diagnostics: the 400 body names the exact cause (Invalid JSON /
     // readBody error / Unknown op) — CI-only failures are debuggable
     // from the assertion message alone.
@@ -142,7 +167,7 @@ describe('plugin-worker RPC', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { plugins: Array<{ id: string; name: string }> };
     const ids = body.plugins.map((p) => p.id).sort();
-    expect(ids).toEqual(['fixture-plugin', 'storage-plugin']);
+    expect(ids).toEqual(['fixture-plugin', 'hang-plugin', 'storage-plugin']);
   });
 
   it('createInitialState receives ONLY the snapshot ctx (no host objects)', async () => {
@@ -197,6 +222,16 @@ describe('plugin-worker RPC', () => {
     });
     expect(res.status).toBe(400);
   });
+
+  it('9th-audit: an infinite-loop plugin is TERMINATED, not hung forever', async () => {
+    const res = await rpc({ op: 'createInitialState', pluginId: 'hang-plugin', ctx: CTX });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/budget|terminated/i);
+    // The worker SERVICE itself must still be healthy afterwards.
+    const health = await fetch(`${baseUrl}/health`);
+    expect(health.status).toBe(200);
+  }, 30_000);
 
   it('unknown op → 400', async () => {
     const res = await rpc({ op: 'explode' });

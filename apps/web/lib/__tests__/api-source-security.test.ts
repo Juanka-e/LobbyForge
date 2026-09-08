@@ -27,7 +27,14 @@ describe('API source security invariants', () => {
     ]);
     for (const file of routeFiles) {
       if (file.includes(`${join('activities', '[sessionId]', 'stream')}`) || exceptions.has(file)) continue;
-      expect(readFileSync(file, 'utf8'), file).toContain('withApiSecurity');
+      // Browser routes use withApiSecurity; signed machine routes
+      // (9th-audit) use withMachineApiSecurity — both are the shared
+      // boundary, both enforce method/body/rate limits.
+      const source = readFileSync(file, 'utf8');
+      expect(
+        source.includes('withApiSecurity') || source.includes('withMachineApiSecurity'),
+        file
+      ).toBe(true);
     }
   });
 });

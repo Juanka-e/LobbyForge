@@ -4,6 +4,7 @@ import { buildGuestSessionCookie, type GuestIdentity } from '@/lib/guest-session
 // Mock the db query layer — we test the route logic, not Drizzle.
 const getServerById = vi.fn();
 const isServerMember = vi.fn();
+const canMemberAccessChannel = vi.fn();
 const listChannelsForServer = vi.fn();
 const createChannel = vi.fn();
 const getChannelById = vi.fn();
@@ -15,6 +16,7 @@ const logAction = vi.fn().mockResolvedValue(undefined);
 vi.mock('@lobbyforge/db', () => ({
   getServerById,
   isServerMember,
+  canMemberAccessChannel,
   listChannelsForServer,
   createChannel,
   getChannelById,
@@ -41,12 +43,15 @@ beforeEach(() => {
   process.env.LOBBYFORGE_SESSION_SECRET = SECRET;
   getServerById.mockReset();
   isServerMember.mockReset();
+  // 9th-audit: channel GET visibility — plain member, public channel.
+  canMemberAccessChannel.mockReset().mockResolvedValue(true);
+  getUserPermissions.mockReset().mockResolvedValue([]);
   listChannelsForServer.mockReset();
   createChannel.mockReset();
   getChannelById.mockReset();
   updateChannel.mockReset();
   deleteChannel.mockReset();
-  getUserPermissions.mockReset();
+  getUserPermissions.mockReset().mockResolvedValue([]);
   logAction.mockReset();
   logAction.mockResolvedValue(undefined);
 });

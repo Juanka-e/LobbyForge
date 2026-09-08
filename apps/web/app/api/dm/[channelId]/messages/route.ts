@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   isDmChannelParticipant,
   checkDmChannelAccess,
+  getDmMessageById,
   listDmMessages,
   sendDmMessage,
   deleteDmMessage,
@@ -98,6 +99,19 @@ async function handlePost(
       { error: 'You cannot send messages in this conversation' },
       { status: 403 }
     );
+  }
+
+  // 9th-audit: a reply target must belong to THIS conversation — the
+  // old code accepted any message id (DB integrity break; a future
+  // reply hydration would turn it into a confidentiality bug).
+  if (body.replyToId) {
+    const replyTarget = await getDmMessageById(db, body.replyToId);
+    if (!replyTarget || replyTarget.dmChannelId !== channelId) {
+      return NextResponse.json(
+        { error: 'Reply target is not in this conversation' },
+        { status: 400 }
+      );
+    }
   }
 
   try {
