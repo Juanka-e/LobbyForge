@@ -96,6 +96,7 @@ jobs:
           export REDIS_PASSWORD=ci LIVEKIT_API_KEY=cikey
           export LIVEKIT_API_SECRET=cisecretcisecretcisecret
           export TURN_AUTH_SECRET=cisecret ACME_EMAIL=ci@example.com
+          export LOBBYFORGE_PLUGIN_WORKER_TOKEN=ciworker LOBBYFORGE_PLUGIN_STORAGE_TOKEN=cistorage
           export LOBBYFORGE_DOMAIN=ci.example.com
           export NEXT_PUBLIC_LIVEKIT_URL=wss://ci.example.com:7880
           export NEXT_PUBLIC_WS_URL=wss://ci.example.com/ws
@@ -162,6 +163,8 @@ jobs:
           echo "POSTGRES_PASSWORD=ci" >> .env.prod
           echo "REDIS_PASSWORD=ci" >> .env.prod
           echo "TURN_AUTH_SECRET=$(printf 'a%.0s' $(seq 1 64))" >> .env.prod
+          echo "LOBBYFORGE_PLUGIN_WORKER_TOKEN=ciworker" >> .env.prod
+          echo "LOBBYFORGE_PLUGIN_STORAGE_TOKEN=cistorage" >> .env.prod
           echo "ACME_EMAIL=ci@example.com" >> .env.prod
           echo "LOBBYFORGE_DOMAIN=$DOMAIN" >> .env.prod
           echo "NEXT_PUBLIC_LIVEKIT_URL=wss://$DOMAIN/livekit" >> .env.prod

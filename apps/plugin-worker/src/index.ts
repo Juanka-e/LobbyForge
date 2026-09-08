@@ -227,6 +227,7 @@ function readBody(req: http.IncomingMessage, cap = 8 * 1024 * 1024): Promise<Buf
     });
     req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
+    req.on('aborted', () => reject(new Error('request aborted')));
   });
 }
 

@@ -93,11 +93,19 @@ afterAll(() => {
 });
 
 async function rpc(body: unknown, headers: Record<string, string> = {}): Promise<Response> {
-  return fetch(`${baseUrl}/rpc`, {
+  const res = await fetch(`${baseUrl}/rpc`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-lf-worker-token': RPC_TOKEN, ...headers },
     body: JSON.stringify(body),
   });
+  if (res.status === 400) {
+    // Diagnostics: the 400 body names the exact cause (Invalid JSON /
+    // readBody error / Unknown op) — CI-only failures are debuggable
+    // from the assertion message alone.
+    const text = await res.clone().text().catch(() => '<unreadable>');
+    console.error(`[rpc-diag] 400 from op=${String((body as { op?: string }).op)}: ${text}`);
+  }
+  return res;
 }
 
 const CTX = {
