@@ -130,9 +130,9 @@ async function loadPluginFromDisk(pluginId: string): Promise<RegisteredGamePlugi
   // LF-SEC-010: restore inside finally — a THROWN import (syntax error,
   // missing dep) used to leave the host process running without its
   // secrets until restart, silently breaking sessions/DB/Redis.
-  let mod: unknown;
+  let mod: { plugin?: unknown; default?: unknown };
   try {
-    mod = await import(fileUrl);
+    mod = (await import(fileUrl)) as { plugin?: unknown; default?: unknown };
   } finally {
     for (const [key, value] of Object.entries(savedValues)) {
       if (value !== undefined) process.env[key] = value;
@@ -141,7 +141,7 @@ async function loadPluginFromDisk(pluginId: string): Promise<RegisteredGamePlugi
   }
 
   // Accept either `{ plugin }` or default export.
-  const raw: unknown = mod?.plugin ?? mod?.default;
+  const raw: unknown = mod.plugin ?? mod.default;
   if (!isValidGamePlugin(raw)) {
     console.warn(`[plugin-loader] plugin "${pluginId}" failed shape validation`);
     return null;
