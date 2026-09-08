@@ -47,15 +47,16 @@ test.describe('production TLS edge (TEST-001)', () => {
   });
 
   test('LF-SEC-012: upload paths accept big bodies at the edge, others 413', async ({ page }) => {
-    // A ~7 MiB JSON body (avatar-scale after base64 inflation): the
-    // avatar location allows up to 12m — the edge must LET IT THROUGH
-    // (the app's own 401 answers, proving nginx didn't cut it off).
-    const bigBody = JSON.stringify({ dataUrl: 'x'.repeat(7 * 1024 * 1024) });
-    const avatarRes = await page.request.post('/api/users/me/avatar', {
+    // A ~7.5 MiB JSON body — banner-scale (the app accepts data URLs up
+    // to 8 MiB there; the avatar route caps at 6 MiB). The edge allows
+    // 12m on upload paths, so the APP must answer (401 — no session),
+    // proving nginx didn't cut the body off.
+    const bigBody = JSON.stringify({ dataUrl: 'x'.repeat(Math.floor(7.5 * 1024 * 1024)) });
+    const bannerRes = await page.request.post('/api/users/me/banner', {
       data: bigBody,
       headers: { 'content-type': 'application/json' },
     });
-    expect(avatarRes.status()).toBe(401); // reached the app, auth said no
+    expect(bannerRes.status()).toBe(401); // reached the app, auth said no
 
     // The SAME body against a normal API path (2m global cap) must be
     // rejected BY THE EDGE with 413 — per-route limits actually apply.
