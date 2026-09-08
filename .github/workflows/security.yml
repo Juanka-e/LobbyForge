@@ -84,6 +84,9 @@ jobs:
     steps:
       # Same approach as the web-image trivy job: run the official
       # Trivy image directly (the action wrapper proved flaky).
+      - name: Checkout
+        uses: actions/checkout@v5
+
       # Policy: third-party images gate on CRITICAL only — HIGHs in
       # upstream base layers (e.g. alpine util-linux mount TOCTOUs in
       # nginx) are outside our control, sit in containers that never
