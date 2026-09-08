@@ -84,9 +84,16 @@ jobs:
     steps:
       # Same approach as the web-image trivy job: run the official
       # Trivy image directly (the action wrapper proved flaky).
+      # Policy: third-party images gate on CRITICAL only — HIGHs in
+      # upstream base layers (e.g. alpine util-linux mount TOCTOUs in
+      # nginx) are outside our control, sit in containers that never
+      # invoke the affected binaries, and would permanently block CI on
+      # upstream rebuild cadence. Our OWN web image keeps the stricter
+      # CRITICAL+HIGH gate above. Documented exceptions live in
+      # .trivyignore with reasons + revisit dates.
       - name: Trivy scan ${{ matrix.image }}
         run: |
-          docker run --rm             aquasec/trivy:0.65.0             image --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed             --scanners vuln             ${{ matrix.image }}
+          docker run --rm             -v "$PWD/.trivyignore:/tmp/.trivyignore:ro"             aquasec/trivy:0.65.0             image --exit-code 1 --severity CRITICAL --ignore-unfixed             --ignorefile /tmp/.trivyignore             --scanners vuln             ${{ matrix.image }}
 
   # V5-009: SAST — CodeQL javascript/typescript analysis.
   codeql:

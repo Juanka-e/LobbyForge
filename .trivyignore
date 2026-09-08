@@ -1,0 +1,10 @@
+# Trivy ignores — every entry needs a reason and a revisit date.
+#
+# CVE-2026-56854 (golang.org/x/crypto/ssh, livekit/livekit-server:v1.13.6):
+# CRITICAL in LiveKit's Go dependency. v1.13.6 is the NEWEST upstream
+# release (2026-08-26) — no fixed image exists yet. The vulnerable SSH
+# library is not exposed by livekit-server's network surface (no SSH
+# endpoints; WebRTC/signaling only) and the container runs on the
+# internal docker network behind nginx. Revisit: remove when a livekit
+# release shipping x/crypto >= v0.55.0 is published (watch v1.13.7+).
+CVE-2026-56854
