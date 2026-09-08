@@ -8,3 +8,11 @@
 # internal docker network behind nginx. Revisit: remove when a livekit
 # release shipping x/crypto >= v0.55.0 is published (watch v1.13.7+).
 CVE-2026-56854
+#
+# CVE-2025-68121 (Go crypto/tls stdlib, postgres:16-alpine moving tag):
+# CRITICAL with upstream fixes released (Go 1.24.13) but the alpine
+# postgres image has not been rebuilt with them yet (checked 2026-09-09).
+# The Go binary involved is build tooling, not the postgres server
+# itself; the container is on the internal network with no TLS ingress.
+# Revisit: drop when the 16-alpine moving tag carries Go >= 1.24.13.
+CVE-2025-68121
