@@ -56,7 +56,10 @@ test.describe('production TLS edge (TEST-001)', () => {
       data: bigBody,
       headers: { 'content-type': 'application/json' },
     });
-    expect(bannerRes.status()).toBe(401); // reached the app, auth said no
+    // NOT 413 — the edge let the body through and the APP answered
+    // (401 without a session, or 403 from the origin guard — either
+    // proves the per-route edge cap is not cutting upload bodies).
+    expect([401, 403]).toContain(bannerRes.status());
 
     // The SAME body against a normal API path (2m global cap) must be
     // rejected BY THE EDGE with 413 — per-route limits actually apply.
