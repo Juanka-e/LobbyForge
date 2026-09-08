@@ -4,9 +4,8 @@
  * containing a fixture bundle, and drive it with real fetch calls —
  * the same path the web app's client takes in production.
  */
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createPluginWorkerServer } from '../index.js';
@@ -72,7 +71,9 @@ function writePlugin(id: string, body: string): void {
 }
 
 beforeAll(async () => {
-  pluginsDir = mkdtempSync(join(tmpdir(), 'lf-plugin-worker-'));
+  // INSIDE the package (vite root): CI temp dirs can carry short-name
+  // path segments (RUNNER~1) that break the module runner's file URLs.
+  pluginsDir = resolve(__dirname, '..', '..', '.plugin-fixtures');
   writePlugin('fixture-plugin', FIXTURE_PLUGIN);
   writePlugin('storage-plugin', STORAGE_PLUGIN);
   process.env.PLUGINS_DIR = pluginsDir;

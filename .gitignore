@@ -77,3 +77,6 @@ infra/turn/turnserver.conf
 # Local TLS debugging: self-signed certs written where the certbot
 # volume would serve them (TEST-001 local repro)
 infra/certbot/
+
+# plugin-worker test fixtures (created at runtime)
+apps/plugin-worker/.plugin-fixtures/
