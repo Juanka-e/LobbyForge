@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises';
-import { randomBytes, verify as verifySignature } from 'node:crypto';
+import { generateKeyPairSync, randomBytes, verify as verifySignature } from 'node:crypto';
 import path from 'node:path';
 import process from 'node:process';
+import { createPrivateKey, sign as edSign } from 'node:crypto';
 
 const DEFAULT_CHANNEL = 'stable';
 const DEFAULT_CURRENT_VERSION = '0.1.0';
@@ -19,6 +20,10 @@ Usage:
   node scripts/lfctl.mjs backup create [--out <dir>] [--database-url <url>] [--json]
   node scripts/lfctl.mjs backup restore --file <dump> --to <database-url> [--allow-unverified] [--json]
   node scripts/lfctl.mjs setup token [--json]
+  node scripts/lfctl.mjs directory keygen [--out <dir>] [--json]
+  node scripts/lfctl.mjs directory heartbeat --url <directory-origin> --instance-id <id> --key-file <pem>
+      [--online-users N] [--public-rooms N] [--stats-version V] [--doctor-score N]
+      [--once | --interval <seconds>] [--json]
 
 Notes:
   apply is intentionally locked until the self-host script runner is wired.
@@ -51,6 +56,16 @@ function parseArgs(argv) {
     else if (arg === '--to') options['to'] = rest[++i];
     else if (arg === '--allow-unverified') options['allow-unverified'] = true;
     else if (arg === '--database-url') options['database-url'] = rest[++i];
+    // Directory heartbeat options (LF-SEC-007)
+    else if (arg === '--url') options.url = rest[++i];
+    else if (arg === '--instance-id') options.instanceId = rest[++i];
+    else if (arg === '--key-file') options.keyFile = rest[++i];
+    else if (arg === '--online-users') options.onlineUsers = Number(rest[++i]);
+    else if (arg === '--public-rooms') options.publicRooms = Number(rest[++i]);
+    else if (arg === '--stats-version') options.statsVersion = rest[++i];
+    else if (arg === '--doctor-score') options.doctorScore = Number(rest[++i]);
+    else if (arg === '--once') options.once = true;
+    else if (arg === '--interval') options.interval = Number(rest[++i]);
     else throw new Error(`Unknown argument: ${arg}`);
   }
 
@@ -343,6 +358,48 @@ function printPlan(plan) {
   console.log('Auto-apply: locked until the self-host script runner is wired.');
 }
 
+// ── Directory heartbeat signing (LF-SEC-007) ─────────────────────────
+// Self-contained twin of apps/web/lib/directory-heartbeat.ts (lfctl runs
+// from a plain checkout with no build step). The canonical payload must
+// stay byte-identical to the SERVER verifier — fixed key order, undefined
+// stats keys omitted. Both sides are pinned by tests.
+function sanitizeHeartbeatStats(stats) {
+  const clean = {};
+  if (stats.onlineUsers !== undefined) clean.onlineUsers = stats.onlineUsers;
+  if (stats.publicRoomsCount !== undefined) clean.publicRoomsCount = stats.publicRoomsCount;
+  if (stats.version !== undefined) clean.version = stats.version;
+  if (stats.doctorScore !== undefined) clean.doctorScore = stats.doctorScore;
+  return clean;
+}
+
+function buildSignedHeartbeat({ instanceId, stats, privateKeyPem }) {
+  const base = {
+    instanceId,
+    timestamp: Math.floor(Date.now() / 1000),
+    nonce: randomBytes(24).toString('base64url'),
+    stats: sanitizeHeartbeatStats(stats),
+  };
+  const canonical = JSON.stringify(base);
+  const signature = edSign(null, Buffer.from(canonical, 'utf8'), createPrivateKey(privateKeyPem)).toString('base64');
+  return { ...base, signature };
+}
+
+async function sendDirectoryHeartbeat({ directoryOrigin, signed }) {
+  let res;
+  try {
+    res = await fetch(`${directoryOrigin.replace(/\/$/, '')}/api/directory/heartbeat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(signed),
+    });
+  } catch (err) {
+    return { ok: false, status: 0, error: err.message };
+  }
+  if (res.ok) return { ok: true, status: res.status };
+  const detail = await res.json().catch(() => ({}));
+  return { ok: false, status: res.status, error: detail.error ?? `HTTP ${res.status}` };
+}
+
 async function main() {
   const { domain, action, options } = parseArgs(process.argv.slice(2));
   if (!domain || domain === '--help' || domain === '-h') {
@@ -377,6 +434,64 @@ async function main() {
     else printBackup(backup);
     if (!backup.ok) process.exitCode = 2;
     return;
+  }
+
+  if (domain === 'directory') {
+    if (action === 'keygen') {
+      const outDir = options.out ?? 'infra/keys';
+      const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+      await fs.mkdir(outDir, { recursive: true });
+      const privPath = path.join(outDir, 'instance-ed25519-private.pem');
+      const pubPath = path.join(outDir, 'instance-ed25519-public.pem');
+      await fs.writeFile(privPath, privateKey.export({ format: 'pem', type: 'pkcs8' }), { mode: 0o600 });
+      await fs.writeFile(pubPath, publicKey.export({ format: 'pem', type: 'spki' }));
+      const spkiB64 = publicKey.export({ format: 'der', type: 'spki' }).toString('base64');
+      if (options.json) {
+        console.log(JSON.stringify({ privateKeyPath: privPath, publicKeyPath: pubPath, publicKeyBase64: spkiB64 }, null, 2));
+      } else {
+        console.log(`Private key: ${privPath} (mode 600 — do not commit)`);
+        console.log(`Public key:  ${pubPath}`);
+        console.log('\npublicKey (base64 SPKI) to submit at registration:');
+        console.log(spkiB64);
+      }
+      return;
+    }
+    if (action === 'heartbeat') {
+      if (!options.url) throw new Error('directory heartbeat requires --url <directory-origin>');
+      if (!options.instanceId) throw new Error('directory heartbeat requires --instance-id <id>');
+      if (!options.keyFile) throw new Error('directory heartbeat requires --key-file <pem>');
+      const privateKeyPem = await fs.readFile(options.keyFile, 'utf8');
+      const stats = {};
+      if (options.onlineUsers !== undefined) stats.onlineUsers = options.onlineUsers;
+      if (options.publicRooms !== undefined) stats.publicRoomsCount = options.publicRooms;
+      if (options.statsVersion !== undefined) stats.version = options.statsVersion;
+      if (options.doctorScore !== undefined) stats.doctorScore = options.doctorScore;
+
+      const sendOnce = async () => {
+        const signed = buildSignedHeartbeat({
+          instanceId: options.instanceId,
+          stats,
+          privateKeyPem,
+        });
+        const result = await sendDirectoryHeartbeat({ directoryOrigin: options.url, signed });
+        if (options.json) console.log(JSON.stringify(result));
+        else console.log(`[${new Date().toISOString()}] heartbeat ${result.ok ? 'ok' : `FAILED (${result.status}${result.error ? `: ${result.error}` : ''})`}`);
+        if (!result.ok) process.exitCode = 2;
+        return result.ok;
+      };
+
+      if (options.once || !options.interval) {
+        await sendOnce();
+        return;
+      }
+      // Loop mode — the nonce is fresh per send, so replays never trip.
+      const intervalMs = Math.max(60, options.interval) * 1000;
+      console.error(`Sending signed heartbeats every ${intervalMs / 1000}s — Ctrl-C to stop.`);
+      await sendOnce();
+      setInterval(() => { void sendOnce(); }, intervalMs);
+      return;
+    }
+    throw new Error(`Unknown directory action: ${action ?? '(missing)'}`);
   }
 
   if (domain === 'setup') {

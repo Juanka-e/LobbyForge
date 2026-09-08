@@ -212,6 +212,22 @@ async function handleStream(
                 if (revoked && !closed) abort();
               })
               .catch(() => { /* Redis down — REST stays the strict gate */ });
+            // LF-SEC-003 (SSE half): access can change MID-STREAM — kick,
+            // role removal, channel-policy edits. Re-run the SAME
+            // visibility + membership gate as stream open every
+            // keepalive; a definitive denial closes the stream (a
+            // transient DB error does NOT — REST stays the strict gate,
+            // and flapping every stream on a DB blip would be worse).
+            void authorizeSessionChannelVisibility(
+              session.uid,
+              serverId,
+              row,
+              server.ownerUserId
+            )
+              .then((visibility) => {
+                if (!visibility.ok && !closed) abort();
+              })
+              .catch(() => { /* transient — keep the stream */ });
           try {
             controller.enqueue(encoder.encode(`: ping\n\n`));
           } catch {

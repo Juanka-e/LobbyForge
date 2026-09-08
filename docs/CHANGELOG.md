@@ -2,6 +2,27 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - 8th-audit follow-ups: SSE revalidation + heartbeat sender - 2026-09-08
+
+### Fixed
+
+- **LF-SEC-003 (SSE half)**: the activity-stream keepalive now re-runs
+  the SAME membership + channel-visibility gate as stream open every
+  30s — a kick or role removal closes an open SSE mid-stream (a
+  transient DB error does not flap the stream; REST stays the strict
+  gate).
+
+### Added
+
+- **LF-SEC-007 (sender half)**: `lfctl directory keygen` generates the
+  instance Ed25519 keypair (private key mode 600; prints the base64
+  SPKI to submit at registration) and `lfctl directory heartbeat`
+  signs + POSTs heartbeats (`--once` or `--interval` loop, fresh nonce
+  every send). The signing logic is a self-contained twin of the
+  tested lib/directory-heartbeat.ts (canonical key order pinned by
+  tests on both the sender and the server side) — the signed directory
+  loop is now usable end-to-end.
+
 ## [Unreleased] - 8th-audit remediation (LF-SEC-001..015) - 2026-09-08
 
 ### Fixed
