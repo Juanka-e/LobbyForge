@@ -109,3 +109,8 @@ export async function getRevocationStatus(uid: string, gid: string): Promise<Rev
 export async function isGuestSessionRevoked(uid: string, gid: string): Promise<boolean> {
   return (await getRevocationStatus(uid, gid)) === 'revoked';
 }
+
+/** Test-only: drop the shared client so fresh mocks take effect. */
+export function __resetRevocationClient(): void {
+  revokedClient = null;
+}

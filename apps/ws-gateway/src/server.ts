@@ -41,7 +41,7 @@ function getEnvPort(): number {
   const raw = process.env.WS_PORT;
   if (!raw) return 3001;
   const n = Number.parseInt(raw, 10);
-  if (!Number.isFinite(n) || n <= 0 || n > 65535) {
+  if (!Number.isFinite(n) || n < 0 || n > 65535) { // 0 = ephemeral (tests)
     throw new Error(`Invalid WS_PORT: ${raw}`);
   }
   return n;
@@ -159,7 +159,7 @@ const REVOCATION_UNAVAILABLE_GRACE_MS = parseInt(
 );
 const ipConnectionCounts = new Map<string, number>();
 
-export function createGateway(): { wss: WebSocketServer; close: () => Promise<void> } {
+export function createGateway(): { wss: WebSocketServer; server: http.Server; close: () => Promise<void> } {
   // Create an HTTP server first — it serves the /health endpoint for
   // Docker healthchecks (the WS-only server returns 426 for plain HTTP).
   const httpServer = http.createServer((req, res) => {
@@ -497,6 +497,8 @@ function trustedClientIp(headers: import('http').IncomingMessage['headers'], soc
 
   return {
     wss,
+    // The underlying HTTP server — tests need its ephemeral port.
+    server: httpServer,
     close: async () => {
       clearInterval(heartbeat);
       stopInvalidationListener();
@@ -508,6 +510,7 @@ function trustedClientIp(headers: import('http').IncomingMessage['headers'], soc
         }
       }
       await new Promise<void>((resolve) => wss.close(() => resolve()));
+      await new Promise<void>((resolve) => httpServer.close(() => resolve()));
     },
   };
 }

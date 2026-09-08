@@ -2,6 +2,34 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - 8th-audit acceptance-criteria sweep - 2026-09-08
+
+### Added
+
+- **LF-SEC-009 test coverage** (done criteria: "tests simulate outage
+  and recovery"): tri-state unit tests with a controllable ioredis
+  fake — active/revoked/unavailable, and a recovery case proving one
+  error does NOT latch. Plus REAL-socket integration tests through
+  createGateway: production handshakes fail CLOSED on outage (1011),
+  confirmed revocations close 1008, development tolerates outage.
+- **LF-SEC-003 integration test** (done criteria: "regression tests
+  cover open-connection revocation"): a live socket subscribes, an
+  invalidation event fires, the re-authorization denies → the client
+  receives `access_revoked` AND a later bus event is provably not
+  delivered (the mocked release mirrors real Redis-unsubscribe
+  semantics); an unrelated user's subscription survives the same
+  event. createGateway now exposes its HTTP server for ephemeral-port
+  testing and WS_PORT=0 is accepted.
+- **LF-SEC-008 client half**: the web app actually CONSUMES the
+  lobbyforge://session/complete deep link now — a root-layout listener
+  handles the shell's postMessage, validates the URL shape, and burns
+  the one-time code ALWAYS sending {code, state} (11 tests). The
+  consumer side of the handoff loop simply did not exist before.
+- **LF-SEC-012 edge test**: the prod-TLS e2e now proves the per-route
+  nginx caps — a 7 MiB body on /api/users/me/avatar passes the edge
+  (app answers 401) while the SAME body on a normal API path is 413'd
+  by the edge.
+
 ## [Unreleased] - original plan tail: Faz D/G completion - 2026-09-08
 
 ### Added

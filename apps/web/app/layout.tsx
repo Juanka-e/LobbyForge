@@ -10,6 +10,7 @@ import 'material-symbols/outlined.css';
 import './globals.css';
 import GlobalHeader from './GlobalHeader';
 import AppearanceRuntime from './AppearanceRuntime';
+import DesktopHandoffListener from '@/components/DesktopHandoffListener';
 
 const geist = Geist({ subsets: ['latin'], variable: '--font-geist' });
 
@@ -61,6 +62,7 @@ export default async function RootLayout({ children, modal }: { children: ReactN
       <body className="bg-background text-text-primary font-body-md antialiased min-h-screen flex flex-col">
         <AppearanceRuntime />
         <GlobalHeader />
+        <DesktopHandoffListener />
         <main className="flex-1">{content}</main>
         {maintenance?.maintenanceMode ? null : modal}
       </body>

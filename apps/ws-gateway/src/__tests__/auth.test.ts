@@ -5,7 +5,7 @@
  * we picked for "unauthenticated") on auth failure. We only test the
  * validator itself here; the close code lives in `server.ts`.
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   buildGuestSessionCookie,
   type GuestIdentity,
@@ -55,5 +55,53 @@ describe('validateGuestFromHeaders', () => {
     const tampered = makeCookie().slice(0, -3) + 'xxx';
     const result = validateGuestFromHeaders(`lf_guest=${tampered}`);
     expect(result.ok).toBe(false);
+  });
+});
+
+// ── LF-SEC-009: tri-state revocation status ─────────────────────────────
+// ioredis is mocked with a controllable fake so the OUTAGE paths are
+// testable: 'unavailable' must be a distinct answer, never a silent
+// "not revoked".
+
+const sismember = vi.fn<(key: string, member: string) => Promise<number>>();
+
+vi.mock('ioredis', () => ({
+  default: class FakeRedis {
+    on() {}
+    sismember = sismember;
+  },
+}));
+
+import { getRevocationStatus, isGuestSessionRevoked, __resetRevocationClient } from '../auth.js';
+
+describe('getRevocationStatus (LF-SEC-009 tri-state)', () => {
+  beforeEach(() => {
+    __resetRevocationClient();
+    sismember.mockReset();
+  });
+
+  it("'active' when Redis confirms the session is not revoked", async () => {
+    sismember.mockResolvedValue(0);
+    await expect(getRevocationStatus('u', 'g')).resolves.toBe('active');
+  });
+
+  it("'revoked' when the gid is in the revocation set", async () => {
+    sismember.mockResolvedValue(1);
+    await expect(getRevocationStatus('u', 'g')).resolves.toBe('revoked');
+    await expect(isGuestSessionRevoked('u', 'g')).resolves.toBe(true);
+  });
+
+  it("'unavailable' when the Redis call errors — never a silent active", async () => {
+    sismember.mockRejectedValue(new Error('ECONNREFUSED'));
+    await expect(getRevocationStatus('u', 'g')).resolves.toBe('unavailable');
+    // The boolean wrapper must NOT treat an outage as "not revoked".
+    await expect(isGuestSessionRevoked('u', 'g')).resolves.toBe(false);
+  });
+
+  it("recovers after an error — one blip does not latch (no permanent failed flag)", async () => {
+    sismember.mockRejectedValueOnce(new Error('timeout')).mockResolvedValue(1);
+    await expect(getRevocationStatus('u', 'g')).resolves.toBe('unavailable');
+    // The shared client is reused; the next call succeeds.
+    await expect(getRevocationStatus('u', 'g')).resolves.toBe('revoked');
   });
 });
