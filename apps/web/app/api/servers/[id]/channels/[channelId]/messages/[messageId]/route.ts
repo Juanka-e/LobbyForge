@@ -2,11 +2,8 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { CorePermission, hasPermission, MessageContentSchema } from '@lobbyforge/core';
 import {
-  getChannelById,
   getMessageById,
-  getServerById,
   getUserPermissions,
-  isServerMember,
   logAction,
   softDeleteMessage,
   updateMessage,
@@ -15,6 +12,7 @@ import {
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
+import { authorizeChannelMessageAccess } from '@/lib/message-authorization';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -80,45 +78,44 @@ interface AuthorizeResult {
 type AuthorizeError = { ok: false; response: NextResponse };
 
 /**
- * Authorization for message-level routes. The caller is allowed to:
- *   - read the message if they are a member of the parent server.
- *   - edit / delete the message if they are the author OR have
- *     `MANAGE_MESSAGES` on the server (typically the owner or anyone
- *     with the @admin role).
+ * LF-SEC-002: authorization for message-level routes now goes through
+ * the CANONICAL channel policy (the same one the list route uses) —
+ * membership + role-gated channel visibility (+ READ_MESSAGE_HISTORY
+ * for reads). The old local check only verified membership and row
+ * relationships, so a user whose private-channel role or history
+ * permission was removed could still fetch any message by known ID.
+ * Mutation additionally requires author-or-MANAGE_MESSAGES below.
  */
 async function loadAndAuthorize(
   serverId: string,
   channelId: string,
   messageId: string,
-  userId: string
+  userId: string,
+  operation: 'read' | 'mutate'
 ): Promise<AuthorizeResult | AuthorizeError> {
   if (!serverId || !channelId || !messageId) {
     return { ok: false, response: NextResponse.json({ error: 'Server, channel, and message ids are required' }, { status: 400 }) };
   }
 
-  const server = await getServerById(getDb(), serverId);
-  if (!server) {
-    return { ok: false, response: NextResponse.json({ error: 'Server not found' }, { status: 404 }) };
-  }
-  const isOwner = server.ownerUserId === userId;
-  if (!isOwner) {
-    const member = await isServerMember(getDb(), userId, serverId);
-    if (!member) {
-      return { ok: false, response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
-    }
-  }
-
-  const channel = await getChannelById(getDb(), channelId);
-  if (!channel || channel.serverId !== serverId) {
-    return { ok: false, response: NextResponse.json({ error: 'Channel not found' }, { status: 404 }) };
-  }
+  const access = await authorizeChannelMessageAccess({
+    userId,
+    serverId,
+    channelId,
+    operation,
+  });
+  if (!access.ok) return access;
 
   const message = await getMessageById(getDb(), messageId);
   if (!message || message.channelId !== channelId) {
     return { ok: false, response: NextResponse.json({ error: 'Message not found' }, { status: 404 }) };
   }
 
-  return { ok: true, message, isOwner, isAuthor: message.userId === userId };
+  return {
+    ok: true,
+    message,
+    isOwner: access.context.server.ownerUserId === userId,
+    isAuthor: message.userId === userId,
+  };
 }
 
 /**
@@ -142,7 +139,7 @@ async function handleGet(req: Request, ctx: RouteContext): Promise<NextResponse>
   if (!session.ok) return session.response;
 
   try {
-    const access = await loadAndAuthorize(serverId, channelId, messageId, session.uid);
+    const access = await loadAndAuthorize(serverId, channelId, messageId, session.uid, 'read');
     if (!access.ok) return access.response;
     return NextResponse.json(
       { message: toJson(access.message) },
@@ -163,7 +160,7 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
   if (!session.ok) return session.response;
 
   try {
-    const access = await loadAndAuthorize(serverId, channelId, messageId, session.uid);
+    const access = await loadAndAuthorize(serverId, channelId, messageId, session.uid, 'mutate');
     if (!access.ok) return access.response;
 
     let body: z.infer<typeof PatchMessageSchema>;
@@ -235,7 +232,7 @@ async function handleDelete(req: Request, ctx: RouteContext): Promise<NextRespon
   if (!session.ok) return session.response;
 
   try {
-    const access = await loadAndAuthorize(serverId, channelId, messageId, session.uid);
+    const access = await loadAndAuthorize(serverId, channelId, messageId, session.uid, 'mutate');
     if (!access.ok) return access.response;
 
     if (!(await canMutateMessage(serverId, access.isAuthor, session.uid))) {

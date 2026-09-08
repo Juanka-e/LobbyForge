@@ -76,12 +76,25 @@ export interface ErrorMessage {
   message: string;
 }
 
+/**
+ * LF-SEC-003: the server revoked a live subscription because the
+ * caller's access changed (kick/ban/role loss/channel policy/block).
+ * The client should drop the resource from the UI immediately.
+ */
+export interface AccessRevokedMessage {
+  type: 'access_revoked';
+  topic: string;
+  reason: string;
+  at: string;
+}
+
 export type ServerMessage =
   | HelloMessage
   | SubscribedMessage
   | UnsubscribedMessage
   | EventMessage
-  | ErrorMessage;
+  | ErrorMessage
+  | AccessRevokedMessage;
 
 /**
  * Parse a topic into its parts. Returns `null` if the topic isn't one

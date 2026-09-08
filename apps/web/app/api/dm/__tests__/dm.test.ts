@@ -6,6 +6,7 @@ const listDmChannelsForUser = vi.fn();
 const findOrCreateDmChannel = vi.fn();
 const getBlockedUserIds = vi.fn();
 const isDmChannelParticipant = vi.fn();
+const checkDmChannelAccess = vi.fn();
 const listDmMessages = vi.fn();
 const sendDmMessage = vi.fn();
 
@@ -15,6 +16,7 @@ vi.mock('@lobbyforge/db', () => ({
   findOrCreateDmChannel,
   getBlockedUserIds,
   isDmChannelParticipant,
+  checkDmChannelAccess,
   listDmMessages,
   sendDmMessage,
 }));
@@ -32,6 +34,8 @@ beforeEach(() => {
   findOrCreateDmChannel.mockReset();
   getBlockedUserIds.mockReset();
   isDmChannelParticipant.mockReset();
+  // LF-SEC-006 default: participant, no block either direction.
+  checkDmChannelAccess.mockReset().mockResolvedValue('ok');
   listDmMessages.mockReset();
   sendDmMessage.mockReset();
   requireMaterializedSession.mockReturnValue({
@@ -175,7 +179,7 @@ describe('POST /api/dm/{channelId}/messages', () => {
   });
 
   it('returns 404 when not a participant', async () => {
-    isDmChannelParticipant.mockResolvedValue(false);
+    checkDmChannelAccess.mockResolvedValue('not_participant');
     const { POST } = await import('../[channelId]/messages/route.js');
     const res = await POST(
       new Request(`https://example.test/api/dm/${CHANNEL_ID}/messages`, {
@@ -185,6 +189,45 @@ describe('POST /api/dm/{channelId}/messages', () => {
       ctx()
     );
     expect(res.status).toBe(404);
+  });
+
+  it('LF-SEC-006: 403 when the OTHER side blocked the caller (existing channel)', async () => {
+    checkDmChannelAccess.mockResolvedValue('blocked');
+    const { POST } = await import('../[channelId]/messages/route.js');
+    const res = await POST(
+      new Request(`https://example.test/api/dm/${CHANNEL_ID}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ content: 'hello' }),
+      }),
+      ctx()
+    );
+    expect(res.status).toBe(403);
+    expect(sendDmMessage).not.toHaveBeenCalled();
+  });
+
+  it('LF-SEC-006: 403 when the CALLER blocked the other side (unblock first)', async () => {
+    checkDmChannelAccess.mockResolvedValue('blocked');
+    const { POST } = await import('../[channelId]/messages/route.js');
+    const res = await POST(
+      new Request(`https://example.test/api/dm/${CHANNEL_ID}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ content: 'hello' }),
+      }),
+      ctx()
+    );
+    expect(res.status).toBe(403);
+    expect(sendDmMessage).not.toHaveBeenCalled();
+  });
+
+  it('LF-SEC-006: history stays readable after a block (documented policy)', async () => {
+    isDmChannelParticipant.mockResolvedValue(true);
+    listDmMessages.mockResolvedValue([]);
+    const { GET } = await import('../[channelId]/messages/route.js');
+    const res = await GET(new Request(`https://example.test/api/dm/${CHANNEL_ID}/messages`), ctx());
+    expect(res.status).toBe(200);
+    // read-history uses participation only — checkDmChannelAccess is a
+    // send/subscribe policy and must not gate the list.
+    expect(checkDmChannelAccess).not.toHaveBeenCalledWith(expect.anything(), CHANNEL_ID, UID, 'send');
   });
 
   it('returns 400 for empty content', async () => {

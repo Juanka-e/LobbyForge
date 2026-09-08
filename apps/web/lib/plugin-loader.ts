@@ -127,10 +127,17 @@ async function loadPluginFromDisk(pluginId: string): Promise<RegisteredGamePlugi
     savedValues[key] = process.env[key];
     delete process.env[key];
   }
-  const mod = await import(fileUrl);
-  // Restore env immediately.
-  for (const [key, value] of Object.entries(savedValues)) {
-    if (value !== undefined) process.env[key] = value;
+  // LF-SEC-010: restore inside finally — a THROWN import (syntax error,
+  // missing dep) used to leave the host process running without its
+  // secrets until restart, silently breaking sessions/DB/Redis.
+  let mod: unknown;
+  try {
+    mod = await import(fileUrl);
+  } finally {
+    for (const [key, value] of Object.entries(savedValues)) {
+      if (value !== undefined) process.env[key] = value;
+      else delete process.env[key];
+    }
   }
 
   // Accept either `{ plugin }` or default export.

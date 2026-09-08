@@ -188,6 +188,15 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
         );
       }
       await setChannelRoleOverrides(getDb(), channelId, body.visibleToRoleIds);
+      // LF-SEC-003: a visibility change must re-check who may keep
+      // live subscriptions on this channel.
+      const { publishAccessInvalidation } = await import('@/lib/access-invalidation');
+      publishAccessInvalidation({
+        kind: 'channel-policy',
+        serverId,
+        channelId,
+        reason: 'permissions_changed',
+      });
     }
 
     void logAction(getDb(), {

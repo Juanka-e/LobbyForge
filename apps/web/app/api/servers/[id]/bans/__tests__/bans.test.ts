@@ -5,6 +5,7 @@ import { buildGuestSessionCookie, type GuestIdentity } from '@/lib/guest-session
 const getServerById = vi.fn();
 const isServerMember = vi.fn();
 const getUserPermissions = vi.fn();
+const getHighestRolePosition = vi.fn();
 const banUser = vi.fn();
 const unbanUser = vi.fn();
 const isCurrentlyBanned = vi.fn();
@@ -15,6 +16,7 @@ vi.mock('@lobbyforge/db', () => ({
   getServerById,
   isServerMember,
   getUserPermissions,
+  getHighestRolePosition,
   banUser,
   unbanUser,
   isCurrentlyBanned,
@@ -39,6 +41,12 @@ beforeEach(() => {
   getServerById.mockReset();
   isServerMember.mockReset();
   getUserPermissions.mockReset();
+  // LF-SEC-005 default: the ACTOR (caller) outranks the TARGET.
+  getHighestRolePosition
+    .mockReset()
+    .mockImplementation(async (_db: unknown, _sid: string, userId: string) =>
+      userId === TARGET_ID ? 10 : 50
+    );
   banUser.mockReset();
   unbanUser.mockReset();
   isCurrentlyBanned.mockReset();
@@ -104,9 +112,10 @@ describe('GET /api/servers/{id}/bans', () => {
     expect(res.status).toBe(403);
   });
 
-  it('returns the ban list to a member', async () => {
+  it('returns the ban list to a member with BAN_MEMBERS (LF-SEC-011)', async () => {
     getServerById.mockResolvedValue(mockServer(OWNER_ID));
     isServerMember.mockResolvedValue(true);
+    getUserPermissions.mockResolvedValue(['ban_members']);
     listBansForServer.mockResolvedValue([
       {
         id: 'ban-1',
@@ -127,6 +136,51 @@ describe('GET /api/servers/{id}/bans', () => {
     expect(res.status).toBe(200);
     const json = (await res.json()) as { bans: { id: string; displayName: string }[] };
     expect(json.bans[0]?.displayName).toBe('Bad Actor');
+  });
+
+  it('LF-SEC-011: denies the ban list to an ordinary member', async () => {
+    getServerById.mockResolvedValue(mockServer(OWNER_ID));
+    isServerMember.mockResolvedValue(true);
+    getUserPermissions.mockResolvedValue(['send_messages', 'read_message_history']);
+    const { GET } = await loadRoute();
+    const req = new Request(`https://example.test/api/servers/${SERVER_ID}/bans`, {
+      headers: { cookie: makeSessionCookie() },
+    });
+    const res = await GET(req, { params: Promise.resolve({ id: SERVER_ID }) });
+    expect(res.status).toBe(403);
+    expect(listBansForServer).not.toHaveBeenCalled();
+  });
+
+  it('LF-SEC-011: MODERATE_MEMBERS and VIEW_AUDIT_LOG also grant the list', async () => {
+    getServerById.mockResolvedValue(mockServer(OWNER_ID));
+    isServerMember.mockResolvedValue(true);
+    getUserPermissions.mockResolvedValue(['view_audit_log']);
+    listBansForServer.mockResolvedValue([]);
+    const { GET } = await loadRoute();
+    const req = new Request(`https://example.test/api/servers/${SERVER_ID}/bans`, {
+      headers: { cookie: makeSessionCookie() },
+    });
+    const res = await GET(req, { params: Promise.resolve({ id: SERVER_ID }) });
+    expect(res.status).toBe(200);
+  });
+
+  it('LF-SEC-005: a lower-ranked moderator cannot ban a higher-ranked user', async () => {
+    getServerById.mockResolvedValue(mockServer(OWNER_ID));
+    isServerMember.mockResolvedValue(true);
+    getUserPermissions.mockResolvedValue(['ban_members']);
+    getHighestRolePosition.mockImplementation(
+      async (_db: unknown, _sid: string, userId: string) =>
+        userId === TARGET_ID ? 80 : 50
+    );
+    const { POST } = await loadRoute();
+    const req = new Request(`https://example.test/api/servers/${SERVER_ID}/bans`, {
+      method: 'POST',
+      headers: { cookie: makeSessionCookie() },
+      body: JSON.stringify({ userId: TARGET_ID, reason: 'spam' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ id: SERVER_ID }) });
+    expect(res.status).toBe(403);
+    expect(banUser).not.toHaveBeenCalled();
   });
 });
 

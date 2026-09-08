@@ -8,14 +8,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  *    burned code 401; unknown code 401
  */
 
-const { redisGet, redisSet, redisDel } = vi.hoisted(() => ({
+const { redisGet, redisSet, redisDel, redisGetdel } = vi.hoisted(() => ({
   redisGet: vi.fn(),
   redisSet: vi.fn(),
   redisDel: vi.fn(),
+  redisGetdel: vi.fn(),
 }));
 
 vi.mock('@/lib/redis', () => ({
-  redis: { get: redisGet, set: redisSet, del: redisDel },
+  redis: { get: redisGet, set: redisSet, del: redisDel, getdel: redisGetdel },
 }));
 
 const { getUserCredentialsByEmail, getUserById } = vi.hoisted(() => ({
@@ -39,11 +40,12 @@ const envSnapshot = { ...process.env };
 
 beforeEach(() => {
   process.env.LOBBYFORGE_SESSION_SECRET = 'x'.repeat(32);
-  for (const fn of [redisGet, redisSet, redisDel, getUserCredentialsByEmail, getUserById, verifyPassword]) {
+  for (const fn of [redisGet, redisSet, redisDel, redisGetdel, getUserCredentialsByEmail, getUserById, verifyPassword]) {
     fn.mockReset();
   }
   redisSet.mockResolvedValue('OK');
   redisDel.mockResolvedValue(1);
+  redisGetdel.mockResolvedValue(null);
   getUserById.mockResolvedValue({ id: 'u-1', displayName: 'Owner', deletedAt: null });
 });
 
@@ -106,38 +108,63 @@ describe('POST /api/auth/desktop-session (start)', () => {
 
 describe('POST /api/auth/desktop-session/complete', () => {
   const CODE = 'c'.repeat(48);
+  const STATE = 's'.repeat(32);
 
-  it('burns the code and sets a session cookie', async () => {
-    redisGet.mockResolvedValue(JSON.stringify({ userId: 'u-1', state: 's', used: false }));
-    const res = await complete({ code: CODE });
+  it('atomically consumes (GETDEL) and sets a session cookie', async () => {
+    redisGetdel.mockResolvedValue(JSON.stringify({ userId: 'u-1', state: STATE, used: false }));
+    const res = await complete({ code: CODE, state: STATE });
     expect(res.status).toBe(200);
-    expect(redisDel).toHaveBeenCalledWith(`lf:desktop-handoff:${CODE}`);
+    expect(redisGetdel).toHaveBeenCalledWith(`lf:desktop-handoff:${CODE}`);
     const setCookie = res.headers.get('set-cookie') ?? '';
     expect(setCookie).toContain('lf_guest=');
   });
 
+  it('LF-SEC-008: 401 for a WRONG state — and the code stays burned', async () => {
+    redisGetdel.mockResolvedValue(JSON.stringify({ userId: 'u-1', state: STATE, used: false }));
+    const res = await complete({ code: CODE, state: 'x'.repeat(32) });
+    expect(res.status).toBe(401);
+    // No re-set of the record — the GETDEL already consumed it.
+    expect(redisSet).not.toHaveBeenCalled();
+    // A second attempt sees nothing (simulated: getdel again → null).
+    redisGetdel.mockResolvedValue(null);
+    const res2 = await complete({ code: CODE, state: STATE });
+    expect(res2.status).toBe(401);
+  });
+
+  it('LF-SEC-008: missing state fails validation', async () => {
+    const res = await complete({ code: CODE });
+    expect(res.status).toBe(400);
+  });
+
+  it('LF-SEC-008: PARALLEL completion — exactly one wins (atomic GETDEL)', async () => {
+    const record = JSON.stringify({ userId: 'u-1', state: STATE, used: false });
+    // First caller gets the record; the concurrent second gets null —
+    // exactly what Redis GETDEL guarantees.
+    redisGetdel.mockResolvedValueOnce(record).mockResolvedValueOnce(null);
+    const [a, b] = await Promise.all([
+      complete({ code: CODE, state: STATE }),
+      complete({ code: CODE, state: STATE }),
+    ]);
+    const statuses = [a.status, b.status].sort();
+    expect(statuses).toEqual([200, 401]);
+  });
+
   it('401 for an expired/unknown code', async () => {
-    redisGet.mockResolvedValue(null);
-    const res = await complete({ code: CODE });
+    redisGetdel.mockResolvedValue(null);
+    const res = await complete({ code: CODE, state: STATE });
     expect(res.status).toBe(401);
   });
 
-  it('401 + delete on a REPLAYED (already used) code', async () => {
-    redisGet.mockResolvedValue(JSON.stringify({ userId: 'u-1', state: 's', used: true }));
-    const res = await complete({ code: CODE });
-    expect(res.status).toBe(401);
-    expect(redisDel).toHaveBeenCalled();
-  });
-
-  it('401 when the account no longer exists', async () => {
-    redisGet.mockResolvedValue(JSON.stringify({ userId: 'gone', state: 's', used: false }));
+  it('401 when the account no longer exists (code stays burned)', async () => {
+    redisGetdel.mockResolvedValue(JSON.stringify({ userId: 'gone', state: STATE, used: false }));
     getUserById.mockResolvedValue(null);
-    const res = await complete({ code: CODE });
+    const res = await complete({ code: CODE, state: STATE });
     expect(res.status).toBe(401);
+    expect(redisSet).not.toHaveBeenCalled();
   });
 
   it('400 for a too-short code', async () => {
-    const res = await complete({ code: 'short' });
+    const res = await complete({ code: 'short', state: STATE });
     expect(res.status).toBe(400);
   });
 });

@@ -43,7 +43,18 @@ beforeEach(() => {
   // The actor holds manage_roles AND administrator — hierarchy must still
   // apply (Discord semantics: only ownership bypasses ranking).
   dbFns.getUserPermissions.mockResolvedValue(['manage_roles', 'administrator']);
-  dbFns.getHighestRolePosition.mockResolvedValue(5);
+  // LF-SEC-004: the gate now compares actor-vs-TARGET too — make the
+  // positions per-user so the hierarchy is observable.
+  const positions = new Map<string, number>([
+    [OWNER, Number.POSITIVE_INFINITY],
+    [ADMIN_LOW, 5],
+    [MEMBER, 1],
+    ['higher-target', 80],
+    ['equal-target', 5],
+  ]);
+  dbFns.getHighestRolePosition.mockImplementation(
+    async (_db: unknown, _sid: string, userId: string) => positions.get(userId) ?? -1
+  );
   // Signature is getRoleById(db, roleId) — read the SECOND argument.
   dbFns.getRoleById.mockImplementation(async (_db: unknown, id: string) =>
     id === ROLE_HIGH
@@ -85,7 +96,6 @@ describe('PUT members/[userId]/role — Discord hierarchy', () => {
   });
 
   it('allows the owner to assign ANY role without rank checks', async () => {
-    dbFns.getHighestRolePosition.mockResolvedValue(Number.POSITIVE_INFINITY);
     const res = await put({ roleIds: [ROLE_HIGH] }, OWNER);
     expect(res.status).toBe(200);
     expect(dbFns.setMemberRoles).toHaveBeenCalled();
@@ -94,6 +104,42 @@ describe('PUT members/[userId]/role — Discord hierarchy', () => {
   it('only the owner may change the OWNER roles (admins cannot)', async () => {
     const res = await put({ roleIds: [ROLE_LOW] }, ADMIN_LOW, OWNER);
     expect(res.status).toBe(403);
+    expect(dbFns.setMemberRoles).not.toHaveBeenCalled();
+  });
+
+  // LF-SEC-004: the actor must ALSO outrank the TARGET user — a lower
+  // role manager cannot strip a higher-ranked member's roles.
+  it('rejects a lower-ranked actor stripping a HIGHER target with roleIds: []', async () => {
+    const res = await put({ roleIds: [] }, ADMIN_LOW, 'higher-target');
+    expect(res.status).toBe(403);
+    expect(dbFns.setMemberRoles).not.toHaveBeenCalled();
+  });
+
+  it('rejects a lower-ranked actor replacing a higher target with low roles', async () => {
+    const res = await put({ roleIds: [ROLE_LOW] }, ADMIN_LOW, 'higher-target');
+    expect(res.status).toBe(403);
+    expect(dbFns.setMemberRoles).not.toHaveBeenCalled();
+  });
+
+  it('rejects an EQUAL-rank actor managing an equal-rank target', async () => {
+    const res = await put({ roleIds: [ROLE_LOW] }, ADMIN_LOW, 'equal-target');
+    expect(res.status).toBe(403);
+    expect(dbFns.setMemberRoles).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-member actor entirely', async () => {
+    dbFns.isServerMember.mockResolvedValue(false);
+    const res = await put({ roleIds: [ROLE_LOW] }, ADMIN_LOW, MEMBER);
+    expect(res.status).toBe(403);
+  });
+
+  it('rejects acting on a target who is not a member', async () => {
+    // isServerMember(db, userId, serverId) — userId is the SECOND arg.
+    dbFns.isServerMember.mockImplementation(
+      async (_db: unknown, userId: string) => userId === ADMIN_LOW
+    );
+    const res = await put({ roleIds: [ROLE_LOW] }, ADMIN_LOW, MEMBER);
+    expect(res.status).toBe(404);
     expect(dbFns.setMemberRoles).not.toHaveBeenCalled();
   });
 });

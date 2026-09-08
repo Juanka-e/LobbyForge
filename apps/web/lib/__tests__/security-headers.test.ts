@@ -7,6 +7,7 @@ import {
   originGuard,
   rateLimitResponse,
   requestSizeGuard,
+  enforceBodyLimit,
   resolveClientAddress,
   withApiSecurity,
 } from '../security-headers.js';
@@ -129,6 +130,50 @@ describe('request boundary guards', () => {
     expect(requestSizeGuard(oversized, 1024)?.status).toBe(413);
     expect(requestSizeGuard(malformed, 1024)?.status).toBe(400);
   });
+
+describe('enforceBodyLimit — LF-SEC-014 streamed bodies', () => {
+  function streamedRequest(body: string, headers: Record<string, string> = {}): Request {
+    return new Request('https://example.test/api/x', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body,
+    });
+  }
+
+  it('rejects an oversized Content-Length immediately (413)', async () => {
+    const res = await enforceBodyLimit(
+      streamedRequest('x'.repeat(2048), { 'content-length': '2048' }),
+      1024
+    );
+    expect((res as Response).status).toBe(413);
+  });
+
+  it('rejects an oversized STREAMED body without Content-Length (413)', async () => {
+    const res = await enforceBodyLimit(streamedRequest('y'.repeat(2048)), 1024);
+    expect((res as Response).status).toBe(413);
+  });
+
+  it('passes a normal streamed body through as a readable Request', async () => {
+    const res = await enforceBodyLimit(streamedRequest('{"ok":true}'), 1024);
+    expect(res).toBeInstanceOf(Request);
+    const parsed = (await (res as Request).json()) as { ok: boolean };
+    expect(parsed.ok).toBe(true);
+  });
+
+  it('rejects a malformed Content-Length (400)', async () => {
+    const res = await enforceBodyLimit(
+      streamedRequest('abc', { 'content-length': 'not-a-number' }),
+      1024
+    );
+    expect((res as Response).status).toBe(400);
+  });
+
+  it('leaves GET requests untouched', async () => {
+    const get = new Request('https://example.test/api/x');
+    const res = await enforceBodyLimit(get, 1024);
+    expect(res).toBe(get);
+  });
+});
 });
 
 describe('rateLimitResponse', () => {

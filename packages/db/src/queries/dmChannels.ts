@@ -8,6 +8,7 @@
 import { and, eq, or, desc, lt } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
 import { dmChannels, dmMessages, users } from '../schema.js';
+import { isUserBlocked } from './userBlocks.js';
 
 export interface DmChannelRow {
   id: string;
@@ -113,6 +114,62 @@ export async function isDmChannelParticipant(
     .limit(1);
   if (!row) return false;
   return row.userAId === userId || row.userBId === userId;
+}
+
+/**
+ * LF-SEC-006: canonical DM access decision, shared by REST and the WS
+ * gateway so the policy cannot diverge.
+ *
+ * Product policy (documented):
+ *   - read-history: participant-only. A block freezes communication but
+ *     does not retroactively hide the conversation from a participant.
+ *   - send / subscribe: participant AND no block in EITHER direction —
+ *     a block on an EXISTING channel must stop new messages and
+ *     realtime delivery immediately.
+ */
+/**
+ * LF-SEC-003: find the DM channel between two users (no create). The
+ * block route uses it to resolve which channel's live subscriptions
+ * must be invalidated when a new block lands.
+ */
+export async function findDmChannelByPair(
+  db: DbClient,
+  userAId: string,
+  userBId: string
+): Promise<string | null> {
+  const [a, b] = orderedPair(userAId, userBId);
+  const [row] = await db
+    .select({ id: dmChannels.id })
+    .from(dmChannels)
+    .where(and(eq(dmChannels.userAId, a), eq(dmChannels.userBId, b)))
+    .limit(1);
+  return row?.id ?? null;
+}
+
+export type DmAccessDecision = 'ok' | 'not_found' | 'not_participant' | 'blocked';
+
+export async function checkDmChannelAccess(
+  db: DbClient,
+  channelId: string,
+  userId: string,
+  operation: 'read-history' | 'send'
+): Promise<DmAccessDecision> {
+  const [row] = await db
+    .select({ userAId: dmChannels.userAId, userBId: dmChannels.userBId })
+    .from(dmChannels)
+    .where(eq(dmChannels.id, channelId))
+    .limit(1);
+  if (!row) return 'not_found';
+
+  const isParticipant = row.userAId === userId || row.userBId === userId;
+  if (!isParticipant) return 'not_participant';
+
+  if (operation === 'send') {
+    const otherUserId = row.userAId === userId ? row.userBId : row.userAId;
+    if (await isUserBlocked(db, userId, otherUserId)) return 'blocked';
+    if (await isUserBlocked(db, otherUserId, userId)) return 'blocked';
+  }
+  return 'ok';
 }
 
 /** Send a DM message and bump the channel's lastMessageAt. */

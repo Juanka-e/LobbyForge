@@ -12,6 +12,7 @@ import { join, resolve, sep } from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { reloadDynamicPlugin } from './plugin-loader';
+import { isBlockedNetworkIp } from './ip-ranges';
 
 const execFileAsync = promisify(execFile);
 
@@ -155,38 +156,14 @@ async function downloadWithTimeout(url: string): Promise<ArrayBuffer> {
   }
 }
 
-/** Check if an IP address is private, loopback, or link-local. */
+/**
+ * LF-SEC-013: SSRF boundary decisions go through the canonical IP/CIDR
+ * classifier (lib/ip-ranges.ts) — the old prefix/regex checks mishandled
+ * compressed IPv6 notation and IPv4-mapped forms. Unparseable addresses
+ * are refused (fail closed).
+ */
 function isPrivateIp(ip: string): boolean {
-  // IPv4 checks
-  if (/^\d+\.\d+\.\d+\.\d+$/.test(ip)) {
-    const parts = ip.split('.').map(Number);
-    return (
-      parts[0] === 10 ||                                    // 10.0.0.0/8
-      (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || // 172.16.0.0/12
-      (parts[0] === 192 && parts[1] === 168) ||             // 192.168.0.0/16
-      parts[0] === 127 ||                                   // 127.0.0.0/8 (loopback)
-      (parts[0] === 169 && parts[1] === 254) ||             // 169.254.0.0/16 (link-local)
-      parts[0] === 0 ||                                       // 0.0.0.0/8
-      (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) || // 100.64.0.0/10 CGNAT
-      (parts[0] === 192 && parts[1] === 0) ||                 // 192.0.0.0/24 special
-      (parts[0] === 198 && (parts[1] === 18 || parts[1] === 19)) // 198.18.0.0/15 benchmark
-    );
-  }
-  // IPv6 checks
-  const lower = ip.toLowerCase();
-  return (
-    lower === '::1' ||                                     // loopback
-    /^fe[89ab]:/.test(lower) ||                            // link-local fe80::/10 (fe80-febf)
-    lower.startsWith('fec0:') ||                            // deprecated site-local
-    lower.startsWith('fc') || lower.startsWith('fd') ||     // ULA fc00::/7
-    lower.startsWith('ff') ||                               // multicast ff00::/8
-    lower.startsWith('2001:db8') ||                         // documentation
-    lower.startsWith('64:ff9b') ||                          // NAT64 well-known
-    lower.startsWith('100::') ||                            // discard-only 100::/64
-    (lower.startsWith('::ffff:') && isPrivateIp(lower.slice(7))) || // IPv4-mapped
-    /^0:0:0:0:0:ffff:/.test(lower) ||                      // IPv4-mapped (expanded hex)
-    /^::ffff:0:/.test(lower)                                // IPv4-translated
-  );
+  return isBlockedNetworkIp(ip);
 }
 
 /** Extract a .tgz tarball using the system `tar` command.

@@ -12,11 +12,12 @@
  */
 import { WebSocketServer, type WebSocket } from 'ws';
 import * as http from 'node:http';
-import { isGuestSessionRevoked, validateGuestFromHeaders, type ResolvedGuest } from './auth.js';
+import { getRevocationStatus, validateGuestFromHeaders, type ResolvedGuest } from './auth.js';
 import { authorizeTopicSubscribe } from './authorize.js';
 import { ConnectionSubscriptions } from './subscriptions.js';
 import { ClientMessageSchema, type ServerMessage } from './protocol.js';
 import { getDb } from './db.js';
+import { initAccessInvalidationListener, topicMatchesInvalidation } from './access-invalidation.js';
 
 import { projectActivityState } from '@lobbyforge/core';
 import { getGameSessionById, getPluginInstall } from '@lobbyforge/db';
@@ -30,6 +31,10 @@ interface ConnectionState {
   subs: ConnectionSubscriptions;
   subscribeTimestamps: number[];
   alive: boolean;
+  /** LF-SEC-009: when revocation checks first became unavailable on
+   * this socket (null = healthy). Past the grace window the socket
+   * closes — realtime never fails open indefinitely. */
+  revocationUnavailableSince: number | null;
 }
 
 function getEnvPort(): number {
@@ -145,6 +150,13 @@ function recordSubscribe(state: ConnectionState): boolean {
 }
 
 const MAX_CONNECTIONS_PER_IP = parseInt(process.env.WS_MAX_CONN_PER_IP || '10', 10);
+
+/** LF-SEC-009: how long a live socket tolerates an unreachable
+ * revocation store before it is closed (fail-closed with grace). */
+const REVOCATION_UNAVAILABLE_GRACE_MS = parseInt(
+  process.env.WS_REVOCATION_GRACE_MS || String(60_000),
+  10
+);
 const ipConnectionCounts = new Map<string, number>();
 
 export function createGateway(): { wss: WebSocketServer; close: () => Promise<void> } {
@@ -203,20 +215,42 @@ export function createGateway(): { wss: WebSocketServer; close: () => Promise<vo
       } catch {
         /* swallow */
       }
-      // SEC-003: re-check revocation on LIVE sockets each heartbeat —
-      // logout must close an already-open WS, not just block new ones.
+      // SEC-003 + LF-SEC-009: re-check revocation on LIVE sockets each
+      // heartbeat — logout must close an already-open WS, not just
+      // block new ones. 'unavailable' gets a BOUNDED grace (Redis
+      // blips don't mass-disconnect), then the socket closes — no more
+      // indefinite fail-open.
       if (state.guest) {
-        void isGuestSessionRevoked(state.guest.uid, state.guest.gid)
-          .then((revoked) => {
-            if (revoked) {
+        void getRevocationStatus(state.guest.uid, state.guest.gid)
+          .then((status) => {
+            if (status === 'active') {
+              state.revocationUnavailableSince = null;
+              return;
+            }
+            if (status === 'revoked') {
               try {
                 client.close(1008, 'session revoked');
               } catch {
                 /* already closed */
               }
+              return;
+            }
+            const now = Date.now();
+            if (state.revocationUnavailableSince == null) {
+              state.revocationUnavailableSince = now;
+              return;
+            }
+            if (now - state.revocationUnavailableSince > REVOCATION_UNAVAILABLE_GRACE_MS) {
+              try {
+                client.close(1011, 'revocation store unavailable');
+              } catch {
+                /* already closed */
+              }
             }
           })
-          .catch(() => { /* fail-open; REST stays the strict gate */ });
+          .catch(() => {
+            /* getRevocationStatus never rejects; defensive no-op */
+          });
       }
     }
   }, HEARTBEAT_INTERVAL_MS);
@@ -237,7 +271,44 @@ function trustedClientIp(headers: import('http').IncomingMessage['headers'], soc
   return socketRemote || 'unknown';
 }
 
-wss.on('connection', async (socket, req) => {
+  // LF-SEC-003: event-driven access invalidation. When the web app
+  // reports a kick/ban/role loss/channel-policy/block change, re-run
+  // the subscription authorization for every AFFECTED live topic and
+  // remove the ones that no longer pass — REST and realtime must lose
+  // access at the same moment.
+  const stopInvalidationListener = initAccessInvalidationListener((event) => {
+    for (const client of wss.clients) {
+      const state = connections.get(client);
+      if (!state?.guest) continue;
+      // user-server-access only concerns the named user.
+      if (event.kind === 'user-server-access' && event.userId !== state.guest.uid) continue;
+
+      for (const topic of state.subs.topics()) {
+        if (!topicMatchesInvalidation(topic, event)) continue;
+        void (async () => {
+          try {
+            const authz = await authorizeTopicSubscribe(getDb(), state.guest!.uid, topic);
+            if (authz.ok) return;
+          } catch {
+            // On a transient DB error, REMOVE the subscription — fail
+            // closed for a security invalidation (it will be re-granted
+            // on the client's next subscribe if access is intact).
+          }
+          if (client.readyState === client.OPEN) {
+            send(client, {
+              type: 'access_revoked',
+              topic,
+              reason: event.reason,
+              at: new Date().toISOString(),
+            });
+          }
+          state.subs.remove(topic);
+        })();
+      }
+    }
+  });
+
+  wss.on('connection', async (socket, req) => {
     const connectionIp = process.env.NODE_ENV === 'production'
       ? trustedClientIp(req.headers, req.socket.remoteAddress)
       : (req.socket.remoteAddress || 'unknown');
@@ -262,10 +333,23 @@ wss.on('connection', async (socket, req) => {
     // The early return MUST release the IP slot — the audit found a
     // revoked-cookie client could re-handshake forever and pin all 10
     // slots of its NAT IP (DoS on legitimate users behind the same IP).
-    if (auth.ok && (await isGuestSessionRevoked(auth.guest.uid, auth.guest.gid))) {
-      releaseIpSlot();
-      socket.close(1008, 'session revoked');
-      return;
+    if (auth.ok) {
+      const revocation = await getRevocationStatus(auth.guest.uid, auth.guest.gid);
+      if (revocation === 'revoked') {
+        releaseIpSlot();
+        socket.close(1008, 'session revoked');
+        return;
+      }
+      // LF-SEC-009: production fails CLOSED when the revocation store
+      // cannot answer — REST already applies this model, and a signed
+      // but revoked cookie must not slip back in through realtime
+      // during an outage. Development stays permissive (local stacks
+      // routinely run without the revocation Redis).
+      if (revocation === 'unavailable' && process.env.NODE_ENV === 'production') {
+        releaseIpSlot();
+        socket.close(1011, 'revocation store unavailable');
+        return;
+      }
     }
     if (!auth.ok) {
       send(socket, {
@@ -284,6 +368,7 @@ wss.on('connection', async (socket, req) => {
       subs: new ConnectionSubscriptions(),
       subscribeTimestamps: [],
       alive: true,
+      revocationUnavailableSince: null,
     };
     connections.set(socket, state);
 
@@ -414,6 +499,7 @@ wss.on('connection', async (socket, req) => {
     wss,
     close: async () => {
       clearInterval(heartbeat);
+      stopInvalidationListener();
       for (const client of wss.clients) {
         try {
           client.close(1001, 'shutting down');

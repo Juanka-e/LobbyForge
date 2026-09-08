@@ -1,6 +1,6 @@
 ﻿import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { blockUser, listBlockedUsers } from '@lobbyforge/db';
+import { blockUser, findDmChannelByPair, listBlockedUsers } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { requireMaterializedSession } from '@/lib/api-auth';
 import { withApiSecurity } from '@/lib/security-headers';
@@ -36,6 +36,13 @@ async function handlePost(req: Request): Promise<NextResponse> {
   }
   try {
     await blockUser(getDb(), session.session.uid, body.userId);
+    // LF-SEC-003: freeze realtime delivery on the EXISTING DM channel —
+    // a block must stop an open subscription, not just future ones.
+    const dmChannelId = await findDmChannelByPair(getDb(), session.session.uid, body.userId);
+    if (dmChannelId) {
+      const { publishAccessInvalidation } = await import('@/lib/access-invalidation');
+      publishAccessInvalidation({ kind: 'dm-access', channelId: dmChannelId, reason: 'blocked' });
+    }
     return NextResponse.json({ success: true });
   } catch {
     return NextResponse.json({ error: 'Failed to block user.' }, { status: 400 });

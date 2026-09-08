@@ -2,6 +2,83 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - 8th-audit remediation (LF-SEC-001..015) - 2026-09-08
+
+### Fixed
+
+- **LF-SEC-001 (P0) Next.js security patch**: 16.3.1 → 16.3.4 (the
+  advisory range is fixed in ≥16.3.3); eslint-config-next and
+  @next/eslint-plugin-next aligned to 16.3.4.
+- **LF-SEC-002 single-message bypass**: the [messageId] route now runs
+  the SAME canonical policy as the message list (membership +
+  role-gated visibility + READ_MESSAGE_HISTORY) via the new
+  lib/message-authorization.ts (authorizeChannelMessageAccess:
+  read/send/mutate). Mutations additionally require
+  author-or-MANAGE_MESSAGES and NEVER bypass channel visibility via
+  authorship. 11 regression tests including role-removal-after-ID-known.
+- **LF-SEC-004 role hierarchy**: lib/member-authorization.ts
+  (authorizeModerationTarget) now enforces actor-vs-TARGET hierarchy
+  (plus MANAGE_ROLES, owner protection, target membership) — a
+  lower-ranked manager can no longer strip a higher-ranked user's
+  roles with roleIds: []. 9 tests.
+- **LF-SEC-005 kick/ban hierarchy**: kick, ban and timeout all funnel
+  through the SAME canonical moderation gate (kick=KICK_MEMBERS,
+  ban=BAN_MEMBERS, timeout=MODERATE_MEMBERS + strict actor>target
+  ranking). Matrix tests across owner/equal/lower/higher.
+- **LF-SEC-006 DM block**: checkDmChannelAccess (canonical, in
+  @lobbyforge/db) — send/subscribe require participant AND no block in
+  either direction, on EXISTING channels too; history stays readable
+  (documented product policy). REST + WS subscribe use the same helper.
+- **LF-SEC-003 realtime stale authorization**: an access-invalidation
+  Redis bus (lib/access-invalidation.ts) — kick/ban/role changes,
+  channel-policy edits, role permission edits and blocks publish
+  events; the ws-gateway re-runs authorizeTopicSubscribe for the
+  affected live subscriptions, removes failing ones and sends
+  `access_revoked` to the client. Blast-radius matching unit-tested.
+- **LF-SEC-009 revocation fail-open**: tri-state
+  getRevocationStatus('active'|'revoked'|'unavailable') — production
+  handshakes REJECT when the store is unreachable (REST parity), live
+  sockets get a bounded 60s grace then close; the permanent
+  failed-client latch is gone (ioredis reconnects).
+- **LF-SEC-007 heartbeat spoofing**: heartbeats are Ed25519-SIGNED
+  against the registered publicKey (canonical JSON, ±300s window,
+  Redis nonce replay guard). A human cookie alone can no longer
+  update another instance's public stats. 7 tests incl. cross-instance
+  spoof, replay, stale/future timestamps.
+- **LF-SEC-008 desktop handoff**: completion now uses Redis GETDEL
+  (atomic consume — parallel completions yield exactly one winner),
+  REQUIRES and constant-time verifies the state, and a burned code
+  stays burned on wrong-state/deleted-account. 10 tests.
+- **LF-SEC-011 ban visibility (Policy A)**: the ban list is now
+  readable only by the owner or BAN_MEMBERS/MODERATE_MEMBERS/
+  VIEW_AUDIT_LOG holders — ordinary members no longer see moderation
+  metadata.
+- **LF-SEC-012 upload limits**: nginx route-specific caps raised to
+  12m for avatar/banner/server-banner/instance-logo — the app accepts
+  data-URL strings up to 8 MiB, which the old flat 6m rejected at the
+  edge (and the server-banner route had no location at all).
+- **LF-SEC-013 IPv6 classification**: lib/ip-ranges.ts — addresses
+  are PARSED to 128-bit BigInts and checked against explicit CIDRs
+  (no string prefixes). Full audit test table passes: fe80::/10 in
+  every notation, IPv4-mapped/translated embedded-policy, CGNAT,
+  ULA, multicast, NAT64, documentation ranges; unparseable → blocked.
+  The plugin installer now uses it.
+- **LF-SEC-014 body guard**: enforceBodyLimit in withApiSecurity —
+  streamed bodies (no trustworthy Content-Length) are read with a
+  byte counter and genuinely 413'd; the handler receives a bounded
+  replacement Request. 5 tests.
+- **LF-SEC-010 (short-term)**: the dynamic plugin loader's env-scrub
+  restore moved into finally — a thrown import can no longer leave
+  the host process without its secrets. The feature stays
+  default-off (SEC-008 wave-5 gates remain pinned).
+
+### Added
+
+- **LF-SEC-015**: a scheduled+push dependency-audit job in the
+  security workflow (lockfile-aware pnpm audit, prod deps,
+  moderate+ gate) — advisories against an UNCHANGED lockfile now
+  surface weekly, not only on merges.
+
 ## [Unreleased] - 7th-audit remediation wave 5: final findings - 2026-09-07
 
 ### Added

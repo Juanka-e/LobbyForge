@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import {
   isDmChannelParticipant,
+  checkDmChannelAccess,
   listDmMessages,
   sendDmMessage,
   deleteDmMessage,
@@ -66,8 +67,10 @@ const SendMessageSchema = z.object({
 
 /**
  * POST /api/dm/{channelId}/messages — send a DM message.
- * Only participants can send. Block check happens at channel-open time
- * (POST /api/dm), but we also mask here as defense-in-depth.
+ * LF-SEC-006: the block check runs against the EXISTING channel too —
+ * the old code only checked participation, so a channel created before
+ * a block stayed usable. Communication freezes in both directions
+ * (history stays readable — documented product policy).
  */
 async function handlePost(
   req: Request,
@@ -86,9 +89,15 @@ async function handlePost(
   }
 
   const db = getDb();
-  const isParticipant = await isDmChannelParticipant(db, channelId, uid);
-  if (!isParticipant) {
+  const access = await checkDmChannelAccess(db, channelId, uid, 'send');
+  if (access === 'not_found' || access === 'not_participant') {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+  if (access === 'blocked') {
+    return NextResponse.json(
+      { error: 'You cannot send messages in this conversation' },
+      { status: 403 }
+    );
   }
 
   try {

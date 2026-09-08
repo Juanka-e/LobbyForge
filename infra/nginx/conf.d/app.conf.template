@@ -109,9 +109,13 @@ server {
     # Client max body size (JSON API routes — app layer enforces stricter limits)
     client_max_body_size 2m;
 
-    # Avatar/banner uploads need more space
+    # LF-SEC-012: image uploads carry base64 DATA URLs — the app caps
+    # the dataUrl STRING at 6 MiB (avatar/logo) and 8 MiB (banners), so
+    # the edge must accept string-length + JSON envelope + slack. The
+    # old flat 6m rejected VALID banners (8 MiB data URL) before the app
+    # ever saw them, and the server-banner route wasn't covered at all.
     location ~ ^/api/users/me/(avatar|banner) {
-        client_max_body_size 6m;
+        client_max_body_size 12m;
         proxy_pass http://web:3000;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -120,6 +124,18 @@ server {
         # address ($remote_addr), never $proxy_add_x_forwarded_for (that
         # preserves an attacker-supplied chain and lets them rotate the
         # rate-limit key with every request).
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Server banners (8 MiB data URL) and the instance logo (2 MiB) —
+    # same base64-inflation math as the user avatar/banner location.
+    location ~ ^/api/(servers/[^/]+/banner|admin/instance-logo) {
+        client_max_body_size 12m;
+        proxy_pass http://web:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
     }

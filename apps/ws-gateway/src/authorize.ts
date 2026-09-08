@@ -13,7 +13,7 @@ import {
   getGameSessionById,
   getServerById,
   getUserPermissions,
-  isDmChannelParticipant,
+  checkDmChannelAccess,
   isServerMember,
   canMemberAccessChannel,
 } from '@lobbyforge/db';
@@ -31,14 +31,17 @@ export async function authorizeTopicSubscribe(
   const parsed = parseTopic(topic);
   if (!parsed) return { ok: false, reason: 'unknown_topic' };
 
-  // DM topics: check channel participation instead of server membership.
+  // DM topics: the CANONICAL DM policy (LF-SEC-006) — a participant of
+  // a channel where either side has blocked the other cannot subscribe,
+  // exactly like the REST send path.
   if (parsed.kind === 'dm') {
-    const isParticipant = await isDmChannelParticipant(
-      db as Parameters<typeof isDmChannelParticipant>[0],
+    const access = await checkDmChannelAccess(
+      db as Parameters<typeof checkDmChannelAccess>[0],
       parsed.resourceId,
-      userId
+      userId,
+      'send'
     );
-    if (!isParticipant) return { ok: false, reason: 'forbidden' };
+    if (access !== 'ok') return { ok: false, reason: 'forbidden' };
     return { ok: true, kind: 'dm', serverId: parsed.serverId, resourceId: parsed.resourceId };
   }
 

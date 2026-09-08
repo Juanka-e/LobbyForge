@@ -53,41 +53,59 @@ export function validateGuestFromHeaders(cookieHeader: string | undefined | null
  * handshake (and periodically on live sockets) so "log out everywhere"
  * disconnects gateway subscribers too, not just REST callers.
  */
-// SEC-003: ONE shared client for revocation lookups — a per-call
-// connect/disconnect burned a connection slot per handshake (DoS surface).
+// SEC-003 + LF-SEC-009: ONE shared client for revocation lookups — a
+// per-call connect/disconnect burned a connection slot per handshake
+// (DoS surface). ioredis reconnects on its own; the old code ALSO had a
+// permanent revokedClientFailed latch, so a single transient error
+// silently disabled revocation checks until process restart. The latch
+// is gone — the check now reports 'unavailable' and callers apply an
+// explicit policy (fail-closed handshake, bounded-grace heartbeat).
 let revokedClient: { sismember: (key: string, member: string) => Promise<number> } | null = null;
-let revokedClientFailed = false;
 
 async function getRevokedClient() {
   if (revokedClient) return revokedClient;
-  if (revokedClientFailed) return null; // don't retry every heartbeat
   try {
     const RedisMod = await import('ioredis');
     const Redis = ('default' in RedisMod ? RedisMod.default : RedisMod) as unknown as new (
       url: string
     ) => { sismember: (key: string, member: string) => Promise<number>; on: (e: string, cb: () => void) => void };
     const client = new Redis(process.env.REDIS_URL || 'redis://:lobbyforge_dev@localhost:6379');
-    client.on('error', () => { revokedClient = null; revokedClientFailed = true; });
+    // Clear (do NOT latch) on error — ioredis keeps reconnecting and the
+    // next successful command reuses the same client.
+    client.on('error', () => { /* surfaced via the tri-state result */ });
     revokedClient = client;
     return client;
   } catch {
-    revokedClientFailed = true;
     return null;
   }
 }
 
-export async function isGuestSessionRevoked(uid: string, gid: string): Promise<boolean> {
+export type RevocationStatus = 'active' | 'revoked' | 'unavailable';
+
+/**
+ * LF-SEC-009: tri-state revocation check. 'unavailable' means Redis
+ * could not answer — the caller must apply an explicit policy instead
+ * of silently treating the session as active:
+ *   handshake  → reject in production (REST's fail-closed model)
+ *   heartbeat  → bounded grace, then close (no indefinite fail-open)
+ */
+export async function getRevocationStatus(uid: string, gid: string): Promise<RevocationStatus> {
   const client = await getRevokedClient();
-  if (!client) {
-    // Redis unavailable: fail OPEN on the realtime path (the REST layer
-    // is the strict fail-closed gate); the handshake HMAC still applies.
-    return false;
-  }
+  if (!client) return 'unavailable';
   try {
     const key = `lf:${process.env.NODE_ENV || 'dev'}:session-revoked:${uid}`;
     const member = await client.sismember(key, gid);
-    return member === 1;
+    return member === 1 ? 'revoked' : 'active';
   } catch {
-    return false;
+    return 'unavailable';
   }
+}
+
+/**
+ * Backward-compatible boolean view: true only when Redis CONFIRMED the
+ * revocation. 'unavailable' is NOT "not revoked" — use
+ * getRevocationStatus for policy decisions.
+ */
+export async function isGuestSessionRevoked(uid: string, gid: string): Promise<boolean> {
+  return (await getRevocationStatus(uid, gid)) === 'revoked';
 }

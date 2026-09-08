@@ -97,6 +97,48 @@ export function requestSizeGuard(req: Request, maxBodyBytes = DEFAULT_MAX_BODY_B
   return null;
 }
 
+/**
+ * LF-SEC-014: enforce the per-route byte limit on the REAL body, not
+ * just the Content-Length header. Chunked/HTTP2 requests reach the app
+ * without a trustworthy length — for those the stream is read with a
+ * byte counter and truncated requests get a genuine 413 (the nginx edge
+ * stays the hard cap; this closes the direct-exposure/custom-proxy
+ * gap). Returns a REPLACEMENT Request carrying the (already buffered,
+ * size-checked) body so the handler's req.json() consumes bounded data.
+ */
+export async function enforceBodyLimit(
+  req: Request,
+  maxBodyBytes = DEFAULT_MAX_BODY_BYTES
+): Promise<Request | NextResponse> {
+  const headerReject = requestSizeGuard(req, maxBodyBytes);
+  if (headerReject) return headerReject;
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return req;
+  if (!req.body) return req;
+
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value: chunk } = await reader.read();
+    if (done) break;
+    total += chunk.byteLength;
+    if (total > maxBodyBytes) {
+      await reader.cancel().catch(() => undefined);
+      return NextResponse.json({ error: 'Request body too large' }, { status: 413 });
+    }
+    chunks.push(chunk);
+  }
+  const buffered = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    buffered.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  // Buffered (fully-read) body — no duplex requirement. The cast works
+  // around TS's lib dom RequestInit lacking the undici duplex field.
+  return new Request(req, { body: buffered } as RequestInit);
+}
+
 async function revokedSessionResponse(req: Request): Promise<NextResponse | null> {
   const cookie = req.headers.get('cookie');
   if (!cookie?.includes('lf_guest=')) return null;
@@ -299,8 +341,10 @@ export function withApiSecurity<TContext = unknown>(
     if (notAllowed) return applySecurityHeaders(notAllowed);
     const badOrigin = originGuard(req);
     if (badOrigin) return applySecurityHeaders(badOrigin);
-    const oversized = requestSizeGuard(req, options.maxBodyBytes);
-    if (oversized) return applySecurityHeaders(oversized);
+    // LF-SEC-014: bounded-reader enforcement (header + streamed bytes).
+    const guarded = await enforceBodyLimit(req, options.maxBodyBytes);
+    if (guarded instanceof NextResponse) return applySecurityHeaders(guarded);
+    const boundedReq = guarded;
     if (options.sessionRevocation !== 'bypass') {
       const revoked = await revokedSessionResponse(req);
       if (revoked) return applySecurityHeaders(revoked);
@@ -319,7 +363,7 @@ export function withApiSecurity<TContext = unknown>(
       if (blocked) return applySecurityHeaders(blocked);
     }
 
-    const response = await handler(req, ctx);
+    const response = await handler(boundedReq, ctx);
     return applySecurityHeaders(response);
   };
 }

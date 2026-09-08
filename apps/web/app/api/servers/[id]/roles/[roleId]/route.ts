@@ -227,6 +227,19 @@ async function handlePatch(req: Request, ctx: { params: Promise<{ id: string; ro
       ...(body.position !== undefined ? { position: body.position } : {}),
       ...(body.permissions !== undefined ? { permissions: body.permissions } : {}),
     });
+    // LF-SEC-003: a role edit can change what ANY holder of the role
+    // may see — revalidate every live subscription in this server.
+    if (
+      body.permissions !== undefined ||
+      body.position !== undefined
+    ) {
+      const { publishAccessInvalidation } = await import('@/lib/access-invalidation');
+      publishAccessInvalidation({
+        kind: 'server-policy',
+        serverId,
+        reason: 'roles_permissions_changed',
+      });
+    }
     void logAction(getDb(), {
       serverId,
       actorUserId: session.uid,

@@ -5,6 +5,7 @@ const requireMaterializedSession = vi.fn();
 const listPublicRegistryInstances = vi.fn();
 const upsertRegistryInstance = vi.fn();
 const heartbeatRegistryInstance = vi.fn();
+const getRegistryInstanceByInstanceId = vi.fn();
 
 vi.mock('@/lib/api-auth', () => ({ requireMaterializedSession }));
 vi.mock('@lobbyforge/db', () => {
@@ -15,6 +16,7 @@ vi.mock('@lobbyforge/db', () => {
     listPublicRegistryInstances,
     upsertRegistryInstance,
     heartbeatRegistryInstance,
+    getRegistryInstanceByInstanceId,
     RegistryInstanceOwnedError,
   };
 });
@@ -28,6 +30,10 @@ vi.mock('@lobbyforge/registry', () => ({
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
 vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));
 
+// LF-SEC-007: heartbeat replay guard — in-memory Redis mock.
+const redisSet = vi.fn().mockResolvedValue('OK');
+vi.mock('@/lib/redis', () => ({ redis: { set: redisSet } }));
+
 const UID = '00000000-0000-0000-0000-000000000099';
 
 beforeEach(() => {
@@ -36,6 +42,8 @@ beforeEach(() => {
   listPublicRegistryInstances.mockReset();
   upsertRegistryInstance.mockReset();
   heartbeatRegistryInstance.mockReset();
+  getRegistryInstanceByInstanceId.mockReset();
+  redisSet.mockReset().mockResolvedValue('OK');
   requireMaterializedSession.mockReturnValue({
     ok: true,
     session: { uid: UID, gid: 'g_1', name: 'Owner', exp: 123 },
@@ -165,14 +173,54 @@ describe('POST /api/directory/register', () => {
   });
 });
 
-describe('POST /api/directory/heartbeat', () => {
-  it('records live stats', async () => {
+// LF-SEC-007: a REAL Ed25519 keypair — the route must verify genuine
+// signatures with node:crypto, not a mocked verify.
+const nodeCrypto = await import('node:crypto');
+const edSign = nodeCrypto.sign;
+const { publicKey, privateKey } = nodeCrypto.generateKeyPairSync('ed25519');
+const publicSpkiB64 = publicKey
+  .export({ format: 'der', type: 'spki' })
+  .toString('base64');
+
+describe('POST /api/directory/heartbeat — LF-SEC-007 signed contract', () => {
+
+  function signedBody(overrides: Record<string, unknown> = {}) {
+    const base = {
+      instanceId: 'inst-1',
+      timestamp: Math.floor(Date.now() / 1000),
+      nonce: 'n'.repeat(24),
+      stats: { onlineUsers: 50, doctorScore: 90 },
+      ...overrides,
+    };
+    const canonical = JSON.stringify({
+      instanceId: base.instanceId,
+      timestamp: base.timestamp,
+      nonce: base.nonce,
+      stats: base.stats,
+    });
+    return {
+      ...base,
+      signature:
+        overrides.signature ??
+        edSign(null, Buffer.from(canonical, 'utf8'), privateKey).toString('base64'),
+    };
+  }
+
+  beforeEach(() => {
+    getRegistryInstanceByInstanceId.mockResolvedValue({
+      instanceId: 'inst-1',
+      publicKey: publicSpkiB64,
+      isBlocked: false,
+    });
     heartbeatRegistryInstance.mockResolvedValue(undefined);
+  });
+
+  it('records stats for a correctly SIGNED heartbeat', async () => {
     const { POST } = await import('../heartbeat/route.js');
     const res = await POST(
       new Request('https://example.test/api/directory/heartbeat', {
         method: 'POST',
-        body: JSON.stringify({ instanceId: 'inst-1', onlineUsers: 50, doctorScore: 90 }),
+        body: JSON.stringify(signedBody()),
       }),
       {}
     );
@@ -184,15 +232,84 @@ describe('POST /api/directory/heartbeat', () => {
     );
   });
 
-  it('rejects invalid body (missing instanceId)', async () => {
+  it('rejects an INVALID signature (cross-instance spoof)', async () => {
+    const { POST } = await import('../heartbeat/route.js');
+    const body = signedBody({ signature: Buffer.alloc(64, 7).toString('base64') });
+    const res = await POST(
+      new Request('https://example.test/api/directory/heartbeat', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+      {}
+    );
+    expect(res.status).toBe(401);
+    expect(heartbeatRegistryInstance).not.toHaveBeenCalled();
+  });
+
+  it('a cookie alone is NOT sufficient anymore (missing fields → 400)', async () => {
     const { POST } = await import('../heartbeat/route.js');
     const res = await POST(
       new Request('https://example.test/api/directory/heartbeat', {
         method: 'POST',
-        body: JSON.stringify({ onlineUsers: 50 }),
+        body: JSON.stringify({ instanceId: 'inst-1', onlineUsers: 50 }),
       }),
       {}
     );
     expect(res.status).toBe(400);
+    expect(heartbeatRegistryInstance).not.toHaveBeenCalled();
+  });
+
+  it('rejects a STALE timestamp', async () => {
+    const { POST } = await import('../heartbeat/route.js');
+    const body = signedBody({ timestamp: Math.floor(Date.now() / 1000) - 3600 });
+    const res = await POST(
+      new Request('https://example.test/api/directory/heartbeat', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+      {}
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('rejects a far-FUTURE timestamp', async () => {
+    const { POST } = await import('../heartbeat/route.js');
+    const body = signedBody({ timestamp: Math.floor(Date.now() / 1000) + 3600 });
+    const res = await POST(
+      new Request('https://example.test/api/directory/heartbeat', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+      {}
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('rejects a REPLAYED nonce', async () => {
+    redisSet.mockResolvedValue(null); // NX lost — the nonce already burned
+    const { POST } = await import('../heartbeat/route.js');
+    const body = signedBody();
+    const res = await POST(
+      new Request('https://example.test/api/directory/heartbeat', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+      {}
+    );
+    expect(res.status).toBe(401);
+    expect(heartbeatRegistryInstance).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unknown instance (404, no enumeration detail)', async () => {
+    getRegistryInstanceByInstanceId.mockResolvedValue(null);
+    const { POST } = await import('../heartbeat/route.js');
+    const res = await POST(
+      new Request('https://example.test/api/directory/heartbeat', {
+        method: 'POST',
+        body: JSON.stringify(signedBody()),
+      }),
+      {}
+    );
+    expect(res.status).toBe(404);
   });
 });

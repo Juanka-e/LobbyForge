@@ -44,6 +44,8 @@ export interface RegistryInstanceRow {
   lastHeartbeatAt: Date | null;
   createdAt: Date;
   ownerUserId: string | null;
+  /** Ed25519 public key (PEM or base64 DER SPKI) — heartbeat signer. */
+  publicKey: string;
 }
 
 /** List public, listed, non-blocked instances for the discovery directory. */

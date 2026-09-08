@@ -1,18 +1,15 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { CorePermission, hasPermission } from '@lobbyforge/core';
 import {
   setMemberRoles,
   getRoleById,
-  getHighestRolePosition,
-  getServerById,
-  getUserPermissions,
-  isServerMember,
   logAction,
 } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
+import { authorizeModerationTarget } from '@/lib/member-authorization';
+import { publishAccessInvalidation } from '@/lib/access-invalidation';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -66,19 +63,6 @@ async function handlePut(
         { status: 400 }
       );
     }
-    const server = await getServerById(getDb(), serverId);
-    if (!server) {
-      return NextResponse.json({ error: 'Server not found' }, { status: 404 });
-    }
-    if (!(await isServerMember(getDb(), session.uid, serverId))) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
-
-    const permissions = await getUserPermissions(getDb(), session.uid, serverId);
-    if (!hasPermission(permissions, CorePermission.MANAGE_ROLES)) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
-
     let body: z.infer<typeof AssignRoleSchema>;
     try {
       const raw = await req.json();
@@ -92,24 +76,29 @@ async function handlePut(
 
     const uniqueRoleIds = Array.from(new Set(body.roleIds));
 
-    // Discord-style hierarchy:
-    //  - Only the OWNER may change the owner's roles (admins cannot).
-    //  - ADMINISTRATOR does NOT bypass ranking: everyone else may only
-    //    assign roles STRICTLY BELOW their own highest role.
-    if (targetUserId === server.ownerUserId && session.uid !== server.ownerUserId) {
-      return NextResponse.json(
-        { error: "Only the server owner can change the owner's roles" },
-        { status: 403 }
-      );
-    }
-    if (session.uid !== server.ownerUserId) {
-      const actorHighest = await getHighestRolePosition(getDb(), serverId, session.uid);
+    // LF-SEC-004: canonical moderation gate — MANAGE_ROLES + the actor
+    // must strictly outrank the TARGET (the old code only checked the
+    // assigned roles against the actor, so a lower role manager could
+    // strip a higher-ranked user's roles with roleIds: []). Only the
+    // owner may change the owner's roles; ADMINISTRATOR never bypasses
+    // ranking. The helper also verifies the target is a member.
+    const gate = await authorizeModerationTarget({
+      operation: 'set_roles',
+      serverId,
+      actorUserId: session.uid,
+      targetUserId,
+    });
+    if (!gate.ok) return gate.response;
+
+    // Assigned roles must sit STRICTLY below the actor's highest role
+    // (owner assigns freely — but roles must still exist in this server).
+    if (session.uid !== gate.context.server.ownerUserId) {
       for (const roleId of uniqueRoleIds) {
         const role = await getRoleById(getDb(), roleId);
         if (!role || role.serverId !== serverId) {
           return NextResponse.json({ error: 'Role not found in this server' }, { status: 404 });
         }
-        if (role.position >= actorHighest) {
+        if (role.position >= gate.context.actorHighest) {
           return NextResponse.json(
             { error: `You can only assign roles below your highest role (role "${role.name}" is at or above it)` },
             { status: 403 }
@@ -117,7 +106,6 @@ async function handlePut(
         }
       }
     } else {
-      // Owner assigns freely — still verify the roles exist in this server.
       for (const roleId of uniqueRoleIds) {
         const role = await getRoleById(getDb(), roleId);
         if (!role || role.serverId !== serverId) {
@@ -126,15 +114,15 @@ async function handlePut(
       }
     }
 
-    // Verify the target user is actually a member of this server before
-    // assigning roles. Without this, an admin can create role assignments
-    // for arbitrary user IDs (including users who never joined).
-    const targetIsMember = server.ownerUserId === targetUserId || await isServerMember(getDb(), targetUserId, serverId);
-    if (!targetIsMember) {
-      return NextResponse.json({ error: 'Target user is not a member of this server' }, { status: 404 });
-    }
-
     const updated = await setMemberRoles(getDb(), serverId, targetUserId, uniqueRoleIds);
+    // LF-SEC-003: role changes must invalidate the target's LIVE
+    // subscriptions (private-channel access may have just changed).
+    publishAccessInvalidation({
+      kind: 'user-server-access',
+      serverId,
+      userId: targetUserId,
+      reason: 'roles_changed',
+    });
     void logAction(getDb(), {
       serverId,
       actorUserId: session.uid,

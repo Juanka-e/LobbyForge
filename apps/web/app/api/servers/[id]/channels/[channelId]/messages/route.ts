@@ -4,10 +4,7 @@ import { MessageContentSchema } from '@lobbyforge/core';
 import {
   createMessage,
   getActiveMemberTimeout,
-  getChannelById,
-  getServerById,
   getBlockedUserIds,
-  isServerMember,
   listMessagesForChannel,
   logAction,
   type MessageRow,
@@ -20,6 +17,7 @@ import {
   authorizeChannelVisibility,
   authorizeServerPermission,
 } from '@/lib/permissions';
+import { authorizeChannelMessageAccess } from '@/lib/message-authorization';
 import { publishChatMessage } from '@/lib/chat-bus';
 
 export const dynamic = 'force-dynamic';
@@ -97,49 +95,6 @@ async function resolveSession(req: Request): Promise<
   return { ok: true, uid: session.uid };
 }
 
-/**
- * Authorization for messages: the caller must be a member of the parent
- * server, and the channel + server must both exist / not be soft-deleted.
- * The owner-only "edit / delete" rules are handled in the [messageId] route
- * — this layer just gates "can you read / write messages here at all".
- */
-async function assertMemberAndChannel(
-  serverId: string,
-  channelId: string,
-  userId: string
-): Promise<
-  | { ok: true }
-  | { ok: false; response: NextResponse }
-> {
-  if (!serverId || !channelId) {
-    return { ok: false, response: NextResponse.json({ error: 'Server id and channel id are required' }, { status: 400 }) };
-  }
-  const server = await getServerById(getDb(), serverId);
-  if (!server) {
-    return { ok: false, response: NextResponse.json({ error: 'Server not found' }, { status: 404 }) };
-  }
-  const member = await isServerMember(getDb(), userId, serverId);
-  if (!member) {
-    return { ok: false, response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
-  }
-  const channel = await getChannelById(getDb(), channelId);
-  if (!channel) {
-    return { ok: false, response: NextResponse.json({ error: 'Channel not found' }, { status: 404 }) };
-  }
-  if (channel.serverId !== serverId) {
-    return { ok: false, response: NextResponse.json({ error: 'Channel not found' }, { status: 404 }) };
-  }
-  // Role-gated visibility (0028) — owner/manage_channels bypass inside.
-  const visibility = await authorizeChannelVisibility(
-    userId,
-    serverId,
-    channelId,
-    server.ownerUserId ?? null
-  );
-  if (!visibility.ok) return visibility;
-  return { ok: true };
-}
-
 async function handleGet(
   req: Request,
   ctx: { params: Promise<{ id: string; channelId: string }> }
@@ -150,17 +105,16 @@ async function handleGet(
   if (!session.ok) return session.response;
 
   try {
-    const access = await assertMemberAndChannel(serverId, channelId, session.uid);
-    if (!access.ok) return access.response;
-
-    // READ_MESSAGE_HISTORY: membership alone is not enough — a role can
-    // revoke history (write-only channels, announcement-style rooms).
-    const historyAuth = await authorizeServerPermission(
-      session.uid,
+    // LF-SEC-002: the canonical policy (membership + visibility +
+    // READ_MESSAGE_HISTORY) — the SAME helper the single-message route
+    // uses, so neither side can drift weaker than the other.
+    const access = await authorizeChannelMessageAccess({
+      userId: session.uid,
       serverId,
-      CorePermission.READ_MESSAGE_HISTORY
-    );
-    if (!historyAuth.ok) return historyAuth.response;
+      channelId,
+      operation: 'read',
+    });
+    if (!access.ok) return access.response;
 
     // Optional `before` cursor for pagination: ISO-8601 timestamp.
     // The list query always orders newest-first, so "before" is a
@@ -224,7 +178,15 @@ async function handlePost(
   if (!session.ok) return session.response;
 
   try {
-    const access = await assertMemberAndChannel(serverId, channelId, session.uid);
+    // LF-SEC-002: canonical policy for sends — membership + channel
+    // visibility + SEND_MESSAGES in one helper (owner has SEND_MESSAGES
+    // via @admin; members via the @everyone default role).
+    const access = await authorizeChannelMessageAccess({
+      userId: session.uid,
+      serverId,
+      channelId,
+      operation: 'send',
+    });
     if (!access.ok) return access.response;
 
     let body: z.infer<typeof CreateMessageSchema>;
@@ -237,12 +199,6 @@ async function handlePost(
         { status: 400 }
       );
     }
-
-    // Permission check — posting a message requires SEND_MESSAGES. The
-    // owner has it via @admin; members of the server have it via the
-    // @everyone default role seeded on server creation.
-    const auth = await authorizeServerPermission(session.uid, serverId, CorePermission.SEND_MESSAGES);
-    if (!auth.ok) return auth.response;
 
     // MODERATE_MEMBERS timeout: timed-out members cannot send messages
     // until the timeout expires (cleared with the same endpoint).

@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { CorePermission, hasPermission } from '@lobbyforge/core';
 import {
-  getHighestRolePosition,
   getServerById,
   getUserPermissions,
   isServerMember,
@@ -12,6 +11,7 @@ import {
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
+import { authorizeModerationTarget } from '@/lib/member-authorization';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -93,27 +93,16 @@ async function handlePut(
       }
     }
 
-    if (targetUserId === server.ownerUserId) {
-      return NextResponse.json({ error: 'The server owner cannot be timed out' }, { status: 403 });
-    }
-    if (!(server.ownerUserId === targetUserId || (await isServerMember(getDb(), targetUserId, serverId)))) {
-      return NextResponse.json({ error: 'Target user is not a member of this server' }, { status: 404 });
-    }
-
-    // Discord-style hierarchy: the actor's highest role must be strictly
-    // above the target's highest role (owner bypasses).
-    if (session.uid !== server.ownerUserId) {
-      const [actorHighest, targetHighest] = await Promise.all([
-        getHighestRolePosition(getDb(), serverId, session.uid),
-        getHighestRolePosition(getDb(), serverId, targetUserId),
-      ]);
-      if (targetHighest >= actorHighest) {
-        return NextResponse.json(
-          { error: 'You can only time out members below your highest role' },
-          { status: 403 }
-        );
-      }
-    }
+    // LF-SEC-005: timeout now funnels through the SAME canonical
+    // moderation gate as kick/ban/roles — owner protection, target
+    // membership and the actor-vs-target hierarchy in one place.
+    const gate = await authorizeModerationTarget({
+      operation: 'timeout',
+      serverId,
+      actorUserId: session.uid,
+      targetUserId,
+    });
+    if (!gate.ok) return gate.response;
 
     const updated = await setMemberTimeout(getDb(), serverId, targetUserId, until);
     void logAction(getDb(), {

@@ -14,6 +14,8 @@ import {
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
+import { authorizeModerationTarget } from '@/lib/member-authorization';
+import { publishAccessInvalidation } from '@/lib/access-invalidation';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -76,8 +78,20 @@ async function handleGet(req: Request, ctx: { params: Promise<{ id: string }> })
     if (!server) {
       return NextResponse.json({ error: 'Server not found' }, { status: 404 });
     }
+    // LF-SEC-011 (Policy A): the ban list exposes moderation-sensitive
+    // data (reasons, moderator identities). It is readable only by the
+    // owner or members holding a moderation-relevant permission — an
+    // ordinary member no longer sees who was banned or why.
     if (server.ownerUserId !== session.uid) {
       if (!(await isServerMember(getDb(), session.uid, serverId))) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
+      const permissions = await getUserPermissions(getDb(), session.uid, serverId);
+      const mayViewBans =
+        hasPermission(permissions, CorePermission.BAN_MEMBERS) ||
+        hasPermission(permissions, CorePermission.MODERATE_MEMBERS) ||
+        hasPermission(permissions, CorePermission.VIEW_AUDIT_LOG);
+      if (!mayViewBans) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }
     }
@@ -124,10 +138,30 @@ async function handlePost(req: Request, ctx: { params: Promise<{ id: string }> }
       return NextResponse.json({ error: 'Cannot ban the server owner' }, { status: 400 });
     }
 
+    // LF-SEC-005: bans follow the SAME hierarchy model as timeout/roles
+    // (the old code only checked BAN_MEMBERS, so a lower-ranked
+    // moderator could ban a higher-ranked user).
+    const gate = await authorizeModerationTarget({
+      operation: 'ban',
+      serverId,
+      actorUserId: session.uid,
+      targetUserId: body.userId,
+    });
+    if (!gate.ok) return gate.response;
+
     const expiresAt = body.expiresAt ? new Date(body.expiresAt) : null;
     if (expiresAt && Number.isNaN(expiresAt.getTime())) {
       return NextResponse.json({ error: 'Invalid expiresAt' }, { status: 400 });
     }
+
+    // LF-SEC-003: a ban must close the target's live server topics
+    // immediately (not just at their next reconnect).
+    publishAccessInvalidation({
+      kind: 'user-server-access',
+      serverId,
+      userId: body.userId,
+      reason: 'ban',
+    });
 
     const result = await banUser(getDb(), {
       serverId,

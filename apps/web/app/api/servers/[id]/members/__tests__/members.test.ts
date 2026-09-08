@@ -9,6 +9,7 @@ const removeMember = vi.fn();
 const setMemberRoles = vi.fn();
 const getRoleById = vi.fn();
 const getUserPermissions = vi.fn();
+const getHighestRolePosition = vi.fn();
 const logAction = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('@lobbyforge/db', () => ({
@@ -19,6 +20,7 @@ vi.mock('@lobbyforge/db', () => ({
   setMemberRoles,
   getRoleById,
   getUserPermissions,
+  getHighestRolePosition,
   logAction,
   EVERYONE_ROLE_NAME: '@everyone',
 }));
@@ -44,6 +46,12 @@ beforeEach(() => {
   setMemberRoles.mockReset();
   getRoleById.mockReset();
   getUserPermissions.mockReset();
+  // LF-SEC-005: kick hierarchy — the ACTOR outranks the TARGET by default.
+  getHighestRolePosition
+    .mockReset()
+    .mockImplementation(async (_db: unknown, _sid: string, userId: string) =>
+      userId === TARGET_ID ? 10 : 50
+    );
   logAction.mockReset();
   logAction.mockResolvedValue(undefined);
 });
@@ -246,6 +254,29 @@ describe('DELETE /api/servers/{id}/members/{userId}', () => {
     });
     expect(res.status).toBe(200);
     expect(removeMember).toHaveBeenCalledWith(expect.anything(), SERVER_ID, TARGET_ID);
+  });
+
+  it('LF-SEC-005: a lower-ranked moderator cannot kick a higher-ranked user', async () => {
+    getServerById.mockResolvedValue(mockServer(OWNER_ID));
+    isServerMember.mockResolvedValue(true);
+    getUserPermissions.mockResolvedValue(['kick_members']);
+    getHighestRolePosition.mockImplementation(
+      async (_db: unknown, _sid: string, userId: string) =>
+        userId === TARGET_ID ? 80 : 50
+    );
+    const { DELETE } = await loadItemRoute();
+    const req = new Request(
+      `https://example.test/api/servers/${SERVER_ID}/members/${TARGET_ID}`,
+      {
+        method: 'DELETE',
+        headers: { cookie: makeSessionCookie() },
+      }
+    );
+    const res = await DELETE(req, {
+      params: Promise.resolve({ id: SERVER_ID, userId: TARGET_ID }),
+    });
+    expect(res.status).toBe(403);
+    expect(removeMember).not.toHaveBeenCalled();
   });
 });
 

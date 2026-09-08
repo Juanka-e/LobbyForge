@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
-import { CorePermission, hasPermission } from '@lobbyforge/core';
 import {
   getServerById,
-  getUserPermissions,
   isServerMember,
   logAction,
   removeMember,
@@ -10,6 +8,8 @@ import {
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
+import { authorizeModerationTarget } from '@/lib/member-authorization';
+import { publishAccessInvalidation } from '@/lib/access-invalidation';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -78,13 +78,29 @@ async function handleDelete(
 
     // Self-leave is allowed for any member (no KICK_MEMBERS required).
     if (targetUserId !== session.uid) {
-      const permissions = await getUserPermissions(getDb(), session.uid, serverId);
-      if (!hasPermission(permissions, CorePermission.KICK_MEMBERS)) {
-        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-      }
+      // LF-SEC-005: kicks go through the SAME hierarchy model as
+      // timeout/roles — KICK_MEMBERS plus the actor strictly outranking
+      // the target (the old code only checked the permission bit, so a
+      // lower-ranked moderator could kick a higher-ranked user).
+      const gate = await authorizeModerationTarget({
+        operation: 'kick',
+        serverId,
+        actorUserId: session.uid,
+        targetUserId,
+      });
+      if (!gate.ok) return gate.response;
     }
 
     await removeMember(getDb(), serverId, targetUserId);
+    if (targetUserId !== session.uid) {
+      // LF-SEC-003: a kick must close the target's live server topics.
+      publishAccessInvalidation({
+        kind: 'user-server-access',
+        serverId,
+        userId: targetUserId,
+        reason: 'kick',
+      });
+    }
     void logAction(getDb(), {
       serverId,
       actorUserId: session.uid,
