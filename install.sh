@@ -127,6 +127,12 @@ LK_API_SECRET=$(reuse_env LIVEKIT_API_SECRET "$(openssl rand -hex 32)")
 # LF-019: shared coturn <-> LiveKit TURN credential (hex — render-configs
 # validates the shape before writing it into both configs).
 TURN_SECRET=$(reuse_env LOBBYFORGE_TURN_SECRET "$(openssl rand -hex 32)")
+# LF-SEC-010: shared tokens for the isolated plugin-worker runtime
+# (RPC auth + the storage-capability proxy). Unused unless dynamic
+# plugins are enabled, but generated unconditionally so the compose
+# interpolation always resolves.
+PLUGIN_WORKER_TOKEN=$(reuse_env LOBBYFORGE_PLUGIN_WORKER_TOKEN "$(openssl rand -hex 32)")
+PLUGIN_STORAGE_TOKEN=$(reuse_env LOBBYFORGE_PLUGIN_STORAGE_TOKEN "$(openssl rand -hex 32)")
 # V5-003: coturn public address behind 1:1 NAT. Reused from an existing
 # .env.prod; export LOBBYFORGE_TURN_EXTERNAL_IP on the first run to set
 # it. Empty = coturn auto-detects (correct for public-interface VPSes).
@@ -219,6 +225,8 @@ LOBBYFORGE_SESSION_SECRET=$SESSION_SECRET
 LOBBYFORGE_ADMIN_TOKEN=$ADMIN_TOKEN
 LOBBYFORGE_SETUP_TOKEN=$SETUP_TOKEN
 LOBBYFORGE_TURN_SECRET=$TURN_SECRET
+LOBBYFORGE_PLUGIN_WORKER_TOKEN=$PLUGIN_WORKER_TOKEN
+LOBBYFORGE_PLUGIN_STORAGE_TOKEN=$PLUGIN_STORAGE_TOKEN
 LOBBYFORGE_TURN_EXTERNAL_IP=$TURN_EXTERNAL_IP
 
 # Product

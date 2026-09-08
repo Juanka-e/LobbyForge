@@ -89,6 +89,13 @@ server {
         proxy_read_timeout 86400;
     }
 
+    # LF-SEC-010: internal service endpoints (plugin-worker storage
+    # capability proxy) are container-network only — never routable
+    # from the public edge.
+    location /api/internal/ {
+        return 404;
+    }
+
     # Next.js app
     location / {
         proxy_pass http://web:3000;

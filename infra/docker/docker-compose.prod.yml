@@ -101,6 +101,13 @@ services:
       # compose-internal Redis (not localhost) in the container network.
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - DATABASE_URL=postgres://${POSTGRES_USER:-lobbyforge}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-lobbyforge}
+      # LF-SEC-010: dynamic plugins execute ONLY in the isolated worker.
+      # URL+tokens are always set; execution stays off until
+      # LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED=true (operator opt-in in
+      # .env.prod).
+      - LOBBYFORGE_PLUGIN_WORKER_URL=http://plugin-worker:7101
+      - LOBBYFORGE_PLUGIN_WORKER_TOKEN=${LOBBYFORGE_PLUGIN_WORKER_TOKEN:?Set LOBBYFORGE_PLUGIN_WORKER_TOKEN}
+      - LOBBYFORGE_PLUGIN_STORAGE_TOKEN=${LOBBYFORGE_PLUGIN_STORAGE_TOKEN:?Set LOBBYFORGE_PLUGIN_STORAGE_TOKEN}
     depends_on:
       postgres:
         condition: service_healthy
@@ -108,6 +115,10 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    volumes:
+      # The installer (web) extracts approved bundles here; the worker
+      # mounts the SAME directory read-only.
+      - plugins-data:/app/plugins
     healthcheck:
       # TEST-001: the runtime image (node:22-bookworm-slim) has NO wget —
       # probe with node's global fetch instead.
@@ -147,6 +158,48 @@ services:
       retries: 5
     networks:
       - edge
+      - internal
+
+  # ── Isolated runtime for marketplace plugins (LF-SEC-010) ────────
+  # Third-party plugin code runs HERE — a separate container with NO
+  # host secrets, a read-only plugin mount, memory/pid caps, dropped
+  # capabilities and an internal-only network. The web app talks to it
+  # over the token-authenticated /rpc endpoint with hard timeouts; a
+  # hung plugin can at worst get this container restarted by its
+  # healthcheck. Not behind nginx at all.
+  plugin-worker:
+    image: lobbyforge-web:latest
+    container_name: lobbyforge-plugin-worker
+    restart: unless-stopped
+    working_dir: /app
+    command: ["node", "apps/plugin-worker/dist/index.js"]
+    environment:
+      PLUGIN_WORKER_STANDALONE: "1"
+      PLUGIN_WORKER_PORT: "7101"
+      PLUGINS_DIR: /app/plugins/installed
+      PLUGIN_WORKER_TOKEN: ${LOBBYFORGE_PLUGIN_WORKER_TOKEN:?Set LOBBYFORGE_PLUGIN_WORKER_TOKEN}
+      PLUGIN_STORAGE_TOKEN: ${LOBBYFORGE_PLUGIN_STORAGE_TOKEN:?Set LOBBYFORGE_PLUGIN_STORAGE_TOKEN}
+      # The storage-capability proxy target — the web container on the
+      # internal network. nginx never routes /api/internal/*.
+      PLUGIN_HOST_ORIGIN: http://web:3000
+    volumes:
+      - plugins-data:/app/plugins:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 256m
+    pids_limit: 64
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7101/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
       - internal
 
   # ── DB migrations: one-shot at boot ──────────────────────────────
@@ -283,6 +336,8 @@ services:
 volumes:
   postgres-data:
   redis-data:
+  # LF-SEC-010: approved plugin bundles — web writes, worker reads ro.
+  plugins-data:
 
 networks:
   edge:

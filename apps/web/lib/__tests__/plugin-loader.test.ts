@@ -23,6 +23,17 @@ vi.mock('node:fs', async (importOriginal) => {
   return { ...actual, ...fsMocks };
 });
 
+// LF-SEC-010: worker-runtime client mock.
+const workerMocks = vi.hoisted(() => ({
+  listWorkerPlugins: vi.fn(),
+  buildWorkerPlugin: vi.fn((info: { id: string; name: string }) => ({
+    manifest: { id: info.id, name: info.name },
+    __workerBacked: true,
+  })),
+  workerRuntimeConfigured: vi.fn(() => false),
+}));
+vi.mock('../plugin-worker-client', () => workerMocks);
+
 describe('plugin-loader SEC-008 gate', () => {
   const realEnv = process.env.LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED;
 
@@ -47,5 +58,41 @@ describe('plugin-loader SEC-008 gate', () => {
     const { reloadDynamicPlugin } = await import('../plugin-loader');
     await expect(reloadDynamicPlugin('quiz')).resolves.toBe(false);
     expect(fsMocks.existsSync).not.toHaveBeenCalled();
+  });
+
+  it('LF-SEC-010: flag ON without the worker URL loads NOTHING (fail closed)', async () => {
+    process.env.LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED = 'true';
+    delete process.env.LOBBYFORGE_PLUGIN_WORKER_URL;
+    workerMocks.workerRuntimeConfigured.mockReturnValue(false);
+    const { warmInstalledPlugins, listDynamicPluginIds } = await import('../plugin-loader');
+    await warmInstalledPlugins();
+    expect(workerMocks.listWorkerPlugins).not.toHaveBeenCalled();
+    expect(listDynamicPluginIds()).toEqual([]);
+    expect(fsMocks.existsSync).not.toHaveBeenCalled();
+  });
+
+  it('LF-SEC-010: flag ON + worker URL loads through the ISOLATED worker', async () => {
+    process.env.LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED = 'true';
+    process.env.LOBBYFORGE_PLUGIN_WORKER_URL = 'http://plugin-worker:7101';
+    workerMocks.workerRuntimeConfigured.mockReturnValue(true);
+    workerMocks.listWorkerPlugins.mockResolvedValue([
+      { id: 'market-quiz', name: 'Market Quiz', version: '1.0.0' },
+    ]);
+    const { warmInstalledPlugins, listDynamicPluginIds } = await import('../plugin-loader');
+    await warmInstalledPlugins();
+    expect(workerMocks.listWorkerPlugins).toHaveBeenCalled();
+    // In-process import is GONE — no filesystem walk at all.
+    expect(fsMocks.existsSync).not.toHaveBeenCalled();
+    expect(listDynamicPluginIds()).toEqual(['market-quiz']);
+  });
+
+  it('LF-SEC-010: an unreachable worker fails CLOSED (no plugins, no throw)', async () => {
+    process.env.LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED = 'true';
+    process.env.LOBBYFORGE_PLUGIN_WORKER_URL = 'http://plugin-worker:7101';
+    workerMocks.workerRuntimeConfigured.mockReturnValue(true);
+    workerMocks.listWorkerPlugins.mockRejectedValue(new Error('ECONNREFUSED'));
+    const { warmInstalledPlugins, listDynamicPluginIds } = await import('../plugin-loader');
+    await expect(warmInstalledPlugins()).resolves.toBeUndefined();
+    expect(listDynamicPluginIds()).toEqual([]);
   });
 });

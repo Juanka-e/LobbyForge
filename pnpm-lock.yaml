@@ -54,6 +54,25 @@ importers:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@22.19.20)(happy-dom@14.12.3)
 
+  apps/plugin-worker:
+    dependencies:
+      '@lobbyforge/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+    devDependencies:
+      '@lobbyforge/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.20
+      typescript:
+        specifier: ^5.4.5
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@22.19.20)(happy-dom@14.12.3)
+
   apps/registry:
     dependencies:
       '@lobbyforge/core':

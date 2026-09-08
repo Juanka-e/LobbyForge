@@ -33,6 +33,11 @@ import {
   type RegisteredGamePlugin,
   type GamePlugin,
 } from '@lobbyforge/plugin-sdk';
+import {
+  buildWorkerPlugin,
+  listWorkerPlugins,
+  workerRuntimeConfigured,
+} from './plugin-worker-client';
 
 const INSTALLED_DIR = resolve(process.cwd(), 'plugins', 'installed');
 
@@ -54,110 +59,35 @@ export async function warmInstalledPlugins(): Promise<void> {
   if (warmed) return;
   warmed = true;
 
-  // Dynamic plugin execution is disabled by default. The feature requires
-  // process-level isolation (separate container/worker_thread with no access
-  // to host secrets) before it can be safely enabled for third-party code.
-  // Set LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED=true to opt in (not recommended yet).
+  // Dynamic plugin execution is disabled by default. Since LF-SEC-010
+  // the ONLY enabled mode is the ISOLATED plugin-worker container —
+  // the flag alone (without LOBBYFORGE_PLUGIN_WORKER_URL) loads
+  // NOTHING (fail closed), and in-process import of third-party code
+  // is no longer possible from this path at all.
   if (process.env.LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED !== 'true') {
     return;
   }
-
-  if (!existsSync(INSTALLED_DIR)) return;
-
-  let entries: string[];
-  try {
-    entries = readdirSync(INSTALLED_DIR).filter((name) =>
-      statSync(join(INSTALLED_DIR, name)).isDirectory()
+  if (!workerRuntimeConfigured()) {
+    console.warn(
+      '[plugin-loader] LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED=true but LOBBYFORGE_PLUGIN_WORKER_URL is not set — refusing to load anything (the isolated worker is mandatory).'
     );
-  } catch {
     return;
   }
 
-  for (const pluginId of entries) {
-    try {
-      const loaded = await loadPluginFromDisk(pluginId);
-      if (loaded) {
-        dynamicPlugins.set(loaded.manifest.id, loaded);
-        loadedPluginIds.push(loaded.manifest.id);
-        console.info(`[plugin-loader] loaded dynamic plugin: ${loaded.manifest.id} v${loaded.manifest.version}`);
-      }
-    } catch (err) {
-      console.error(`[plugin-loader] failed to load plugin "${pluginId}":`, (err as Error).message);
-    }
-  }
-}
-
-/**
- * Import a single plugin from its installed directory.
- * Expects `plugins/installed/<pluginId>/index.js` (ESM) exporting `{ plugin }`.
- */
-async function loadPluginFromDisk(pluginId: string): Promise<RegisteredGamePlugin | null> {
-  // Find the latest version directory (or the plugin root if no versioning).
-  const pluginDir = join(INSTALLED_DIR, pluginId);
-  let indexPath = join(pluginDir, 'index.js');
-
-  // If there are version subdirectories, pick the newest by name.
-  if (!existsSync(indexPath)) {
-    const subdirs = readdirSync(pluginDir)
-      .filter((d) => statSync(join(pluginDir, d)).isDirectory())
-      .sort()
-      .reverse();
-    if (subdirs.length === 0) return null;
-    indexPath = join(pluginDir, subdirs[0]!, 'index.js');
-    if (!existsSync(indexPath)) return null;
-  }
-
-  const fileUrl = pathToFileURL(indexPath).href;
-
-  // Scrub sensitive env vars before importing untrusted plugin code.
-  // A marketplace plugin runs in-process and could read process.env to
-  // exfiltrate secrets. We restore the original env immediately after.
-  const SENSITIVE_KEYS = [
-    'LOBBYFORGE_SESSION_SECRET',
-    'LOBBYFORGE_ADMIN_TOKEN',
-    'LOBBYFORGE_SETUP_TOKEN',
-    'POSTGRES_PASSWORD',
-    'REDIS_PASSWORD',
-    'LIVEKIT_API_SECRET',
-    'GOOGLE_OAUTH_CLIENT_SECRET',
-    'DATABASE_URL',
-  ];
-  const savedValues: Record<string, string | undefined> = {};
-  for (const key of SENSITIVE_KEYS) {
-    savedValues[key] = process.env[key];
-    delete process.env[key];
-  }
-  // LF-SEC-010: restore inside finally — a THROWN import (syntax error,
-  // missing dep) used to leave the host process running without its
-  // secrets until restart, silently breaking sessions/DB/Redis.
-  let mod: { plugin?: unknown; default?: unknown };
   try {
-    mod = (await import(fileUrl)) as { plugin?: unknown; default?: unknown };
-  } finally {
-    for (const [key, value] of Object.entries(savedValues)) {
-      if (value !== undefined) process.env[key] = value;
-      else delete process.env[key];
+    const plugins = await listWorkerPlugins();
+    for (const info of plugins) {
+      dynamicPlugins.set(info.id, buildWorkerPlugin(info));
+      loadedPluginIds.push(info.id);
     }
+    if (plugins.length > 0) {
+      console.info(`[plugin-loader] ${plugins.length} plugin(s) loaded via the isolated worker`);
+    }
+  } catch (err) {
+    // Fail closed — the worker being down means no dynamic plugins.
+    console.error('[plugin-loader] plugin-worker unreachable:', (err as Error).message);
+    return;
   }
-
-  // Accept either `{ plugin }` or default export.
-  const raw: unknown = mod.plugin ?? mod.default;
-  if (!isValidGamePlugin(raw)) {
-    console.warn(`[plugin-loader] plugin "${pluginId}" failed shape validation`);
-    return null;
-  }
-
-  const gamePlugin = raw as GamePlugin<unknown, unknown, unknown>;
-
-  // Verify the manifest id matches the directory name.
-  if (gamePlugin.manifest.id !== pluginId) {
-    console.warn(
-      `[plugin-loader] plugin "${pluginId}" manifest.id mismatch: "${gamePlugin.manifest.id}"`
-    );
-    return null;
-  }
-
-  return registerGamePlugin(gamePlugin);
 }
 
 /** Validate that the imported object has the required GamePlugin shape. */
@@ -190,57 +120,28 @@ export function listDynamicPluginIds(): string[] {
 }
 
 /**
- * Reload a single plugin after the install API extracts a new version.
- * Uses a cache-busting query string on the import URL so ESM `import()`
- * always picks up the new files on disk (ESM has no `require.cache`).
+ * Refresh a single plugin after the install API extracts a new version.
+ * In worker mode the WORKER owns loading — we ask it for its current
+ * plugin list and sync our registry entry from it.
  */
 export async function reloadDynamicPlugin(pluginId: string): Promise<boolean> {
   if (process.env.LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED !== 'true') {
     console.warn('[plugin-loader] dynamic plugins are disabled (LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED != true)');
     return false;
   }
+  if (!workerRuntimeConfigured()) {
+    console.warn('[plugin-loader] reload refused: the isolated plugin-worker is mandatory');
+    return false;
+  }
   try {
-    // Force re-import by busting any internal ESM cache via a unique URL.
-    const pluginDir = join(INSTALLED_DIR, pluginId);
-    let indexPath = join(pluginDir, 'index.js');
-    if (!existsSync(indexPath)) {
-      const subdirs = existsSync(pluginDir)
-        ? readdirSync(pluginDir).filter((d) => statSync(join(pluginDir, d)).isDirectory()).sort().reverse()
-        : [];
-      if (subdirs.length === 0) return false;
-      indexPath = join(pluginDir, subdirs[0]!, 'index.js');
-      if (!existsSync(indexPath)) return false;
-    }
-
-    // Cache-bust: append a unique version query so Node's ESM loader treats
-    // this as a new module (ESM doesn't have require.cache to clear).
-    const fileUrl = pathToFileURL(indexPath).href + `?v=${Date.now()}`;
-    // V4-012: the bundler must NOT try to resolve this runtime-only import
-    // (it warns "Can't resolve <dynamic>" otherwise). Same pattern as
-    // lib/component-migrations.ts.
-    const mod = (await import(/* webpackIgnore: true */ fileUrl)) as {
-      plugin?: unknown;
-      default?: unknown;
-    };
-    const raw: unknown = mod.plugin ?? mod.default;
-    if (!isValidGamePlugin(raw)) {
-      console.warn(`[plugin-loader] reload shape validation failed for "${pluginId}"`);
-      return false;
-    }
-    const gamePlugin = raw as GamePlugin<unknown, unknown, unknown>;
-    if (gamePlugin.manifest.id !== pluginId) {
-      console.warn(`[plugin-loader] reload id mismatch: "${pluginId}" vs "${gamePlugin.manifest.id}"`);
-      return false;
-    }
-    const registered = registerGamePlugin(gamePlugin);
-    dynamicPlugins.set(registered.manifest.id, registered);
-    if (!loadedPluginIds.includes(registered.manifest.id)) {
-      loadedPluginIds.push(registered.manifest.id);
-    }
-    console.info(`[plugin-loader] reloaded plugin: ${registered.manifest.id}`);
+    const plugins = await listWorkerPlugins();
+    const info = plugins.find((p) => p.id === pluginId);
+    if (!info) return false;
+    dynamicPlugins.set(info.id, buildWorkerPlugin(info));
+    if (!loadedPluginIds.includes(info.id)) loadedPluginIds.push(info.id);
     return true;
   } catch (err) {
-    console.error(`[plugin-loader] reload failed for "${pluginId}":`, (err as Error).message);
+    console.error(`[plugin-loader] reload via worker failed for "${pluginId}":`, (err as Error).message);
+    return false;
   }
-  return false;
 }

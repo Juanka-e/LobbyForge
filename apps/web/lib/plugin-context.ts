@@ -158,7 +158,7 @@ export async function buildHttpPluginContext(
         },
       };
 
-  return {
+  const ctx: GamePluginContext = {
     actorUserId: input.actorUserId,
     players: playersContext,
     messages: messagesContext,
@@ -171,6 +171,18 @@ export async function buildHttpPluginContext(
     voice: voiceContext,
     storage: storageContext,
   };
+  // LF-SEC-010: non-enumerable scoping for the isolated worker runtime —
+  // the worker-backed plugin packages (serverId, pluginId) into its RPC
+  // envelope so ctx.storage proxies execute against the plugin's OWN
+  // keyspace. Invisible to in-process plugins (not enumerable, not in
+  // the SDK contract).
+  Object.defineProperty(ctx, '__lfScope', {
+    value: { serverId: input.serverId, pluginId: input.pluginId },
+    enumerable: false,
+    writable: false,
+    configurable: false,
+  });
+  return ctx;
 }
 
 /** CPU budget for plugin reducer calls (ms). A reducer that takes longer

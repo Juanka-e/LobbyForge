@@ -41,6 +41,30 @@ LobbyForge implements defense-in-depth:
 - **TURN relay credentials**: per-user, time-limited (coturn REST auth) —
   no permanent shared TURN secret exists.
 
+## Marketplace plugins — isolated worker runtime (LF-SEC-010)
+
+Third-party plugin bundles execute in the **plugin-worker container**,
+never in the web process:
+
+- separate container, internal-only network (not behind nginx at all);
+- NO host secrets in its environment — only the RPC token and the
+  storage-capability token;
+- read-only root filesystem + read-only plugin bundle mount;
+- `mem_limit 256m`, `pids_limit 64`, `cap_drop ALL`,
+  `no-new-privileges`, healthcheck-gated restarts;
+- the web app calls it with hard timeouts — a hung plugin can at worst
+  restart the worker, never the web app;
+- `ctx.storage.*` executes back on the host via the internal
+  `/api/internal/plugin-storage` endpoint (404 at the public edge),
+  hard-scoped to the plugin's own (serverId, pluginId) keyspace.
+
+Dynamic execution STILL defaults to off. Enabling requires BOTH
+`LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED=true` AND
+`LOBBYFORGE_PLUGIN_WORKER_URL` — the flag alone loads nothing (fail
+closed), and the old in-process import path for third-party code has
+been removed from the loader entirely. Workspace plugins (hushle,
+quiz, …) remain trusted first-party code in the static registry.
+
 ## Marketplace plugins — dynamic execution is DISABLED (SEC-008)
 
 Third-party plugin bundles (`plugins/installed/…`) are NOT executed by
@@ -52,14 +76,9 @@ plugin code runs, and both default to closed:
 2. The boot-time loader (`lib/plugin-loader.ts`) skips the
    `plugins/installed/` walk entirely without the same flag.
 
-**Do not enable the flag.** The plugin execution model is in-process:
-`createInitialState` / `handleAction` are synchronous in the SDK
-contract, so genuine isolation requires moving execution into
-`worker_threads` (or an external process) with an async RPC bridge —
-an intentional protocol migration, not a config change. Until that
-lands, an approved-but-malicious bundle would run with full host
-process privileges (DB pool, Redis, secrets). Both gates are pinned by
-regression tests; removing either is a security review, not a chore.
+(Historical note — superseded by the isolated worker runtime above.)
+The original in-process execution model is gone; the remaining gate
+below is defense-in-depth while the feature stays opt-in:
 
 ## Self-Host Security Checklist
 
