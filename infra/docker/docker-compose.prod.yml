@@ -16,7 +16,7 @@ name: lobbyforge-prod
 services:
   # ── Edge: Nginx reverse proxy + TLS termination ──────────────────
   nginx:
-    image: nginx:1.27-alpine
+    image: nginx:1.31-alpine
     container_name: lobbyforge-nginx
     restart: unless-stopped
     # V4-004: nginx loads certificates ONCE at startup. The certbot
@@ -68,7 +68,7 @@ services:
 
   # ── Certbot: Let's Encrypt certificate automation ────────────────
   certbot:
-    image: certbot/certbot:v2.11.0  # LF-010-R: pinned (was :latest)
+    image: certbot/certbot:v5.8.0  # LF-010-R pinned (9th-audit: v2.11.0 base EOL)
     container_name: lobbyforge-certbot
     restart: unless-stopped
     entrypoint: >

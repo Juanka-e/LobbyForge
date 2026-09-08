@@ -75,12 +75,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - image: 'nginx:1.27-alpine'
+          - image: 'nginx:1.31-alpine'
           - image: 'redis:7-alpine'
           - image: 'postgres:16-alpine'
           - image: 'livekit/livekit-server:v1.13.6'
           - image: 'coturn/coturn:4.17.2'
-          - image: 'certbot/certbot:v2.11.0'
+          - image: 'certbot/certbot:v5.8.0'
     steps:
       # Same approach as the web-image trivy job: run the official
       # Trivy image directly (the action wrapper proved flaky).
