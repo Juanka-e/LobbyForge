@@ -1,8 +1,57 @@
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { isOfficialDeployment } from '@/lib/deployment-mode';
 import { getDb } from '@/lib/db';
 import { listPublicRegistryInstances } from '@lobbyforge/db';
+import { t, type TranslationKey } from '@lobbyforge/i18n';
 import DiscoveryGrid from './DiscoveryGrid';
+
+/** Resolve the visitor locale for the (public) discovery page: the two
+ * supported languages via Accept-Language, defaulting to English. */
+async function resolveLocale(): Promise<'en' | 'tr'> {
+  const accept = (await headers()).get('accept-language') ?? '';
+  return accept.toLowerCase().includes('tr') ? 'tr' : 'en';
+}
+
+/** Pre-translate the labels the grid needs (RSC → props — no client
+ * i18n machinery required). */
+function buildLabels(locale: 'en' | 'tr'): Record<string, string> {
+  const keys: TranslationKey[] = [
+    'discovery.title',
+    'discovery.subtitle',
+    'discovery.search',
+    'discovery.allRegions',
+    'discovery.online',
+    'discovery.rooms',
+    'discovery.noResults',
+    'discovery.noResultsHint',
+    'discovery.noResultsQuery',
+    'discovery.noListedYet',
+    'discovery.communitiesFound',
+    'discovery.communityFound',
+    'discovery.backToLobby',
+    'discovery.notVerified',
+    'discovery.report',
+    'discovery.reportTitle',
+    'discovery.reportBody',
+    'discovery.reportReason',
+    'discovery.reportReason.spam',
+    'discovery.reportReason.nsfw',
+    'discovery.reportReason.abuse',
+    'discovery.reportReason.malware',
+    'discovery.reportReason.other',
+    'discovery.reportDetail',
+    'discovery.reportSubmit',
+    'discovery.reportSubmitted',
+    'discovery.reportFailed',
+    'discovery.cancel',
+  ];
+  const labels: Record<string, string> = {};
+  for (const key of keys) {
+    labels[key.replace('discovery.', '')] = t(key, undefined, locale);
+  }
+  return labels;
+}
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -44,5 +93,8 @@ export default async function DiscoverPage({
       })
     : instances;
 
-  return <DiscoveryGrid instances={filtered} region={region} query={query} />;
+  const locale = await resolveLocale();
+  const labels = buildLabels(locale);
+
+  return <DiscoveryGrid instances={filtered} region={region} query={query} labels={labels} />;
 }

@@ -3,7 +3,6 @@
   "voice.leave": "Leave voice",
   "activity.start": "Start activity",
   "welcome.user": "Welcome, {username}!",
-
   "discovery.title": "Discover Communities",
   "discovery.subtitle": "Find and join self-hosted LobbyForge communities.",
   "discovery.search": "Search communities...",
@@ -20,7 +19,6 @@
   "discovery.notAvailable": "Community not available",
   "discovery.notAvailableBody": "This community is no longer listed or has been removed.",
   "discovery.report": "Report",
-
   "marketplace.title": "Plugin Marketplace",
   "marketplace.search": "Search plugins...",
   "marketplace.all": "All",
@@ -31,7 +29,6 @@
   "marketplace.noResults": "No plugins found",
   "marketplace.by": "by",
   "marketplace.download": "downloads",
-
   "dm.title": "Direct Message",
   "dm.backToLobby": "Back to lobby",
   "dm.placeholder": "Type a message...",
@@ -39,7 +36,6 @@
   "dm.noMessages": "No messages yet — say hello!",
   "dm.deleted": "message deleted",
   "dm.sendMessage": "Send message",
-
   "moderation.title": "Moderation",
   "moderation.subtitle": "Review marketplace submissions and moderate the community directory.",
   "moderation.pluginQueue": "Plugin Review Queue",
@@ -50,14 +46,12 @@
   "moderation.unlist": "Unlist",
   "moderation.block": "Block",
   "moderation.noPending": "No pending submissions.",
-
   "updates.checkForUpdates": "Check for Updates",
   "updates.upgrade": "Upgrade",
   "updates.rollback": "Rollback",
   "updates.clickToConfirm": "Click again to confirm",
   "updates.allGatesSatisfied": "All gates satisfied — upgrade/rollback ready.",
   "updates.viewRunDetails": "View run details",
-
   "setup.privacyLocked": "Search engines are blocked (recommended)",
   "setup.privacyLockedDesc": "Your instance is invisible to Google, Bing, and other crawlers. This protects member privacy and prevents your community from being discoverable by strangers.",
   "setup.privacyWarning": "Search engine indexing is ON",
@@ -65,12 +59,28 @@
   "setup.discoveryOptIn": "List in the Discovery directory",
   "setup.discoveryOptInDesc": "Your community will appear in the official Discovery page so others can find and join it. An admin reviews each listing before it goes public.",
   "setup.discoveryDescription": "Community description",
-
   "connect.title": "LobbyForge",
   "connect.subtitle": "Connect to your self-hosted LobbyForge instance to join voice rooms and live activities.",
   "connect.instanceUrl": "Instance URL",
   "connect.connect": "Connect",
   "connect.connecting": "Connecting…",
   "connect.hint": "Don't have an instance yet? LobbyForge is self-hosted — run it on your own server with Docker, or ask your community admin for the instance URL.",
-  "connect.switchInstance": "Switch instance"
+  "connect.switchInstance": "Switch instance",
+  "discovery.backToLobby": "Back to lobby",
+  "discovery.communitiesFound": "{{count}} communities found",
+  "discovery.communityFound": "1 community found",
+  "discovery.noResultsQuery": "No results for \"{{query}}\". Try a different search.",
+  "discovery.noListedYet": "No communities are listed yet. Check back soon!",
+  "discovery.reportTitle": "Report this community",
+  "discovery.reportBody": "Tell the directory moderators what is wrong.",
+  "discovery.reportReason": "Reason",
+  "discovery.reportReason.spam": "Spam or misleading",
+  "discovery.reportReason.nsfw": "NSFW content",
+  "discovery.reportReason.abuse": "Abuse or harassment",
+  "discovery.reportReason.malware": "Malware or phishing",
+  "discovery.reportReason.other": "Other",
+  "discovery.reportDetail": "Details (optional)",
+  "discovery.reportSubmit": "Submit report",
+  "discovery.reportSubmitted": "Report submitted. Thank you.",
+  "discovery.reportFailed": "Could not submit the report — try again."
 }

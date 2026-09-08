@@ -3,7 +3,6 @@
   "voice.leave": "Sesten ayrıl",
   "activity.start": "Aktiviteyi başlat",
   "welcome.user": "Hoş geldin, {username}!",
-
   "discovery.title": "Toplulukları Keşfet",
   "discovery.subtitle": "Kendi sunucusunu barındıran LobbyForge topluluklarını keşfet ve katıl.",
   "discovery.search": "Topluluk ara...",
@@ -20,7 +19,6 @@
   "discovery.notAvailable": "Topluluk mevcut değil",
   "discovery.notAvailableBody": "Bu topluluk artık listelenmiyor veya kaldırılmış.",
   "discovery.report": "Şikayet et",
-
   "marketplace.title": "Eklenti Marketi",
   "marketplace.search": "Eklenti ara...",
   "marketplace.all": "Tümü",
@@ -31,7 +29,6 @@
   "marketplace.noResults": "Eklenti bulunamadı",
   "marketplace.by": "yapan",
   "marketplace.download": "indirme",
-
   "dm.title": "Özel Mesaj",
   "dm.backToLobby": "Lobiye dön",
   "dm.placeholder": "Mesaj yazın...",
@@ -39,7 +36,6 @@
   "dm.noMessages": "Henüz mesaj yok — merhaba de!",
   "dm.deleted": "mesaj silindi",
   "dm.sendMessage": "Mesaj gönder",
-
   "moderation.title": "Moderasyon",
   "moderation.subtitle": "Market gönderimlerini incele ve topluluk dizinini yönet.",
   "moderation.pluginQueue": "Eklenti İnceleme Kuyruğu",
@@ -50,14 +46,12 @@
   "moderation.unlist": "Kaldır",
   "moderation.block": "Engelle",
   "moderation.noPending": "Bekleyen gönderim yok.",
-
   "updates.checkForUpdates": "Güncellemeleri Kontrol Et",
   "updates.upgrade": "Yükselt",
   "updates.rollback": "Geri Al",
   "updates.clickToConfirm": "Onaylamak için tekrar tıkla",
   "updates.allGatesSatisfied": "Tüm koşullar sağlandı — yükseltme/geri alma hazır.",
   "updates.viewRunDetails": "Çalıştırma detaylarını gör",
-
   "setup.privacyLocked": "Arama motorları engelli (önerilen)",
   "setup.privacyLockedDesc": "Sunucunuz Google, Bing ve diğer tarayıcılara görünmez. Bu, üye gizliliğini korur ve topluluğunuzun yabancılar tarafından keşfedilmesini önler.",
   "setup.privacyWarning": "Arama motoru indeksleme AÇIK",
@@ -65,12 +59,28 @@
   "setup.discoveryOptIn": "Keşfet dizininde listele",
   "setup.discoveryOptInDesc": "Topluluğunuz resmi Keşfet sayfasında görünecek ve diğerleri bulup katılabilecek. Her listeleme genel görünmeden önce admin tarafından incelenir.",
   "setup.discoveryDescription": "Topluluk açıklaması",
-
   "connect.title": "LobbyForge",
   "connect.subtitle": "Sesli odalara ve canlı aktivitelere katılmak için kendi LobbyForge sunucunuza bağlanın.",
   "connect.instanceUrl": "Sunucu URL'i",
   "connect.connect": "Bağlan",
   "connect.connecting": "Bağlanıyor…",
   "connect.hint": "Henüz bir sunucunuz yok mu? LobbyForge self-host'tur — kendi sunucunuzda Docker ile çalıştırın veya topluluk admininizden sunucu URL'ini isteyin.",
-  "connect.switchInstance": "Sunucu değiştir"
+  "connect.switchInstance": "Sunucu değiştir",
+  "discovery.backToLobby": "Lobiye dön",
+  "discovery.communitiesFound": "{{count}} topluluk bulundu",
+  "discovery.communityFound": "1 topluluk bulundu",
+  "discovery.noResultsQuery": "\"{{query}}\" için sonuç yok. Farklı bir arama deneyin.",
+  "discovery.noListedYet": "Henüz listelenmiş topluluk yok. Yakında tekrar bakın!",
+  "discovery.reportTitle": "Bu topluluğu bildir",
+  "discovery.reportBody": "Dizin moderatörlerine sorunun ne olduğunu anlatın.",
+  "discovery.reportReason": "Sebep",
+  "discovery.reportReason.spam": "Spam veya yanıltıcı",
+  "discovery.reportReason.nsfw": "Yetişkin içeriği",
+  "discovery.reportReason.abuse": "İstismar veya taciz",
+  "discovery.reportReason.malware": "Zararlı yazılım veya oltalama",
+  "discovery.reportReason.other": "Diğer",
+  "discovery.reportDetail": "Ayrıntılar (isteğe bağlı)",
+  "discovery.reportSubmit": "Bildirimi gönder",
+  "discovery.reportSubmitted": "Bildiriminiz alındı. Teşekkürler.",
+  "discovery.reportFailed": "Bildirim gönderilemedi — tekrar deneyin."
 }

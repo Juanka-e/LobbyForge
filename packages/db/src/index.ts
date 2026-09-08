@@ -29,6 +29,7 @@ export * from './queries/serverLocalCards.js';
 export * from './queries/channelVisibility.js';
 export * from './queries/pluginData.js';
 export * from './queries/uploadQuota.js';
+export * from './queries/instanceReports.js';
 export * from './queries/componentMigrations.js';
 export * from './queries/dmChannels.js';
 export { sql, eq, and, or, desc, asc } from 'drizzle-orm';

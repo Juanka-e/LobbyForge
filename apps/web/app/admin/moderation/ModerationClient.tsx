@@ -23,13 +23,24 @@ interface RegistryInstance {
   lastHeartbeatAt: string | null;
 }
 
+interface InstanceReport {
+  id: string;
+  instanceId: string;
+  reporterName: string | null;
+  reason: string;
+  detail: string | null;
+  status: string;
+  createdAt: string;
+}
+
 interface ModerationData {
   pendingPlugins: PendingPlugin[];
   registryInstances: RegistryInstance[];
+  reports?: InstanceReport[];
 }
 
 export default function ModerationClient() {
-  const [data, setData] = useState<ModerationData>({ pendingPlugins: [], registryInstances: [] });
+  const [data, setData] = useState<ModerationData>({ pendingPlugins: [], registryInstances: [], reports: [] });
   const [loading, setLoading] = useState(true);
   const [actioning, setActioning] = useState<string | null>(null);
 
@@ -54,6 +65,21 @@ export default function ModerationClient() {
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pluginId, decision }),
+      });
+      await reload();
+    } finally {
+      setActioning(null);
+    }
+  }
+
+  async function resolveReport(reportId: string, action: 'dismiss' | 'actioned') {
+    setActioning(reportId);
+    try {
+      await fetch('/api/admin/moderation', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'report', reportId, action }),
       });
       await reload();
     } finally {
@@ -133,6 +159,56 @@ export default function ModerationClient() {
                       Reject
                     </button>
                   </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Instance reports (discovery complaints) */}
+      <section>
+        <h2 className="text-lg font-semibold text-text-primary mb-3 flex items-center gap-2 border-b border-border-subtle pb-2">
+          <span className="material-symbols-outlined text-warning text-[20px]">flag</span>
+          Instance Reports ({(data.reports ?? []).filter((r) => r.status === 'pending').length} pending)
+        </h2>
+        {(data.reports ?? []).length === 0 ? (
+          <p className="text-sm text-text-muted">No reports filed.</p>
+        ) : (
+          <div className="space-y-3">
+            {(data.reports ?? []).map((r) => (
+              <article key={r.id} className="rounded-xl border border-border-subtle bg-surface p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="rounded-full bg-warning/10 px-2 py-0.5 text-[10px] font-semibold text-warning uppercase">{r.reason}</span>
+                      <span className="text-xs text-text-muted">
+                        {r.instanceId} · by {r.reporterName ?? 'unknown'} · {new Date(r.createdAt).toLocaleDateString()}
+                      </span>
+                      {r.status !== 'pending' ? (
+                        <span className="rounded-full bg-surface-container px-2 py-0.5 text-[10px] text-text-muted">{r.status}</span>
+                      ) : null}
+                    </div>
+                    {r.detail ? <p className="text-sm text-text-secondary mt-1">{r.detail}</p> : null}
+                  </div>
+                  {r.status === 'pending' ? (
+                    <div className="flex gap-2 flex-shrink-0">
+                      <button
+                        onClick={() => resolveReport(r.id, 'dismiss')}
+                        disabled={actioning === r.id}
+                        className="rounded-md border border-border-subtle px-3 py-1.5 text-xs text-text-secondary hover:bg-surface-container disabled:opacity-40"
+                      >
+                        Dismiss
+                      </button>
+                      <button
+                        onClick={() => resolveReport(r.id, 'actioned')}
+                        disabled={actioning === r.id}
+                        className="rounded-md bg-primary/15 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/25 disabled:opacity-40"
+                      >
+                        Actioned
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               </article>
             ))}

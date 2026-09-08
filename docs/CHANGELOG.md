@@ -2,6 +2,27 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - original plan tail: Faz D/G completion - 2026-09-08
+
+### Added
+
+- **Faz D (reporting loop closed)**: the discovery card now carries a
+  report button (flag, hover-revealed) with a reason/detail dialog that
+  posts to the existing /api/directory/:id/report endpoint — and the
+  admin moderation panel gained an "Instance Reports" section (pending
+  first, reporter attribution, reason badges) with dismiss/actioned
+  resolution. The moderation API actually GAINED its missing POST
+  handler (the client had been calling a 405): instance
+  list/unlist/block and report resolution, admin-gated, decisions
+  attributed to the acting admin session. New DB queries:
+  listInstanceReports / setInstanceReportStatus (pending-only
+  transitions). 7 API tests.
+- **Faz G (discovery i18n)**: the discovery page resolves the visitor
+  locale (Accept-Language, en/tr) and pre-translates all labels with
+  the @lobbyforge/i18n translator — the grid had been hardcoded
+  English while the keys sat unused. 17 new en/tr key pairs (report
+  dialog, counts, empty states), full parity maintained.
+
 ## [Unreleased] - LF-SEC-010 long-term: isolated plugin-worker runtime - 2026-09-08
 
 ### Added
