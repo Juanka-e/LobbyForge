@@ -274,7 +274,7 @@ if [[ "$DO_CERTBOT" =~ ^[Yy]$ ]]; then
   if docker run --rm \
     -p 80:80 \
     -v "$SCRIPT_DIR/infra/certbot/conf:/etc/letsencrypt" \
-    certbot/certbot:v2.11.0 certonly --standalone \
+    certbot/certbot:v5.8.0 certonly --standalone \
     -d "$DOMAIN" \
     --non-interactive \
     --agree-tos \

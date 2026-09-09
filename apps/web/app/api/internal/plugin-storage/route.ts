@@ -97,5 +97,27 @@ export const POST = withMachineApiSecurity(handlePost, {
   allowedMethods: ['POST'],
   maxBodyBytes: 256 * 1024,
   rateLimit: { identifier: 'internal-plugin-storage', config: { windowMs: 60_000, maxRequests: 600 } },
+  // 11th-audit: the worker has no trustworthy IP (direct web access);
+  // IP-keying put EVERY plugin in one 600/min bucket — a malicious
+  // plugin could 429 everyone else's storage. The bucket is the
+  // CAPABILITY's (serverId, pluginId) scope instead: one plugin's
+  // flood only throttles itself. The pre-auth peek is safe — the
+  // capability itself is verified in the handler (fail closed).
+  rateScope: async (req) => {
+    const capability = req.headers.get('x-lf-plugin-capability') ?? '';
+    const dot = capability.indexOf('.');
+    if (dot <= 0) return null;
+    const secret = process.env.LOBBYFORGE_PLUGIN_STORAGE_TOKEN;
+    if (!secret) return null;
+    try {
+      const body = (await req.clone().json()) as { serverId?: string; pluginId?: string };
+      if (!body.serverId || !body.pluginId) return null;
+      return capabilityOk(req, body.serverId, body.pluginId)
+        ? `${body.serverId}:${body.pluginId}`
+        : null;
+    } catch {
+      return null;
+    }
+  },
   maintenanceMode: 'bypass',
 });

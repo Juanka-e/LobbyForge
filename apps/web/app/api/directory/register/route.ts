@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { createPublicKey, verify as edVerify } from 'node:crypto';
 import { z } from 'zod';
 import { RegistryInstanceOwnedError, RegistryInstanceUnclaimableError, upsertRegistryInstance } from '@lobbyforge/db';
 import { normalizeRegistryInstanceUrl } from '@lobbyforge/registry';
@@ -19,7 +20,32 @@ const RegisterSchema = z.object({
   tags: z.array(z.string()).max(30).optional(),
   features: z.array(z.string()).max(30).optional(),
   publicKey: z.string().min(32).max(512),
+  /**
+   * 11th-audit: proof that the caller OPERATES the instance whose key
+   * is being registered. Flow: GET /api/directory/register/challenge?
+   * instanceId=… → {challenge, expiresIn} (Redis, 10 min, one-time);
+   * the instance signs the challenge with the PRIVATE key matching
+   * publicKey; registration verifies the signature. Without this, any
+   * user could squat an arbitrary instanceId ahead of the real
+   * operator (registration DoS) or register a domain they don't
+   * control.
+   */
+  challenge: z.string().min(16).max(128),
+  challengeSignature: z.string().min(64).max(256),
 }).strict();
+
+function parsePublicKeyPemOrDer(stored: string): ReturnType<typeof createPublicKey> | null {
+  try {
+    if (stored.includes('-----BEGIN')) return createPublicKey(stored);
+    return createPublicKey({
+      key: Buffer.from(stored, 'base64'),
+      format: 'der',
+      type: 'spki',
+    });
+  } catch {
+    return null;
+  }
+}
 
 /**
  * POST /api/directory/register — register or update a self-hosted instance
@@ -46,6 +72,41 @@ async function handlePost(req: Request): Promise<NextResponse> {
     normalizedDomain = normalizeRegistryInstanceUrl(body.domain);
   } catch {
     return NextResponse.json({ error: 'Domain must be a valid HTTPS origin' }, { status: 400 });
+  }
+
+  // Challenge verification (11th-audit ownership proof).
+  try {
+    const { redis } = await import('@/lib/redis');
+    const challengeKey = `lf:register-challenge:${body.instanceId}`;
+    const challenge = await redis.getdel(challengeKey);
+    if (!challenge || challenge !== body.challenge) {
+      return NextResponse.json(
+        { error: 'Challenge expired or invalid. Request a fresh one via GET /api/directory/register/challenge.' },
+        { status: 401 }
+      );
+    }
+    const pubKey = parsePublicKeyPemOrDer(body.publicKey);
+    if (!pubKey) {
+      return NextResponse.json({ error: 'publicKey is not a usable key' }, { status: 400 });
+    }
+    const signedOk = edVerify(
+      null,
+      Buffer.from(
+        JSON.stringify({ register: 1, instanceId: body.instanceId, challenge: body.challenge }),
+        'utf8'
+      ),
+      pubKey,
+      Buffer.from(body.challengeSignature, 'base64')
+    );
+    if (!signedOk) {
+      return NextResponse.json(
+        { error: 'Challenge signature does not match publicKey — registration refused.' },
+        { status: 401 }
+      );
+    }
+  } catch (err) {
+    console.error('[directory/register] challenge verification failed:', (err as Error).message);
+    return NextResponse.json({ error: 'Challenge verification failed' }, { status: 500 });
   }
 
   try {

@@ -46,14 +46,26 @@ export type AccessInvalidationEvent =
     };
 
 /**
- * 10th-audit: SSE streams also listen for invalidation events — the
- * 30s keepalive recheck alone leaves a kick a up-to-30s event window.
- * The web app shares the bus channel with the ws-gateway; handlers
- * filter for their own blast radius. Returns an unsubscribe.
+ * 10th-audit + 11th-audit: SSE streams listen for invalidation events —
+ * the 30s keepalive recheck alone leaves a kick a up-to-30s event
+ * window. ONE process-wide subscriber connection multiplexes every
+ * registered handler (the per-stream duplicate() the first cut used
+ * re-introduced exactly the connection-exhaustion surface the activity
+ * bus had already solved: 1 SSE ≈ 1 extra Redis subscriber, hordable
+ * for hours). Handlers filter for their own blast radius; registering
+ * costs a Set entry, not a connection.
  */
-export function subscribeAccessInvalidation(
-  onEvent: (event: AccessInvalidationEvent) => void
-): () => void {
+type InvalidationHandler = (event: AccessInvalidationEvent) => void;
+const invalidationHandlers = new Set<InvalidationHandler>();
+let invalidationSubscriber: {
+  subscribe: (ch: string) => Promise<unknown>;
+  quit: () => Promise<unknown>;
+} | null = null;
+let invalidationSubscriberStarting = false;
+
+function ensureInvalidationSubscriber(): void {
+  if (invalidationSubscriber || invalidationSubscriberStarting) return;
+  invalidationSubscriberStarting = true;
   const io = redis as unknown as {
     duplicate: () => {
       subscribe: (ch: string) => Promise<unknown>;
@@ -61,24 +73,44 @@ export function subscribeAccessInvalidation(
       quit: () => Promise<unknown>;
     };
   };
-  let sub: ReturnType<typeof io.duplicate> | null = null;
-  void (async () => {
-    try {
-      sub = io.duplicate();
-      sub.on('message', (_channel: string, raw: string) => {
+  try {
+    const sub = io.duplicate();
+    sub.on('message', (_channel: string, raw: string) => {
+      let event: AccessInvalidationEvent;
+      try {
+        event = JSON.parse(raw) as AccessInvalidationEvent;
+      } catch {
+        return; // publisher owns the shape
+      }
+      for (const handler of invalidationHandlers) {
         try {
-          onEvent(JSON.parse(raw) as AccessInvalidationEvent);
+          handler(event);
         } catch {
-          /* publisher owns the shape */
+          /* one stream's handler must not break the fan-out */
         }
-      });
-      await sub.subscribe(ACCESS_INVALIDATION_CHANNEL);
-    } catch (err) {
-      console.error('[access-invalidation] subscribe failed:', (err as Error).message);
-    }
-  })();
+      }
+    });
+    void sub.subscribe(ACCESS_INVALIDATION_CHANNEL).catch((err: Error) => {
+      console.error('[access-invalidation] subscribe failed:', err.message);
+    });
+    invalidationSubscriber = sub;
+  } catch (err) {
+    console.error('[access-invalidation] subscriber create failed:', (err as Error).message);
+  } finally {
+    invalidationSubscriberStarting = false;
+  }
+}
+
+/** Register a handler on the SHARED subscriber; returns an unregister. */
+export function subscribeAccessInvalidation(
+  onEvent: InvalidationHandler
+): () => void {
+  ensureInvalidationSubscriber();
+  invalidationHandlers.add(onEvent);
   return () => {
-    void sub?.quit().catch(() => undefined);
+    invalidationHandlers.delete(onEvent);
+    // The singleton connection intentionally stays up — other streams
+    // (now or later) share it.
   };
 }
 

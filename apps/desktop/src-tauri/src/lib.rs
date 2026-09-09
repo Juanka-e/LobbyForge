@@ -111,8 +111,12 @@ fn accept_deep_link(state: &ShellState, raw: &str) -> Option<String> {
     if url.scheme() != "lobbyforge" {
         return None;
     }
+    // 11th-audit: VERIFY FIRST, consume LAST. The old take()-first
+    // order let any wrong-state link burn the pending login (a login
+    // DoS) — the real deep link then never matched. The entry is only
+    // consumed when every check has passed.
     let mut pending_guard = state.pending_handoff.lock().unwrap();
-    let pending = pending_guard.take()?; // single-use regardless of outcome
+    let pending = pending_guard.as_ref()?;
     if std::time::Instant::now() >= pending.expires_at {
         return None;
     }
@@ -132,7 +136,9 @@ fn accept_deep_link(state: &ShellState, raw: &str) -> Option<String> {
             return None;
         }
     }
-    Some(raw.to_string())
+    let accepted = raw.to_string();
+    *pending_guard = None; // single-use — consumed only on success
+    Some(accepted)
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {

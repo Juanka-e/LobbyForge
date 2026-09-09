@@ -389,6 +389,15 @@ export function withMachineApiSecurity<TContext = unknown>(
   options: {
     allowedMethods: string[];
     rateLimit?: { identifier: string; config: RateLimitConfig };
+    /**
+     * 11th-audit: machine callers have no trustworthy client IP (the
+     * plugin-worker reaches web directly — no XFF), so IP-keyed limits
+     * put every caller in ONE bucket. When provided, this extracts the
+     * rate-limit scope from the AUTHENTICATED identity instead (e.g.
+     * the capability's (serverId, pluginId)). Runs AFTER the body
+     * guard so it can read the (bounded) cloned request's parsed form.
+     */
+    rateScope?: (req: Request) => Promise<string | null>;
     maintenanceMode?: 'enforce' | 'bypass';
     maxBodyBytes?: number;
   }
@@ -406,10 +415,16 @@ export function withMachineApiSecurity<TContext = unknown>(
       if (maintenance) return applySecurityHeaders(maintenance);
     }
     if (options.rateLimit) {
-      const result = await distributedRateLimit(
-        rateLimitKey(req, options.rateLimit.identifier),
-        options.rateLimit.config
-      );
+      const scope = options.rateScope
+        ? await options.rateScope(boundedReq)
+        : null;
+      // A null scope (unauthenticated caller) keeps the IP-keyed
+      // bucket — the handler will reject them anyway, and this keeps
+      // garbage floods off the authenticated buckets.
+      const key = scope
+        ? `${options.rateLimit.identifier}:${scope}`
+        : rateLimitKey(req, options.rateLimit.identifier);
+      const result = await distributedRateLimit(key, options.rateLimit.config);
       const blocked = rateLimitResponse(result, options.rateLimit.identifier);
       if (blocked) return applySecurityHeaders(blocked);
     }

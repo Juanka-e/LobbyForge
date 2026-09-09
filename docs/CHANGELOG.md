@@ -2,6 +2,48 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - 11th-audit remediation - 2026-09-09
+
+### Fixed
+
+- **SSE invalidation connection exhaustion**: the per-stream
+  Redis duplicate() is gone — ONE process-wide subscriber now
+  multiplexes a handler Set (registering costs a Set entry, not a
+  connection). This was the exact surface the activity bus had already
+  solved; the first invalidation cut re-introduced it (1 SSE ≈ 1
+  hordable subscriber).
+- **Plugin-storage rate-limit poisoning**: the machine wrapper's
+  optional rateScope extracts the bucket from the AUTHENTICATED
+  capability — plugin-storage now limits per (serverId, pluginId)
+  instead of the IP-shaped 'unknown' bucket every worker call shared.
+  A malicious plugin flooding its own quota no longer 429s every other
+  plugin's storage.
+- **Directory registration ownership proof**: registration now
+  requires a KEY CHALLENGE — GET /api/directory/register/challenge
+  issues a one-time 10-min nonce (Redis GETDEL); the instance signs it
+  with the PRIVATE key matching the submitted publicKey; the route
+  verifies before upsert. InstanceId squatting / registration DoS by
+  unrelated users is closed (2 tests: wrong signature, expired
+  challenge).
+- **Registration concurrency race**: the ownership decision moved
+  INSIDE the atomic statement — the conflict-update carries
+  setWhere(owner = excluded.owner), so the concurrent race loser's
+  metadata write is a no-op instead of rewriting the winner's row.
+- **Desktop login DoS**: accept_deep_link now VERIFIES FIRST and
+  consumes the pending entry only on success — a wrong-state link
+  could previously burn the pending login so the REAL deep link never
+  matched.
+- **Deployment consistency**: .env.prod.example synced with every
+  variable the production compose interpolates (worker/storage tokens,
+  TURN secret, ACME/domain, trusted-proxy); install.sh's initial
+  certbot run bumped v2.11.0 → v5.8.0 (the compose image had moved but
+  the installer path still ran the EOL base).
+- **Scan hygiene**: the livekit Trivy ignore no longer carries the
+  postgres CVE (it belongs to .trivyignore.d/postgres only); branch
+  protection now requires the full security pipeline (CodeQL, web +
+  per-image Trivy, RustSec, both e2e suites) in addition to the CI
+  gates.
+
 ## [Unreleased] - 10th-audit remediation - 2026-09-09
 
 ### Fixed

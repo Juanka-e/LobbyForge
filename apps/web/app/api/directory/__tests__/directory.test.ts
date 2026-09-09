@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { generateKeyPairSync, sign as signEd25519 } from 'node:crypto';
 import { NextResponse } from 'next/server';
 
 const requireMaterializedSession = vi.fn();
@@ -28,14 +29,26 @@ vi.mock('@lobbyforge/registry', () => ({
   },
 }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
+
+// 11th-audit: registration challenge (ownership proof) mocks.
+const { redisGetdel, redisSet } = vi.hoisted(() => ({
+  redisGetdel: vi.fn().mockResolvedValue('challenge-value-0123456789'),
+  redisSet: vi.fn().mockResolvedValue('OK'),
+}));
+vi.mock('@/lib/redis', () => ({
+  redis: {
+    getdel: redisGetdel,
+    get: vi.fn(),
+    set: (...args: unknown[]) => redisSet(...args),
+  },
+}));
 vi.mock('@/lib/security-headers', () => ({
   withApiSecurity: (handler: unknown) => handler,
   withMachineApiSecurity: (handler: unknown) => handler,
 }));
 
-// LF-SEC-007: heartbeat replay guard — in-memory Redis mock.
-const redisSet = vi.fn().mockResolvedValue('OK');
-vi.mock('@/lib/redis', () => ({ redis: { set: redisSet } }));
+
+
 
 const UID = '00000000-0000-0000-0000-000000000099';
 
@@ -44,6 +57,7 @@ beforeEach(() => {
   requireMaterializedSession.mockReset();
   listPublicRegistryInstances.mockReset();
   upsertRegistryInstance.mockReset();
+  redisGetdel.mockReset().mockResolvedValue(CHALLENGE);
   heartbeatRegistryInstance.mockReset();
   getRegistryInstanceByInstanceId.mockReset();
   redisSet.mockReset().mockResolvedValue('OK');
@@ -83,12 +97,26 @@ describe('GET /api/directory', () => {
   });
 });
 
+// Real Ed25519 keypair: registration verifies a genuine challenge
+// signature against the submitted publicKey.
+const keypair = generateKeyPairSync('ed25519');
+const { publicKey: regPub, privateKey: regPriv } = keypair;
+const regPublicKeyB64 = regPub.export({ format: 'der', type: 'spki' }).toString('base64');
+const CHALLENGE = 'challenge-value-0123456789';
+const challengeSignature = signEd25519(
+  null,
+  Buffer.from(JSON.stringify({ register: 1, instanceId: 'inst-2', challenge: CHALLENGE }), 'utf8'),
+  regPriv
+).toString('base64');
+
 describe('POST /api/directory/register', () => {
   const validBody = {
     instanceId: 'inst-2',
     name: 'My Community',
     domain: 'https://my.example.dev',
-    publicKey: 'x'.repeat(64),
+    publicKey: regPublicKeyB64,
+    challenge: CHALLENGE,
+    challengeSignature,
   };
 
   it('registers a new instance (starts unlisted)', async () => {
@@ -125,6 +153,34 @@ describe('POST /api/directory/register', () => {
       { __mockDb: true },
       expect.objectContaining({ actorUserId: UID })
     );
+  });
+
+  it('11th-audit: rejects registration with a WRONG challenge signature', async () => {
+    upsertRegistryInstance.mockResolvedValue({ instanceId: 'inst-2', isListed: false, isVerified: false, id: 'y' });
+    const { POST } = await import('../register/route.js');
+    const res = await POST(
+      new Request('https://example.test/api/directory/register', {
+        method: 'POST',
+        body: JSON.stringify({ ...validBody, challengeSignature: Buffer.alloc(64, 1).toString('base64') }),
+      }),
+      {}
+    );
+    expect(res.status).toBe(401);
+    expect(upsertRegistryInstance).not.toHaveBeenCalled();
+  });
+
+  it('11th-audit: rejects an expired/unknown challenge', async () => {
+    redisGetdel.mockResolvedValueOnce(null);
+    const { POST } = await import('../register/route.js');
+    const res = await POST(
+      new Request('https://example.test/api/directory/register', {
+        method: 'POST',
+        body: JSON.stringify(validBody),
+      }),
+      {}
+    );
+    expect(res.status).toBe(401);
+    expect(upsertRegistryInstance).not.toHaveBeenCalled();
   });
 
   it('maps an ownership rejection to 403 (SEC-007)', async () => {

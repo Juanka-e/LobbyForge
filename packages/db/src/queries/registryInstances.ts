@@ -150,6 +150,12 @@ export async function upsertRegistryInstance(
     publicKey: input.publicKey,
     ownerUserId: input.actorUserId,
   };
+  // 11th-audit: the ownership decision is INSIDE the atomic statement.
+  // The old SELECT-then-upsert let a concurrent second registrant
+  // rewrite the winner's metadata via the conflict branch. Now the
+  // conflict update carries a WHERE that only fires for the rightful
+  // owner (or the single legacy-NULL claim), so the race loser's
+  // insert-update is a no-op and the pre-check error stands.
   const [row] = await db
     .insert(registryInstances)
     .values(values)
@@ -163,9 +169,8 @@ export async function upsertRegistryInstance(
         languages: values.languages,
         tags: values.tags,
         features: values.features,
-        // Claim legacy NULL-owner rows exactly once; never steal a set owner.
-        ownerUserId: sql`coalesce(${registryInstances.ownerUserId}, excluded.owner_user_id)`,
       },
+      setWhere: sql`${registryInstances.ownerUserId} = excluded.owner_user_id`,
     })
     .returning();
   return row as RegistryInstanceRow;
