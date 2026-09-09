@@ -68,7 +68,11 @@ jobs:
   # postgres, livekit, coturn, certbot). Scan the pinned versions the
   # compose file actually deploys.
   third-party-image-scan:
-    name: Third-party image vulnerabilities (Trivy)
+    # 12th-audit: STABLE name keyed on matrix.key only — GitHub appends
+    # every matrix field to the check name, so the image-tag form never
+    # matched the branch-protection contexts (merge blocker, not a
+    # bypass). This form matches "Third-party Trivy (nginx)" etc.
+    name: Third-party Trivy (${{ matrix.key }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:

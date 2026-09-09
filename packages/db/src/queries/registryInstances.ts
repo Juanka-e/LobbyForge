@@ -173,6 +173,12 @@ export async function upsertRegistryInstance(
       setWhere: sql`${registryInstances.ownerUserId} = excluded.owner_user_id`,
     })
     .returning();
+  // 12th-audit: the race loser's setWhere is false → no row returned.
+  // Surface the REAL reason (someone else owns it) instead of letting
+  // an undefined row 500 downstream.
+  if (!row) {
+    throw new RegistryInstanceOwnedError(true);
+  }
   return row as RegistryInstanceRow;
 }
 

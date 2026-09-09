@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createPublicKey, verify as edVerify } from 'node:crypto';
+import { ssrfSafeGet } from '@/lib/ssrf-safe-fetch';
 import { z } from 'zod';
 import { RegistryInstanceOwnedError, RegistryInstanceUnclaimableError, upsertRegistryInstance } from '@lobbyforge/db';
 import { normalizeRegistryInstanceUrl } from '@lobbyforge/registry';
@@ -21,17 +22,15 @@ const RegisterSchema = z.object({
   features: z.array(z.string()).max(30).optional(),
   publicKey: z.string().min(32).max(512),
   /**
-   * 11th-audit: proof that the caller OPERATES the instance whose key
-   * is being registered. Flow: GET /api/directory/register/challenge?
-   * instanceId=… → {challenge, expiresIn} (Redis, 10 min, one-time);
-   * the instance signs the challenge with the PRIVATE key matching
-   * publicKey; registration verifies the signature. Without this, any
-   * user could squat an arbitrary instanceId ahead of the real
-   * operator (registration DoS) or register a domain they don't
-   * control.
+   * 12th-audit: proof that the caller controls the INSTANCE + DOMAIN.
+   * The 11th-audit key challenge only proved the signature matched the
+   * REQUEST'S OWN publicKey (an attacker just used their own keypair).
+   * Real proof: the directory fetches
+   * https://{domain}/.well-known/lobbyforge-verification over the
+   * SSRF-safe IP-pinned client and verifies the document server-side —
+   * only an operator who actually controls the domain can serve it.
    */
-  challenge: z.string().min(16).max(128),
-  challengeSignature: z.string().min(64).max(256),
+  verificationSignature: z.string().min(64).max(256),
 }).strict();
 
 function parsePublicKeyPemOrDer(stored: string): ReturnType<typeof createPublicKey> | null {
@@ -45,6 +44,71 @@ function parsePublicKeyPemOrDer(stored: string): ReturnType<typeof createPublicK
   } catch {
     return null;
   }
+}
+
+/**
+ * 12th-audit domain proof: fetch the instance's verification document
+ * over the SSRF-safe client and verify it against the submitted key.
+ * The instance operator serves:
+ *   GET /.well-known/lobbyforge-verification →
+ *   { instanceId, publicKey, proof }
+ * where proof = Ed25519(privateKey,
+ *   JSON.stringify({ verify: 1, instanceId, domain, publicKey })).
+ */
+async function verifyDomainOwnership(input: {
+  instanceId: string;
+  domain: string;
+  publicKey: string;
+  signature: string;
+}): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
+  const pubKey = parsePublicKeyPemOrDer(input.publicKey);
+  if (!pubKey) return { ok: false, error: 'publicKey is not a usable key', status: 400 };
+
+  const wellKnown = `${input.domain.replace(/\/$/, '')}/.well-known/lobbyforge-verification`;
+  let res: Awaited<ReturnType<typeof ssrfSafeGet>>;
+  try {
+    res = await ssrfSafeGet(wellKnown);
+  } catch (err) {
+    return {
+      ok: false,
+      error: `Could not verify the domain (fetch failed: ${(err as Error).message}). The instance must serve ${wellKnown}.`,
+      status: 400,
+    };
+  }
+  if (!res.ok) {
+    return { ok: false, error: `Verification endpoint returned HTTP ${res.status}`, status: 400 };
+  }
+  let doc: { instanceId?: unknown; publicKey?: unknown; proof?: unknown };
+  try {
+    doc = JSON.parse(res.body);
+  } catch {
+    return { ok: false, error: 'Verification document is not valid JSON', status: 400 };
+  }
+  if (doc.instanceId !== input.instanceId) {
+    return { ok: false, error: 'Verification document instanceId mismatch', status: 400 };
+  }
+  if (doc.publicKey !== input.publicKey) {
+    return { ok: false, error: 'Verification document publicKey mismatch', status: 400 };
+  }
+  if (typeof doc.proof !== 'string') {
+    return { ok: false, error: 'Verification document has no proof', status: 400 };
+  }
+  const canonical = JSON.stringify({
+    verify: 1,
+    instanceId: input.instanceId,
+    domain: input.domain,
+    publicKey: input.publicKey,
+  });
+  const signedOk = edVerify(
+    null,
+    Buffer.from(canonical, 'utf8'),
+    pubKey,
+    Buffer.from(input.signature, 'base64')
+  );
+  if (!signedOk) {
+    return { ok: false, error: 'Domain proof signature invalid', status: 401 };
+  }
+  return { ok: true };
 }
 
 /**
@@ -74,39 +138,19 @@ async function handlePost(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'Domain must be a valid HTTPS origin' }, { status: 400 });
   }
 
-  // Challenge verification (11th-audit ownership proof).
-  try {
-    const { redis } = await import('@/lib/redis');
-    const challengeKey = `lf:register-challenge:${body.instanceId}`;
-    const challenge = await redis.getdel(challengeKey);
-    if (!challenge || challenge !== body.challenge) {
-      return NextResponse.json(
-        { error: 'Challenge expired or invalid. Request a fresh one via GET /api/directory/register/challenge.' },
-        { status: 401 }
-      );
-    }
-    const pubKey = parsePublicKeyPemOrDer(body.publicKey);
-    if (!pubKey) {
-      return NextResponse.json({ error: 'publicKey is not a usable key' }, { status: 400 });
-    }
-    const signedOk = edVerify(
-      null,
-      Buffer.from(
-        JSON.stringify({ register: 1, instanceId: body.instanceId, challenge: body.challenge }),
-        'utf8'
-      ),
-      pubKey,
-      Buffer.from(body.challengeSignature, 'base64')
-    );
-    if (!signedOk) {
-      return NextResponse.json(
-        { error: 'Challenge signature does not match publicKey — registration refused.' },
-        { status: 401 }
-      );
-    }
-  } catch (err) {
-    console.error('[directory/register] challenge verification failed:', (err as Error).message);
-    return NextResponse.json({ error: 'Challenge verification failed' }, { status: 500 });
+  // 12th-audit: DOMAIN OWNERSHIP PROOF — the directory fetches the
+  // instance's .well-known document over the SSRF-safe IP-pinned
+  // client and verifies instanceId + publicKey + proof server-side.
+  // A self-chosen keypair alone proves nothing; only the domain's
+  // real operator can serve the document.
+  const domainProof = await verifyDomainOwnership({
+    instanceId: body.instanceId,
+    domain: normalizedDomain,
+    publicKey: body.publicKey,
+    signature: body.verificationSignature,
+  });
+  if (!domainProof.ok) {
+    return NextResponse.json({ error: domainProof.error }, { status: domainProof.status });
   }
 
   try {

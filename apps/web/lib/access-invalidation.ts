@@ -63,6 +63,25 @@ let invalidationSubscriber: {
 } | null = null;
 let invalidationSubscriberStarting = false;
 
+let invalidationRetryMs = 500;
+const INVALIDATION_RETRY_MAX_MS = 30_000;
+
+function fanOut(raw: string): void {
+  let event: AccessInvalidationEvent;
+  try {
+    event = JSON.parse(raw) as AccessInvalidationEvent;
+  } catch {
+    return; // publisher owns the shape
+  }
+  for (const handler of invalidationHandlers) {
+    try {
+      handler(event);
+    } catch {
+      /* one stream's handler must not break the fan-out */
+    }
+  }
+}
+
 function ensureInvalidationSubscriber(): void {
   if (invalidationSubscriber || invalidationSubscriberStarting) return;
   invalidationSubscriberStarting = true;
@@ -75,27 +94,30 @@ function ensureInvalidationSubscriber(): void {
   };
   try {
     const sub = io.duplicate();
-    sub.on('message', (_channel: string, raw: string) => {
-      let event: AccessInvalidationEvent;
-      try {
-        event = JSON.parse(raw) as AccessInvalidationEvent;
-      } catch {
-        return; // publisher owns the shape
-      }
-      for (const handler of invalidationHandlers) {
-        try {
-          handler(event);
-        } catch {
-          /* one stream's handler must not break the fan-out */
-        }
-      }
-    });
-    void sub.subscribe(ACCESS_INVALIDATION_CHANNEL).catch((err: Error) => {
-      console.error('[access-invalidation] subscribe failed:', err.message);
-    });
-    invalidationSubscriber = sub;
+    sub.on('message', (_channel: string, raw: string) => fanOut(raw));
+    // 12th-audit: a failed subscribe no longer latches a dead
+    // subscriber — retry with exponential backoff so a Redis blip at
+    // process start doesn't silently downgrade every stream to the
+    // 30s recheck window.
+    void sub
+      .subscribe(ACCESS_INVALIDATION_CHANNEL)
+      .then(() => {
+        invalidationRetryMs = 500;
+        invalidationSubscriber = sub;
+      })
+      .catch((err: Error) => {
+        console.error(
+          `[access-invalidation] subscribe failed (retry in ${invalidationRetryMs}ms):`,
+          err.message
+        );
+        void sub.quit().catch(() => undefined);
+        setTimeout(ensureInvalidationSubscriber, invalidationRetryMs);
+        invalidationRetryMs = Math.min(invalidationRetryMs * 2, INVALIDATION_RETRY_MAX_MS);
+      });
   } catch (err) {
     console.error('[access-invalidation] subscriber create failed:', (err as Error).message);
+    setTimeout(ensureInvalidationSubscriber, invalidationRetryMs);
+    invalidationRetryMs = Math.min(invalidationRetryMs * 2, INVALIDATION_RETRY_MAX_MS);
   } finally {
     invalidationSubscriberStarting = false;
   }

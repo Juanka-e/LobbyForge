@@ -1,5 +1,7 @@
 export const APP_NAME = 'LobbyForge Registry';
 
+import { isBlockedNetworkIp } from './ip-ranges.js';
+
 export interface ServerEntry {
   id: string;
   name: string;
@@ -33,11 +35,18 @@ function isLoopback(hostname: string): boolean {
 
 function isPrivateHost(hostname: string): boolean {
   const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, '');
-  const privateIpv6 = normalized.includes(':') && (
-    normalized.startsWith('fc') || normalized.startsWith('fd') || normalized.startsWith('fe8')
-  );
-  return isLoopback(normalized) || isPrivateIpv4(normalized) ||
-    privateIpv6 ||
+  // 12th-audit: canonical BigInt/CIDR classification — the old prefix
+  // checks missed most of fe80::/10 (fe90/fea0/feb0 passed) and all
+  // IPv4-mapped/translated forms. This runs BEFORE any server-side
+  // fetch (the .well-known domain proof), so it is a live SSRF gate.
+  const canonicalBlocked = (() => {
+    try {
+      return isBlockedNetworkIp(normalized);
+    } catch {
+      return false;
+    }
+  })();
+  return isLoopback(normalized) || canonicalBlocked ||
     normalized.endsWith('.local') || normalized.endsWith('.internal');
 }
 

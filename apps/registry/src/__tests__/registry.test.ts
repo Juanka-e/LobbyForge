@@ -49,3 +49,26 @@ describe('@lobbyforge/registry', () => {
       .toThrow(/HTTPS/);
   });
 });
+
+// 12th-audit: canonical IPv6 classification in the URL validator.
+describe('normalizeRegistryInstanceUrl — private IPv6 (canonical CIDR)', () => {
+  it.each([
+    ['https://[fe80::1]/', 'fe80 link-local'],
+    ['https://[fe90::1]/', 'fe90 link-local (old prefix check missed it)'],
+    ['https://[fea0::1]/', 'fea0 link-local'],
+    ['https://[febf::1]/', 'febf link-local edge'],
+    ['https://[fc00::1]/', 'ULA fc00'],
+    ['https://[fd12:3456::1]/', 'ULA fd00'],
+    ['https://[::ffff:10.0.0.1]/', 'IPv4-mapped private'],
+    ['https://[::ffff:192.168.1.1]/', 'IPv4-mapped private 2'],
+  ])('rejects %s (%s)', (url) => {
+    expect(() => normalizeRegistryInstanceUrl(url)).toThrow();
+  });
+
+  it.each([
+    ['https://[2606:4700:4700::1111]/', 'public IPv6'],
+    ['https://[2a00:1450:4001:81b::200e]/', 'public IPv6 2'],
+  ])('allows %s', (url) => {
+    expect(() => normalizeRegistryInstanceUrl(url)).not.toThrow();
+  });
+});

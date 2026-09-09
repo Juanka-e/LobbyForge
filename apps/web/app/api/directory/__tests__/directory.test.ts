@@ -30,18 +30,18 @@ vi.mock('@lobbyforge/registry', () => ({
 }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
 
-// 11th-audit: registration challenge (ownership proof) mocks.
-const { redisGetdel, redisSet } = vi.hoisted(() => ({
-  redisGetdel: vi.fn().mockResolvedValue('challenge-value-0123456789'),
+// 12th-audit: domain-ownership proof mocks — the register route
+// fetches the instance's .well-known document via the SSRF-safe client.
+const { redisSet, ssrfSafeGet, buildWellKnown } = vi.hoisted(() => ({
   redisSet: vi.fn().mockResolvedValue('OK'),
+  ssrfSafeGet: vi.fn(),
+  buildWellKnown: (instanceId: string, publicKey: string, proof: string) =>
+    JSON.stringify({ instanceId, publicKey, proof }),
 }));
 vi.mock('@/lib/redis', () => ({
-  redis: {
-    getdel: redisGetdel,
-    get: vi.fn(),
-    set: (...args: unknown[]) => redisSet(...args),
-  },
+  redis: { get: vi.fn(), set: (...args: unknown[]) => redisSet(...args), getdel: vi.fn() },
 }));
+vi.mock('@/lib/ssrf-safe-fetch', () => ({ ssrfSafeGet }));
 vi.mock('@/lib/security-headers', () => ({
   withApiSecurity: (handler: unknown) => handler,
   withMachineApiSecurity: (handler: unknown) => handler,
@@ -57,7 +57,11 @@ beforeEach(() => {
   requireMaterializedSession.mockReset();
   listPublicRegistryInstances.mockReset();
   upsertRegistryInstance.mockReset();
-  redisGetdel.mockReset().mockResolvedValue(CHALLENGE);
+  ssrfSafeGet.mockReset().mockResolvedValue({
+    ok: true,
+    status: 200,
+    body: buildWellKnown('inst-2', regPublicKeyB64, verificationSignature),
+  });
   heartbeatRegistryInstance.mockReset();
   getRegistryInstanceByInstanceId.mockReset();
   redisSet.mockReset().mockResolvedValue('OK');
@@ -97,16 +101,22 @@ describe('GET /api/directory', () => {
   });
 });
 
-// Real Ed25519 keypair: registration verifies a genuine challenge
-// signature against the submitted publicKey.
+// Real Ed25519 keypair + a well-known document the (mocked) SSRF-safe
+// fetch serves: registration verifies the DOMAIN proof server-side.
 const keypair = generateKeyPairSync('ed25519');
-const { publicKey: regPub, privateKey: regPriv } = keypair;
-const regPublicKeyB64 = regPub.export({ format: 'der', type: 'spki' }).toString('base64');
-const CHALLENGE = 'challenge-value-0123456789';
-const challengeSignature = signEd25519(
+const regPublicKeyB64 = keypair.publicKey
+  .export({ format: 'der', type: 'spki' })
+  .toString('base64');
+const canonicalProof = JSON.stringify({
+  verify: 1,
+  instanceId: 'inst-2',
+  domain: 'https://my.example.dev',
+  publicKey: regPublicKeyB64,
+});
+const verificationSignature = signEd25519(
   null,
-  Buffer.from(JSON.stringify({ register: 1, instanceId: 'inst-2', challenge: CHALLENGE }), 'utf8'),
-  regPriv
+  Buffer.from(canonicalProof, 'utf8'),
+  keypair.privateKey
 ).toString('base64');
 
 describe('POST /api/directory/register', () => {
@@ -115,8 +125,7 @@ describe('POST /api/directory/register', () => {
     name: 'My Community',
     domain: 'https://my.example.dev',
     publicKey: regPublicKeyB64,
-    challenge: CHALLENGE,
-    challengeSignature,
+    verificationSignature,
   };
 
   it('registers a new instance (starts unlisted)', async () => {
@@ -155,13 +164,13 @@ describe('POST /api/directory/register', () => {
     );
   });
 
-  it('11th-audit: rejects registration with a WRONG challenge signature', async () => {
+  it('12th-audit: rejects a WRONG domain proof signature', async () => {
     upsertRegistryInstance.mockResolvedValue({ instanceId: 'inst-2', isListed: false, isVerified: false, id: 'y' });
     const { POST } = await import('../register/route.js');
     const res = await POST(
       new Request('https://example.test/api/directory/register', {
         method: 'POST',
-        body: JSON.stringify({ ...validBody, challengeSignature: Buffer.alloc(64, 1).toString('base64') }),
+        body: JSON.stringify({ ...validBody, verificationSignature: Buffer.alloc(64, 1).toString('base64') }),
       }),
       {}
     );
@@ -169,8 +178,8 @@ describe('POST /api/directory/register', () => {
     expect(upsertRegistryInstance).not.toHaveBeenCalled();
   });
 
-  it('11th-audit: rejects an expired/unknown challenge', async () => {
-    redisGetdel.mockResolvedValueOnce(null);
+  it('12th-audit: rejects when the domain serves NO verification document', async () => {
+    ssrfSafeGet.mockResolvedValueOnce({ ok: false, status: 404, body: '' });
     const { POST } = await import('../register/route.js');
     const res = await POST(
       new Request('https://example.test/api/directory/register', {
@@ -179,7 +188,39 @@ describe('POST /api/directory/register', () => {
       }),
       {}
     );
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(400);
+    expect(upsertRegistryInstance).not.toHaveBeenCalled();
+  });
+
+  it('12th-audit: an attacker-owned keypair FAILS — the served document must carry the SAME key', async () => {
+    // Attacker registers their own keypair but the domain serves the
+    // REAL operator's document — publicKey mismatch = rejection. This
+    // is the hole the 11th-audit self-challenge had.
+    const attackerPair = generateKeyPairSync('ed25519');
+    const attackerKey = attackerPair.publicKey
+      .export({ format: 'der', type: 'spki' })
+      .toString('base64');
+    const attackerSig = signEd25519(
+      null,
+      Buffer.from(
+        JSON.stringify({ verify: 1, instanceId: 'inst-2', domain: 'https://my.example.dev', publicKey: attackerKey }),
+        'utf8'
+      ),
+      attackerPair.privateKey
+    ).toString('base64');
+    const { POST } = await import('../register/route.js');
+    const res = await POST(
+      new Request('https://example.test/api/directory/register', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...validBody,
+          publicKey: attackerKey,
+          verificationSignature: attackerSig,
+        }),
+      }),
+      {}
+    );
+    expect(res.status).toBe(400); // document publicKey mismatch
     expect(upsertRegistryInstance).not.toHaveBeenCalled();
   });
 

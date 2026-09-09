@@ -2,6 +2,45 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - 12th-audit remediation - 2026-09-09
+
+### Fixed
+
+- **REAL directory domain proof**: the 11th-audit key challenge only
+  proved a signature matched the request's OWN publicKey — an attacker
+  simply used their own keypair and squatted any instanceId.
+  Registration now verifies DOMAIN OWNERSHIP server-side: the
+  directory fetches https://{domain}/.well-known/
+  lobbyforge-verification over a new SSRF-safe IP-pinned HTTPS client
+  (hostname checks + all-addresses-public DNS resolution + connection
+  pinned to the verified IPs; extracted from the plugin installer's
+  battle-tested pattern) and requires the served document to carry the
+  same instanceId + publicKey + a valid Ed25519 proof over the
+  canonical payload. 3 tests including the attacker-keypair case.
+- **Registry IPv6 canonical classification**: the standalone registry
+  package used the old prefix checks (fe90/fea0/feb0 link-locals and
+  all IPv4-mapped forms passed). It now vendors the canonical
+  BigInt/CIDR parser — with hostname-appropriate semantics (a
+  non-literal hostname is not auto-blocked pre-resolution; literal
+  garbage still refuses). 10 new regression tests. This was a
+  prerequisite: the domain proof's server-side fetch would have
+  inherited the hole as live SSRF.
+- **Branch-protection check names**: the Trivy matrix jobs got STABLE
+  names (Third-party Trivy (nginx), …) — GitHub appends every matrix
+  field to the generated check name, so the old image-tag contexts
+  could never match (a permanent merge blocker on contributor PRs).
+  Protection updated to the exact stable names.
+- **TURN env name**: .env.prod.example carried TURN_AUTH_SECRET but
+  the web app reads LOBBYFORGE_TURN_SECRET — manual deploys silently
+  lost the TURN fallback on restrictive networks. Renamed + a manual
+  deploy note (render-configs.sh) added.
+- **SSE invalidation resilience**: a failed initial Redis subscribe no
+  longer latches a dead subscriber (which silently downgraded every
+  stream to the 30s recheck) — exponential backoff retry, 500ms→30s.
+- **Registration race loser UX**: the setWhere no-op now throws
+  RegistryInstanceOwnedError (403) instead of returning an undefined
+  row that 500'd downstream.
+
 ## [Unreleased] - 11th-audit remediation - 2026-09-09
 
 ### Fixed
