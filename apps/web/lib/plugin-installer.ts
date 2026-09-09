@@ -34,7 +34,14 @@ export interface InstallResult {
 export async function installPluginBundle(
   pluginId: string,
   url: string,
-  version: string
+  version: string,
+  /**
+   * 13th-audit: the REVIEWED artifact pin (catalog.bundleSha256 /
+   * bundleSizeBytes). When provided, the downloaded bytes must match
+   * BOTH, compared constant-time — a compromised publisher host can no
+   * longer swap the artifact behind an unchanged approved catalog row.
+   */
+  expectedPin?: { sha256: string; sizeBytes: number }
 ): Promise<InstallResult> {
   // LF-004: Validate version as strict semver — it's used as a path segment.
   if (!/^\d+\.\d+\.\d+(-[a-z0-9.-]+)?(\+[a-z0-9.-]+)?$/i.test(version)) {
@@ -58,6 +65,26 @@ export async function installPluginBundle(
     const tarball = await downloadWithTimeout(url);
     if (tarball.byteLength > MAX_BUNDLE_BYTES) {
       return { ok: false, error: `Bundle exceeds ${MAX_BUNDLE_BYTES} bytes` };
+    }
+
+    // 1b. 13th-audit: verify the bytes against the REVIEWED pin before
+    // anything touches the filesystem.
+    if (expectedPin) {
+      if (tarball.byteLength !== expectedPin.sizeBytes) {
+        return {
+          ok: false,
+          error: `Bundle size ${tarball.byteLength} does not match the reviewed artifact (${expectedPin.sizeBytes}) — the download may have been tampered with.`,
+        };
+      }
+      const { createHash, timingSafeEqual } = await import('node:crypto');
+      const actual = createHash('sha256').update(Buffer.from(tarball)).digest();
+      const expected = Buffer.from(expectedPin.sha256, 'hex');
+      if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+        return {
+          ok: false,
+          error: 'Bundle SHA-256 does not match the reviewed artifact — refusing to install possibly tampered code.',
+        };
+      }
     }
 
     // 2. Extract into staging.
@@ -320,4 +347,13 @@ async function fetchIpPinned(
     req.on('timeout', () => { req.destroy(new Error('Download timed out')); });
     req.end();
   });
+}
+
+/**
+ * 13th-audit: the SAME hardened downloader the installer uses, exposed
+ * for review-time bundle pinning — the reviewed digest and the
+ * installed bytes must come from one code path.
+ */
+export async function downloadBundleForReview(url: string): Promise<ArrayBuffer> {
+  return downloadWithTimeout(url);
 }

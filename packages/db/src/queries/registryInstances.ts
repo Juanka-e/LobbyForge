@@ -162,8 +162,13 @@ export async function upsertRegistryInstance(
     .onConflictDoUpdate({
       target: registryInstances.instanceId,
       set: {
+        // 13th-audit: DOMAIN IS IMMUTABLE HERE. The register proof
+        // verifies the REQUEST's key against the new domain — an
+        // attacker with a hijacked owner session could otherwise point
+        // a listed instance at their own (self-verified) domain.
+        // Domain moves go through changeRegistryInstanceDomain, which
+        // additionally proves possession of the STORED private key.
         name: values.name,
-        domain: values.domain,
         description: values.description,
         region: values.region,
         languages: values.languages,
@@ -180,6 +185,27 @@ export async function upsertRegistryInstance(
     throw new RegistryInstanceOwnedError(true);
   }
   return row as RegistryInstanceRow;
+}
+
+/** 13th-audit: change the instance's domain. Requires BOTH the owner
+ * session AND a proof signed with the CURRENT (stored) private key —
+ * the same model rotate-key uses, so a hijacked session alone cannot
+ * redirect discovery traffic to an attacker-controlled domain. */
+export async function changeRegistryInstanceDomain(
+  db: DbClient,
+  input: { instanceId: string; ownerUserId: string; newDomain: string }
+): Promise<boolean> {
+  const updated = await db
+    .update(registryInstances)
+    .set({ domain: input.newDomain })
+    .where(
+      and(
+        eq(registryInstances.instanceId, input.instanceId),
+        eq(registryInstances.ownerUserId, input.ownerUserId)
+      )
+    )
+    .returning({ id: registryInstances.id });
+  return updated.length > 0;
 }
 
 /** 10th-audit: rotate the instance signing key. Owner-only. */

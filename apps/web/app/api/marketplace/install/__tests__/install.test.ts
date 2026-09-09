@@ -41,7 +41,31 @@ describe('POST /api/marketplace/install', () => {
       {}
     );
     expect(res.status).toBe(200);
-    expect(installPluginBundle).toHaveBeenCalledWith('cool-game', 'https://cdn.example.dev/cool-game-1.0.0.tgz', '1.0.0');
+    expect(installPluginBundle).toHaveBeenCalledWith('cool-game', 'https://cdn.example.dev/cool-game-1.0.0.tgz', '1.0.0', undefined); // legacy row: no pin
+  });
+
+  it('13th-audit: passes the REVIEWED pin to the installer', async () => {
+    getCatalogEntry.mockResolvedValue({
+      pluginId: 'pinned-game', reviewStatus: 'approved', version: '2.0.0',
+      manifestUrl: 'https://cdn.example.dev/pinned-2.0.0.tgz',
+      bundleSha256: 'a'.repeat(64), bundleSizeBytes: 4096, id: 'z',
+    });
+    installPluginBundle.mockResolvedValue({ ok: true, path: '/tmp/x' });
+    const { POST } = await import('../route.js');
+    const res = await POST(
+      new Request('https://example.test/api/marketplace/install', {
+        method: 'POST',
+        body: JSON.stringify({ pluginId: 'pinned-game' }),
+      }),
+      {}
+    );
+    expect(res.status).toBe(200);
+    expect(installPluginBundle).toHaveBeenCalledWith(
+      'pinned-game',
+      'https://cdn.example.dev/pinned-2.0.0.tgz',
+      '2.0.0',
+      { sha256: 'a'.repeat(64), sizeBytes: 4096 }
+    );
   });
 
   it('returns 403 when the plugin is not approved', async () => {

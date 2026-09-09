@@ -673,6 +673,12 @@ export const pluginCatalog = pgTable('plugin_catalog', {
   playerConfig: jsonb('player_config'),
   manifestUrl: text('manifest_url'),
   iconUrl: text('icon_url'),
+  // 13th-audit: the reviewed artifact's exact digest — review computes
+  // it, install verifies it constant-time. NULL = legacy/unpinned rows
+  // (installs refuse until re-reviewed under the pinned model when the
+  // strict gate is on).
+  bundleSha256: text('bundle_sha256'),
+  bundleSizeBytes: integer('bundle_size_bytes'),
   reviewStatus: text('review_status').default('pending').notNull(), // pending | approved | rejected | delisted
   reviewerUserId: uuid('reviewer_user_id').references(() => users.id, { onDelete: 'set null' }),
   reviewedAt: timestamp('reviewed_at', { withTimezone: true }),

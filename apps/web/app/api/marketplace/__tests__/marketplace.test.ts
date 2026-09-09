@@ -9,13 +9,18 @@ const reviewPlugin = vi.fn();
 
 vi.mock('@/lib/api-auth', () => ({ requireMaterializedSession }));
 vi.mock('@/lib/admin-auth', () => ({ requireAdminHealthToken }));
+const getCatalogEntry = vi.fn();
 vi.mock('@lobbyforge/db', () => ({
   listApprovedPlugins,
   submitPluginForReview,
   reviewPlugin,
+  getCatalogEntry,
 }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
 vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));
+// 13th-audit: review-time bundle pinning.
+const downloadBundleForReview = vi.fn().mockResolvedValue(new ArrayBuffer(16));
+vi.mock('@/lib/plugin-bundle-download', () => ({ downloadBundleForReview }));
 
 const UID = '00000000-0000-0000-0000-000000000099';
 
@@ -132,6 +137,11 @@ describe('POST /api/marketplace/submit', () => {
 describe('POST /api/marketplace/review', () => {
   it('approves a plugin (admin)', async () => {
     reviewPlugin.mockResolvedValue(undefined);
+    // 13th-audit: approval fetches the bundle and pins its digest.
+    getCatalogEntry.mockResolvedValue({
+      pluginId: 'my-awesome-game',
+      manifestUrl: 'https://cdn.example.com/my-game-1.0.0.tgz',
+    });
     const { POST } = await import('../review/route.js');
     const res = await POST(
       new Request('https://example.test/api/marketplace/review', {
@@ -141,13 +151,30 @@ describe('POST /api/marketplace/review', () => {
       {}
     );
     expect(res.status).toBe(200);
+    expect(downloadBundleForReview).toHaveBeenCalledWith('https://cdn.example.com/my-game-1.0.0.tgz');
     expect(reviewPlugin).toHaveBeenCalledWith(
       { __mockDb: true },
       'my-awesome-game',
       'approved',
-      expect.any(String),
-      null
+      null,
+      null,
+      expect.objectContaining({ sha256: expect.any(String), sizeBytes: 16 })
     );
+  });
+
+  it('13th-audit: refuses approval when the bundle cannot be fetched for pinning', async () => {
+    getCatalogEntry.mockResolvedValue({ pluginId: 'x', manifestUrl: 'https://cdn.example.com/x.tgz' });
+    downloadBundleForReview.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    const { POST } = await import('../review/route.js');
+    const res = await POST(
+      new Request('https://example.test/api/marketplace/review', {
+        method: 'POST',
+        body: JSON.stringify({ pluginId: 'x', decision: 'approved' }),
+      }),
+      {}
+    );
+    expect(res.status).toBe(400);
+    expect(reviewPlugin).not.toHaveBeenCalled();
   });
 
   it('rejects an invalid decision value', async () => {

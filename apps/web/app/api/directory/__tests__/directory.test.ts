@@ -60,7 +60,7 @@ beforeEach(() => {
   ssrfSafeGet.mockReset().mockResolvedValue({
     ok: true,
     status: 200,
-    body: buildWellKnown('inst-2', regPublicKeyB64, verificationSignature),
+    body: buildWellKnown('inst-2', regPublicKeyB64, docProof),
   });
   heartbeatRegistryInstance.mockReset();
   getRegistryInstanceByInstanceId.mockReset();
@@ -113,7 +113,7 @@ const canonicalProof = JSON.stringify({
   domain: 'https://my.example.dev',
   publicKey: regPublicKeyB64,
 });
-const verificationSignature = signEd25519(
+const docProof = signEd25519(
   null,
   Buffer.from(canonicalProof, 'utf8'),
   keypair.privateKey
@@ -125,7 +125,6 @@ describe('POST /api/directory/register', () => {
     name: 'My Community',
     domain: 'https://my.example.dev',
     publicKey: regPublicKeyB64,
-    verificationSignature,
   };
 
   it('registers a new instance (starts unlisted)', async () => {
@@ -164,13 +163,18 @@ describe('POST /api/directory/register', () => {
     );
   });
 
-  it('12th-audit: rejects a WRONG domain proof signature', async () => {
+  it('12th-audit: rejects a WRONG domain proof signature (doc-carried)', async () => {
+    ssrfSafeGet.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      body: buildWellKnown('inst-2', regPublicKeyB64, Buffer.alloc(64, 1).toString('base64')),
+    });
     upsertRegistryInstance.mockResolvedValue({ instanceId: 'inst-2', isListed: false, isVerified: false, id: 'y' });
     const { POST } = await import('../register/route.js');
     const res = await POST(
       new Request('https://example.test/api/directory/register', {
         method: 'POST',
-        body: JSON.stringify({ ...validBody, verificationSignature: Buffer.alloc(64, 1).toString('base64') }),
+        body: JSON.stringify(validBody),
       }),
       {}
     );
@@ -200,14 +204,7 @@ describe('POST /api/directory/register', () => {
     const attackerKey = attackerPair.publicKey
       .export({ format: 'der', type: 'spki' })
       .toString('base64');
-    const attackerSig = signEd25519(
-      null,
-      Buffer.from(
-        JSON.stringify({ verify: 1, instanceId: 'inst-2', domain: 'https://my.example.dev', publicKey: attackerKey }),
-        'utf8'
-      ),
-      attackerPair.privateKey
-    ).toString('base64');
+    const attackerSig = Buffer.alloc(64, 2).toString('base64'); // doc serves operator key, not attacker's
     const { POST } = await import('../register/route.js');
     const res = await POST(
       new Request('https://example.test/api/directory/register', {
@@ -215,7 +212,6 @@ describe('POST /api/directory/register', () => {
         body: JSON.stringify({
           ...validBody,
           publicKey: attackerKey,
-          verificationSignature: attackerSig,
         }),
       }),
       {}

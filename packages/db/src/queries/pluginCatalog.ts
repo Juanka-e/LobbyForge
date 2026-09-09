@@ -18,6 +18,9 @@ export interface PluginCatalogRow {
   name: string;
   version: string;
   type: string;
+  /** 13th-audit: the reviewed artifact pin (null = legacy unpinned row). */
+  bundleSha256: string | null;
+  bundleSizeBytes: number | null;
   summary: string | null;
   description: string | null;
   publisher: string;
@@ -183,21 +186,34 @@ export async function submitPluginForReview(
   return row as PluginCatalogRow;
 }
 
-/** Admin review: approve, reject, or delist a plugin. */
+/**
+ * Admin review: approve, reject, or delist a plugin.
+ *
+ * 13th-audit: APPROVAL pins the reviewed artifact — the caller passes
+ * the exact bundle digest + size (computed by the review route while
+ * fetching the bundle for review). Installs verify downloads against
+ * these, so a compromised publisher host can no longer swap approved
+ * code under an unchanged catalog row.
+ */
 export async function reviewPlugin(
   db: DbClient,
   pluginId: string,
   decision: PluginReviewStatus,
-  reviewerUserId: string,
-  note?: string | null
+  /** null = reviewed via the emergency admin TOKEN, not a user account
+   *  (13th-audit: the all-zero UUID violated the users FK on real
+   *  Postgres). Session-based reviewers pass their uid. */
+  reviewerUserId: string | null,
+  note?: string | null,
+  bundlePin?: { sha256: string; sizeBytes: number }
 ): Promise<void> {
   await db
     .update(pluginCatalog)
     .set({
       reviewStatus: decision,
-      reviewerUserId,
+      reviewerUserId: reviewerUserId ?? null,
       reviewedAt: new Date(),
       reviewNote: note ?? null,
+      ...(bundlePin ? { bundleSha256: bundlePin.sha256, bundleSizeBytes: bundlePin.sizeBytes } : {}),
       updatedAt: new Date(),
       // Promote to verified-community on approval (unless already official).
       trustLevel: decision === 'approved' ? 'verified-community' : undefined,

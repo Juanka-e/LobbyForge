@@ -30,7 +30,6 @@ const RegisterSchema = z.object({
    * SSRF-safe IP-pinned client and verifies the document server-side —
    * only an operator who actually controls the domain can serve it.
    */
-  verificationSignature: z.string().min(64).max(256),
 }).strict();
 
 function parsePublicKeyPemOrDer(stored: string): ReturnType<typeof createPublicKey> | null {
@@ -59,7 +58,6 @@ async function verifyDomainOwnership(input: {
   instanceId: string;
   domain: string;
   publicKey: string;
-  signature: string;
 }): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
   const pubKey = parsePublicKeyPemOrDer(input.publicKey);
   if (!pubKey) return { ok: false, error: 'publicKey is not a usable key', status: 400 };
@@ -93,6 +91,10 @@ async function verifyDomainOwnership(input: {
   if (typeof doc.proof !== 'string') {
     return { ok: false, error: 'Verification document has no proof', status: 400 };
   }
+  // 13th-audit cleanup: ONE proof source — the DOCUMENT's own proof,
+  // verified against the document's own publicKey (which the caller's
+  // body had to match above). The old request-carried twin signature
+  // was redundant and error-prone.
   const canonical = JSON.stringify({
     verify: 1,
     instanceId: input.instanceId,
@@ -103,7 +105,7 @@ async function verifyDomainOwnership(input: {
     null,
     Buffer.from(canonical, 'utf8'),
     pubKey,
-    Buffer.from(input.signature, 'base64')
+    Buffer.from(doc.proof, 'base64')
   );
   if (!signedOk) {
     return { ok: false, error: 'Domain proof signature invalid', status: 401 };
@@ -147,7 +149,6 @@ async function handlePost(req: Request): Promise<NextResponse> {
     instanceId: body.instanceId,
     domain: normalizedDomain,
     publicKey: body.publicKey,
-    signature: body.verificationSignature,
   });
   if (!domainProof.ok) {
     return NextResponse.json({ error: domainProof.error }, { status: domainProof.status });

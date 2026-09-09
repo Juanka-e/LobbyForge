@@ -2,6 +2,34 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - 13th-audit remediation - 2026-09-09
+
+### Fixed
+
+- **Registry domain immutability + change flow (P1)**: /register no
+  longer mutates the domain on existing rows — its proof only ties the
+  REQUEST's key to the new domain, so a hijacked owner session could
+  previously redirect a listed instance to a self-verified attacker
+  domain. New POST /api/directory/change-domain applies the rotate-key
+  model to domains: owner session + a canonical-payload proof signed
+  with the CURRENT stored private key + a valid .well-known document
+  on the NEW domain + timestamp window + one-time nonce.
+- **Marketplace artifact pinning (P1)**: approval now FETCHES the
+  bundle (via the installer's hardened downloader — one code path for
+  review and install) and records bundleSha256 + bundleSizeBytes
+  (migration 0033); install verifies downloaded bytes against the pin
+  constant-time BEFORE touching the filesystem. A compromised
+  publisher host can no longer swap approved code behind an unchanged
+  catalog row. 3 new tests (pin passed, fetch-failure refusal,
+  review-call assertion).
+- **Reviewer FK bug**: the marketplace review route's all-zero
+  reviewer UUID would violate the users FK on real Postgres (approve →
+  500). Token-based reviews now record NULL (column semantics
+  documented); session-based admin reviews attribute their uid.
+- **Proof single-sourcing**: registration and change-domain verify the
+  DOCUMENT's own proof (doc.proof) instead of a redundant
+  request-carried twin — one proof source, fewer future footguns.
+
 ## [Unreleased] - 12th-audit remediation - 2026-09-09
 
 ### Fixed

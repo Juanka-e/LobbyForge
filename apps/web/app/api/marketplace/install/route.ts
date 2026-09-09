@@ -63,7 +63,16 @@ async function handlePost(req: Request): Promise<NextResponse> {
       );
     }
 
-    const result = await installPluginBundle(body.pluginId, entry.manifestUrl, entry.version);
+    // 13th-audit: pass the REVIEWED pin so the installer verifies the
+    // downloaded bytes against what approval actually reviewed.
+    const result = await installPluginBundle(
+      body.pluginId,
+      entry.manifestUrl,
+      entry.version,
+      entry.bundleSha256 && entry.bundleSizeBytes != null
+        ? { sha256: entry.bundleSha256, sizeBytes: entry.bundleSizeBytes }
+        : undefined
+    );
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 500 });
     }

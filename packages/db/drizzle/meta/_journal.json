@@ -218,6 +218,13 @@
       "when": 1785644800000,
       "tag": "0032_unlist_unowned_instances",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1785731200000,
+      "tag": "0033_plugin_bundle_pin",
+      "breakpoints": true
     }
   ]
 }
