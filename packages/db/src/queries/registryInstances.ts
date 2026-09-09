@@ -23,6 +23,19 @@ export class RegistryInstanceOwnedError extends Error {
   }
 }
 
+/**
+ * 10th-audit: legacy rows predate the owner column (owner NULL). The
+ * old "first updater claims it" rule let ANY authenticated user seize
+ * a listed legacy instance and rewrite its domain — a discovery
+ * phishing vector. Unclaimed rows are admin-recovery territory only.
+ */
+export class RegistryInstanceUnclaimableError extends Error {
+  constructor() {
+    super('This instance predates ownership tracking and cannot be claimed through self-service registration. Contact the directory administrators.');
+    this.name = 'RegistryInstanceUnclaimableError';
+  }
+}
+
 export interface RegistryInstanceRow {
   id: string;
   instanceId: string;
@@ -120,6 +133,10 @@ export async function upsertRegistryInstance(
   if (existing && existing.ownerUserId !== null && existing.ownerUserId !== input.actorUserId) {
     throw new RegistryInstanceOwnedError(true);
   }
+  // 10th-audit: NULL-owner legacy rows are NOT claimable via upsert.
+  if (existing && existing.ownerUserId === null) {
+    throw new RegistryInstanceUnclaimableError();
+  }
 
   const values = {
     instanceId: input.instanceId,
@@ -131,7 +148,7 @@ export async function upsertRegistryInstance(
     tags: input.tags ?? [],
     features: input.features ?? [],
     publicKey: input.publicKey,
-    ownerUserId: existing ? existing.ownerUserId ?? input.actorUserId : input.actorUserId,
+    ownerUserId: input.actorUserId,
   };
   const [row] = await db
     .insert(registryInstances)
@@ -152,6 +169,22 @@ export async function upsertRegistryInstance(
     })
     .returning();
   return row as RegistryInstanceRow;
+}
+
+/** 10th-audit: rotate the instance signing key. Owner-only. */
+export async function rotateRegistryInstanceKey(
+  db: DbClient,
+  input: { instanceId: string; ownerUserId: string; newPublicKey: string }
+): Promise<void> {
+  await db
+    .update(registryInstances)
+    .set({ publicKey: input.newPublicKey })
+    .where(
+      and(
+        eq(registryInstances.instanceId, input.instanceId),
+        eq(registryInstances.ownerUserId, input.ownerUserId)
+      )
+    );
 }
 
 /** Ingest a heartbeat: bump live stats + lastHeartbeatAt. */

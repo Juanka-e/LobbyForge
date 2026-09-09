@@ -36,6 +36,13 @@ vi.mock('@/lib/security-headers', () => ({
   withApiSecurity: (handler: unknown) => handler,
 }));
 
+// 10th-audit: the route now goes through the canonical moderation
+// hierarchy gate (voice_mute op).
+const mockAuthorizeModerationTarget = vi.fn();
+vi.mock('@/lib/member-authorization', () => ({
+  authorizeModerationTarget: (...args: unknown[]) => mockAuthorizeModerationTarget(...args),
+}));
+
 vi.mock('@/lib/db', () => ({
   getDb: () => ({ __mockDbClient: true }),
 }));
@@ -48,6 +55,7 @@ beforeEach(() => {
   mockRequireServerMember.mockReset();
   mockRequireChannelInServer.mockReset();
   mockRequireServerPermission.mockReset();
+  mockAuthorizeModerationTarget.mockReset().mockResolvedValue({ ok: true, context: { server: { ownerUserId: 'owner' }, actorHighest: 100 } });
   mockRequireServerMember.mockResolvedValue({ ok: true, server: { id: SERVER_ID } });
   mockRequireChannelInServer.mockResolvedValue({
     ok: true,
@@ -84,8 +92,8 @@ const TARGET_ID = '00000000-0000-0000-0000-000000000020';
 const ROOM = 's_00000000000000000000000000000001_c_00000000000000000000000000000010';
 
 describe('POST /api/servers/{id}/channels/{channelId}/members/{userId}/voice/mute', () => {
-  it('returns 403 when the caller lacks MUTE_MEMBERS', async () => {
-    mockRequireServerPermission.mockResolvedValue({
+  it('returns 403 when the caller lacks MUTE_MEMBERS (enforced by the hierarchy gate)', async () => {
+    mockAuthorizeModerationTarget.mockResolvedValue({
       ok: false,
       response: new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403 }),
     });

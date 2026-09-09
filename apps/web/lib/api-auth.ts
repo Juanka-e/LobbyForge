@@ -72,6 +72,15 @@ export async function requireVisibleChannelInServer(
   channelId: string,
   serverId: string
 ): Promise<ApiResult<{ channel: NonNullable<Awaited<ReturnType<typeof getChannelById>>> }>> {
+  // 10th-audit: MEMBERSHIP is part of this gate, centrally. The old
+  // helper checked channel-binding + visibility only, and the
+  // underlying canMemberAccessChannel returns true for ANYONE on
+  // no-override channels — so "visible" was silently treated as
+  // "member" by every caller (typing, presence, single-channel GET…).
+  // Order: authenticated → server member → channel belongs to server
+  // → channel visible.
+  const member = await requireServerMember(userId, serverId);
+  if (!member.ok) return member;
   const found = await requireChannelInServer(channelId, serverId);
   if (!found.ok) return found;
   const server = await getServerById(getDb(), serverId);

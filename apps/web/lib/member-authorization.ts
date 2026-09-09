@@ -27,13 +27,14 @@ import {
 } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 
-export type ModerationOperation = 'kick' | 'ban' | 'timeout' | 'set_roles';
+export type ModerationOperation = 'kick' | 'ban' | 'timeout' | 'set_roles' | 'voice_mute';
 
 const OPERATION_PERMISSION: Record<ModerationOperation, CorePermission> = {
   kick: CorePermission.KICK_MEMBERS,
   ban: CorePermission.BAN_MEMBERS,
   timeout: CorePermission.MODERATE_MEMBERS,
   set_roles: CorePermission.MANAGE_ROLES,
+  voice_mute: CorePermission.MUTE_MEMBERS,
 };
 
 const OPERATION_LABEL: Record<ModerationOperation, string> = {
@@ -41,6 +42,7 @@ const OPERATION_LABEL: Record<ModerationOperation, string> = {
   ban: 'ban',
   timeout: 'time out',
   set_roles: 'manage the roles of',
+  voice_mute: 'voice-mute',
 };
 
 export interface ModerationAuthContext {

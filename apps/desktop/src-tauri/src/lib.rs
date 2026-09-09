@@ -49,11 +49,121 @@ fn normalize_instance_url(input: &str) -> Result<String, String> {
     Ok(url.origin().ascii_serialization())
 }
 
+const HANDOFF_TTL: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+/// Begin a browser-login handoff: mint a fresh NATIVE state bound to
+/// the connected instance, hold it pending (single-use, 30 min TTL)
+/// and open the system browser at the instance login page carrying
+/// the state. Only a deep link whose state matches this pending entry
+/// will ever be forwarded into the webview.
+#[tauri::command]
+fn begin_desktop_login(
+    state: tauri::State<ShellState>,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    let instance = state
+        .instance_url
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "Connect to an instance first".to_string())?;
+    let bytes: [u8; 24] = rand::random();
+    let state_value = base64_url_encode(&bytes);
+    *state.pending_handoff.lock().unwrap() = Some(PendingHandoff {
+        state: state_value.clone(),
+        instance_origin: instance.clone(),
+        expires_at: std::time::Instant::now() + HANDOFF_TTL,
+    });
+    let login_url = format!("{}/login?desktopLoginState={}", instance, state_value);
+    let _ = open_in_system_browser(&app, &login_url);
+    Ok(state_value)
+}
+
+fn open_in_system_browser(app: &tauri::AppHandle, url: &str) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_url(url.to_string(), None::<&str>)
+        .map_err(|e| format!("failed to open browser: {e}"))
+}
+
+fn base64_url_encode(data: &[u8]) -> String {
+    const ALPHA: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(ALPHA[(n >> 18) as usize & 63] as char);
+        out.push(ALPHA[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 { ALPHA[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 2 { ALPHA[n as usize & 63] as char } else { '=' });
+    }
+    out
+}
+
+/// Gate a lobbyforge:// deep link against the pending handoff.
+/// Returns Some(url) only when a pending entry exists, is unexpired,
+/// the state matches EXACTLY and the link's instance (when present)
+/// matches the pending origin. Consumes the pending entry on success.
+fn accept_deep_link(state: &ShellState, raw: &str) -> Option<String> {
+    let url = url::Url::parse(raw).ok()?;
+    if url.scheme() != "lobbyforge" {
+        return None;
+    }
+    let mut pending_guard = state.pending_handoff.lock().unwrap();
+    let pending = pending_guard.take()?; // single-use regardless of outcome
+    if std::time::Instant::now() >= pending.expires_at {
+        return None;
+    }
+    let link_state = url
+        .query_pairs()
+        .find(|(k, _)| k == "state")
+        .map(|(_, v)| v.to_string())?;
+    if !constant_time_eq(link_state.as_bytes(), pending.state.as_bytes()) {
+        return None;
+    }
+    if let Some((_, instance)) = url.query_pairs().find(|(k, _)| k == "instance") {
+        let origin = url::Url::parse(&instance)
+            .ok()
+            .map(|u| u.origin().ascii_serialization())
+            .unwrap_or_default();
+        if origin != pending.instance_origin {
+            return None;
+        }
+    }
+    Some(raw.to_string())
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 /// State held across commands: the active instance URL the webview is showing.
 #[derive(Default)]
 struct ShellState {
     instance_url: Mutex<Option<String>>,
+    /// 10th-audit: the NATIVE pending handoff. A deep link is only
+    /// forwarded into the webview when its state matches this
+    /// single-use, expiring, instance-bound entry — unsolicited
+    /// lobbyforge:// links (an attacker feeding their own code+state)
+    /// are dropped at the OS boundary, before any web check runs.
+    pending_handoff: Mutex<Option<PendingHandoff>>,
 }
+
+struct PendingHandoff {
+    state: String,
+    instance_origin: String,
+    expires_at: std::time::Instant,
+}
+
 
 #[tauri::command]
 fn get_instance_url(state: tauri::State<ShellState>) -> Option<String> {
@@ -192,7 +302,12 @@ pub fn run() {
                 // lobbyforge://session/complete handoff from a browser
                 // login would silently vanish.
                 if let Some(url) = args.iter().find(|a| a.starts_with("lobbyforge://")) {
-                    forward_handoff(&window, url);
+                    // 10th-audit: argv-carried links pass the SAME
+                    // native pending-state gate.
+                    let shell: tauri::State<ShellState> = app.state();
+                    if let Some(accepted) = accept_deep_link(&shell, url) {
+                        forward_handoff(&window, &accepted);
+                    }
                 }
                 let _ = window.show();
                 let _ = window.set_focus();
@@ -214,8 +329,15 @@ pub fn run() {
             let dl_handle = app.handle().clone();
             let _ = app.deep_link().on_open_url(move |event| {
                 if let Some(url) = event.urls().first() {
-                    if let Some(window) = dl_handle.get_webview_window("main") {
-                        forward_handoff(&window, &url.to_string());
+                    // 10th-audit: unsolicited deep links are dropped at
+                    // the NATIVE boundary — only a link matching the
+                    // pending (native-generated, instance-bound,
+                    // single-use, expiring) state reaches the webview.
+                    let shell: tauri::State<ShellState> = dl_handle.state();
+                    if let Some(accepted) = accept_deep_link(&shell, &url.to_string()) {
+                        if let Some(window) = dl_handle.get_webview_window("main") {
+                            forward_handoff(&window, &accepted);
+                        }
                     }
                 }
             });
@@ -279,6 +401,7 @@ pub fn run() {
             get_instance_url,
             connect_instance,
             disconnect_instance,
+            begin_desktop_login,
         ])
         .run(tauri::generate_context!())
         .expect("error while running LobbyForge desktop shell");

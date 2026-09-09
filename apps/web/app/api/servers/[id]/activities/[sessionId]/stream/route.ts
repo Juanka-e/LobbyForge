@@ -38,6 +38,7 @@ import { projectActivityState } from '@/lib/activity-projection';
 import { isSessionRevoked } from '@/lib/session-tracker';
 import { authorizeSessionChannelVisibility } from '@/lib/permissions';
 import { denyActivityStreamAccess } from '@/lib/activity-stream-authorization';
+import { subscribeAccessInvalidation } from '@/lib/access-invalidation';
 import { subscribeActivityStateChange } from '@/lib/activity-bus';
 
 export const dynamic = 'force-dynamic';
@@ -168,6 +169,20 @@ async function handleStream(
         controller.enqueue(encoder.encode(sse('hello', { ok: true })));
 
         let subscription: { close: () => void } | null = null;
+        // 10th-audit: EVENT-DRIVEN access revocation for SSE — kicks,
+        // role changes and channel-policy edits abort the stream the
+        // moment they happen; the 30s keepalive recheck stays as the
+        // safety net for lost pub/sub messages.
+        const stopInvalidationSub = subscribeAccessInvalidation((event) => {
+          if (closed) return;
+          const matches =
+            (event.kind === 'user-server-access' &&
+              event.serverId === serverId &&
+              event.userId === session.uid) ||
+            (event.kind === 'channel-policy' && event.serverId === serverId) ||
+            (event.kind === 'server-policy' && event.serverId === serverId);
+          if (matches) abort();
+        });
         void subscribeActivityStateChange(
           serverId,
           sessionId,
@@ -244,6 +259,7 @@ async function handleStream(
           if (closed) return;
           closed = true;
           clearInterval(keepAlive);
+          stopInvalidationSub();
           subscription?.close();
           try {
             controller.close();

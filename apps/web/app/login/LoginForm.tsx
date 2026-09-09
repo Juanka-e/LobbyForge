@@ -9,10 +9,13 @@ export default function LoginForm({
   guestEnabled,
   registrationMode,
   initialInviteCode,
+  desktopLoginState,
 }: {
   guestEnabled: boolean;
   registrationMode: RegistrationMode;
   initialInviteCode: string;
+  /** Native shell's pending handoff state (?desktopLoginState=...). */
+  desktopLoginState?: string;
 }) {
   const router = useRouter();
   const canRegister = registrationMode !== 'closed';
@@ -50,6 +53,28 @@ export default function LoginForm({
       setError(body.error ?? (mode === 'login' ? 'Sign in failed.' : 'Account could not be created.'));
       setBusy(false);
       return;
+    }
+    // Desktop browser-login flow: the NATIVE shell opened this page
+    // with its own pending state (?desktopLoginState=...). Mint the
+    // one-time handoff bound to that state, then hand control back via
+    // the lobbyforge:// deep link — the shell drops it unless the
+    // state matches its pending entry.
+    if (desktopLoginState) {
+      const handoff = await fetch('/api/auth/desktop-session', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password, state: desktopLoginState }),
+      }).catch(() => null);
+      const handoffBody = handoff
+        ? ((await handoff.json().catch(() => ({}))) as { redirectUrl?: string })
+        : {};
+      if (handoff?.ok && handoffBody.redirectUrl) {
+        window.location.href = handoffBody.redirectUrl;
+        return;
+      }
+      // Handoff minting failed — fall through to the normal web path;
+      // the desktop shell will simply not receive a session.
     }
     router.replace('/lobby');
     router.refresh();

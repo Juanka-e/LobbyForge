@@ -211,6 +211,13 @@
       "when": 1785558400000,
       "tag": "0030_registry_instance_owner",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1785644800000,
+      "tag": "0032_unlist_unowned_instances",
+      "breakpoints": true
     }
   ]
 }

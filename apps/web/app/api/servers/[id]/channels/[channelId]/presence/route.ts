@@ -8,6 +8,7 @@ import {
 } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
+import { authorizeChannelVisibility } from '@/lib/permissions';
 import { withApiSecurity } from '@/lib/security-headers';
 import { getUserPresenceInChannel } from '@/lib/redis';
 import { applyPresencePrivacy } from '@/lib/presence-privacy';
@@ -59,6 +60,18 @@ async function handleGet(
       if (!member) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }
+    }
+    // 10th-audit: presence is channel-scoped metadata — a plain member
+    // must not read WHO is in a private room by guessing its id. Same
+    // visibility policy as messages/typing; 404 keeps existence quiet.
+    const visibility = await authorizeChannelVisibility(
+      session.uid,
+      serverId,
+      channelId,
+      server.ownerUserId ?? null
+    );
+    if (!visibility.ok) {
+      return NextResponse.json({ error: 'Channel not found' }, { status: 404 });
     }
     const presences = await getUserPresenceInChannel(channelId);
     const filtered = await Promise.all(

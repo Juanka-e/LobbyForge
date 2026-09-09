@@ -113,7 +113,16 @@ void (async () => {
     const plugin = raw;
 
     let result;
-    if (data.op === 'createInitialState') {
+    if (data.op === 'describe') {
+      // Manifest probe ONLY — used by the parent for the plugin list.
+      // Runs here, in the disposable thread, precisely so the parent
+      // NEVER import()s untrusted code (10th-audit finding 2).
+      result = {
+        id: plugin.manifest.id,
+        name: plugin.manifest.name,
+        version: plugin.manifest.version ?? null,
+      };
+    } else if (data.op === 'createInitialState') {
       result = await plugin.createInitialState(buildCtx());
     } else if (data.op === 'handleAction') {
       result = await plugin.handleAction(buildCtx(), data.state, data.action);

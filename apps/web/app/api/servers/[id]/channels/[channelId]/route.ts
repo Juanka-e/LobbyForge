@@ -140,7 +140,9 @@ async function handleGet(req: Request, ctx: RouteContext): Promise<NextResponse>
   if (!session.ok) return session.response;
 
   try {
-    const access = await loadAndAuthorize(serverId, channelId, session.uid, false, true);
+    // 10th-audit: membership is REQUIRED on reads too (was false —
+    // a non-member with the channel id read public-channel metadata).
+    const access = await loadAndAuthorize(serverId, channelId, session.uid, true, true);
     if (!access.ok) return access.response;
     return NextResponse.json(
       { channel: toJson(access.channel) },

@@ -2,6 +2,64 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - 10th-audit remediation - 2026-09-09
+
+### Fixed
+
+- **Desktop native state binding (P1)**: the state is now generated
+  and held NATIVELY. `begin_desktop_login` (Rust command) mints a
+  192-bit state bound to the connected instance (30-min TTL,
+  single-use) and opens the system browser at
+  /login?desktopLoginState=…; the login page passes it into the
+  handoff mint. EVERY lobbyforge:// deep link — OS-routed or carried
+  in a second instance's argv — now passes accept_deep_link(): pending
+  entry exists, unexpired, state constant-time-equal, instance origin
+  matching, consumed on use. Unsolicited attacker links die at the OS
+  boundary; the web-side checks remain as defense-in-depth.
+- **Plugin parent import (P1)**: the plugin-worker parent process no
+  longer import()s ANY bundle (ESM import runs top-level code — a
+  malicious plugin could previously block the service, read
+  process.env or monkeypatch globals before any executor thread
+  existed). The parent tracks filesystem paths only; even the plugin
+  LIST is produced by a disposable describe-executor thread. Importing
+  happens exclusively inside terminated-on-timeout threads.
+- **Central membership gate (P1)**: requireVisibleChannelInServer now
+  enforces authenticated → server MEMBER → channel binding →
+  visibility in one place. This closes the systemic "visible treated
+  as member" hole for every caller (typing, presence, …); the
+  single-channel GET additionally flipped its requireMembership flag
+  (non-members could read public-channel metadata by id).
+- **Presence leak (P1)**: channel presence now applies the same
+  visibility policy (404 keeps private-room existence quiet) — a plain
+  member can no longer see WHO is in a private room by guessing ids.
+- **Directory NULL-owner claim (P1)**: legacy owner-less rows are no
+  longer claimable via self-service upsert (RegistryInstanceUnclaimable
+  Error → 403); migration 0032 unlists every unowned row until an
+  administrator recovers it — listed-but-unvouchable discovery entries
+  were a phishing vector.
+- **Voice mute hierarchy (P2)**: voice_mute joined the canonical
+  moderation gate (MUTE_MEMBERS + strict actor>target ranking) — a
+  rank-30 moderator can no longer mute a rank-80 admin.
+- **SSE revocation latency (P2)**: SSE streams subscribe to the
+  access-invalidation bus (shared with the ws-gateway) and abort the
+  INSTANT a matching kick/role/channel-policy event lands; the 30s
+  keepalive recheck remains as the lost-message safety net.
+- **Directory key rotation (P2)**: POST /api/directory/rotate-key —
+  owner session + proof signature made with the CURRENT private key
+  over the canonical rotation payload + timestamp window + nonce
+  replay guard. A stolen key can be rotated out; a stolen session
+  alone cannot swap keys. Lost-key recovery stays an admin flow.
+- **CI truthfulness**: our web-image Trivy gate actually runs
+  CRITICAL,HIGH (the comment claimed it, the command didn't);
+  third-party ignores split into per-image files (.trivyignore.d/) so
+  an accepted livekit CVE can never silence another image's scan.
+
+### Added
+
+- **main branch protection**: required status checks (verify x2,
+  docker build, compose config, prod audit) + force-push/deletion
+  disabled; the owner keeps an admin escape hatch.
+
 ## [Unreleased] - 9th-audit remediation - 2026-09-09
 
 ### Fixed

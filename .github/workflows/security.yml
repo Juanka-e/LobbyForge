@@ -76,11 +76,17 @@ jobs:
       matrix:
         include:
           - image: 'nginx:1.31-alpine'
+            key: nginx
           - image: 'redis:7-alpine'
+            key: redis
           - image: 'postgres:16-alpine'
+            key: postgres
           - image: 'livekit/livekit-server:v1.13.6'
+            key: livekit
           - image: 'coturn/coturn:4.17.2'
+            key: coturn
           - image: 'certbot/certbot:v5.8.0'
+            key: certbot
     steps:
       # Same approach as the web-image trivy job: run the official
       # Trivy image directly (the action wrapper proved flaky).
@@ -96,7 +102,7 @@ jobs:
       # .trivyignore with reasons + revisit dates.
       - name: Trivy scan ${{ matrix.image }}
         run: |
-          docker run --rm             -v "$PWD/.trivyignore:/tmp/.trivyignore:ro"             aquasec/trivy:0.65.0             image --exit-code 1 --severity CRITICAL --ignore-unfixed             --ignorefile /tmp/.trivyignore             --scanners vuln             ${{ matrix.image }}
+          docker run --rm             -v "$PWD/.trivyignore.d/${{ matrix.key }}:/tmp/.trivyignore:ro"             aquasec/trivy:0.65.0             image --exit-code 1 --severity CRITICAL --ignore-unfixed             --ignorefile /tmp/.trivyignore             --scanners vuln             ${{ matrix.image }}
 
   # V5-009: SAST — CodeQL javascript/typescript analysis.
   codeql:
@@ -152,4 +158,4 @@ jobs:
       # the trivy-action wrapper's binary-install step proved flaky here.
       - name: Trivy vulnerability scan
         run: |
-          docker run --rm             -v /var/run/docker.sock:/var/run/docker.sock             aquasec/trivy:0.65.0             image --exit-code 1 --severity CRITICAL --ignore-unfixed             --scanners vuln             lobbyforge-web:scan
+          docker run --rm             -v /var/run/docker.sock:/var/run/docker.sock             aquasec/trivy:0.65.0             image --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed             --scanners vuln             lobbyforge-web:scan

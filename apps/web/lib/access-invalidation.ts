@@ -45,6 +45,43 @@ export type AccessInvalidationEvent =
       reason: 'blocked' | 'unblocked';
     };
 
+/**
+ * 10th-audit: SSE streams also listen for invalidation events — the
+ * 30s keepalive recheck alone leaves a kick a up-to-30s event window.
+ * The web app shares the bus channel with the ws-gateway; handlers
+ * filter for their own blast radius. Returns an unsubscribe.
+ */
+export function subscribeAccessInvalidation(
+  onEvent: (event: AccessInvalidationEvent) => void
+): () => void {
+  const io = redis as unknown as {
+    duplicate: () => {
+      subscribe: (ch: string) => Promise<unknown>;
+      on: (ev: string, cb: (ch: string, raw: string) => void) => void;
+      quit: () => Promise<unknown>;
+    };
+  };
+  let sub: ReturnType<typeof io.duplicate> | null = null;
+  void (async () => {
+    try {
+      sub = io.duplicate();
+      sub.on('message', (_channel: string, raw: string) => {
+        try {
+          onEvent(JSON.parse(raw) as AccessInvalidationEvent);
+        } catch {
+          /* publisher owns the shape */
+        }
+      });
+      await sub.subscribe(ACCESS_INVALIDATION_CHANNEL);
+    } catch (err) {
+      console.error('[access-invalidation] subscribe failed:', (err as Error).message);
+    }
+  })();
+  return () => {
+    void sub?.quit().catch(() => undefined);
+  };
+}
+
 /** Fire-and-forget publish; never blocks the mutating request. */
 export function publishAccessInvalidation(event: AccessInvalidationEvent): void {
   redis

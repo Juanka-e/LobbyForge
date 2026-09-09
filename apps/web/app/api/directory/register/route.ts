@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { RegistryInstanceOwnedError, upsertRegistryInstance } from '@lobbyforge/db';
+import { RegistryInstanceOwnedError, RegistryInstanceUnclaimableError, upsertRegistryInstance } from '@lobbyforge/db';
 import { normalizeRegistryInstanceUrl } from '@lobbyforge/registry';
 import { requireMaterializedSession } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
@@ -84,6 +84,9 @@ async function handlePost(req: Request): Promise<NextResponse> {
         { error: 'This instance is registered by another user' },
         { status: 403 }
       );
+    }
+    if (err instanceof RegistryInstanceUnclaimableError) {
+      return NextResponse.json({ error: err.message }, { status: 403 });
     }
     return NextResponse.json({ error: 'Failed to register instance' }, { status: 500 });
   }

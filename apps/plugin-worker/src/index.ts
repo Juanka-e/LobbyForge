@@ -64,8 +64,15 @@ interface CtxEnvelope {
   pluginId: string;
 }
 
+/**
+ * 10th-audit finding 2: the parent process holds ONLY filesystem
+ * metadata — it never import()s a plugin bundle (ESM import runs
+ * top-level code: a malicious plugin could block this process,
+ * read process.env, monkeypatch globals or spy on later RPCs before
+ * any executor thread existed). Importing and shape-validation happen
+ * exclusively inside disposable executor threads.
+ */
 interface LoadedPlugin {
-  plugin: GamePlugin<unknown, unknown, unknown>;
   pluginPath: string;
 }
 
@@ -85,8 +92,8 @@ function isValidGamePlugin(obj: unknown): obj is GamePlugin<unknown, unknown, un
   );
 }
 
-/** Import one plugin bundle (index.js or <version>/index.js layout). */
-async function loadFromDisk(pluginId: string): Promise<LoadedPlugin | null> {
+/** Resolve the bundle path WITHOUT importing it (parent stays clean). */
+function resolvePluginPath(pluginId: string): string | null {
   const base = join(pluginsDir(), pluginId);
   if (!existsSync(base) || !statSync(base).isDirectory()) return null;
 
@@ -99,19 +106,11 @@ async function loadFromDisk(pluginId: string): Promise<LoadedPlugin | null> {
     indexPath = join(base, subdirs[subdirs.length - 1]!, 'index.js');
     if (!existsSync(indexPath)) return null;
   }
-
-  const mod = (await import(pathToFileURL(indexPath).href)) as {
-    plugin?: unknown;
-    default?: unknown;
-  };
-  const raw = mod?.plugin ?? mod?.default;
-  if (!isValidGamePlugin(raw)) return null;
-  if (raw.manifest.id !== pluginId) return null;
-  return { plugin: raw, pluginPath: indexPath };
+  return indexPath;
 }
 
 /**
- * 9th-audit (findings 4+5): run ONE plugin op in a dedicated
+ * 10th-audit (findings 4+5): run ONE plugin op in a dedicated
  * worker_thread with an EMPTY environment and hard resource limits,
  * terminated on timeout. The plugin can neither read worker secrets
  * (env is {}) nor block the service forever (terminate kills the
@@ -119,7 +118,7 @@ async function loadFromDisk(pluginId: string): Promise<LoadedPlugin | null> {
  */
 function runInExecutorThread(payload: {
   pluginPath: string;
-  op: 'createInitialState' | 'handleAction' | 'migrateState';
+  op: 'describe' | 'createInitialState' | 'handleAction' | 'migrateState';
   ctx: CtxEnvelope;
   state?: unknown;
   action?: unknown;
@@ -161,16 +160,17 @@ function runInExecutorThread(payload: {
 function resolveExecutorPath(): string {
   // Plain-JS executor — sibling of this module in BOTH layouts:
   // dist/index.js → dist/executor.mjs (copied at build), and
-  // src/index.ts under vitest → src/executor.mjs. Returned as a plain
-  // PATH STRING (Worker(URL) misbehaves under some loaders).
+  // src/index.ts under vitest → src/executor.mjs.
   return fileURLToPath(new URL('./executor.mjs', import.meta.url));
 }
 
 async function getPlugin(pluginId: string): Promise<LoadedPlugin | null> {
   const cached = loaded.get(pluginId);
   if (cached) return cached;
-  const fresh = await loadFromDisk(pluginId);
-  if (fresh) loaded.set(pluginId, fresh);
+  const pluginPath = resolvePluginPath(pluginId);
+  if (!pluginPath) return null;
+  const fresh: LoadedPlugin = { pluginPath };
+  loaded.set(pluginId, fresh);
   return fresh;
 }
 
@@ -218,12 +218,32 @@ async function handleRpc(rawBody: Buffer): Promise<{ status: number; body: unkno
     const plugins: Array<{ id: string; name: string; version: string | null }> = [];
     for (const id of entries) {
       const loadedPlugin = await getPlugin(id);
-      if (loadedPlugin) {
-        plugins.push({
-          id,
-          name: loadedPlugin.plugin.manifest.name,
-          version: loadedPlugin.plugin.manifest.version ?? null,
+      if (!loadedPlugin) continue;
+      try {
+        // Manifest probe in the DISPOSABLE executor — the parent never
+        // imports untrusted code (10th-audit finding 2). A broken or
+        // malicious bundle only loses its own listing slot.
+        const described = await runInExecutorThread({
+          pluginPath: loadedPlugin.pluginPath,
+          op: 'describe',
+          ctx: { actorUserId: '', players: [], voiceParticipants: [], serverId: '', pluginId: id },
+          storageCapability: '',
+          storageEndpoint: '',
         });
+        if (
+          described &&
+          typeof described === 'object' &&
+          (described as { id?: unknown }).id === id
+        ) {
+          const d = described as { name?: unknown; version?: unknown };
+          plugins.push({
+            id,
+            name: typeof d.name === 'string' ? d.name : id,
+            version: typeof d.version === 'string' ? d.version : null,
+          });
+        }
+      } catch {
+        /* invalid bundle — skip its listing */
       }
     }
     return { status: 200, body: { plugins } };

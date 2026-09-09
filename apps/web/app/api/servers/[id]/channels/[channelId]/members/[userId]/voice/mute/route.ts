@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { logAction } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { withApiSecurity } from '@/lib/security-headers';
+import { authorizeModerationTarget } from '@/lib/member-authorization';
 import { getRoomServiceClient } from '@/lib/livekit';
 import {
   CorePermission,
@@ -35,17 +36,22 @@ async function handlePost(
       return NextResponse.json({ error: 'Missing required parameters' }, { status: 400 });
     }
 
-    const member = await requireServerMember(session.uid, serverId);
-    if (!member.ok) return member.response;
-    const targetMember = await requireServerMember(targetUserId, serverId);
-    if (!targetMember.ok) return targetMember.response;
     const channel = await requireVisibleChannelInServer(session.uid, channelId, serverId);
     if (!channel.ok) return channel.response;
     if (channel.channel.type !== 'voice' && channel.channel.type !== 'stage') {
       return NextResponse.json({ error: 'Channel is not a voice room' }, { status: 400 });
     }
-    const permission = await requireServerPermission(session.uid, serverId, CorePermission.MUTE_MEMBERS);
-    if (!permission.ok) return permission.response;
+    // 10th-audit: voice mutes join the SAME hierarchy model as
+    // kick/ban/timeout/roles — MUTE_MEMBERS plus the actor strictly
+    // outranking the target (a rank-30 moderator could previously
+    // mute a rank-80 admin).
+    const gate = await authorizeModerationTarget({
+      operation: 'voice_mute',
+      serverId,
+      actorUserId: session.uid,
+      targetUserId,
+    });
+    if (!gate.ok) return gate.response;
 
     // 2. Validate body
     let body: z.infer<typeof MuteRequestSchema>;

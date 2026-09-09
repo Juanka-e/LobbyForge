@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ invite?: string }>;
+  searchParams: Promise<{ invite?: string; desktopLoginState?: string }>;
 }) {
   if (isOfficialDeployment()) redirect('/landing');
   const setup = await getInstanceBootstrapStatus(getDb());
@@ -24,7 +24,7 @@ export default async function LoginPage({
   if (session?.uid) redirect('/lobby');
 
   const settings = await getEffectiveInstanceAccessSettings(getDb());
-  const { invite = '' } = await searchParams;
+  const { invite = '', desktopLoginState } = await searchParams;
   const instanceName =
     setup.instanceName || process.env.LOBBYFORGE_INSTANCE_NAME?.trim() || 'LobbyForge Community';
   const inviteOnly = settings.registrationMode === 'invite_only';
@@ -73,7 +73,7 @@ export default async function LoginPage({
           guestEnabled={settings.guestAccessEnabled && settings.registrationMode !== 'closed'}
           registrationMode={settings.registrationMode}
           initialInviteCode={invite}
-        />
+         desktopLoginState={desktopLoginState} />
       </section>
     </div>
   );
