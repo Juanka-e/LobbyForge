@@ -136,48 +136,74 @@ function runInExecutorProcess(payload: {
   storageEndpoint: string;
 }): Promise<unknown> {
   return new Promise<unknown>((resolve, reject) => {
-    // 16th-audit: payload via IPC (child.send), NOT argv —
-    //   1. /proc/<pid>/cmdline exposed every sibling plugin's state,
-    //      action payloads and scoped capabilities to any same-UID
-    //      process in the container (confidentiality break for game
-    //      plugins);
-    //   2. Linux MAX_ARG_STRLEN (~128 KiB) silently capped large
-    //      activity states (E2BIG crash).
-    // IPC channels are private to the parent-child pair.
+    // 17th-audit: detached → the child becomes its OWN PROCESS GROUP
+    // LEADER (setsid). On cleanup we kill(-pid, SIGKILL) to take out
+    // the entire process tree — a plugin that spawned descendants via
+    // node:child_process cannot leave them running after the executor
+    // dies.
     const child = fork(resolveChildExecutorPath(), [], {
       env: {}, // NO environment — nothing leaks in or out
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-      execArgv: ['--max-old-space-size=128'],
+      execArgv: ['--max-old-space-size=128'], // V8 old-space cap; the container
+      //-level mem_limit: 256m is the real hard ceiling (shared by parent + children)
+      detached: true, // own process group for tree-wide kill
     });
+    const killProcessGroup = () => {
+      try {
+        // Negative PID targets the GROUP (the child + all descendants).
+        process.kill(-child.pid!, 'SIGKILL');
+      } catch {
+        // Group already gone; the direct child may linger.
+        try { child.kill('SIGKILL'); } catch { /* already dead */ }
+      }
+    };
     // 16th-audit: settled flag — a plugin calling process.exit(0)
     // never sends a message; without the flag the exit handler cleared
-    // the timeout without settling, leaving the Promise pending forever
-    // (resource leak / DoS).
+    // the timeout without settling, leaving the Promise pending forever.
     let settled = false;
     const finishError = (err: Error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      killProcessGroup();
       reject(err);
     };
     const finishResult = (value: unknown) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      killProcessGroup();
       resolve(value);
     };
     const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      finishError(new Error('plugin call exceeded its execution budget (process killed)'));
+      finishError(new Error('plugin call exceeded its execution budget (process tree killed)'));
     }, CALL_BUDGET_MS);
-    child.on('message', (msg: { result?: unknown; error?: string; log?: string }) => {
-      if (msg.log !== undefined) {
-        console.info(`[plugin-executor] ${msg.log}`);
+    // 17th-audit: STRICT IPC message validation — a hostile plugin
+    // shares the process.send() primitive and can send null, arrays,
+    // or fabricated "result" objects. The old handler accessed
+    // msg.log without checking, so process.send(null) crashed the
+    // PARENT (uncaught TypeError → entire plugin-worker down).
+    child.on('message', (raw: unknown) => {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        finishError(new Error('Invalid executor IPC message (expected object)'));
         return;
       }
-      child.kill(); // clean exit after result
-      if (msg.error) finishError(new Error(msg.error));
-      else finishResult(msg.result);
+      const msg = raw as { result?: unknown; error?: unknown; log?: unknown };
+      // Discriminated protocol: exactly one of {log, error, result}.
+      if (typeof msg.log === 'string') {
+        console.info(`[plugin-executor] ${msg.log.slice(0, 200)}`);
+        return; // log messages don't settle the Promise
+      }
+      if (typeof msg.error === 'string') {
+        finishError(new Error(msg.error.slice(0, 500)));
+        return;
+      }
+      if ('result' in msg) {
+        finishResult(msg.result ?? null);
+        return;
+      }
+      // Unknown shape — hostile or corrupted protocol.
+      finishError(new Error('Invalid executor IPC message (no known field)'));
     });
     child.on('error', (err) => {
       finishError(err);

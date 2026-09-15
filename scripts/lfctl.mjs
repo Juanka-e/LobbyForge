@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises';
-import { createHash, generateKeyPairSync, randomBytes, verify as verifySignature } from 'node:crypto';
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign, verify as verifySignature } from 'node:crypto';
 import path from 'node:path';
 import process from 'node:process';
-import { createPrivateKey, sign as edSign } from 'node:crypto';
 
 const DEFAULT_CHANNEL = 'stable';
 const DEFAULT_CURRENT_VERSION = '0.1.0';
@@ -58,6 +57,7 @@ function parseArgs(argv) {
     else if (arg === '--database-url') options['database-url'] = rest[++i];
     // Directory heartbeat options (LF-SEC-007)
     else if (arg === '--url') options.url = rest[++i];
+    else if (arg === '--domain') options.url = rest[++i];
     else if (arg === '--instance-id') options.instanceId = rest[++i];
     else if (arg === '--key-file') options.keyFile = rest[++i];
     else if (arg === '--online-users') options.onlineUsers = Number(rest[++i]);
@@ -415,7 +415,7 @@ function buildSignedHeartbeat({ instanceId, stats, privateKeyPem }) {
     stats: sanitizeHeartbeatStats(stats),
   };
   const canonical = JSON.stringify(base);
-  const signature = edSign(null, Buffer.from(canonical, 'utf8'), createPrivateKey(privateKeyPem)).toString('base64');
+  const signature = sign(null, Buffer.from(canonical, 'utf8'), createPrivateKey(privateKeyPem)).toString('base64');
   return { ...base, signature };
 }
 
@@ -491,6 +491,33 @@ async function main() {
       }
       return;
     }
+    if (action === 'proof') {
+      if (!options.instanceId) throw new Error('directory proof requires --instance-id <id>');
+      if (!options.url) throw new Error('directory proof requires --url <domain>');
+      if (!options.keyFile) throw new Error('directory proof requires --key-file <pem>');
+      const privateKeyPem = await fs.readFile(options.keyFile, 'utf8');
+      const publicKeyPem = await fs.readFile(options.keyFile.replace('private', 'public'), 'utf8');
+      const publicKeyB64 = createPublicKey(publicKeyPem)
+        .export({ format: 'der', type: 'spki' })
+        .toString('base64');
+      const canonical = JSON.stringify({
+        verify: 1,
+        instanceId: options.instanceId,
+        domain: options.url,
+        publicKey: publicKeyB64,
+      });
+      const proof = sign(null, Buffer.from(canonical, 'utf8'), createPrivateKey(privateKeyPem)).toString('base64');
+      if (options.json) {
+        console.log(JSON.stringify({ proof, instanceId: options.instanceId, domain: options.url }, null, 2));
+      } else {
+        console.log('Directory verification proof:');
+        console.log(proof);
+        console.log('\nStore this proof on your instance (admin→ directory settings).');
+        console.log('The /.well-known/lobbyforge-verification endpoint will serve it.');
+      }
+      return;
+    }
+
     if (action === 'heartbeat') {
       if (!options.url) throw new Error('directory heartbeat requires --url <directory-origin>');
       if (!options.instanceId) throw new Error('directory heartbeat requires --instance-id <id>');

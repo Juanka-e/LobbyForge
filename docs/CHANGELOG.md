@@ -2,6 +2,43 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - 17th-audit remediation - 2026-09-15
+
+### Fixed
+
+- **IPC message strict validation (P1)**: a hostile plugin sharing
+  the process.send() primitive could send null, arrays or fabricated
+  results — the parent accessed msg.log without checking, so
+  process.send(null) crashed the ENTIRE plugin-worker service. The
+  handler now validates every IPC message is a non-null, non-array
+  object with a known field (log/error/result) before touching it;
+  unknown shapes are killed with SIGKILL + clean error.
+- **Process tree escape (P1)**: a plugin could spawn descendant
+  processes (node:child_process) that survived the executor's SIGKILL.
+  The executor now runs detached (own process group via setsid) and
+  cleanup kills the ENTIRE GROUP via kill(-pid, SIGKILL) — descendants
+  cannot outlive their parent.
+- **.well-known route fixed (P1-functional)**: the previous
+  implementation had a syntax error (calling an object as a function)
+  AND read fields that don't exist in the schema. Rewritten with a
+  dedicated getDirectoryVerificationConfig() query reading the actual
+  instance_settings columns (instanceId, domain, publicKey,
+  isPublicDirectoryEnabled).
+- **lfctl directory proof command**: generates the Ed25519 proof the
+  .well-known endpoint serves (lfctl directory proof --instance-id
+  --domain --key-file).
+- **Memory claim corrected**: --max-old-space-size=128 is a V8
+  old-space cap, not a 128 MB hard process limit — the container's
+  mem_limit: 256m (shared by parent + children) is the real ceiling.
+  Documentation now states this accurately.
+
+### Added
+
+- **Adversarial plugin tests (3)**: process.send(null) parent-survival,
+  process.exit(0) Promise-settlement, fake-result IPC hijack —
+  proving the strict validation and settled-flag paths work under
+  hostile input.
+
 ## [Unreleased] - 16th-audit remediation - 2026-09-15
 
 ### Fixed

@@ -498,6 +498,31 @@ export async function getOrCreateOwnerUser(
  * route) or clear it with null. Used by the admin panel; the setup
  * wizard seeds it at bootstrap time.
  */
+/**
+ * 17th-audit: directory verification config — the .well-known producer
+ * endpoint reads these fields to serve the registration proof document
+ * the official registry fetches.
+ */
+export async function getDirectoryVerificationConfig(
+  db: DbClient
+): Promise<{
+  instanceId: string;
+  domain: string | null;
+  publicKey: string | null;
+  isPublicDirectoryEnabled: boolean;
+} | null> {
+  const [row] = await db
+    .select({
+      instanceId: instanceSettings.instanceId,
+      domain: instanceSettings.domain,
+      publicKey: instanceSettings.publicKey,
+      isPublicDirectoryEnabled: instanceSettings.isPublicDirectoryEnabled,
+    })
+    .from(instanceSettings)
+    .limit(1);
+  return row ?? null;
+}
+
 export async function setInstanceLogoUrl(
   db: DbClient,
   logoUrl: string | null,
