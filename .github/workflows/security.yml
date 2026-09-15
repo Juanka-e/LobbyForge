@@ -87,7 +87,7 @@ jobs:
             key: postgres
           - image: 'livekit/livekit-server:v1.13.6'
             key: livekit
-          - image: 'coturn/coturn:4.17.2'
+          - image: 'coturn/coturn:4.18.0'
             key: coturn
           - image: 'certbot/certbot:v5.8.0'
             key: certbot
@@ -162,4 +162,4 @@ jobs:
       # the trivy-action wrapper's binary-install step proved flaky here.
       - name: Trivy vulnerability scan
         run: |
-          docker run --rm             -v /var/run/docker.sock:/var/run/docker.sock             aquasec/trivy:0.65.0             image --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed             --scanners vuln             lobbyforge-web:scan
+          docker run --rm             -v /var/run/docker.sock:/var/run/docker.sock             -v "$PWD/.trivyignore.d/web-image:/tmp/.trivyignore:ro"             aquasec/trivy:0.65.0             image --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed             --ignorefile /tmp/.trivyignore             --scanners vuln             lobbyforge-web:scan

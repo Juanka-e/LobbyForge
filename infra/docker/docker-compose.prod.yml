@@ -308,7 +308,7 @@ services:
   # negotiation. Open on the firewall: 3478+5349 (tcp/udp) and
   # 49160-49200/udp.
   turn:
-    image: coturn/coturn:4.17.2  # LF-019 pinned; VOICE-002: 4.6.2 -> 4.17.2
+    image: coturn/coturn:4.18.0  # LF-019 pinned; 14th-audit: 4.17.2 -> 4.18.0 (CRITICAL perl CVEs in old Debian base)
     #   (security fixes landed across 4.10-4.14; DTLS listeners are
     #   opt-in from 4.17 — our TLS listener on 5349 is unaffected)
     container_name: lobbyforge-turn
