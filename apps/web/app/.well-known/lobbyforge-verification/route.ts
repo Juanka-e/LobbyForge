@@ -39,19 +39,14 @@ async function handleGet(): Promise<NextResponse> {
         { status: 404 }
       );
     }
-    // The proof must be provided by the operator (lfctl generates it
-    // with the private key and stores it). We read it from the
-    // privateKeyEncrypted column's companion metadata or the operator
-    // sets it via the admin settings API. For now, we compute it from
-    // the stored private key if available; otherwise return setup
-    // instructions.
-    const { getDirectoryProof } = await import('@/lib/directory-proof');
-    const proof = await getDirectoryProof(config.instanceId, config.domain, config.publicKey);
+    // 18th-audit: proof is persisted in the DB (migration 0035) via
+    // the admin configure endpoint — no manual Redis writes needed.
+    const proof = config.directoryProof;
     if (!proof) {
       return NextResponse.json(
         {
           error:
-            'Directory proof not generated. Run: lfctl directory proof --instance-id <id> --domain <domain> --key-file <private-key.pem>',
+            'Directory proof not configured. Run lfctl directory proof, then POST to /api/admin/directory/config.',
         },
         { status: 404 }
       );

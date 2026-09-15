@@ -656,20 +656,30 @@ async function backupCreate(options = {}) {
     await pgExec('pg_dump', ['-Fc', '-f', file, dbUrl], { timeout: 300_000 });
   }
 
-  const buf = await fs.readFile(file);
-  const sha256 = createHash('sha256').update(buf).digest('hex');
+  // 18th-audit: streaming hash — multi-GB dumps stay flat-memory.
+  const { createReadStream } = await import('node:fs');
+  const stat = await fs.stat(file);
+  const hash = createHash('sha256');
+  await new Promise((resolveH, rejectH) => {
+    const stream = createReadStream(file);
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('end', resolveH);
+    stream.on('error', rejectH);
+  });
+  const sha256 = hash.digest('hex');
+  const buf = { byteLength: stat.size }; // size-only shim (no full read)
 
   // Write a sidecar manifest with metadata for verify.
   const meta = {
     file: path.basename(file),
     sha256,
-    sizeBytes: buf.length,
+    sizeBytes: buf.byteLength ?? buf.length,
     createdAt: new Date().toISOString(),
     databaseUrlPrefix: dbUrl.split('@').pop()?.split('/')[0] ?? 'unknown-host',
   };
   await fs.writeFile(`${file}.json`, JSON.stringify(meta, null, 2));
 
-  return { file, sha256, sizeBytes: buf.length };
+  return { file, sha256, sizeBytes: buf.byteLength ?? buf.length };
 }
 
 async function backupRestore(file, targetUrl, options = {}) {
@@ -700,8 +710,15 @@ async function backupRestore(file, targetUrl, options = {}) {
         };
       }
     } else {
-      const buf = await fs.readFile(file);
-      const actual = createHash('sha256').update(buf).digest('hex');
+      const { createReadStream: crs } = await import('node:fs');
+      const h = createHash('sha256');
+      await new Promise((resolveH, rejectH) => {
+        const st = crs(file);
+        st.on('data', (c) => h.update(c));
+        st.on('end', resolveH);
+        st.on('error', rejectH);
+      });
+      const actual = h.digest('hex');
       if (actual !== sidecar.sha256) {
         return { ok: false, message: 'SHA-256 mismatch — dump may be corrupted.' };
       }

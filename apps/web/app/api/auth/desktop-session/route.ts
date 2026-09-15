@@ -72,7 +72,7 @@ async function handleStart(req: Request): Promise<NextResponse> {
       code,
       state,
       expiresIn: CODE_TTL_SECONDS,
-      redirectUrl: `lobbyforge://session/complete?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`,
+      redirectUrl: `lobbyforge://session/complete?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}&instance=${encodeURIComponent(process.env.NEXT_PUBLIC_BASE_URL ?? '')}`,
     },
     { headers: { 'Cache-Control': 'no-store' } }
   );

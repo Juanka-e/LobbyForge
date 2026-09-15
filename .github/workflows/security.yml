@@ -144,7 +144,7 @@ jobs:
         with:
           category: '/language:javascript-typescript'
 
-  # V5-009: container CVE scan of the production image. CRITICAL fails
+  # V5-009: container CVE scan of the production image. CRITICAL+HIGH fail
   # the build; HIGH is reported (base-image HIGHs are frequent and
   # actionable via redeploys rather than blocking every PR).
   trivy:

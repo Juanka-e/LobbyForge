@@ -57,11 +57,17 @@ export type AccessInvalidationEvent =
  */
 type InvalidationHandler = (event: AccessInvalidationEvent) => void;
 const invalidationHandlers = new Set<InvalidationHandler>();
-let invalidationSubscriber: {
+type SubscriberConnection = {
   subscribe: (ch: string) => Promise<unknown>;
   quit: () => Promise<unknown>;
-} | null = null;
-let invalidationSubscriberStarting = false;
+};
+let invalidationSubscriber: SubscriberConnection | null = null;
+// 18th-audit: SINGLETON PROMISE — the old starting-flag flipped false
+// in a finally block BEFORE the subscribe() promise settled, so burst
+// SSE openings each saw (null, false) and created duplicate Redis
+// subscribers (leaked connections, duplicate fan-out). The promise
+// guarantees exactly one duplicate() per process regardless of timing.
+let invalidationSubscriberPromise: Promise<SubscriberConnection> | null = null;
 
 let invalidationRetryMs = 500;
 const INVALIDATION_RETRY_MAX_MS = 30_000;
@@ -82,52 +88,47 @@ function fanOut(raw: string): void {
   }
 }
 
-function ensureInvalidationSubscriber(): void {
-  if (invalidationSubscriber || invalidationSubscriberStarting) return;
-  invalidationSubscriberStarting = true;
+function ensureInvalidationSubscriber(): Promise<SubscriberConnection> {
+  if (invalidationSubscriber) return Promise.resolve(invalidationSubscriber);
+  if (invalidationSubscriberPromise) return invalidationSubscriberPromise;
   const io = redis as unknown as {
-    duplicate: () => {
-      subscribe: (ch: string) => Promise<unknown>;
+    duplicate: () => SubscriberConnection & {
       on: (ev: string, cb: (ch: string, raw: string) => void) => void;
-      quit: () => Promise<unknown>;
     };
   };
-  try {
+  invalidationSubscriberPromise = (async () => {
     const sub = io.duplicate();
     sub.on('message', (_channel: string, raw: string) => fanOut(raw));
-    // 12th-audit: a failed subscribe no longer latches a dead
-    // subscriber — retry with exponential backoff so a Redis blip at
-    // process start doesn't silently downgrade every stream to the
-    // 30s recheck window.
-    void sub
-      .subscribe(ACCESS_INVALIDATION_CHANNEL)
-      .then(() => {
-        invalidationRetryMs = 500;
-        invalidationSubscriber = sub;
-      })
-      .catch((err: Error) => {
-        console.error(
-          `[access-invalidation] subscribe failed (retry in ${invalidationRetryMs}ms):`,
-          err.message
-        );
-        void sub.quit().catch(() => undefined);
-        setTimeout(ensureInvalidationSubscriber, invalidationRetryMs);
-        invalidationRetryMs = Math.min(invalidationRetryMs * 2, INVALIDATION_RETRY_MAX_MS);
-      });
-  } catch (err) {
-    console.error('[access-invalidation] subscriber create failed:', (err as Error).message);
-    setTimeout(ensureInvalidationSubscriber, invalidationRetryMs);
-    invalidationRetryMs = Math.min(invalidationRetryMs * 2, INVALIDATION_RETRY_MAX_MS);
-  } finally {
-    invalidationSubscriberStarting = false;
-  }
+    try {
+      await sub.subscribe(ACCESS_INVALIDATION_CHANNEL);
+      invalidationRetryMs = 500;
+      invalidationSubscriber = sub;
+      return sub;
+    } catch (err) {
+      console.error(
+        `[access-invalidation] subscribe failed (retry in ${invalidationRetryMs}ms):`,
+        (err as Error).message
+      );
+      void sub.quit().catch(() => undefined);
+      // Reset so the NEXT registration retries; backoff between tries.
+      invalidationSubscriberPromise = null;
+      setTimeout(() => {
+        invalidationSubscriberPromise = null;
+      }, invalidationRetryMs);
+      invalidationRetryMs = Math.min(invalidationRetryMs * 2, INVALIDATION_RETRY_MAX_MS);
+      throw err;
+    }
+  })();
+  return invalidationSubscriberPromise;
 }
 
 /** Register a handler on the SHARED subscriber; returns an unregister. */
 export function subscribeAccessInvalidation(
   onEvent: InvalidationHandler
 ): () => void {
-  ensureInvalidationSubscriber();
+  void ensureInvalidationSubscriber().catch(() => {
+    /* backoff retry scheduled inside ensure */
+  });
   invalidationHandlers.add(onEvent);
   return () => {
     invalidationHandlers.delete(onEvent);

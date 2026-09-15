@@ -310,6 +310,10 @@ export const instanceSettings = pgTable('instance_settings', {
   languages: jsonb('languages').default([]).notNull(),
   tags: jsonb('tags').default([]).notNull(),
   isPublicDirectoryEnabled: boolean('is_public_directory_enabled').default(false).notNull(),
+  // 18th-audit: persisted directory verification proof — the
+  // .well-known endpoint serves this; lfctl directory proof generates
+  // it, the admin configure endpoint stores it.
+  directoryProof: text('directory_proof'),
   registrationMode: text('registration_mode').default('invite_only').notNull(),
   guestAccessEnabled: boolean('guest_access_enabled').default(true).notNull(),
   seoIndexingEnabled: boolean('seo_indexing_enabled').default(false).notNull(),

@@ -510,17 +510,45 @@ export async function getDirectoryVerificationConfig(
   domain: string | null;
   publicKey: string | null;
   isPublicDirectoryEnabled: boolean;
+  directoryProof: string | null;
 } | null> {
+  // 18th-audit: explicit singleton WHERE — the table is a singleton by
+  // design, but a second row shouldn't silently change which config
+  // the .well-known endpoint serves.
+  const DEFAULT_INSTANCE_ID = 'default';
   const [row] = await db
     .select({
       instanceId: instanceSettings.instanceId,
       domain: instanceSettings.domain,
       publicKey: instanceSettings.publicKey,
       isPublicDirectoryEnabled: instanceSettings.isPublicDirectoryEnabled,
+      directoryProof: instanceSettings.directoryProof,
     })
     .from(instanceSettings)
+    .where(eq(instanceSettings.instanceId, DEFAULT_INSTANCE_ID))
     .limit(1);
   return row ?? null;
+}
+
+/** 18th-audit: owner-only directory verification configuration. */
+export async function setDirectoryVerificationConfig(
+  db: DbClient,
+  input: {
+    domain: string;
+    publicKey: string;
+    directoryProof: string;
+    isPublicDirectoryEnabled: boolean;
+  }
+): Promise<void> {
+  await db
+    .update(instanceSettings)
+    .set({
+      domain: input.domain,
+      publicKey: input.publicKey,
+      directoryProof: input.directoryProof,
+      isPublicDirectoryEnabled: input.isPublicDirectoryEnabled,
+    })
+    .where(eq(instanceSettings.instanceId, 'default'));
 }
 
 export async function setInstanceLogoUrl(

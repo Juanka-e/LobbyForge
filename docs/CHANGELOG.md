@@ -2,6 +2,34 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - 18th-audit remediation - 2026-09-15
+
+### Fixed
+
+- **SSE singleton initialization race (MEDIUM)**: the old starting-flag
+  flipped false BEFORE the subscribe() promise settled — burst SSE
+  openings each saw (null, false) and created DUPLICATE Redis
+  subscribers (leaked connections, duplicate fan-out). Replaced with a
+  singleton Promise that guarantees exactly one duplicate() per process.
+- **Directory proof persistence (HIGH-functional)**: the .well-known
+  endpoint now reads the proof from the DB (migration 0035 adds
+  directory_proof to instance_settings) instead of a manual Redis key.
+  New owner-only POST /api/admin/directory/config atomically stores
+  domain + publicKey + proof + enabled — the operator generates the
+  proof with lfctl directory proof, submits via this endpoint, and the
+  .well-known endpoint serves it immediately. No manual Redis writes.
+- **Directory config query (LOW)**: explicit WHERE instanceId =
+  'default' — a second row in the table can no longer silently change
+  which config the .well-known endpoint serves.
+- **Backup create/restore streaming (MEDIUM)**: both paths now use
+  createReadStream + incremental SHA-256 instead of readFile — multi-GB
+  dumps stay flat-memory throughout create, verify and restore.
+- **Workflow comment truthfulness (LOW)**: the Trivy scan comment now
+  correctly says CRITICAL+HIGH fail (it previously said only CRITICAL).
+- **Desktop callback instance param (LOW)**: the redirectUrl now
+  includes instance=<origin> so the native gate's origin check is
+  always exercised.
+
 ## [Unreleased] - 17th-audit remediation - 2026-09-15
 
 ### Fixed
