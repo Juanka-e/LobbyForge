@@ -1,1 +1,13 @@
-# No accepted vulnerabilities for this image.
+# coturn/coturn image only.
+#
+# CVE-2026-13221 / CVE-2026-42496 / CVE-2026-8376 (perl-base,
+# Debian trixie base layer): CRITICAL with fixes released but the
+# coturn image's Debian base has not been rebuilt yet (checked
+# 2026-09-15). coturn is a native C++ TURN relay — the perl-base
+# package is a transitive base-layer artifact that coturn never
+# executes; no perl interpreter is invoked by the running service.
+# Revisit: drop when the coturn image's base carries
+# perl-base >= 5.40.1-6+deb13u1.
+CVE-2026-13221
+CVE-2026-42496
+CVE-2026-8376
