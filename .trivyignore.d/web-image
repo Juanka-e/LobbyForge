@@ -2,10 +2,12 @@
 #
 # CVE-2026-86145 / CVE-2026-89161 (libpcre2-8-0, Debian bookworm):
 # HIGH with fixes in deb12u1, but the node:22-bookworm-slim base has
-# not been rebuilt with them yet (checked 2026-09-15). pcre2 is used
-# by Node's RegExp engine; the vulnerabilities require crafted
-# patterns to be evaluated — our application never passes untrusted
-# input directly to a raw pcre2 call.
+# not been rebuilt with them yet (checked 2026-09-15). pcre2 is a
+# TRANSITIVE BASE-LAYER library (linked by Debian system utilities
+# like grep/sed — NOT by Node/V8, which uses its own Irregexp engine).
+# The vulnerabilities require crafted pattern evaluation through a
+# pcre2-linked binary; our application code never invokes such a
+# path with untrusted input.
 # Revisit: drop when the node:22-bookworm-slim base carries
 # libpcre2 >= 10.42-1+deb12u1.
 CVE-2026-86145

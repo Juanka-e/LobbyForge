@@ -5,7 +5,7 @@
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
-    "build": "tsc && node -e \"['executor.mjs','executor-child.mjs'].forEach(f=>require('fs').copyFileSync('src/'+f,'dist/'+f))\"",
+    "build": "tsc && rm -f dist/executor.mjs && node -e \"['executor-child.mjs'].forEach(f=>require('fs').copyFileSync('src/'+f,'dist/'+f))\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "start": "node dist/index.js"

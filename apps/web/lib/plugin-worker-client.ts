@@ -122,10 +122,13 @@ export function buildWorkerPlugin(info: WorkerPluginInfo): RegisteredGamePlugin 
     /** Marker — distinguishes worker-backed entries (tests, debugging). */
     __workerBacked: true,
     createInitialState: async (ctx: GamePluginContext): Promise<unknown> => {
+      const envelope = extractEnvelope(ctx, info.id);
+      const { storageCapability, ...ctxSnapshot } = envelope;
       const { result } = await workerRpc<{ result: unknown }>({
         op: 'createInitialState',
         pluginId: info.id,
-        ctx: extractEnvelope(ctx, info.id),
+        ctx: ctxSnapshot,
+        storageCapability,
       });
       return result;
     },
@@ -134,10 +137,16 @@ export function buildWorkerPlugin(info: WorkerPluginInfo): RegisteredGamePlugin 
       state: unknown,
       action: unknown
     ): Promise<unknown> => {
+      // 16th-audit: capability at the TOP LEVEL of the RPC — the old
+      // code buried it inside ctx and the worker looked for
+      // msg.storageCapability → production ctx.storage.* always 401'd.
+      const envelope = extractEnvelope(ctx, info.id);
+      const { storageCapability, ...ctxSnapshot } = envelope;
       const { result } = await workerRpc<{ result: unknown }>({
         op: 'handleAction',
         pluginId: info.id,
-        ctx: extractEnvelope(ctx, info.id),
+        ctx: ctxSnapshot,
+        storageCapability,
         state,
         action,
       });

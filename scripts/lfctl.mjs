@@ -136,8 +136,19 @@ async function verifyBackup(manifest, baseDir, options) {
     // confirmed the file existed and the manifest hash *looked* like a
     // SHA-256. Now the actual bytes are hashed and compared.
     try {
-      const buf = await fs.readFile(filePath);
-      const actual = createHash('sha256').update(buf).digest('hex');
+      // 16th-audit: STREAMING hash — the old readFile() pulled the
+      // entire dump (potentially 10-50 GB) into memory. createReadStream
+      // + incremental hash keeps memory flat regardless of dump size.
+      const { createReadStream } = await import('node:fs');
+      const stat = await fs.stat(filePath);
+      const hash = createHash('sha256');
+      await new Promise((resolveHash, rejectHash) => {
+        const stream = createReadStream(filePath);
+        stream.on('data', (chunk) => hash.update(chunk));
+        stream.on('end', resolveHash);
+        stream.on('error', rejectHash);
+      });
+      const actual = hash.digest('hex');
       checks.push({
         id: 'databaseDump.sha256Match',
         ok: actual === manifest.databaseDump.sha256.toLowerCase(),
@@ -145,8 +156,8 @@ async function verifyBackup(manifest, baseDir, options) {
       });
       checks.push({
         id: 'databaseDump.sizeMatch',
-        ok: buf.byteLength === manifest.databaseDump.sizeBytes,
-        message: `Actual size matches manifest (${buf.byteLength} bytes).`,
+        ok: stat.size === manifest.databaseDump.sizeBytes,
+        message: `Actual size matches manifest (${stat.size} bytes).`,
       });
     } catch (err) {
       checks.push({

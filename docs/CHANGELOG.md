@@ -2,6 +2,52 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - 16th-audit remediation - 2026-09-15
+
+### Fixed
+
+- **Plugin storage capability wiring (P1-functional)**: the capability
+  was minted into the ctx envelope but the worker looked for it at
+  the RPC top level — production ctx.storage.* calls always 401'd.
+  The client now destructures the envelope into (ctx snapshot,
+  storageCapability) and sends the capability as a separate top-level
+  RPC field.
+- **Child process payload via IPC (P1-security)**: the payload was a
+  single argv string — /proc/<pid>/cmdline exposed every sibling
+  plugin's state, action payloads and scoped capabilities to any
+  same-UID process (game confidentiality break), and Linux
+  MAX_ARG_STRLEN (~128 KiB) silently capped large states (E2BIG).
+  Now child.send() over the private IPC channel.
+- **Early-exit Promise fix (P1-DoS)**: a plugin calling
+  process.exit(0) sent no message, cleared the timeout without
+  settling, and left the executor Promise pending forever (resource
+  leak). A settled-flag pattern now guarantees settle-once on every
+  path (result, error, timeout, clean exit, signal).
+- **Legacy executor.mjs removed**: the old worker-thread variant was
+  dead code — a future contributor could accidentally re-wire the
+  weaker path. Build only ships executor-child.mjs.
+- **Registry .well-known producer (P2-product)**: new
+  GET /.well-known/lobbyforge-verification endpoint — self-host
+  instances can now actually SERVE the document the official registry
+  fetches (the verifier existed but the producer didn't; onboarding
+  was impossible on a vanilla install).
+- **Challenge canonicalization + atomicity (P2)**: the challenge
+  endpoint now normalizes the domain the same way register does
+  (trailing-slash variants produced different Redis keys), and uses
+  SET NX for atomic create-if-absent (the old GET→SET race could
+  invalidate a challenge the instant it was returned). The response
+  includes the canonical domain for the client to sign.
+- **Backup verify streaming hash (P3)**: createReadStream +
+  incremental SHA-256 instead of readFile — multi-GB dumps no longer
+  load entirely into memory.
+- **CSP E2E interaction (P3)**: the hydration test now clicks a
+  visible element and waits for the UI to respond — real proof that
+  React hydrated, not just that server HTML rendered.
+- **Trivy rationale corrected**: the pcre2 description now correctly
+  attributes it as a transitive Debian base-layer library (NOT
+  Node/V8 — V8 uses Irregexp), reachable only via pcre2-linked system
+  utilities.
+
 ## [Unreleased] - 15th-audit follow-ups: backup hash, child-process isolation - 2026-09-15
 
 ### Fixed

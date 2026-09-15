@@ -28,28 +28,40 @@ async function handleGet(req: Request): Promise<NextResponse> {
 
   const url = new URL(req.url);
   const instanceId = url.searchParams.get('instanceId') ?? '';
-  const domain = url.searchParams.get('domain') ?? '';
+  const rawDomain = url.searchParams.get('domain') ?? '';
   if (!instanceId || instanceId.length < 3 || instanceId.length > 128) {
     return NextResponse.json({ error: 'instanceId query parameter is required' }, { status: 400 });
   }
-  if (!domain || domain.length < 3 || domain.length > 253) {
+  if (!rawDomain || rawDomain.length < 3 || rawDomain.length > 253) {
     return NextResponse.json({ error: 'domain query parameter is required' }, { status: 400 });
   }
 
-  // One challenge per (user, instanceId, domain) — re-request returns
-  // the SAME value (no churn), stored with TTL, single-use on submit.
+  // 16th-audit: NORMALIZE the domain the same way register does —
+  // the old code stored the raw value (trailing-slash variants
+  // produced different Redis keys than the normalized lookup).
+  let domain: string;
+  try {
+    const { normalizeRegistryInstanceUrl } = await import('@lobbyforge/registry');
+    domain = normalizeRegistryInstanceUrl(rawDomain);
+  } catch {
+    return NextResponse.json({ error: 'domain must be a valid HTTPS origin' }, { status: 400 });
+  }
+
+  // 16th-audit: atomic create-if-absent (SET NX) — the old GET→SET
+  // race could invalidate a challenge the instant it was returned.
   const key = `lf:reg-challenge:${sessionResult.session.uid}:${instanceId}:${domain}`;
-  const existing = await redis.get(key);
-  if (existing) {
+  const challenge = randomBytes(24).toString('base64url');
+  const stored = await redis.set(key, challenge, 'EX', CHALLENGE_TTL_SECONDS, 'NX');
+  if (stored === 'OK') {
     return NextResponse.json(
-      { challenge: existing, expiresIn: CHALLENGE_TTL_SECONDS },
+      { challenge, domain, expiresIn: CHALLENGE_TTL_SECONDS },
       { headers: { 'Cache-Control': 'no-store' } }
     );
   }
-  const challenge = randomBytes(24).toString('base64url');
-  await redis.set(key, challenge, 'EX', CHALLENGE_TTL_SECONDS);
+  // NX lost — an active challenge already exists; return it.
+  const existing = await redis.get(key);
   return NextResponse.json(
-    { challenge, expiresIn: CHALLENGE_TTL_SECONDS },
+    { challenge: existing ?? challenge, domain, expiresIn: CHALLENGE_TTL_SECONDS },
     { headers: { 'Cache-Control': 'no-store' } }
   );
 }

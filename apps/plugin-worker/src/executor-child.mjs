@@ -1,24 +1,11 @@
-// Plugin executor — CHILD PROCESS variant (15th-audit finding 5).
+// Plugin executor — CHILD PROCESS variant (16th-audit).
 //
-// Runs ONE plugin op in a dedicated child process (node:child_process
-// fork). Unlike worker_threads (which share the same OS process and
-// can read /proc/self/environ for startup env), a child process is a
-// REAL OS-level boundary:
-//   - its own /proc/<pid>/environ (empty — no startup env leakage);
-//   - kill(signal) is a hard termination the child cannot intercept;
-//   - memory limits via --max-old-space-size RLIMIT.
+// Runs ONE plugin op in a dedicated child process. The payload arrives
+// via the fork IPC channel (process.on('message')), NOT argv —
+// /proc/<pid>/cmdline would otherwise expose sibling plugins' state,
+// actions and scoped capabilities to any same-UID process.
 //
 // This file is plain JS — fork() requires a real file on disk.
-import { parentPort } from 'node:worker_threads'; // NOT used — fork uses process.send
-
-// Extract workerData-equivalent from process.argv (fork passes args)
-const payloadJson = process.argv[process.argv.length - 1];
-if (!payloadJson || !payloadJson.startsWith('{')) {
-  process.send?.({ error: 'executor: no payload' });
-  process.exit(1);
-}
-
-const data = JSON.parse(payloadJson);
 const { pathToFileURL } = await import('node:url');
 
 function post(message) {
@@ -68,7 +55,12 @@ function buildCtx() {
   };
 }
 
-void (async () => {
+// 16th-audit: receive the payload via the IPC channel (private to the
+// parent-child pair) — argv is readable by every same-UID process via
+// /proc/<pid>/cmdline and capped at ~128 KiB per string.
+let data = null;
+process.on('message', async (payload) => {
+  data = payload;
   try {
     const mod = await import(pathToFileURL(data.pluginPath).href);
     const raw = mod?.plugin ?? mod?.default;
@@ -92,4 +84,4 @@ void (async () => {
   } catch (err) {
     post({ error: err && err.message ? err.message : String(err) });
   }
-})();
+});

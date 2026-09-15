@@ -136,35 +136,59 @@ function runInExecutorProcess(payload: {
   storageEndpoint: string;
 }): Promise<unknown> {
   return new Promise<unknown>((resolve, reject) => {
-    const child = fork(resolveChildExecutorPath(), [JSON.stringify(payload)], {
+    // 16th-audit: payload via IPC (child.send), NOT argv —
+    //   1. /proc/<pid>/cmdline exposed every sibling plugin's state,
+    //      action payloads and scoped capabilities to any same-UID
+    //      process in the container (confidentiality break for game
+    //      plugins);
+    //   2. Linux MAX_ARG_STRLEN (~128 KiB) silently capped large
+    //      activity states (E2BIG crash).
+    // IPC channels are private to the parent-child pair.
+    const child = fork(resolveChildExecutorPath(), [], {
       env: {}, // NO environment — nothing leaks in or out
-      stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
       execArgv: ['--max-old-space-size=128'],
     });
+    // 16th-audit: settled flag — a plugin calling process.exit(0)
+    // never sends a message; without the flag the exit handler cleared
+    // the timeout without settling, leaving the Promise pending forever
+    // (resource leak / DoS).
+    let settled = false;
+    const finishError = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(err);
+    };
+    const finishResult = (value: unknown) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
     const timer = setTimeout(() => {
-      child.kill('SIGKILL'); // hard kill — the child cannot intercept
-      reject(new Error('plugin call exceeded its execution budget (process killed)'));
+      child.kill('SIGKILL');
+      finishError(new Error('plugin call exceeded its execution budget (process killed)'));
     }, CALL_BUDGET_MS);
     child.on('message', (msg: { result?: unknown; error?: string; log?: string }) => {
       if (msg.log !== undefined) {
         console.info(`[plugin-executor] ${msg.log}`);
         return;
       }
-      clearTimeout(timer);
       child.kill(); // clean exit after result
-      if (msg.error) reject(new Error(msg.error));
-      else resolve(msg.result);
+      if (msg.error) finishError(new Error(msg.error));
+      else finishResult(msg.result);
     });
     child.on('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
+      finishError(err);
     });
     child.on('exit', (code, signal) => {
-      clearTimeout(timer);
-      if (signal === 'SIGKILL') return; // timeout already rejected
-      if (code !== 0 && code !== 1 && code !== null) {
-        reject(new Error(`executor exited with code ${code}`));
-      }
+      if (signal === 'SIGKILL') return; // timeout already settled
+      // Any exit without a settled result is a failure — including
+      // clean process.exit(0) from a hostile plugin.
+      finishError(
+        new Error(`executor exited before producing a result (code=${code}, signal=${signal ?? 'none'})`)
+      );
     });
     // Collect stderr for diagnostics (plugin crash traces).
     let stderr = '';
@@ -178,6 +202,8 @@ function runInExecutorProcess(payload: {
         console.warn(`[plugin-executor] stderr: ${lastLine}`);
       }
     });
+    // Send the payload AFTER the IPC listeners are wired.
+    child.send(payload);
   });
 }
 
