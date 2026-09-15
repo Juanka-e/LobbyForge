@@ -4,6 +4,7 @@ import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, ran
 import path from 'node:path';
 import process from 'node:process';
 import { execFile } from 'node:child_process';
+import { createReadStream } from 'node:fs';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -755,7 +756,6 @@ async function backupCreate(options = {}) {
   }
 
   // 18th-audit: streaming hash — multi-GB dumps stay flat-memory.
-  const { createReadStream } = await import('node:fs');
   const stat = await fs.stat(file);
   const hash = createHash('sha256');
   await new Promise((resolveH, rejectH) => {
@@ -829,10 +829,10 @@ async function backupRestore(file, targetUrl, options = {}) {
         };
       }
     } else {
-      const { createReadStream: crs } = await import('node:fs');
+      
       const h = createHash('sha256');
       await new Promise((resolveH, rejectH) => {
-        const st = crs(file);
+        const st = createReadStream(file);
         st.on('data', (c) => h.update(c));
         st.on('end', resolveH);
         st.on('error', rejectH);
