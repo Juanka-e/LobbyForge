@@ -745,11 +745,14 @@ async function backupCreate(options = {}) {
     // (the container cannot see the host output directory). encoding:
     // 'buffer' is critical — the -Fc dump is binary and a default UTF-8
     // string decode silently corrupts the TOC.
-    const { stdout } = await pgExec('pg_dump', ['-Fc', dbUrl], {
+    const { stdout, stderr } = await pgExec('pg_dump', ['-Fc', dbUrl], {
       timeout: 300_000,
       maxBuffer: 1024 * 1024 * 1024,
       encoding: 'buffer',
     });
+    if (!stdout || stdout.length === 0) {
+      throw new Error(`pg_dump produced no output${stderr ? ': ' + stderr.toString().slice(0, 500) : ''}`);
+    }
     await fs.writeFile(file, stdout);
   } else {
     await pgExec('pg_dump', ['-Fc', '-f', file, dbUrl], { timeout: 300_000 });
