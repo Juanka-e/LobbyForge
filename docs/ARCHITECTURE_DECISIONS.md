@@ -1,0 +1,83 @@
+# Architecture Decision Records
+
+Status: Accepted — 2026-09-15
+
+## ADR-001: Plugin Runtime Trust Model
+
+**Decision**: Reviewed-only trust model for the community marketplace.
+
+The plugin-worker executes third-party code in a dedicated child process
+within a hardened container (read-only fs, mem/pids caps, cap_drop ALL,
+no-new-privileges, internal-only network, process-group SIGKILL on
+timeout, strict IPC validation). This is adequate for **admin-reviewed,
+curated plugins** where the review process is the primary trust gate.
+
+**NOT adequate for arbitrary hostile JavaScript**. The child and parent
+share the same UID and container; `/proc/<ppid>/environ` readability
+depends on host kernel policy, and a sufficiently motivated plugin
+could attempt same-UID signal attacks. Per-plugin containers with
+separate UIDs, PID namespaces and cgroups are the path to hostile-code
+sandboxing — deferred until the marketplace scales beyond curated.
+
+**Marketplace policy**: submissions require human review before
+`approved` status; artifact hash pinning ensures reviewed bytes ==
+installed bytes; dynamic plugin execution remains opt-in
+(`LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED=true` + worker URL).
+
+## ADR-002: Plugin Client UI Architecture
+
+**Decision**: Server-only for beta; sandboxed iframe as the target.
+
+Dynamic marketplace plugins currently have `renderClient: () => null` —
+they can manage server-side state, handle actions and use scoped
+storage, but cannot render their own UI components in the LobbyForge
+client. This is a **known functional gap**, not a bug.
+
+**Target architecture** (post-beta):
+- Each plugin UI runs in a sandboxed `<iframe>` with
+  `sandbox="allow-scripts"` and a plugin-specific origin
+- Communication via `postMessage` with a versioned capability protocol
+  (state read/write, action dispatch, storage access)
+- No direct access to the parent React context, DOM or LobbyForge
+  session tokens
+- Plugin bundles serve their client entry from the plugin-worker's
+  static file path
+
+This keeps untrusted client JS out of the main application context.
+
+## ADR-003: Docker Image Supply Chain
+
+**Decision**: Moving tags + CI scanning for beta; digest pinning
+before public release.
+
+Production images currently use mutable tags (nginx:1.31-alpine,
+redis:7-alpine, etc.). CI scans these tags on every push, but the
+bytes CI scans may differ from what an operator pulls later.
+
+**Pre-release action**: Pin all images to `image@sha256:...` digests
+and configure Renovate to auto-PR digest updates. This ensures the
+CI-scanned bytes are byte-identical to deployed bytes.
+
+## ADR-004: GitHub Governance Level
+
+**Decision**: Graduated enforcement; full lockdown before release.
+
+Current: branch protection with required CI/security checks,
+`enforcement_level: non_admins` (admin can bypass), unsigned commits.
+
+**Pre-release action**: Enable admin enforcement, require PRs for all
+changes (including admin), set up commit signing (GPG or SSH key),
+create repo rulesets for branch protection.
+
+## ADR-005: Desktop Distribution Security
+
+**Decision**: Defer code signing to pre-distribution phase.
+
+The Tauri desktop shell builds and runs correctly without signing.
+Windows SmartScreen and macOS Gatekeeper will show warnings on
+unsigned binaries, but this is acceptable for beta/closed testing.
+
+**Pre-distribution action**: Obtain Windows Authenticode certificate,
+set up macOS Developer ID + notarization, add SHA-256 checksums and
+GitHub artifact attestations to the release workflow, pin release
+actions to commit SHAs.

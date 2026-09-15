@@ -2,6 +2,21 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Architecture decisions - 2026-09-15
+
+### Added
+
+- **ADR-001..005** (docs/ARCHITECTURE_DECISIONS.md): five architecture
+  decision records covering the remaining design choices — plugin
+  runtime trust model (reviewed-only for beta, per-plugin containers
+  for hostile), plugin client UI (server-only for beta, sandboxed
+  iframe as target), Docker supply chain (moving tags for beta, digest
+  pinning pre-release), GitHub governance (graduated, full lockdown
+  pre-release) and desktop distribution security (defer signing to
+  pre-distribution).
+- **SECURITY.md** updated with the explicit reviewed-only trust model
+  and its limitations.
+
 ## [Unreleased] - 18th-audit remediation - 2026-09-15
 
 ### Fixed

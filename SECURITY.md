@@ -41,6 +41,21 @@ LobbyForge implements defense-in-depth:
 - **TURN relay credentials**: per-user, time-limited (coturn REST auth) —
   no permanent shared TURN secret exists.
 
+## Marketplace plugins — trust model (ADR-001)
+
+**Current model: reviewed-only.** The marketplace accepts curated,
+admin-reviewed plugins. The plugin-worker executes them in a hardened
+container (child process, strict IPC, process-group kill, memory/pids
+caps, read-only fs, internal network). This is adequate for
+**reviewed code where the review process is the trust gate**.
+
+**NOT a hostile-code sandbox.** Arbitrary untrusted JavaScript
+requires per-plugin containers with separate UIDs, PID namespaces and
+cgroups. Until that exists, the marketplace requires human review
+before approval, and dynamic execution stays opt-in.
+
+See docs/ARCHITECTURE_DECISIONS.md for the full ADR.
+
 ## Marketplace plugins — isolated worker runtime (LF-SEC-010)
 
 Third-party plugin bundles execute in the **plugin-worker container**,
