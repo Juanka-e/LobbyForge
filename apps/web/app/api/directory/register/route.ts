@@ -30,6 +30,14 @@ const RegisterSchema = z.object({
    * SSRF-safe IP-pinned client and verifies the document server-side —
    * only an operator who actually controls the domain can serve it.
    */
+  /**
+   * 15th-audit: account-bound challenge. The .well-known document is
+   * PUBLIC — an attacker who saw it could replay the same tuple. The
+   * nonce is bound to (userId, instanceId, domain); only that user's
+   * submission can consume it.
+   */
+  registrationNonce: z.string().min(16).max(128),
+  nonceSignature: z.string().min(64).max(256),
 }).strict();
 
 function parsePublicKeyPemOrDer(stored: string): ReturnType<typeof createPublicKey> | null {
@@ -138,6 +146,46 @@ async function handlePost(req: Request): Promise<NextResponse> {
     normalizedDomain = normalizeRegistryInstanceUrl(body.domain);
   } catch {
     return NextResponse.json({ error: 'Domain must be a valid HTTPS origin' }, { status: 400 });
+  }
+
+  // 15th-audit: ACCOUNT-BOUND challenge — the nonce is stored against
+  // (userId, instanceId, domain); only the user who requested it can
+  // consume it. Closes the public-.well-known replay vector.
+  try {
+    const { redis } = await import('@/lib/redis');
+    const challengeKey = `lf:reg-challenge:${sessionResult.session.uid}:${body.instanceId}:${normalizedDomain}`;
+    const nonce = await redis.getdel(challengeKey);
+    if (!nonce || nonce !== body.registrationNonce) {
+      return NextResponse.json(
+        { error: 'Registration challenge expired, invalid, or bound to a different account.' },
+        { status: 401 }
+      );
+    }
+    const nonceCanonical = JSON.stringify({
+      register: 1,
+      nonce,
+      instanceId: body.instanceId,
+      domain: normalizedDomain,
+    });
+    const nonceKey = parsePublicKeyPemOrDer(body.publicKey);
+    if (!nonceKey) {
+      return NextResponse.json({ error: 'publicKey is not a usable key' }, { status: 400 });
+    }
+    const nonceOk = edVerify(
+      null,
+      Buffer.from(nonceCanonical, 'utf8'),
+      nonceKey,
+      Buffer.from(body.nonceSignature, 'base64')
+    );
+    if (!nonceOk) {
+      return NextResponse.json(
+        { error: 'Nonce signature invalid — the instance private key must sign the account-bound challenge.' },
+        { status: 401 }
+      );
+    }
+  } catch (err) {
+    console.error('[directory/register] challenge verification failed:', (err as Error).message);
+    return NextResponse.json({ error: 'Challenge verification failed' }, { status: 500 });
   }
 
   // 12th-audit: DOMAIN OWNERSHIP PROOF — the directory fetches the

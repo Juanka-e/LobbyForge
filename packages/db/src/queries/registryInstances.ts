@@ -61,16 +61,33 @@ export interface RegistryInstanceRow {
   publicKey: string;
 }
 
-/** List public, listed, non-blocked instances for the discovery directory. */
+/**
+ * List public, listed, non-blocked instances for the discovery directory.
+ *
+ * 15th-audit: heartbeat freshness is part of the listing contract. A
+ * dead instance's domain eventually expires and can be re-registered
+ * by anyone — without a freshness gate the directory keeps sending
+ * users to a domain the original operator no longer controls.
+ * Instances whose lastHeartbeatAt is older than HEARTBEAT_STALE_MS
+ * (default 10 minutes, matching a 60-120s heartbeat cadence with
+ * generous headroom) are excluded.
+ */
+export const HEARTBEAT_STALE_MS = 10 * 60 * 1000;
+
 export async function listPublicRegistryInstances(
   db: DbClient,
-  options: { limit?: number; region?: string | null } = {}
+  options: { limit?: number; region?: string | null; includeStale?: boolean } = {}
 ): Promise<RegistryInstanceRow[]> {
   const limit = Math.min(options.limit ?? 50, 200);
   const conditions = [
     eq(registryInstances.isListed, true),
     eq(registryInstances.isBlocked, false),
   ];
+  if (!options.includeStale) {
+    conditions.push(
+      sql`${registryInstances.lastHeartbeatAt} >= now() - interval '${sql.raw(String(Math.floor(HEARTBEAT_STALE_MS / 1000)))} seconds'`
+    );
+  }
   if (options.region) {
     conditions.push(eq(registryInstances.region, options.region));
   }

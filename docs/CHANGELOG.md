@@ -2,6 +2,48 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - 15th-audit remediation - 2026-09-15
+
+### Fixed
+
+- **Registry account-bound challenge (P1)**: the .well-known domain
+  proof was PUBLIC — an attacker who saw the document could replay
+  the same instanceId+domain+publicKey tuple and become the first
+  registrant. Registration now requires an ACCOUNT-BOUND nonce:
+  GET /register/challenge issues one stored against (userId,
+  instanceId, domain); the instance signs {register, nonce,
+  instanceId, domain} with the private key; only that user's
+  submission can consume it. 17 tests.
+- **Marketplace first-submit bug (P1)**: the NULL-publisher lock fired
+  for BOTH "no row" (brand-new plugin → INSERT should succeed) and
+  "legacy row with NULL publisher" (locked) — every FIRST community
+  submission was rejected with PluginIdTakenError. The fix gates the
+  NULL check behind existing.length > 0; the concurrent race loser
+  now gets a clean 409 instead of an undefined row. Structural
+  regression tests.
+- **CSP nonce request propagation (P1)**: the middleware now passes
+  the nonce AND CSP to the renderer via NextResponse.next({ request:
+  { headers } }) — Next.js reads x-nonce from the REQUEST to inject
+  nonces into framework/bootstrap scripts. The old code only set the
+  response headers; production hydration could break under strict
+  CSP. A hydration E2E test was added to the prod-TLS suite (CSP
+  nonce present, no unsafe-inline, no console errors, DOM
+  interactive).
+- **Heartbeat staleness filtering (P2)**: public directory listings
+  now require lastHeartbeatAt within 10 minutes — dead instances
+  whose domains expire and get re-registered no longer stay listed
+  forever sending users to a domain the operator no longer controls.
+- **TURN IPv6 ranges (P2)**: coturn's denied-peer-ip now covers the
+  full IPv6 private space (::, fc00::/7, fe80::/10, ff00::/8) —
+  previously only ::1 was denied.
+- **Directory limit validation (P3)**: strict integer 1-200 — NaN,
+  negatives and fractional values now default to 50 instead of
+  reaching the query.
+- **Trivy rationale correction (P3)**: the web-image pcre2 CVE
+  description incorrectly claimed Node's RegExp uses pcre2 — V8 uses
+  Irregexp. The rationale now correctly attributes pcre2 as a
+  transitive base-layer library, not a Node dependency.
+
 ## [Unreleased] - 14th-audit remediation - 2026-09-10
 
 ### Fixed

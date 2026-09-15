@@ -127,16 +127,22 @@ export async function submitPluginForReview(
     .from(pluginCatalog)
     .where(eq(pluginCatalog.pluginId, input.pluginId))
     .limit(1);
-  const currentOwner = existing[0]?.publisherUserId ?? null;
-  if (currentOwner && publisherUserId && currentOwner !== publisherUserId) {
-    throw new PluginIdTakenError(input.pluginId);
+  // 15th-audit: distinguish BRAND-NEW (no row → INSERT allowed) from
+  // LEGACY NULL-publisher (row exists but locked). The old code merged
+  // both into `currentOwner === null` and rejected every first
+  // legitimate submission with PluginIdTakenError.
+  if (existing.length > 0) {
+    const currentOwner = existing[0]!.publisherUserId;
+    if (currentOwner === null) {
+      // Legacy/migrated rows with a NULL publisher are locked: an
+      // authenticated submit cannot squat an official-looking entry.
+      throw new PluginIdTakenError(input.pluginId);
+    }
+    if (currentOwner !== publisherUserId) {
+      throw new PluginIdTakenError(input.pluginId);
+    }
   }
-  // Legacy/migrated rows with a NULL publisher are locked: an
-  // authenticated submit cannot squat an official-looking entry; an
-  // admin must claim it first.
-  if (currentOwner === null && publisherUserId) {
-    throw new PluginIdTakenError(input.pluginId);
-  }
+  // existing.length === 0 → brand-new plugin, INSERT allowed.
   const values = {
     pluginId: input.pluginId,
     name: input.name,
@@ -183,6 +189,12 @@ export async function submitPluginForReview(
       },
     })
     .returning();
+  // 15th-audit: concurrent same-ID submits — the race loser's
+  // setWhere is false → no row returned. Surface a clean conflict
+  // instead of an undefined row that 500s downstream.
+  if (!row) {
+    throw new PluginIdTakenError(input.pluginId);
+  }
   return row as PluginCatalogRow;
 }
 

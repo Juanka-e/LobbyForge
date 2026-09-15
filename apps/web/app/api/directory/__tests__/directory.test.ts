@@ -38,10 +38,13 @@ const { redisSet, ssrfSafeGet, buildWellKnown } = vi.hoisted(() => ({
   buildWellKnown: (instanceId: string, publicKey: string, proof: string) =>
     JSON.stringify({ instanceId, publicKey, proof }),
 }));
-vi.mock('@/lib/redis', () => ({
-  redis: { get: vi.fn(), set: (...args: unknown[]) => redisSet(...args), getdel: vi.fn() },
-}));
+
 vi.mock('@/lib/ssrf-safe-fetch', () => ({ ssrfSafeGet }));
+
+const redisGetdel = vi.fn();
+vi.mock('@/lib/redis', () => ({
+  redis: { get: vi.fn(), set: (...a: unknown[]) => redisSet(...a), getdel: redisGetdel },
+}));
 vi.mock('@/lib/security-headers', () => ({
   withApiSecurity: (handler: unknown) => handler,
   withMachineApiSecurity: (handler: unknown) => handler,
@@ -57,6 +60,7 @@ beforeEach(() => {
   requireMaterializedSession.mockReset();
   listPublicRegistryInstances.mockReset();
   upsertRegistryInstance.mockReset();
+  redisGetdel.mockReset().mockResolvedValue(REG_NONCE);
   ssrfSafeGet.mockReset().mockResolvedValue({
     ok: true,
     status: 200,
@@ -113,6 +117,9 @@ const canonicalProof = JSON.stringify({
   domain: 'https://my.example.dev',
   publicKey: regPublicKeyB64,
 });
+const REG_NONCE = 'reg-nonce-0123456789abcdef';
+const nonceCanonical = JSON.stringify({ register: 1, nonce: REG_NONCE, instanceId: 'inst-2', domain: 'https://my.example.dev' });
+const nonceSignature = signEd25519(null, Buffer.from(nonceCanonical, 'utf8'), keypair.privateKey).toString('base64');
 const docProof = signEd25519(
   null,
   Buffer.from(canonicalProof, 'utf8'),
@@ -125,6 +132,8 @@ describe('POST /api/directory/register', () => {
     name: 'My Community',
     domain: 'https://my.example.dev',
     publicKey: regPublicKeyB64,
+    registrationNonce: REG_NONCE,
+    nonceSignature,
   };
 
   it('registers a new instance (starts unlisted)', async () => {
@@ -216,7 +225,9 @@ describe('POST /api/directory/register', () => {
       }),
       {}
     );
-    expect(res.status).toBe(400); // document publicKey mismatch
+    // The account-bound nonce check fires FIRST — the attacker's key
+    // cannot sign the challenge even if they have the public document.
+    expect(res.status).toBe(401); // nonce signature invalid
     expect(upsertRegistryInstance).not.toHaveBeenCalled();
   });
 

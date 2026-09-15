@@ -59,10 +59,18 @@ export function middleware(request: NextRequest) {
     ...(isProduction ? ['upgrade-insecure-requests'] : []),
   ].join('; ');
 
+  // 15th-audit: propagate the nonce AND CSP to the RENDERER via the
+  // request headers — Next.js reads `x-nonce` and `Content-Security-
+  // Policy` from the REQUEST during rendering to inject nonces into
+  // framework scripts and inline bootstrap scripts. The old code only
+  // set them on the response; the renderer never saw the nonce, so
+  // production hydration could break under strict CSP.
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set('x-nonce', nonce);
+  requestHeaders.set('Content-Security-Policy', csp);
+
   const response = NextResponse.next({
-    request: {
-      headers: new Headers(request.headers),
-    },
+    request: { headers: requestHeaders },
   });
 
   response.headers.set('Content-Security-Policy', csp);

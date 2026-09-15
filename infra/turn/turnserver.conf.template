@@ -58,6 +58,13 @@ denied-peer-ip=169.254.0.0-169.254.255.255
 denied-peer-ip=172.16.0.0-172.31.255.255
 denied-peer-ip=192.168.0.0-192.168.255.255
 denied-peer-ip=::1
+# 15th-audit: full IPv6 private/link-local/multicast coverage — the
+# old config only denied ::1; a relay credential holder on an IPv6
+# host could pivot to ULA, link-local or multicast space.
+denied-peer-ip=::/128
+denied-peer-ip=fc00::/7
+denied-peer-ip=fe80::/10
+denied-peer-ip=ff00::/8
 no-cli
 
 # V5-003: behind 1:1 NAT (cloud VM with a private interface) the public

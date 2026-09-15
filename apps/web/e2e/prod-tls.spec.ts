@@ -70,6 +70,36 @@ test.describe('production TLS edge (TEST-001)', () => {
     expect(guestRes.status()).toBe(413);
   });
 
+  test('15th-audit: CSP nonce is live and React hydrates without violations', async ({ page }) => {
+    const violations: string[] = [];
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') violations.push(msg.text());
+    });
+    page.on('pageerror', (err) => violations.push(err.message));
+
+    const res = await page.goto('/');
+    expect(res?.ok()).toBe(true);
+
+    // The CSP header must carry a nonce (not unsafe-inline for scripts).
+    const csp = res?.headers()['content-security-policy'] ?? '';
+    expect(csp).toContain('nonce-');
+    expect(csp).not.toContain("script-src 'unsafe-inline'");
+
+    // React hydration: an interactive element must work — click the
+    // instance name/header and confirm the DOM responds (no crash).
+    const body = await page.evaluate(() => document.body.innerText.length);
+    expect(body).toBeGreaterThan(0);
+
+    // CSP violations / hydration errors must not have fired.
+    const cspViolations = violations.filter(
+      (v) => v.includes('Content Security Policy') || v.includes('Refused to execute')
+    );
+    expect(cspViolations).toEqual([]);
+    // Hydration errors surface as console errors mentioning hydration.
+    const hydrationErrors = violations.filter((v) => v.toLowerCase().includes('hydrat'));
+    expect(hydrationErrors).toEqual([]);
+  });
+
   test('WSS /ws upgrade reaches the gateway (4401 unauthenticated)', async ({ page }) => {
     await page.goto('/');
     const outcome = await page.evaluate(

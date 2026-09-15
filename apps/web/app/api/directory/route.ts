@@ -17,7 +17,13 @@ async function handleGet(req: Request): Promise<NextResponse> {
   const url = new URL(req.url);
   const region = url.searchParams.get('region');
   const limitParam = url.searchParams.get('limit');
-  const limit = limitParam ? Number(limitParam) : 50;
+  const limitParsed = limitParam ? Number(limitParam) : 50;
+  // 15th-audit: strict integer validation — the old Number() coercion
+  // passed NaN, negatives and fractional values straight to the query.
+  const limit =
+    Number.isInteger(limitParsed) && limitParsed >= 1 && limitParsed <= 200
+      ? limitParsed
+      : 50;
 
   try {
     const db = getDb();
