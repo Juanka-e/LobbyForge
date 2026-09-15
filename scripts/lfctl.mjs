@@ -594,14 +594,64 @@ async function main() {
     else printPlan(plan);
     return;
   }
-
   printPlan(plan);
   const { manifest: backupManifest, baseDir } = await loadBackupManifest(options.backupManifest);
   const backup = await verifyBackup(backupManifest, baseDir, options);
   printBackup(backup);
-  console.error('\nRefusing to execute update: apply requires the future script runner and backup artifact verification.');
-  process.exitCode = 2;
+
+  if (!backup.ok) {
+    console.error('\nUpdate ABORTED: backup verification failed.');
+    process.exitCode = 2;
+    return;
+  }
+  if (!options.yes) {
+    console.error('\nUpdate plan ready. Re-run with --yes to execute.');
+    process.exitCode = 0;
+    return;
+  }
+
+  const { execFile } = await import('node:child_process');
+  const execFileAsync = (cmd, args, opts = {}) =>
+    new Promise((resolveExec, rejectExec) => {
+      execFile(cmd, args, { timeout: 300000, ...opts }, (err, stdout, stderr) => {
+        if (err) rejectExec(Object.assign(err, { stdout, stderr }));
+        else resolveExec({ stdout, stderr });
+      });
+    });
+
+  const COMPOSE_FILE = 'infra/docker/docker-compose.prod.yml';
+  const ENV_FILE = '.env.prod';
+
+  console.log('\nExecuting update plan...\n');
+  for (const step of plan.steps) {
+    const label = step.title || step.id;
+    process.stdout.write(`  ${step.id}: ${label}... `);
+    try {
+      if (step.id === 'pull-images') {
+        await execFileAsync('docker', ['compose', '-f', COMPOSE_FILE, '--env-file', ENV_FILE, 'pull']);
+        console.log('ok');
+      } else if (step.id === 'recreate-services') {
+        await execFileAsync('docker', ['compose', '-f', COMPOSE_FILE, '--env-file', ENV_FILE, 'up', '-d', '--remove-orphans', '--wait']);
+        console.log('ok');
+      } else if (step.id === 'post-health-check') {
+        await execFileAsync('docker', ['compose', '-f', COMPOSE_FILE, '--env-file', ENV_FILE, 'ps']);
+        console.log('ok');
+      } else {
+        console.log('skipped');
+      }
+    } catch (err) {
+      console.log('FAILED');
+      console.error(`    ${err.stderr || err.message}`);
+      console.error(`\nUpdate step "${step.id}" failed. Recovery:\n  ${plan.rollbackCommand}`);
+      process.exitCode = 2;
+      return;
+    }
+  }
+
+  console.log('\nUpdate completed successfully.');
+  console.log('Rollback if needed:', plan.rollbackCommand);
 }
+
 
 main().catch((err) => {
   console.error(err instanceof Error ? err.message : String(err));

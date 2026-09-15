@@ -13,10 +13,15 @@ name: lobbyforge-prod
 # See docs/DEPLOYMENT.md or projectdetails/04_DEPLOYMENT_SINGLE_VPS_NGINX.md
 # for the full deployment guide.
 
+# ADR-003: All third-party images are DIGEST-PINNED (@sha256) so the
+# bytes CI scans are byte-identical to what production deploys.
+# Updates: Renovate/Dependabot auto-PRs digest bumps; Trivy scans the
+# exact pinned digests in .github/workflows/security.yml.
+
 services:
   # ── Edge: Nginx reverse proxy + TLS termination ──────────────────
   nginx:
-    image: nginx:1.31-alpine
+    image: nginx:1.31-alpine@sha256:72ba65eb42c10344912a84ff42408db7d34f2feb642204570ab8fc5ffd29f1d3
     container_name: lobbyforge-nginx
     restart: unless-stopped
     # V4-004: nginx loads certificates ONCE at startup. The certbot
@@ -68,7 +73,7 @@ services:
 
   # ── Certbot: Let's Encrypt certificate automation ────────────────
   certbot:
-    image: certbot/certbot:v5.8.0  # LF-010-R pinned (9th-audit: v2.11.0 base EOL)
+    image: certbot/certbot:v5.8.0@sha256:f70ad0adbb7e117f0fe42a63c553f28ea451edabc0148757b6efcd9735acaa20  # LF-010-R pinned (9th-audit: v2.11.0 base EOL)
     container_name: lobbyforge-certbot
     restart: unless-stopped
     entrypoint: >
@@ -228,7 +233,7 @@ services:
 
   # ── Database: PostgreSQL 16 ──────────────────────────────────────
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
     container_name: lobbyforge-postgres
     restart: unless-stopped
     environment:
@@ -248,7 +253,7 @@ services:
 
   # ── Cache: Redis 7 ───────────────────────────────────────────────
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
     container_name: lobbyforge-redis
     restart: unless-stopped
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env.prod}", "--appendonly", "yes"]
@@ -264,7 +269,7 @@ services:
 
   # ── Voice: LiveKit SFU ───────────────────────────────────────────
   livekit:
-    image: livekit/livekit-server:v1.13.6  # LF-010-R pinned; VOICE-002: 1.8.3 -> 1.13.6
+    image: livekit/livekit-server:v1.13.6@sha256:e37d68f172556d02aa77968b9fc55ef481468c0315fa38e4fa6c56ce72e3a815  # LF-010-R pinned; VOICE-002: 1.8.3 -> 1.13.6
     #   (1.10 fixed grpc CVE-2026-33186; 1.12+ hardened TURN auth; 1.13.6
     #   adds signal body limits + per-participant TURN allocation caps).
     #   Docker tags are v-prefixed (a bare 1.13.6 does not exist).
@@ -308,7 +313,7 @@ services:
   # negotiation. Open on the firewall: 3478+5349 (tcp/udp) and
   # 49160-49200/udp.
   turn:
-    image: coturn/coturn:4.18.0  # LF-019 pinned; 14th-audit: 4.17.2 -> 4.18.0 (CRITICAL perl CVEs in old Debian base)
+    image: coturn/coturn:4.18.0@sha256:bbefd3e1fdfdc0d58770fe01b581fd8b00d9f3a5580d00acb77cf719a6bc78e3  # LF-019 pinned; 14th-audit: 4.17.2 -> 4.18.0 (CRITICAL perl CVEs in old Debian base)
     #   (security fixes landed across 4.10-4.14; DTLS listeners are
     #   opt-in from 4.17 — our TLS listener on 5349 is unaffected)
     container_name: lobbyforge-turn

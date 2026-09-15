@@ -2,6 +2,21 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Docker digest pinning + update automation - 2026-09-15
+
+### Fixed
+
+- **Docker digest pinning (ADR-003)**: all six production third-party
+  images are now pinned to exact @sha256 digests (nginx, redis,
+  postgres, livekit, coturn, certbot) — CI scans byte-identical to
+  what production deploys. Renovate/Dependabot can auto-PR digest
+  updates.
+- **Update automation runner (18th-audit)**: `lfctl update apply
+  --yes` now EXECUTES the plan instead of refusing — verified backup
+  → pull images → recreate services with --wait → health check, with
+  per-step failure handling and rollback command output. The old
+  "refusing to execute" lock is removed.
+
 ## [Unreleased] - Architecture decisions - 2026-09-15
 
 ### Added
