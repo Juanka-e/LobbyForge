@@ -792,9 +792,13 @@ async function backupCreate(options = {}) {
     },
     includes: { database: true },
   };
-  const manifestPath = file.replace(/\.(dump|sql)$/, '.manifest.json');
-  await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
-  return { file, sha256, sizeBytes: buf.byteLength ?? buf.length, manifestPath, manifest };
+  // Best-effort manifest — don't let a path issue crash the backup.
+  let manifestPath = null;
+  try {
+    manifestPath = file.replace(/\.(dump|sql)$/, '.manifest.json');
+    await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+  } catch { manifestPath = null; }
+  return { file, sha256, sizeBytes: buf.byteLength ?? buf.length };
 }
 
 async function backupRestore(file, targetUrl, options = {}) {
