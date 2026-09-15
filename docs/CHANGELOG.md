@@ -2,6 +2,34 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - 14th-audit remediation - 2026-09-10
+
+### Fixed
+
+- **SSRF transport Node-22 incompatibility (P1)**: the directory's
+  private ssrfSafeGet had a bare-string lookup callback — Node 22's
+  autoSelectFamily passes all:true and expects {address, family}
+  objects, so the IP pinning silently misbehaved. All server-side
+  HTTPS fetches (plugin installer, marketplace review-pinning,
+  directory domain verification) now share ONE transport
+  (lib/ip-pinned-https.ts) with the correct lookup shape — the exact
+  implementation the installer had already proven.
+- **Legacy unpinned plugins fail CLOSED (P1)**: install refuses
+  approved rows without a bundle pin (409, re-review required) and
+  migration 0034 pushes every legacy approved-but-unpinned row back to
+  pending — the mutable-URL trust gap no longer survives for
+  pre-pinning approvals. Test added.
+- **Tar archive validation actually validates (P1)**: the old `tar
+  -tv` human-output regex did not match REAL GNU tar lines, so the
+  decompression-bomb, symlink/hardlink/device/FIFO and traversal
+  pre-checks silently skipped EVERY entry. Replaced with a
+  programmatic ustar header parser (512-byte blocks, GNU base-256
+  sizes) — bounded in-memory gunzip first, every rule counts every
+  entry. 7 tests against hand-built archives including the bomb and
+  symlink cases the regex missed.
+- **API cleanup**: the change-domain schema's unused domainProof
+  field removed (the document's own proof is the single source).
+
 ## [Unreleased] - 13th-audit remediation - 2026-09-09
 
 ### Fixed

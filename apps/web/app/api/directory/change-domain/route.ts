@@ -36,8 +36,6 @@ const ChangeDomainSchema = z.object({
   nonce: z.string().min(16).max(64),
   /** Ed25519(storedPrivateKey, canonical payload) — old-key proof. */
   oldKeySignature: z.string().min(64).max(256),
-  /** Ed25519(newDomainPrivateKey, canonical payload) — domain proof. */
-  domainProof: z.string().min(64).max(256),
 }).strict();
 
 const MAX_SKEW_SECONDS = 300;

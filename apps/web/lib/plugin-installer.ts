@@ -1,3 +1,4 @@
+import { gunzipSync } from 'node:zlib';
 /**
  * Plugin installer — downloads, extracts, and validates a marketplace
  * plugin bundle so the dynamic loader can pick it up.
@@ -13,6 +14,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { reloadDynamicPlugin } from './plugin-loader';
 import { isBlockedNetworkIp } from './ip-ranges';
+import { fetchIpPinned } from './ip-pinned-https';
 
 const execFileAsync = promisify(execFile);
 
@@ -172,15 +174,13 @@ async function downloadWithTimeout(url: string): Promise<ArrayBuffer> {
   // address. The custom lookup serves ONLY the pre-verified address;
   // SNI + certificate validation keep using the ORIGINAL hostname
   // (serverName option), so TLS stays correct.
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
-  try {
-    const res = await fetchIpPinned(url, parsed.hostname, addresses, controller.signal, DOWNLOAD_TIMEOUT_MS);
-    if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`);
-    return await res.arrayBuffer();
-  } finally {
-    clearTimeout(timer);
-  }
+  // 14th-audit: shared IP-pinned transport (same code path as the
+  // marketplace review-time bundle fetch and the directory verifier).
+  const res = await fetchIpPinned(url, parsed.hostname, addresses, {
+    timeoutMs: DOWNLOAD_TIMEOUT_MS,
+  });
+  if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`);
+  return res.arrayBuffer;
 }
 
 /**
@@ -193,45 +193,109 @@ function isPrivateIp(ip: string): boolean {
   return isBlockedNetworkIp(ip);
 }
 
+/**
+ * 14th-audit: PROGRAMMATIC tar header scan. The old approach parsed
+ * `tar -tv` human output with a regex; real GNU tar verbose lines did
+ * NOT match, so the size-bomb check, symlink/hardlink/device/FIFO
+ * checks and traversal pre-check silently skipped EVERY entry. We now
+ * walk the uncompressed archive's 512-byte header blocks directly —
+ * the POSIX ustar format is stable and parsing it ourselves is exact.
+ */
+interface TarEntry {
+  name: string;
+  sizeBytes: number;
+  typeflag: string;
+}
+
+export function parseTarHeaders(uncompressed: Buffer): TarEntry[] {
+  const entries: TarEntry[] = [];
+  let offset = 0;
+  while (offset + 512 <= uncompressed.length) {
+    const header = uncompressed.subarray(offset, offset + 512);
+    // All-zero header = end of archive.
+    if (header.every((b) => b === 0)) break;
+
+    const name = header.subarray(0, 100).toString('utf8').replace(/ [\s\S]*$/, '');
+    const sizeField = header.subarray(124, 136);
+    const typeflag = String.fromCharCode(header[156]!);
+    let size: number;
+    if (sizeField[0]! & 0x80) {
+      // GNU base-256 size encoding.
+      size = 0;
+      for (let i = 1; i < sizeField.length; i++) {
+        size = size * 256 + sizeField[i]!;
+      }
+    } else {
+      const octal = sizeField.toString('utf8').replace(/[  ]/g, '');
+      size = parseInt(octal, 8) || 0;
+    }
+    entries.push({ name, sizeBytes: size, typeflag });
+
+    const dataBlocks = Math.ceil(size / 512);
+    offset += 512 + dataBlocks * 512;
+  }
+  return entries;
+}
+
 /** Extract a .tgz tarball using the system `tar` command.
- *  LF-004 hardening:
- *  - Lists entries FIRST and rejects path traversal (..), absolute paths,
- *    symlinks, hardlinks, and device/FIFO entries before extracting.
- *  - Rejects entries that would resolve outside destDir.
- *  - Limits total extracted entries and uncompressed size (tar bomb defense). */
+ *  LF-004 + 14th-audit: decompress in-memory (bounded), scan tar
+ *  headers PROGRAMATICALLY, reject traversal/absolute paths, non-regular
+ *  entries and bombs BEFORE extraction; post-extraction symlink walk
+ *  stays as defense-in-depth. */
 async function extractTarball(tarPath: string, destDir: string): Promise<void> {
-  // 1. List entries and validate.
   const MAX_ENTRIES = 500;
   const MAX_TOTAL_BYTES = 50 * 1024 * 1024; // 50 MB uncompressed
-  const { stdout: listing } = await execFileAsync('tar', ['-tzf', tarPath, '--verbose'], { timeout: 30_000 });
+  const MAX_COMPRESSED_BYTES = 64 * 1024 * 1024; // scan-buffer cap
 
-  const lines = listing.split('\n').filter((l) => l.trim().length > 0);
-  if (lines.length > MAX_ENTRIES) {
-    throw new Error(`Tarball has ${lines.length} entries (max ${MAX_ENTRIES}) — possible tar bomb.`);
+  // 1. Bounded decompress.
+  const { createGunzip } = await import('node:zlib');
+  const fsp = await import('node:fs').then((m) => m.promises);
+  const compressed = await fsp.readFile(tarPath);
+  if (compressed.byteLength > MAX_COMPRESSED_BYTES) {
+    throw new Error(`Tarball exceeds the ${MAX_COMPRESSED_BYTES} byte compressed cap.`);
   }
+  const uncompressed: Buffer = await new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    const gunzip = createGunzip();
+    gunzip.on('data', (chunk: Buffer) => {
+      total += chunk.length;
+      // Header+data upper bound; the exact data cap is enforced in the scan.
+      if (total > MAX_TOTAL_BYTES + 512 * (MAX_ENTRIES + 4)) {
+        gunzip.destroy(new Error(`Tarball exceeds ${MAX_TOTAL_BYTES} bytes uncompressed — possible tar bomb.`));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    gunzip.on('end', () => resolve(Buffer.concat(chunks)));
+    gunzip.on('error', reject);
+    gunzip.end(compressed);
+  });
 
+  // 2. Programmatic header scan — every rule now counts every entry.
+  const entries = parseTarHeaders(uncompressed);
+  if (entries.length > MAX_ENTRIES) {
+    throw new Error(`Tarball has ${entries.length} entries (max ${MAX_ENTRIES}) — possible tar bomb.`);
+  }
   let totalBytes = 0;
-  for (const line of lines) {
-    // tar -tv output: "perm owner/group size date time path"
-    const match = line.match(/^([a-zA-Z-]{10})\s+\S+\s+(\d+)\s+\S+\s+\S+\s+\S+\s+(.+)$/);
-    if (!match) continue;
-    const [, perms, sizeStr, entryPath] = match;
-    const size = parseInt(sizeStr, 10) || 0;
-    totalBytes += size;
+  for (const entry of entries) {
+    totalBytes += entry.sizeBytes;
     if (totalBytes > MAX_TOTAL_BYTES) {
       throw new Error(`Tarball exceeds ${MAX_TOTAL_BYTES} bytes uncompressed — possible tar bomb.`);
     }
-    // Reject symlinks, hardlinks, devices, FIFOs.
-    if (perms?.startsWith('l') || perms?.startsWith('h') || perms?.startsWith('b') || perms?.startsWith('c') || perms?.startsWith('p')) {
-      throw new Error(`Tarball contains a non-regular file entry: ${entryPath} (${perms}). Rejected.`);
+    const isRegular = entry.typeflag === '0' || entry.typeflag === ' ';
+    const isDir = entry.typeflag === '5';
+    if (!isRegular && !isDir) {
+      throw new Error(
+        `Tarball contains a non-regular file entry: ${entry.name} (type "${entry.typeflag}"). Rejected.`
+      );
     }
-    // Reject path traversal and absolute paths.
-    if (entryPath.includes('..') || entryPath.startsWith('/') || entryPath.includes('\\')) {
-      throw new Error(`Tarball contains an unsafe path: ${entryPath}. Rejected.`);
+    if (entry.name.includes('..') || entry.name.startsWith('/') || entry.name.includes('\\')) {
+      throw new Error(`Tarball contains an unsafe path: ${entry.name}. Rejected.`);
     }
   }
 
-  // 2. Extract with hardened flags.
+  // 3. Extract with hardened flags.
   await execFileAsync('tar', [
     '-xzf', tarPath,
     '-C', destDir,
@@ -241,7 +305,7 @@ async function extractTarball(tarPath: string, destDir: string): Promise<void> {
     '--overwrite-dir',
   ], { timeout: 60_000 });
 
-  // 3. Post-extraction: verify nothing escaped destDir (no symlinks pointing out).
+  // 4. Post-extraction: verify nothing escaped destDir.
   assertNoEscapingSymlinks(destDir);
 }
 
@@ -284,76 +348,51 @@ function findIndexJs(dir: string): string | null {
   return null;
 }
 
-/**
- * SEC-009: HTTPS fetch pinned to pre-verified IPs. Uses node:https (not
- * global fetch) because https.request accepts a `lookup` option — the
- * connection's DNS resolution returns ONLY the addresses we already
- * validated as public. A DNS rebind between check and connect therefore
- * cannot reach an internal service. serverName keeps SNI on the real
- * hostname so certificate validation is unaffected.
- */
-async function fetchIpPinned(
-  url: string,
-  originalHostname: string,
-  verifiedAddresses: string[],
-  signal: AbortSignal,
-  timeoutMs: number
-): Promise<{ ok: boolean; status: number; arrayBuffer: () => Promise<ArrayBuffer> }> {
-  const https = await import('node:https');
-  const dns = await import('node:dns');
-  const lookupFn = (
-    _hostname: string,
-    _options: unknown,
-    callback: (err: Error | null, addresses: unknown) => void
-  ) => {
-    callback(null, verifiedAddresses.map((address) => ({ address, family: address.includes(':') ? 6 : 4 })));
-  };
-  const agent = new https.Agent({
-    lookup: lookupFn as never,
-    servername: originalHostname,
-  });
-  // SEC-009: cap bytes DURING the stream — the old code buffered the
-  // entire response and checked the size only at the end, so a hostile
-  // manifest server could balloon web-process memory with an infinite
-  // body. Destroy the request the moment the cap is crossed.
-  const MAX_STREAM_BYTES = 16 * 1024 * 1024; // 16 MiB hard ceiling
-  return new Promise((resolve, reject) => {
-    let received = 0;
-    const chunks: Buffer[] = [];
-    const req = https.request(
-      url,
-      { agent, signal, timeout: timeoutMs, headers: { 'user-agent': 'LobbyForge-Installer' } },
-      (res) => {
-        res.on('data', (chunk: Buffer) => {
-          received += chunk.length;
-          if (received > MAX_STREAM_BYTES) {
-            req.destroy(new Error('Download exceeds the 16 MiB cap'));
-            return;
-          }
-          chunks.push(chunk);
-        });
-        res.on('end', () => {
-          const body = Buffer.concat(chunks);
-          resolve({
-            ok: (res.statusCode ?? 500) >= 200 && (res.statusCode ?? 500) < 300,
-            status: res.statusCode ?? 500,
-            arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),
-          });
-        });
-        res.on('error', reject);
-      }
-    );
-    req.on('error', reject);
-    req.on('timeout', () => { req.destroy(new Error('Download timed out')); });
-    req.end();
-  });
+export async function downloadBundleForReview(url: string): Promise<ArrayBuffer> {
+  return downloadWithTimeout(url);
 }
 
 /**
- * 13th-audit: the SAME hardened downloader the installer uses, exposed
- * for review-time bundle pinning — the reviewed digest and the
- * installed bytes must come from one code path.
+ * 14th-audit: scan a gzip'd tarball against every security rule
+ * (entries, total size, non-regular types, traversal) WITHOUT
+ * extracting. Exported for regression tests.
  */
-export async function downloadBundleForReview(url: string): Promise<ArrayBuffer> {
-  return downloadWithTimeout(url);
+export function scanTarEntries(
+  compressed: Buffer
+): { ok: true; entries: TarEntry[]; totalBytes: number } | { ok: false; error: string } {
+  const MAX_ENTRIES = 500;
+  const MAX_TOTAL_BYTES = 50 * 1024 * 1024;
+  const MAX_COMPRESSED_BYTES = 64 * 1024 * 1024;
+  if (compressed.byteLength > MAX_COMPRESSED_BYTES) {
+    return { ok: false, error: `Tarball exceeds the ${MAX_COMPRESSED_BYTES} byte compressed cap.` };
+  }
+  let uncompressed: Buffer;
+  try {
+    uncompressed = gunzipSync(compressed);
+  } catch {
+    return { ok: false, error: 'Not a valid gzip stream' };
+  }
+  if (uncompressed.length > MAX_TOTAL_BYTES + 512 * (MAX_ENTRIES + 4)) {
+    return { ok: false, error: `Tarball exceeds ${MAX_TOTAL_BYTES} bytes uncompressed — possible tar bomb.` };
+  }
+  const entries = parseTarHeaders(uncompressed);
+  if (entries.length > MAX_ENTRIES) {
+    return { ok: false, error: `Tarball has ${entries.length} entries (max ${MAX_ENTRIES}) — possible tar bomb.` };
+  }
+  let totalBytes = 0;
+  for (const entry of entries) {
+    totalBytes += entry.sizeBytes;
+    if (totalBytes > MAX_TOTAL_BYTES) {
+      return { ok: false, error: `Tarball exceeds ${MAX_TOTAL_BYTES} bytes uncompressed — possible tar bomb.` };
+    }
+    const isRegular = entry.typeflag === '0' || entry.typeflag === ' ';
+    const isDir = entry.typeflag === '5';
+    if (!isRegular && !isDir) {
+      return { ok: false, error: `Tarball contains a non-regular file entry: ${entry.name} (type "${entry.typeflag}"). Rejected.` };
+    }
+    if (entry.name.includes('..') || entry.name.startsWith('/') || entry.name.includes('\\')) {
+      return { ok: false, error: `Tarball contains an unsafe path: ${entry.name}. Rejected.` };
+    }
+  }
+  return { ok: true, entries, totalBytes };
 }

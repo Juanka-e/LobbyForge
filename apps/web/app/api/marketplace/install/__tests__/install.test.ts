@@ -29,7 +29,7 @@ describe('POST /api/marketplace/install', () => {
     getCatalogEntry.mockResolvedValue({
       pluginId: 'cool-game', name: 'Cool Game', version: '1.0.0',
       reviewStatus: 'approved', manifestUrl: 'https://cdn.example.dev/cool-game-1.0.0.tgz',
-      id: 'x',
+      bundleSha256: 'b'.repeat(64), bundleSizeBytes: 2048, id: 'x',
     });
     installPluginBundle.mockResolvedValue({ ok: true, path: '/plugins/installed/cool-game/1.0.0' });
     const { POST } = await import('../route.js');
@@ -41,7 +41,28 @@ describe('POST /api/marketplace/install', () => {
       {}
     );
     expect(res.status).toBe(200);
-    expect(installPluginBundle).toHaveBeenCalledWith('cool-game', 'https://cdn.example.dev/cool-game-1.0.0.tgz', '1.0.0', undefined); // legacy row: no pin
+    expect(installPluginBundle).toHaveBeenCalledWith(
+      'cool-game', 'https://cdn.example.dev/cool-game-1.0.0.tgz', '1.0.0',
+      { sha256: 'b'.repeat(64), sizeBytes: 2048 }
+    );
+  });
+
+  it('14th-audit: FAILS CLOSED on an approved row with no pin (re-review required)', async () => {
+    getCatalogEntry.mockResolvedValue({
+      pluginId: 'legacy-game', reviewStatus: 'approved',
+      manifestUrl: 'https://cdn.example.dev/legacy.tgz',
+      bundleSha256: null, bundleSizeBytes: null, id: 'legacy',
+    });
+    const { POST } = await import('../route.js');
+    const res = await POST(
+      new Request('https://example.test/api/marketplace/install', {
+        method: 'POST',
+        body: JSON.stringify({ pluginId: 'legacy-game' }),
+      }),
+      {}
+    );
+    expect(res.status).toBe(409);
+    expect(installPluginBundle).not.toHaveBeenCalled();
   });
 
   it('13th-audit: passes the REVIEWED pin to the installer', async () => {
@@ -99,7 +120,8 @@ describe('POST /api/marketplace/install', () => {
 
   it('returns 400 when the plugin has no manifestUrl', async () => {
     getCatalogEntry.mockResolvedValue({
-      pluginId: 'no-url', reviewStatus: 'approved', manifestUrl: null, id: 'z',
+      pluginId: 'no-url', reviewStatus: 'approved', manifestUrl: null,
+      bundleSha256: 'c'.repeat(64), bundleSizeBytes: 100, id: 'z',
     });
     const { POST } = await import('../route.js');
     const res = await POST(
@@ -115,7 +137,8 @@ describe('POST /api/marketplace/install', () => {
   it('returns 500 when the bundle download fails', async () => {
     getCatalogEntry.mockResolvedValue({
       pluginId: 'broken', version: '0.1.0', reviewStatus: 'approved',
-      manifestUrl: 'https://cdn.example.dev/broken.tgz', id: 'w',
+      manifestUrl: 'https://cdn.example.dev/broken.tgz',
+      bundleSha256: 'd'.repeat(64), bundleSizeBytes: 100, id: 'w',
     });
     installPluginBundle.mockResolvedValue({ ok: false, error: 'Download failed: HTTP 404' });
     const { POST } = await import('../route.js');

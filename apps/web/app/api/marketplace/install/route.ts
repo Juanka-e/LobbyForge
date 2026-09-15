@@ -56,6 +56,15 @@ async function handlePost(req: Request): Promise<NextResponse> {
         { status: 403 }
       );
     }
+    // 14th-audit: FAIL CLOSED — an approved row without an artifact pin
+    // means "approved" predates the pinned model; the mutable-URL trust
+    // gap applies. Re-review (which now pins) is required first.
+    if (!entry.bundleSha256 || entry.bundleSizeBytes == null) {
+      return NextResponse.json(
+        { error: 'This plugin was approved before artifact pinning and must be re-reviewed before installation.' },
+        { status: 409 }
+      );
+    }
     if (!entry.manifestUrl) {
       return NextResponse.json(
         { error: 'Plugin has no manifestUrl — cannot download bundle.' },
