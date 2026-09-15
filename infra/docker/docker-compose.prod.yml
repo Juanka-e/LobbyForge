@@ -269,7 +269,7 @@ services:
 
   # ── Voice: LiveKit SFU ───────────────────────────────────────────
   livekit:
-    image: livekit/livekit-server:v1.13.6@sha256:e37d68f172556d02aa77968b9fc55ef481468c0315fa38e4fa6c56ce72e3a815  # LF-010-R pinned; VOICE-002: 1.8.3 -> 1.13.6
+    image: livekit/livekit-server:v1.13.7@sha256:6fd3b7088874c4d119160dd688798dfec852bc014786d392caad15f6f63912a3  # LF-010-R pinned; VOICE-002: 1.8.3 -> 1.13.6
     #   (1.10 fixed grpc CVE-2026-33186; 1.12+ hardened TURN auth; 1.13.6
     #   adds signal body limits + per-participant TURN allocation caps).
     #   Docker tags are v-prefixed (a bare 1.13.6 does not exist).

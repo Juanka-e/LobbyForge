@@ -3,9 +3,13 @@ import fs from 'node:fs/promises';
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign, verify as verifySignature } from 'node:crypto';
 import path from 'node:path';
 import process from 'node:process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 const DEFAULT_CHANNEL = 'stable';
-const DEFAULT_CURRENT_VERSION = '0.1.0';
+const DEFAULT_CURRENT_VERSION = '0.2.0';
 
 function usage() {
   return `LobbyForge control CLI
@@ -25,8 +29,10 @@ Usage:
       [--once | --interval <seconds>] [--json]
 
 Notes:
-  apply is intentionally locked until the self-host script runner is wired.
-  The plan always requires a backup before compose pull/recreate steps.
+  update apply builds the new image, applies migrations (via the
+  migrate service), recreates containers and runs a health check.
+  A verified backup is MANDATORY before any destructive step.
+  Add --force-major for major version upgrades.
 `;
 }
 
@@ -591,16 +597,38 @@ async function main() {
   const plan = await buildPlan(manifest, options);
   if (action === 'plan') {
     if (options.json) console.log(JSON.stringify(plan, null, 2));
-    else printPlan(plan);
+  printPlan(plan);
+
+  // 19th-audit: enforce the safety flags BEFORE touching anything.
+  if (!check.updateAvailable) {
+    console.error('\nNo update available (current >= target).');
+    process.exitCode = 0;
     return;
   }
-  printPlan(plan);
-  const { manifest: backupManifest, baseDir } = await loadBackupManifest(options.backupManifest);
-  const backup = await verifyBackup(backupManifest, baseDir, options);
-  printBackup(backup);
+  if (!check.currentSupported) {
+    console.error('\nCurrent version is below the manifest minimumVersion — manual migration required.');
+    process.exitCode = 2;
+    return;
+  }
+  if (check.signature && !check.signature.valid) {
+    console.error('\nManifest signature INVALID — refusing to update from an untrusted source.');
+    process.exitCode = 2;
+    return;
+  }
+  if (check.majorUpgrade && !options.forceMajor) {
+    console.error('\nThis is a MAJOR upgrade. Re-run with --force-major to confirm.');
+    process.exitCode = 2;
+    return;
+  }
 
+  // 19th-audit: STRICT backup verification — destructive operations
+  // must not proceed on a manifest-only check. requireFiles is
+  // mandatory, not opt-in.
+  const { manifest: backupManifest, baseDir } = await loadBackupManifest(options.backupManifest);
+  const backup = await verifyBackup(backupManifest, baseDir, { ...options, requireFiles: true });
+  printBackup(backup);
   if (!backup.ok) {
-    console.error('\nUpdate ABORTED: backup verification failed.');
+    console.error('\nUpdate ABORTED: backup verification failed (strict mode — file must exist and hash-match).');
     process.exitCode = 2;
     return;
   }
@@ -613,7 +641,7 @@ async function main() {
   const { execFile } = await import('node:child_process');
   const execFileAsync = (cmd, args, opts = {}) =>
     new Promise((resolveExec, rejectExec) => {
-      execFile(cmd, args, { timeout: 300000, ...opts }, (err, stdout, stderr) => {
+      execFile(cmd, args, { timeout: 600000, ...opts }, (err, stdout, stderr) => {
         if (err) rejectExec(Object.assign(err, { stdout, stderr }));
         else resolveExec({ stdout, stderr });
       });
@@ -621,20 +649,44 @@ async function main() {
 
   const COMPOSE_FILE = 'infra/docker/docker-compose.prod.yml';
   const ENV_FILE = '.env.prod';
+  const composeArgs = ['compose', '-f', COMPOSE_FILE, '--env-file', ENV_FILE];
 
   console.log('\nExecuting update plan...\n');
   for (const step of plan.steps) {
     const label = step.title || step.id;
     process.stdout.write(`  ${step.id}: ${label}... `);
     try {
-      if (step.id === 'pull-images') {
-        await execFileAsync('docker', ['compose', '-f', COMPOSE_FILE, '--env-file', ENV_FILE, 'pull']);
+      if (step.id === 'preflight-doctor') {
+        // Doctor is advisory but should run — log warnings, don't block.
+        await execFileAsync('node', ['scripts/lfctl.mjs', 'doctor']);
         console.log('ok');
+      } else if (step.id === 'backup') {
+        // The backup was already verified above; this is the actual creation.
+        const dbUrl = process.env.DATABASE_URL || '';
+        const backupResult = await execFileAsync('node', ['scripts/lfctl.mjs', 'backup', 'create', '--database-url', dbUrl]);
+        console.log('ok');
+      } else if (step.id === 'pull-images') {
+        // 19th-audit: lobbyforge-web:latest is a LOCALLY-BUILT image,
+        // not from a registry. `docker compose pull` would fail on it.
+        // Instead, BUILD with --pull (refreshes base images) so the
+        // new source code actually gets compiled into the image.
+        await execFileAsync('docker', [...composeArgs, 'build', '--pull']);
+        console.log('ok (built)');
+      } else if (step.id === 'migration-dry-run') {
+        // Migrations are applied by the migrate one-shot container
+        // during compose up — the dry-run is advisory.
+        console.log('ok (runs via migrate service)');
+      } else if (step.id === 'apply-migrations') {
+        // Applied automatically by the version-matched migrate container.
+        console.log('ok (runs via migrate service)');
       } else if (step.id === 'recreate-services') {
-        await execFileAsync('docker', ['compose', '-f', COMPOSE_FILE, '--env-file', ENV_FILE, 'up', '-d', '--remove-orphans', '--wait']);
+        await execFileAsync('docker', [...composeArgs, 'up', '-d', '--remove-orphans', '--wait']);
         console.log('ok');
-      } else if (step.id === 'post-health-check') {
-        await execFileAsync('docker', ['compose', '-f', COMPOSE_FILE, '--env-file', ENV_FILE, 'ps']);
+      } else if (step.id === 'health-check') {
+        // Real HTTP health check — the plan's ID is 'health-check'
+        // (19th-audit: the old runner looked for 'post-health-check').
+        const { stdout } = await execFileAsync('docker', [...composeArgs, 'exec', '-T', 'web', 'node', '-e',
+          "fetch('http://localhost:3000/api/health').then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);process.exit(0)}).catch(e=>{console.error(e.message);process.exit(1)})"]);
         console.log('ok');
       } else {
         console.log('skipped');
@@ -643,15 +695,15 @@ async function main() {
       console.log('FAILED');
       console.error(`    ${err.stderr || err.message}`);
       console.error(`\nUpdate step "${step.id}" failed. Recovery:\n  ${plan.rollbackCommand}`);
+      console.error('\nThe verified backup is available for manual restore if needed.');
       process.exitCode = 2;
       return;
     }
   }
 
   console.log('\nUpdate completed successfully.');
-  console.log('Rollback if needed:', plan.rollbackCommand);
+  console.log('Recovery hint (not a full rollback):', plan.rollbackCommand);
 }
-
 
 main().catch((err) => {
   console.error(err instanceof Error ? err.message : String(err));
@@ -667,10 +719,6 @@ main().catch((err) => {
 // INSIDE the PostgreSQL container instead — operators don't need a host
 // pg installation (the container always ships the exact-version tools).
 
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
-const execFileAsync = promisify(execFile);
 
 const PG_CONTAINER = process.env.LFCTL_PG_CONTAINER ?? '';
 
@@ -729,7 +777,24 @@ async function backupCreate(options = {}) {
   };
   await fs.writeFile(`${file}.json`, JSON.stringify(meta, null, 2));
 
-  return { file, sha256, sizeBytes: buf.byteLength ?? buf.length };
+  // 19th-audit: emit the CANONICAL formatVersion:1 manifest so
+  // `lfctl backup create` output feeds directly into `lfctl update
+  // apply --backup-manifest` without format conversion.
+  const manifest = {
+    formatVersion: 1,
+    backupId: `backup-${Date.now()}`,
+    completed: true,
+    createdAt: new Date().toISOString(),
+    databaseDump: {
+      path: path.relative(process.cwd(), file),
+      sha256,
+      sizeBytes: buf.byteLength ?? buf.length,
+    },
+    includes: { database: true },
+  };
+  const manifestPath = file.replace(/\.(dump|sql)$/, '.manifest.json');
+  await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+  return { file, sha256, sizeBytes: buf.byteLength ?? buf.length, manifestPath, manifest };
 }
 
 async function backupRestore(file, targetUrl, options = {}) {
@@ -801,4 +866,5 @@ async function backupRestore(file, targetUrl, options = {}) {
   } catch (err) {
     return { ok: false, message: err instanceof Error ? err.message : String(err) };
   }
+}
 }

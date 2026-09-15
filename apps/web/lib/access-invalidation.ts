@@ -111,11 +111,16 @@ function ensureInvalidationSubscriber(): Promise<SubscriberConnection> {
       );
       void sub.quit().catch(() => undefined);
       // Reset so the NEXT registration retries; backoff between tries.
+      // 19th-audit: ACTUALLY retry — the old code just re-nulled the
+      // promise without scheduling a reconnect, so a Redis failure at
+      // process start permanently disabled event-driven invalidation.
       invalidationSubscriberPromise = null;
-      setTimeout(() => {
-        invalidationSubscriberPromise = null;
-      }, invalidationRetryMs);
       invalidationRetryMs = Math.min(invalidationRetryMs * 2, INVALIDATION_RETRY_MAX_MS);
+      setTimeout(() => {
+        void ensureInvalidationSubscriber().catch(() => {
+          /* next retry scheduled by the recursive catch */
+        });
+      }, invalidationRetryMs);
       throw err;
     }
   })();

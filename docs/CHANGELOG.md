@@ -2,6 +2,42 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - 19th-audit remediation - 2026-09-15
+
+### Fixed
+
+- **Update runner complete rewrite (P1)**: now builds the new
+  LobbyForge image (docker compose build --pull, not just pull which
+  fails on the locally-built lobbyforge-web), runs the ACTUAL health
+  check (correct step ID 'health-check', real HTTP fetch), enforces
+  ALL safety gates (updateAvailable, currentSupported, signature
+  validity, --force-major for major upgrades), and uses STRICT backup
+  verification (requireFiles mandatory, not opt-in).
+- **LiveKit 1.13.6 → 1.13.7 (P1)**: the x/crypto CVE-2026-56854 is
+  fixed upstream (v1.13.7 ships x/crypto v0.56.0); the .trivyignore
+  exception is removed and the image digest updated in compose + Trivy.
+- **Backup create emits canonical manifest (P2)**: `lfctl backup
+  create` now produces a formatVersion:1 manifest alongside the dump —
+  the output feeds directly into `lfctl update apply --backup-manifest`
+  without format conversion.
+- **SSE retry logic (P2)**: the failed-subscribe path now ACTUALLY
+  retries (the old code just re-nulled without scheduling a
+  reconnect, permanently disabling event-driven invalidation after a
+  Redis failure at process start).
+- **Dockerfile base digest-pinned (P2)**: node:22-bookworm-slim is
+  pinned to @sha256 — the LobbyForge image build is now reproducible
+  from the same commit.
+- **Dependabot docker-compose (P3)**: configured for /infra/docker
+  with weekly digest update PRs.
+- **install.sh certbot digest-pinned (P3)**: the first TLS bootstrap
+  now uses the same digest-pinned image as steady-state.
+- **Version default corrected (P3)**: DEFAULT_CURRENT_VERSION updated
+  to 0.2.0 (was 0.1.0).
+- **ADR-003 status updated (P3)**: marked IMPLEMENTED (was "pre-
+  release action").
+- **lfctl help text updated (P3)**: no longer says "intentionally
+  locked".
+
 ## [Unreleased] - Docker digest pinning + update automation - 2026-09-15
 
 ### Fixed

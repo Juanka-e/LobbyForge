@@ -47,16 +47,12 @@ This keeps untrusted client JS out of the main application context.
 
 ## ADR-003: Docker Image Supply Chain
 
-**Decision**: Moving tags + CI scanning for beta; digest pinning
-before public release.
+**Decision**: Digest-pinned (IMPLEMENTED).
 
-Production images currently use mutable tags (nginx:1.31-alpine,
-redis:7-alpine, etc.). CI scans these tags on every push, but the
-bytes CI scans may differ from what an operator pulls later.
-
-**Pre-release action**: Pin all images to `image@sha256:...` digests
-and configure Renovate to auto-PR digest updates. This ensures the
-CI-scanned bytes are byte-identical to deployed bytes.
+All six production third-party images AND the Dockerfile base image
+are pinned to exact @sha256 digests. CI scans byte-identical to what
+production deploys. Dependabot docker-compose is configured to
+auto-PR digest updates weekly.
 
 ## ADR-004: GitHub Governance Level
 
