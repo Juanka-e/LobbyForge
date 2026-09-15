@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises';
-import { generateKeyPairSync, randomBytes, verify as verifySignature } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomBytes, verify as verifySignature } from 'node:crypto';
 import path from 'node:path';
 import process from 'node:process';
 import { createPrivateKey, sign as edSign } from 'node:crypto';
@@ -126,11 +126,35 @@ async function verifyBackup(manifest, baseDir, options) {
     },
   ];
   if (options.requireFiles) {
+    const filePath = manifest.databaseDump.path.startsWith('/') ? manifest.databaseDump.path : path.join(baseDir, manifest.databaseDump.path);
     checks.push({
       id: 'databaseDump.exists',
       ok: await exists(manifest.databaseDump.path, baseDir),
       message: 'Database dump exists on disk.',
     });
+    // 15th-audit: "Verified" must mean VERIFIED — the old check only
+    // confirmed the file existed and the manifest hash *looked* like a
+    // SHA-256. Now the actual bytes are hashed and compared.
+    try {
+      const buf = await fs.readFile(filePath);
+      const actual = createHash('sha256').update(buf).digest('hex');
+      checks.push({
+        id: 'databaseDump.sha256Match',
+        ok: actual === manifest.databaseDump.sha256.toLowerCase(),
+        message: `Actual SHA-256 matches manifest (${actual.slice(0, 16)}…).`,
+      });
+      checks.push({
+        id: 'databaseDump.sizeMatch',
+        ok: buf.byteLength === manifest.databaseDump.sizeBytes,
+        message: `Actual size matches manifest (${buf.byteLength} bytes).`,
+      });
+    } catch (err) {
+      checks.push({
+        id: 'databaseDump.sha256Match',
+        ok: false,
+        message: `Could not read dump for hash verification: ${err.message}`,
+      });
+    }
   }
   return { ok: checks.every((item) => item.ok), backupId: manifest.backupId, createdAt: manifest.createdAt, ageMs, checks };
 }
@@ -557,7 +581,7 @@ main().catch((err) => {
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { createHash } from 'node:crypto';
+
 const execFileAsync = promisify(execFile);
 
 const PG_CONTAINER = process.env.LFCTL_PG_CONTAINER ?? '';

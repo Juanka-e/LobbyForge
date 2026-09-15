@@ -29,7 +29,7 @@ import * as http from 'node:http';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { Worker } from 'node:worker_threads';
+import { fork } from 'node:child_process';
 import { createHmac } from 'node:crypto';
 import type { GamePlugin, GamePluginContext } from '@lobbyforge/plugin-sdk';
 
@@ -116,7 +116,16 @@ function resolvePluginPath(pluginId: string): string | null {
  * (env is {}) nor block the service forever (terminate kills the
  * loop). Returns the op result; rejects on error/timeout.
  */
-function runInExecutorThread(payload: {
+/**
+ * 15th-audit finding 5: child-process isolation. worker_threads share
+ * the OS process — /proc/self/environ still exposes the process's
+ * STARTUP environment (which includes PLUGIN_WORKER_TOKEN). A child
+ * process is a real OS boundary: its own /proc/<pid>/environ (empty
+ * via env: NONE), hard kill(signal) termination, and --max-old-space-
+ * size for memory limits. The ONLY thing the child receives is the
+ * JSON payload (pluginPath + op + snapshot ctx + scoped capability).
+ */
+function runInExecutorProcess(payload: {
   pluginPath: string;
   op: 'describe' | 'createInitialState' | 'handleAction' | 'migrateState';
   ctx: CtxEnvelope;
@@ -127,41 +136,53 @@ function runInExecutorThread(payload: {
   storageEndpoint: string;
 }): Promise<unknown> {
   return new Promise<unknown>((resolve, reject) => {
-    const worker = new Worker(resolveExecutorPath(), {
-      workerData: payload,
-      env: {}, // NO worker secrets reach untrusted code
-      resourceLimits: { maxOldGenerationSizeMb: 128, maxYoungGenerationSizeMb: 32 },
+    const child = fork(resolveChildExecutorPath(), [JSON.stringify(payload)], {
+      env: {}, // NO environment — nothing leaks in or out
+      stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+      execArgv: ['--max-old-space-size=128'],
     });
     const timer = setTimeout(() => {
-      void worker.terminate().catch(() => undefined);
-      reject(new Error('plugin call exceeded its execution budget (thread terminated)'));
+      child.kill('SIGKILL'); // hard kill — the child cannot intercept
+      reject(new Error('plugin call exceeded its execution budget (process killed)'));
     }, CALL_BUDGET_MS);
-    worker.on('message', (msg: { result?: unknown; error?: string; log?: string }) => {
+    child.on('message', (msg: { result?: unknown; error?: string; log?: string }) => {
       if (msg.log !== undefined) {
         console.info(`[plugin-executor] ${msg.log}`);
         return;
       }
       clearTimeout(timer);
-      void worker.terminate().catch(() => undefined);
+      child.kill(); // clean exit after result
       if (msg.error) reject(new Error(msg.error));
       else resolve(msg.result);
     });
-    worker.on('error', (err) => {
+    child.on('error', (err) => {
       clearTimeout(timer);
       reject(err);
     });
-    worker.on('exit', (code) => {
+    child.on('exit', (code, signal) => {
       clearTimeout(timer);
-      if (code !== 0 && code !== 1) reject(new Error(`executor exited with code ${code}`));
+      if (signal === 'SIGKILL') return; // timeout already rejected
+      if (code !== 0 && code !== 1 && code !== null) {
+        reject(new Error(`executor exited with code ${code}`));
+      }
+    });
+    // Collect stderr for diagnostics (plugin crash traces).
+    let stderr = '';
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf8');
+      if (stderr.length > 4096) stderr = stderr.slice(-4096); // cap
+    });
+    child.on('close', () => {
+      if (stderr.trim()) {
+        const lastLine = stderr.trim().split('\n').pop() ?? '';
+        console.warn(`[plugin-executor] stderr: ${lastLine}`);
+      }
     });
   });
 }
 
-function resolveExecutorPath(): string {
-  // Plain-JS executor — sibling of this module in BOTH layouts:
-  // dist/index.js → dist/executor.mjs (copied at build), and
-  // src/index.ts under vitest → src/executor.mjs.
-  return fileURLToPath(new URL('./executor.mjs', import.meta.url));
+function resolveChildExecutorPath(): string {
+  return fileURLToPath(new URL('./executor-child.mjs', import.meta.url));
 }
 
 async function getPlugin(pluginId: string): Promise<LoadedPlugin | null> {
@@ -223,7 +244,7 @@ async function handleRpc(rawBody: Buffer): Promise<{ status: number; body: unkno
         // Manifest probe in the DISPOSABLE executor — the parent never
         // imports untrusted code (10th-audit finding 2). A broken or
         // malicious bundle only loses its own listing slot.
-        const described = await runInExecutorThread({
+        const described = await runInExecutorProcess({
           pluginPath: loadedPlugin.pluginPath,
           op: 'describe',
           ctx: { actorUserId: '', players: [], voiceParticipants: [], serverId: '', pluginId: id },
@@ -260,7 +281,7 @@ async function handleRpc(rawBody: Buffer): Promise<{ status: number; body: unkno
     const storageEndpoint = `${hostOrigin()}/api/internal/plugin-storage`;
 
     try {
-      const result = await runInExecutorThread({
+      const result = await runInExecutorProcess({
         pluginPath: loadedPlugin.pluginPath,
         op,
         ctx: envelope,

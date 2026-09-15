@@ -2,6 +2,26 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - 15th-audit follow-ups: backup hash, child-process isolation - 2026-09-15
+
+### Fixed
+
+- **Backup verify actually verifies (15th-audit P3)**: `lfctl backup
+  verify --require-files` now reads the dump bytes, computes the real
+  SHA-256 and compares against the manifest (plus exact size). The
+  old check only confirmed the file existed and the manifest hash
+  LOOKED like a SHA-256 — "Backup Verified: yes" was misleading for
+  corrupted dumps.
+- **Plugin executor → CHILD PROCESS (15th-audit finding 5)**:
+  plugin code now runs in a dedicated child process (fork) instead of
+  a worker thread. This is a REAL OS boundary: the child's
+  /proc/<pid>/environ is empty (worker threads shared the parent's
+  startup env via /proc/self/environ — PLUGIN_WORKER_TOKEN was
+  readable), kill(SIGKILL) is a hard termination the child cannot
+  intercept, and --max-old-space-size enforces memory. The infinite-
+  loop termination test now proves the process-kill path.
+- **Build copies both executor variants** (thread + child) to dist.
+
 ## [Unreleased] - 15th-audit remediation - 2026-09-15
 
 ### Fixed
