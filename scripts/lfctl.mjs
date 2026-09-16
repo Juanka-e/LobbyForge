@@ -595,8 +595,33 @@ async function main() {
     return;
   }
   printPlan(plan);
+
+  // 19th-audit: enforce safety gates BEFORE touching anything.
+  if (!check.updateAvailable) {
+    console.error('\nNo update available (current >= target).');
+    process.exitCode = 0;
+    return;
+  }
+  if (!check.currentSupported) {
+    console.error('\nCurrent version is below the manifest minimumVersion — manual migration required.');
+    process.exitCode = 2;
+    return;
+  }
+  if (check.signature && !check.signature.valid) {
+    console.error('\nManifest signature INVALID — refusing to update from an untrusted source.');
+    process.exitCode = 2;
+    return;
+  }
+  if (check.majorUpgrade && !options.forceMajor) {
+    console.error('\nThis is a MAJOR upgrade. Re-run with --force-major to confirm.');
+    process.exitCode = 2;
+    return;
+  }
+
   const { manifest: backupManifest, baseDir } = await loadBackupManifest(options.backupManifest);
-  const backup = await verifyBackup(backupManifest, baseDir, options);
+  // 19th-audit: STRICT backup verification — requireFiles is MANDATORY
+  // for destructive operations, not opt-in.
+  const backup = await verifyBackup(backupManifest, baseDir, { ...options, requireFiles: true });
   printBackup(backup);
 
   if (!backup.ok) {
@@ -628,13 +653,21 @@ async function main() {
     process.stdout.write(`  ${step.id}: ${label}... `);
     try {
       if (step.id === 'pull-images') {
-        await execFileAsync('docker', ['compose', '-f', COMPOSE_FILE, '--env-file', ENV_FILE, 'pull']);
-        console.log('ok');
+        // 19th-audit: lobbyforge-web:latest is LOCALLY-BUILT, not from
+        // a registry — `docker compose pull` would fail on it. BUILD
+        // with --pull (refreshes base images) so new source actually
+        // gets compiled into the image.
+        await execFileAsync('docker', ['compose', '-f', COMPOSE_FILE, '--env-file', ENV_FILE, 'build', '--pull']);
+        console.log('ok (built)');
       } else if (step.id === 'recreate-services') {
         await execFileAsync('docker', ['compose', '-f', COMPOSE_FILE, '--env-file', ENV_FILE, 'up', '-d', '--remove-orphans', '--wait']);
         console.log('ok');
-      } else if (step.id === 'post-health-check') {
-        await execFileAsync('docker', ['compose', '-f', COMPOSE_FILE, '--env-file', ENV_FILE, 'ps']);
+      } else if (step.id === 'health-check') {
+        // 19th-audit: the plan generates 'health-check' (the old code
+        // looked for 'post-health-check' which never matched). Real
+        // HTTP health check through the compose network.
+        const { stdout } = await execFileAsync('docker', ['compose', '-f', COMPOSE_FILE, '--env-file', ENV_FILE, 'exec', '-T', 'web', 'node', '-e',
+          "fetch('http://localhost:3000/api/health').then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);process.exit(0)}).catch(e=>{console.error(e.message);process.exit(1)})"]);
         console.log('ok');
       } else {
         console.log('skipped');

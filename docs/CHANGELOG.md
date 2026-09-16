@@ -2,6 +2,24 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - 19th-audit final fixes - 2026-09-16
+
+### Fixed
+
+- **Update runner safety gates (19th-audit P1)**: update apply now
+  enforces updateAvailable, currentSupported, signature validity and
+  --force-major for major upgrades BEFORE touching anything. Strict
+  backup verification (requireFiles: true) is MANDATORY for the
+  destructive path — not opt-in.
+- **Update runner build step (19th-audit P1)**: `pull-images` step now
+  runs `docker compose build --pull` instead of `docker compose pull`
+  (lobbyforge-web:latest is a LOCALLY-BUILT image — pull would fail
+  or pull a stale registry image).
+- **Health-check step ID fixed (19th-audit P1)**: the runner now
+  matches the plan's actual `health-check` ID (was looking for the
+  non-existent `post-health-check`), and runs a REAL HTTP health
+  check through the compose network instead of just `docker compose ps`.
+
 ## [Unreleased] - 19th-audit remediation - 2026-09-15
 
 ### Fixed
