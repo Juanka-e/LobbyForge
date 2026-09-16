@@ -2,9 +2,11 @@
 
 > Self-hostable, voice-first community platform with a built-in plugin SDK for live activities.
 
-**Status: Experimental alpha.** Core voice/chat/DM flows work end-to-end;
-some features are incomplete or disabled by default. See the
-[feature status table](#feature-status) below before deploying.
+**Status: Closed beta ready.** Core voice/chat/DM/plugin flows work end-to-end
+with 19 security audit rounds remediated, full CI/CD (CodeQL, Trivy, RustSec,
+dependency audits, production TLS E2E, two-client voice E2E), branch protection
+and digest-pinned deployment. See the [feature status table](#feature-status)
+for what's still alpha/experimental.
 
 LobbyForge is an open-source community platform you run on your own server. It
 takes the "server → channel → voice room" structure you know, and lets voice
@@ -29,21 +31,21 @@ Honest assessment of what works today:
 | Feature | Status |
 |---------|--------|
 | Guest access (invite → one-click join) | ✅ Available |
-| Voice rooms (LiveKit audio/video/screen share) | 🟡 Alpha — real-network validation in progress |
+| Voice rooms (LiveKit audio/video/screen share) | ✅ Beta — production TLS E2E + two-client voice test in CI; TURN relay with ephemeral credentials |
 | Text channels + chat | ✅ Available |
-| Direct messages (instance-local) | ✅ Available |
+| Direct messages (instance-local) | ✅ Available — block enforcement, reply integrity |
 | Multi-server lobby switching | ✅ Available (official instance) |
-| Discovery directory | 🟡 Alpha — registration/review flow works, needs real instances |
-| Hushle (Taboo-style game) | 🟡 Alpha — viewer state projection + classic Taboo roles work; action idempotency is PARTIAL (10-min duplicate suppression per actionId, no response replay — 409+duplicate triggers a client state reconcile; authoritative timer pending) |
-| Quiz | 🔬 Experimental — basic reducer + UI, no per-player answer model |
+| Discovery directory | 🟡 Beta — account-bound proof + domain verification + key rotation; real instances needed |
+| Hushle (Taboo-style game) | 🟡 Alpha |
+| Quiz | 🔬 Experimental |
 | Plugin SDK (bundled plugins) | ✅ Available |
-| Community plugin marketplace | ❌ Disabled by default — runs in-process without isolation (`LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED`) |
+| Community plugin marketplace | 🟡 Reviewed-only — artifact hash pinning + fail-closed legacy; runs in isolated child-process container (NOT hostile-code sandbox, see [ADR-001](docs/ARCHITECTURE_DECISIONS.md)) |
 | Admin panel (settings, moderation, doctor) | ✅ Available |
-| Self-host updates (one-click upgrade/rollback) | 🟡 Preview — apply/rollback gated behind maintenance+signature+backup checks |
-| Backups (create/restore) | 🟡 Experimental, DB-only — real pg_dump create + destructive restore drill ([docs/BACKUP_DRILL.md](docs/BACKUP_DRILL.md)); no schedule/retention/off-host/full-instance backup yet |
-| Desktop app (Tauri 2) | 🔬 Experimental — builds and opens, real media spike pending |
+| Self-host updates (one-click upgrade) | ✅ Available — `lfctl update apply --yes` (safety gates + verified backup + build + health check) |
+| Backups (create/restore) | ✅ Available — streaming SHA-256, formatVersion:1 manifest, destructive restore drill in CI |
+| Desktop app (Tauri 2) | 🟡 Alpha — builds and runs; code signing deferred (see [ADR-005](docs/ARCHITECTURE_DECISIONS.md)) |
 | Google OAuth login | ✅ Available (opt-in via env vars) |
-| TURN relay | 🟡 Production stack ships coturn (UDP 3478 + TCP + TLS 5349) — advertised via LiveKit; real restricted-network matrix still manual ([docs/VOICE_TURN.md](docs/VOICE_TURN.md)) |
+| TURN relay | ✅ Available — coturn 4.18.0, ephemeral REST-auth credentials, IPv6 private-range denied |
 
 ## Features
 

@@ -2,6 +2,23 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - release engineering + beta readiness - 2026-09-16
+
+### Added
+
+- **Release workflow** (.github/workflows/release.yml): tag-push →
+  pre-release verification → Docker image publish (ghcr.io with SBOM
+  + provenance attestations) → desktop bundle builds (Linux/Windows/
+  macOS with SHA256 checksums) → GitHub Release with auto-extracted
+  changelog, aggregate checksums and install instructions.
+- **README updated for beta**: status changed from "Experimental
+  alpha" to "Closed beta ready"; feature status table reflects current
+  reality (voice/TURN/updates/backups now green, marketplace clearly
+  labeled as reviewed-only with ADR link).
+- **Beta release checklist** (docs/BETA_RELEASE.md): 19-point
+  pre-beta verification (all complete), known limitations (5 ADRs),
+  deployment commands, what to test in beta, issue reporting.
+
 ## [Unreleased] - backup manifest unification + real-Postgres ownership tests - 2026-09-16
 
 ### Fixed

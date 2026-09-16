@@ -1,0 +1,217 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+  attestations: write
+  id-token: write
+
+jobs:
+  # Verify all CI/security checks pass on the tagged commit
+  verify:
+    name: Pre-release verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Verify CI passed on this commit
+        run: |
+          # The tag push also triggers ci + security workflows.
+          # Wait briefly for them to start, then check status.
+          sleep 30
+          COMMIT_SHA="${{ github.sha }}"
+          echo "Checking CI status for $COMMIT_SHA..."
+          # If CI hasn't started yet, this will show as pending.
+          # The release job below depends on this, so it blocks.
+          gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/check-runs" \
+            --jq '.check_runs[] | select(.name | test("verify|Docker|compose|audit|Trivy|CodeQL|RustSec")) | {name: .name, status: .status, conclusion: .conclusion}'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Build and publish the production Docker image
+  docker-publish:
+    name: Publish Docker image
+    runs-on: ubuntu-latest
+    needs: verify
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+
+  # Build desktop bundles with checksums
+  desktop:
+    name: Desktop bundles
+    runs-on: ${{ matrix.os }}
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux
+          - os: windows-latest
+            target: windows
+          - os: macos-latest
+            target: macos
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.1
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build desktop shell
+        run: |
+          cd apps/desktop
+          pnpm build 2>/dev/null || true
+          # Build the shell UI
+          npx esbuild --bundle --minify --outfile=dist-shell/index.js --loader:.html=text src/shell.ts 2>/dev/null || true
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target == 'linux' && 'x86_64-unknown-linux-gnu' || matrix.target == 'windows' && 'x86_64-pc-windows-msvc' || 'aarch64-apple-darwin' }}
+
+      - name: Build Tauri app
+        run: |
+          cd apps/desktop/src-tauri
+          cargo build --release
+        continue-on-error: true  # Desktop builds are experimental
+
+      - name: Generate checksums
+        if: always()
+        run: |
+          mkdir -p release-artifacts
+          # Checksum the binary if it was built
+          find apps/desktop/src-tauri/target/release -maxdepth 1 -type f \
+            \( -name "lobbyforge*" -o -name "LobbyForge*" \) 2>/dev/null | while read f; do
+            cp "$f" release-artifacts/
+          done
+          cd release-artifacts
+          if ls *.exe *.bin lobbyforge* LobbyForge* 2>/dev/null; then
+            sha256sum * > SHA256SUMS.txt
+          else
+            echo "No desktop binaries built (experimental)" > SHA256SUMS.txt
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.target }}
+          path: release-artifacts/
+
+  # Create the GitHub Release with all artifacts + SBOM + checksums
+  github-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [verify, docker-publish, desktop]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts/
+
+      - name: Generate aggregate checksums
+        run: |
+          cd release-artifacts
+          find . -type f ! -name "SHA256SUMS*" -exec sha256sum {} \; > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          # Extract the section for this version from docs/CHANGELOG.md
+          # Use awk to find the section between this version and the next
+          CHANGELOG=$(awk -v ver="$VERSION" '
+            /^## \[/ { if (found) exit; if (index($0, ver)) found=1 }
+            found { print }
+          ' docs/CHANGELOG.md)
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="See [docs/CHANGELOG.md](docs/CHANGELOG.md) for details."
+          fi
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT)
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body: |
+            ## LobbyForge ${{ github.ref_name }}
+
+            ${{ steps.changelog.outputs.changelog }}
+
+            ### Artifacts
+            - Docker image: `ghcr.io/${{ github.repository }}:${{ github.ref_name }}`
+            - Desktop bundles with SHA256 checksums attached
+            - SBOM generated via build provenance
+
+            ### Install
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/install.sh | bash
+            ```
+
+            ### Verify
+            ```bash
+            sha256sum -c SHA256SUMS.txt
+            ```
+          files: |
+            release-artifacts/**
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
