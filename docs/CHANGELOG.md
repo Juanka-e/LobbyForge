@@ -2,6 +2,59 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - update recovery + GHCR access hardening (22nd audit) - 2026-09-16
+
+### Fixed
+
+- **P1 — failed rollout left broken NEW containers running**: the catch
+  handler restored `.env.prod`'s image ref but never recreated the old
+  containers if the new ones had started, and wrote `previous: null`
+  into deployment state — making `lfctl update rollback` refuse exactly
+  when recovery was needed. The runner now tracks whether services were
+  recreated; on failure it restores the ref AND brings the stack back
+  up on it + health-checks. If auto-recovery also fails, the state
+  keeps a WORKING previous pointer and prints the rollback command.
+- **P1 — GHCR access on first release**: GHCR packages default to
+  PRIVATE. The release scan job now carries `packages: read`, logs in
+  and PULLS the exact digest before Trivy (works regardless of
+  visibility); a new post-publish step verifies/sets the package PUBLIC
+  and fails the release loudly otherwise (anonymous digest pull is how
+  every self-host updater fetches releases).
+- **Version resolution edge**: an untagged checkout install recorded
+  `LOBBYFORGE_VERSION=source`, which crashes the updater's semver
+  parser. install.sh now falls back to the root package.json version
+  (then `0.0.0-unknown`); lfctl refuses to guess an unknown current
+  version entirely (clear error instead of silently assuming 0.2.0).
+- **install.sh update bypass removed**: the "Update to the code in this
+  checkout" menu action ran `compose up -d --build`, bypassing signed
+  manifests, backups, digest pinning and rollback state — and could
+  silently flip a digest-pinned deployment back to a mutable local
+  build. Option 1 now only prints the lfctl update commands; the
+  installer is fresh-install/config-repair only. Re-runs also PRESERVE
+  existing LOBBYFORGE_VERSION/IMAGE instead of resetting the update
+  model.
+
+### Changed
+
+- **First rollback is byte-exact**: before the first digest update, the
+  running local image is pinned to `lobbyforge-web:rollback-<ts>` and
+  THAT is the rollback target — later rebuilds of `latest` can no
+  longer silently change what rollback restores.
+- **Verified manifests must pin deployable bytes**: a manifest whose
+  signature verifies against a pinned key but has no `imageDigest` is
+  refused by `lfctl update apply`, and the generator refuses to SIGN a
+  manifest without `--git-sha` + `--image-digest` (signature over a
+  bare version number is trust theater). The warned local-build path
+  remains only for unsigned manifests.
+
+### Added
+
+- **v0.2.0-rc.1 release drill checklist** in docs/BETA_RELEASE.md:
+  anonymous digest pull from a clean VPS, signed-manifest verification,
+  old→RC update, forced-health-failure rollback, backup restore,
+  three-platform desktop artifacts; notes that GitHub `releases/latest`
+  excludes prereleases (RC tests must pass `--manifest` explicitly).
+
 ## [Unreleased] - signed-digest update chain (21st audit) - 2026-09-16
 
 ### Fixed

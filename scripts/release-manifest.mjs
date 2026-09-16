@@ -120,6 +120,13 @@ async function main() {
     }
     console.error('Writing UNSIGNED manifest (--allow-unsigned).');
   } else {
+    // 22nd-audit: a SIGNATURE must vouch for the exact deployed bytes —
+    // signing a bare version number is deployable trust theater.
+    if (!options.gitSha || !options.imageDigest) {
+      throw new Error(
+        'Signed manifests must pin --git-sha and --image-digest — without them the signature vouches for nothing deployable.'
+      );
+    }
     const privateKey = createPrivateKey(keyPem.trim());
     if (privateKey.asymmetricKeyType !== 'ed25519') {
       throw new Error(`Signing key must be Ed25519, got ${privateKey.asymmetricKeyType}`);

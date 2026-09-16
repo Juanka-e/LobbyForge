@@ -8,7 +8,6 @@ import { createWriteStream } from 'node:fs';
 import { promisify } from 'node:util';
 
 const DEFAULT_CHANNEL = 'stable';
-const DEFAULT_CURRENT_VERSION = '0.2.0';
 // 21st-audit: check/plan/apply work with NO arguments — the documented
 // chain must run verbatim. Forks point this (or per-invocation --manifest)
 // at their own releases.
@@ -442,7 +441,13 @@ async function resolveCurrentVersion(options) {
   if (fromEnvFile) return fromEnvFile;
   const state = await readDeploymentState();
   if (state && typeof state.version === 'string') return state.version;
-  return DEFAULT_CURRENT_VERSION;
+  // 22nd-audit: silently assuming a version is how an updater lies about
+  // what it will do — refuse instead of guessing.
+  throw new Error(
+    'Cannot determine the currently deployed version: no --current-version, LOBBYFORGE_VERSION,\n' +
+    '.env.prod entry or deployment-state.json found. On an installed server run install.sh\n' +
+    'first; on a bare checkout pass --current-version explicitly.'
+  );
 }
 
 async function resolveDatabaseUrl() {
@@ -835,6 +840,16 @@ async function main() {
     process.exitCode = 2;
     return;
   }
+  // 22nd-audit: a manifest verified against a pinned key MUST pin the
+  // deployed bytes — the signature → exact-image-digest binding IS the
+  // point of the signed-manifest system. The warned local-build path
+  // remains only for unsigned manifests (no key configured).
+  if (plan.signature.verified && !manifest.imageDigest) {
+    console.error('\nVerified manifest has no imageDigest — refusing to apply.');
+    console.error('A signature must vouch for the exact deployed bytes; a version number alone is not deployable trust.');
+    process.exitCode = 2;
+    return;
+  }
 
   // 21st-audit: apply must never depend on a hand-written backup manifest.
   // With --backup-manifest it verifies THAT dump; without it, a FRESH
@@ -873,10 +888,26 @@ async function main() {
 
   // 21st-audit: capture the previous deployment for rollback BEFORE
   // mutating anything.
-  const previousImage = (await readEnvProdValue('LOBBYFORGE_IMAGE')) ?? 'lobbyforge-web:latest';
+  let previousImage = (await readEnvProdValue('LOBBYFORGE_IMAGE')) ?? 'lobbyforge-web:latest';
   const previousVersion = options.currentVersion;
   const usesDigest = typeof manifest.imageDigest === 'string' && manifest.imageDigest.length > 0;
   let envImageMutated = false;
+  let servicesRecreated = false;
+
+  // 22nd-audit: the FIRST update's rollback target is a MUTABLE local
+  // tag (lobbyforge-web:latest) — a later build could silently replace
+  // those bytes. Pin the currently-running image to a timestamped
+  // rollback tag so the pointer stays byte-exact even if `latest` moves.
+  if (!/@sha256:[a-f0-9]{64}$/i.test(previousImage)) {
+    try {
+      const rollbackTag = `lobbyforge-web:rollback-${Date.now()}`;
+      await execFileAsync('docker', ['tag', previousImage, rollbackTag], { timeout: 60_000 });
+      console.log(`Rollback anchor: ${previousImage} -> ${rollbackTag} (byte-exact rollback target)`);
+      previousImage = rollbackTag;
+    } catch (err) {
+      console.error(`WARNING: could not pin a rollback tag for ${previousImage} (${err.message}) — rollback will use the mutable ref.`);
+    }
+  }
 
   console.log('\nExecuting update plan...\n');
   for (const step of plan.steps) {
@@ -914,6 +945,7 @@ async function main() {
         console.log('ok');
       } else if (step.id === 'recreate-services') {
         await composeExec(['up', '-d', '--remove-orphans', '--wait'], 900_000);
+        servicesRecreated = true;
         console.log('ok');
       } else if (step.id === 'health-check') {
         await composeHealthCheck();
@@ -929,20 +961,50 @@ async function main() {
     } catch (err) {
       console.log('FAILED');
       console.error(`    ${err.stderr || err.message}`);
-      // Restore the recorded image ref so a retry/rollback isn't fighting
-      // a half-written .env.prod.
+      // Restore the recorded image ref first so compose targets the old
+      // bytes again on the next `up`.
       if (envImageMutated) {
         await setEnvProdValue('LOBBYFORGE_IMAGE', previousImage).catch(() => {});
       }
-      await writeDeploymentState({
-        version: previousVersion,
-        image: previousImage,
-        gitSha: null,
-        previous: null,
-        note: `update to ${plan.latestVersion} failed at step "${step.id}"; .env.prod image ref restored`,
-      });
-      console.error(`\nUpdate step "${step.id}" failed. .env.prod image ref restored to ${previousImage}.`);
-      console.error(`Recovery:\n  ${plan.rollbackCommand}`);
+      // 22nd-audit: if the new containers were already created, a bare
+      // env restore is NOT recovery — the broken image keeps running
+      // while .env.prod claims otherwise. Bring the stack back up on the
+      // restored ref and health-check it for real.
+      let recovery = 'old containers untouched (failure happened before recreate)';
+      if (servicesRecreated) {
+        try {
+          await composeExec(['up', '-d', '--remove-orphans', '--wait'], 900_000);
+          await composeHealthCheck();
+          recovery = 'OLD CONTAINERS RESTORED AND HEALTHY';
+        } catch (recErr) {
+          recovery = 'MANUAL ROLLBACK REQUIRED';
+          console.error(`    auto-recovery failed: ${recErr.stderr || recErr.message}`);
+          // 22nd-audit: keep a WORKING rollback pointer — writing
+          // previous:null here is what made `update rollback` refuse to
+          // help exactly when it was needed most.
+          await writeDeploymentState({
+            version: previousVersion,
+            image: previousImage,
+            gitSha: null,
+            previous: { version: previousVersion, image: previousImage },
+            note: `update to ${plan.latestVersion} failed after recreate; auto-recovery failed — run "lfctl update rollback"`,
+          });
+        }
+      }
+      if (recovery !== 'MANUAL ROLLBACK REQUIRED') {
+        await writeDeploymentState({
+          version: previousVersion,
+          image: previousImage,
+          gitSha: null,
+          previous: null,
+          note: `update to ${plan.latestVersion} failed at step "${step.id}" (${recovery}); .env.prod image ref restored`,
+        });
+      }
+      console.error(`\nUpdate step "${step.id}" failed. Recovery: ${recovery}`);
+      console.error(`.env.prod image ref restored to ${previousImage}.`);
+      if (recovery === 'MANUAL ROLLBACK REQUIRED') {
+        console.error(`Run: node scripts/lfctl.mjs update rollback`);
+      }
       process.exitCode = 2;
       return;
     }

@@ -62,6 +62,30 @@ node scripts/lfctl.mjs update rollback     # restore the previous recorded image
 5. **Self-host**: Install, configure, update, backup + restore
 6. **Desktop**: Connect to instance, login handoff, global push-to-talk
 
+## Release drill — v0.2.0-rc.1 (before any final tag)
+
+The unified `v*` release pipeline is only "tested" after this passes once
+end-to-end on GitHub. Notes:
+
+- GitHub `releases/latest` does NOT include prereleases — for RC updater
+  tests pass the manifest explicitly:
+  `--manifest https://github.com/Juanka-e/LobbyForge/releases/download/v0.2.0-rc.1/release-manifest.json`
+- The release fails closed if the GHCR package is not PUBLIC (anonymous
+  pull is how every self-host updater fetches the digest). First publish
+  may need a one-time manual visibility flip in package settings.
+
+Checklist:
+
+- [ ] RC tag pushed → 19 checks green → release gate passes → GHCR push
+- [ ] ghcr.io/juanka-e/lobbyforge package is PUBLIC
+- [ ] Clean VPS, NO GitHub credentials: `docker pull ghcr.io/juanka-e/lobbyforge@sha256:<digest>` succeeds
+- [ ] Fresh tagged install (`git clone --branch v0.2.0-rc.1` + install.sh) healthy
+- [ ] `lfctl update check` against the RC manifest verifies the signature and shows the pinned digest
+- [ ] Old install (0.1.x/0.2.0-source) → RC update: backup auto-created, digest deployed, migrations ran, health green, version state persisted
+- [ ] Forced failure drill: make `/api/health` fail after recreate → updater restores OLD containers + `.env.prod` (or leaves a working `update rollback` pointer)
+- [ ] `lfctl backup restore` round-trip from the pre-update dump into an empty DB
+- [ ] Desktop artifacts present for linux/windows/macos with matching single SHA256SUMS.txt
+
 ## Reporting issues
 
 - Security: use GitHub Security Advisories (private)

@@ -88,23 +88,62 @@ jobs:
           provenance: mode=max
           sbom: true
 
+      # 22nd-audit: GHCR container packages default to PRIVATE on first
+      # publish — self-hosters must be able to `docker compose pull` the
+      # digest ANONYMOUSLY or the updater cannot work. Try to flip it
+      # public via the API (needs package-admin; may fail on the very
+      # first publish); otherwise VERIFY it is already public. A private
+      # package fails the release loudly with a one-time manual fix.
+      - name: Ensure package is public (self-host pull requirement)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PKG="${GITHUB_REPOSITORY##*/}"
+          if gh api --method PATCH "/user/packages/container/${PKG,,}" -f visibility=public >/dev/null 2>&1; then
+            echo "ghcr.io package ${PKG,,} set to public."
+            exit 0
+          fi
+          echo "PATCH failed (token lacks package-admin or first-publish lag) — verifying current visibility…"
+          for i in 1 2 3 4 5; do
+            VIS=$(gh api "/user/packages/container/${PKG,,}" --jq '.visibility' 2>/dev/null || true)
+            [ "$VIS" = "public" ] && { echo "Package already public."; exit 0; }
+            sleep 10
+          done
+          echo "::error::ghcr.io/${GITHUB_REPOSITORY,,} is '${VIS:-unknown}' — self-host updates pull it anonymously."
+          echo "::error::Set the package PUBLIC once in its GitHub settings (Package settings → Danger Zone → Change visibility), then re-run."
+          exit 1
+
   # 21st-audit: the EXACT pushed image (by digest, not a mutable tag) is
   # scanned before anything is released — same CRITICAL+HIGH policy as
   # the security workflow's web-image scan.
+  # 22nd-audit: GHCR packages default to PRIVATE on first publish — the
+  # scan logs in (packages:read) and PULLS the digest first, so it works
+  # regardless of visibility, then Trivy scans the local image via the
+  # docker socket (image-src auto → daemon before registry).
   scan:
     name: Trivy scan (released digest)
     runs-on: ubuntu-latest
     needs: docker-publish
     permissions:
       contents: read
+      packages: read
     timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      - name: Trivy scan ghcr.io digest
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull exact digest + Trivy scan
         run: |
           IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}@${{ needs.docker-publish.outputs.digest }}"
+          echo "Pulling $IMAGE"
+          docker pull "$IMAGE"
           echo "Scanning $IMAGE"
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \

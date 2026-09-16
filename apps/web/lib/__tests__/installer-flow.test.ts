@@ -169,13 +169,38 @@ describe('install.sh — V4-003 safe activation', () => {
     expect(runInstallerPosix(sandbox, 'same.example.com').rc).toBe(0);
     const before = fileState(sandbox);
 
-    // OPS-003: the installer now offers update/renew/exit; answer exit.
+    // OPS-003 + 22nd-audit: the installer offers update-guidance/renew/exit;
+    // answer exit. Updates are NOT performed by the installer (bypassed the
+    // signed-manifest updater) — option 1 only prints the lfctl commands.
     const { rc, out } = runInstallerPosix(sandbox, 'same.example.com', { stackRunning: true }, '3\n');
     expect(rc, out).toBe(0);
-    expect(out).toContain('Update to the code in this checkout');
+    expect(out).toContain('How to update');
     expect(out).toContain('Renew TLS certificates only');
     expect(out).toContain('No changes made');
     expect(fileState(sandbox)).toEqual(before); // byte-for-byte untouched
+  });
+
+  it('scenario 2b: menu option 1 prints the signed-release updater commands and changes NOTHING', () => {
+    const sandbox = makeSandbox();
+    sandboxes.push(sandbox);
+    expect(runInstallerPosix(sandbox, 'same.example.com').rc).toBe(0);
+    const before = fileState(sandbox);
+
+    // The shared harness appends its trailing "Y" AFTER extraInput, so the
+    // menu would swallow the Y — drive this scenario with exact stdin:
+    // domain, community name, official=n, then menu choice 1.
+    const res = spawnSync(
+      'bash',
+      ['-c', `cd "$1" && PATH="$2:$PATH" FAKE_DOCKER_PS="lobbyforge-nginx" bash ./install.sh`, 'run', sandbox, join(sandbox, 'bin')],
+      { input: 'same.example.com\nE2E Community\nn\n1\n', encoding: 'utf8', timeout: 60_000 }
+    );
+    const rc = res.status ?? -1;
+    const out = (res.stdout ?? '') + (res.stderr ?? '');
+    expect(rc, out).toBe(0);
+    expect(out).toContain('lfctl.mjs update check');
+    expect(out).toContain('lfctl.mjs update apply --yes');
+    expect(out).toContain('No changes were made');
+    expect(fileState(sandbox)).toEqual(before); // the installer never rebuilds a live stack
   });
 
   it('scenario 3: RUNNING stack + DIFFERENT domain → early exit, NOTHING modified', () => {
