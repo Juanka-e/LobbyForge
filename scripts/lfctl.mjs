@@ -3,6 +3,9 @@ import fs from 'node:fs/promises';
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign, verify as verifySignature } from 'node:crypto';
 import path from 'node:path';
 import process from 'node:process';
+import { execFile, spawn } from 'node:child_process';
+import { createWriteStream } from 'node:fs';
+import { promisify } from 'node:util';
 
 const DEFAULT_CHANNEL = 'stable';
 const DEFAULT_CURRENT_VERSION = '0.2.0';
@@ -16,6 +19,14 @@ const DEFAULT_PUBLIC_KEY_PATH = 'infra/update/release-public.pem';
 const ENV_FILE = '.env.prod';
 const COMPOSE_FILE = 'infra/docker/docker-compose.prod.yml';
 const STATE_FILE = 'infra/update/deployment-state.json';
+
+// 21st-audit (drill-caught TDZ): main() is invoked mid-file and the
+// backup path runs SYNCHRONOUSLY up to its first await — the pg runtime
+// MUST be initialized here at the top, before main() executes. Declaring
+// these in the bottom-of-file backup section crashed `backup create`
+// with "Cannot access 'PG_CONTAINER' before initialization".
+const execFileAsync = promisify(execFile);
+let PG_CONTAINER = process.env.LFCTL_PG_CONTAINER ?? '';
 
 function usage() {
   return `LobbyForge control CLI
@@ -965,23 +976,17 @@ main().catch((err) => {
 // Set LFCTL_PG_CONTAINER=<container> to run them via `docker exec`
 // INSIDE the PostgreSQL container instead — operators don't need a host
 // pg installation (the container always ships the exact-version tools).
-
-import { execFile, spawn } from 'node:child_process';
-import { createWriteStream } from 'node:fs';
-import { promisify } from 'node:util';
-
-const execFileAsync = promisify(execFile);
-
-let PG_CONTAINER = process.env.LFCTL_PG_CONTAINER ?? '';
+// (PG_CONTAINER + execFileAsync live at the TOP of this file — see the
+// TDZ note there.)
 
 // 21st-audit: install.sh writes a compose-internal DATABASE_URL
 // (host "postgres") — unreachable from the host. When no container is
 // configured explicitly, resolve the compose postgres container so the
 // auto-backup in `update apply` works with zero operator config.
-async function ensurePgContainer() {
+async function ensurePgContainer(dbUrl = null) {
   if (PG_CONTAINER) return PG_CONTAINER;
-  const dbUrl = await resolveDatabaseUrl();
-  if (dbUrl && !/@(localhost|127\.0\.0\.1|\[::1\])/.test(dbUrl.split('?')[0])) {
+  const url = dbUrl ?? (await resolveDatabaseUrl());
+  if (url && !/@(localhost|127\.0\.0\.1|\[::1\])/.test(url.split('?')[0])) {
     try {
       const { stdout } = await execFileAsync(
         'docker',
@@ -1049,7 +1054,7 @@ async function backupCreate(options = {}) {
   const outDir = options.out ?? 'backups';
   const dbUrl = options['database-url'] ?? process.env.DATABASE_URL;
   if (!dbUrl) throw new Error('backup create requires --database-url or DATABASE_URL');
-  await ensurePgContainer();
+  await ensurePgContainer(dbUrl);
 
   await fs.mkdir(outDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
