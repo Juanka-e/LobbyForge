@@ -4,7 +4,7 @@ Status: Ready for closed beta — 2026-09-16
 
 ## Pre-beta verification (ALL COMPLETE)
 
-- [x] 19 security audit rounds remediated
+- [x] 20 security audit rounds remediated
 - [x] CI: Ubuntu + Windows verify, Docker build, production compose config
 - [x] CI: Production TLS E2E (HTTPS, HTTP→HTTPS redirect, WSS upgrade, CSP nonce + hydration)
 - [x] CI: Two-client voice E2E (real WebRTC through LiveKit)
@@ -21,6 +21,8 @@ Status: Ready for closed beta — 2026-09-16
 - [x] Realtime: WS event-driven invalidation + 30s periodic reauth + SSE instant abort
 - [x] Authorization: Centralized membership+visibility gates, moderation hierarchy
 - [x] Updates: Safety gates (available/supported/signature/major) + strict backup + build + health check
+- [x] Release: tag push gates on ALL CI+security checks (19 contexts, completed+success) before publishing
+- [x] Release: `release-manifest.json` generated per release (Ed25519-signed when `LF_RELEASE_SIGNING_KEY` secret is set)
 
 ## Known limitations (documented in ADRs)
 
@@ -33,17 +35,19 @@ Status: Ready for closed beta — 2026-09-16
 ## Beta deployment
 
 ```bash
-# One-command install (Linux/macOS)
-curl -fsSL https://raw.githubusercontent.com/Juanka-e/LobbyForge/main/install.sh | bash
-
-# Or from source
-git clone https://github.com/Juanka-e/LobbyForge.git
+# Install (Linux/macOS) — the installer needs the repo files next to it
+# (compose stack, nginx/livekit templates, lfctl), so clone first:
+# curl | bash does NOT work.
+git clone --branch <release-tag> --depth 1 https://github.com/Juanka-e/LobbyForge.git
 cd LobbyForge && bash install.sh
 
-# Updates
-lfctl update check   # see what's available
-lfctl update plan    # review the plan
-lfctl update apply --yes  # execute (backup verified, safety gates checked)
+# Updates — every GitHub release publishes a release-manifest.json asset
+node scripts/lfctl.mjs update check \
+  --manifest https://github.com/Juanka-e/LobbyForge/releases/latest/download/release-manifest.json
+node scripts/lfctl.mjs update plan    # review the plan
+node scripts/lfctl.mjs update apply --yes  # execute (verified backup + safety gates required)
+# Optional trust hardening: pin the release public key with --public-key <pem>
+# (a client with a pinned key fails closed on unsigned/tampered manifests).
 ```
 
 ## What to test in beta

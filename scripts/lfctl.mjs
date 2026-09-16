@@ -49,6 +49,7 @@ function parseArgs(argv) {
     else if (arg === '--require-files') options.requireFiles = true;
     else if (arg === '--json') options.json = true;
     else if (arg === '--yes') options.yes = true;
+    else if (arg === '--force-major') options.forceMajor = true;
     // Backup create/restore options
     else if (arg === '--out') options.out = rest[++i];
     else if (arg === '--file') options.file = rest[++i];
@@ -596,23 +597,26 @@ async function main() {
   }
   printPlan(plan);
 
-  // 19th-audit: enforce safety gates BEFORE touching anything.
-  if (!check.updateAvailable) {
+  // 20th-audit: enforce safety gates BEFORE touching anything.
+  // buildPlan() already flattens check fields into the plan object.
+  if (!plan.updateAvailable) {
     console.error('\nNo update available (current >= target).');
     process.exitCode = 0;
     return;
   }
-  if (!check.currentSupported) {
+  if (!plan.currentSupported) {
     console.error('\nCurrent version is below the manifest minimumVersion — manual migration required.');
     process.exitCode = 2;
     return;
   }
-  if (check.signature && !check.signature.valid) {
+  // Signature: the verifier returns { status, verified, required }.
+  // Fail-closed only when a key IS configured and verification FAILED.
+  if (plan.signature && plan.signature.required && !plan.signature.verified) {
     console.error('\nManifest signature INVALID — refusing to update from an untrusted source.');
     process.exitCode = 2;
     return;
   }
-  if (check.majorUpgrade && !options.forceMajor) {
+  if (plan.majorUpgrade && !options.forceMajor) {
     console.error('\nThis is a MAJOR upgrade. Re-run with --force-major to confirm.');
     process.exitCode = 2;
     return;
@@ -700,7 +704,8 @@ main().catch((err) => {
 // INSIDE the PostgreSQL container instead — operators don't need a host
 // pg installation (the container always ships the exact-version tools).
 
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { createWriteStream } from 'node:fs';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -714,6 +719,47 @@ async function pgExec(tool, args, options = {}) {
   return execFileAsync(tool, args, options);
 }
 
+// 20th-audit: container mode used to buffer the ENTIRE -Fc dump in RAM
+// (maxBuffer up to 1 GiB) before writing it out. Spawn docker exec and
+// pipe stdout straight to disk — memory stays flat for any dump size,
+// and any failure deletes the partial file so it can never masquerade
+// as a restorable backup.
+function streamPgDumpTo(dbUrl, outFile, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('docker', ['exec', PG_CONTAINER, 'pg_dump', '-Fc', dbUrl], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const out = createWriteStream(outFile);
+    let stderr = '';
+    let settled = false;
+    let timer;
+    const finish = (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      out.end(() => {
+        if (err) {
+          fs.unlink(outFile).catch(() => {});
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    };
+    timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      finish(new Error(`pg_dump timed out after ${Math.round(timeoutMs / 1000)}s`));
+    }, timeoutMs);
+    child.stdout.pipe(out);
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
+    child.on('error', finish);
+    child.on('close', (code) => {
+      if (code === 0) finish();
+      else finish(new Error(`pg_dump exited with code ${code}: ${stderr.trim().slice(0, 400)}`));
+    });
+  });
+}
+
 async function backupCreate(options = {}) {
   const outDir = options.out ?? 'backups';
   const dbUrl = options['database-url'] ?? process.env.DATABASE_URL;
@@ -725,16 +771,10 @@ async function backupCreate(options = {}) {
 
   // pg_dump custom format (-Fc) — compressed, supports parallel restore + selective tables.
   if (PG_CONTAINER) {
-    // Container mode: stream the dump to stdout and write it host-side
-    // (the container cannot see the host output directory). encoding:
-    // 'buffer' is critical — the -Fc dump is binary and a default UTF-8
-    // string decode silently corrupts the TOC.
-    const { stdout } = await pgExec('pg_dump', ['-Fc', dbUrl], {
-      timeout: 300_000,
-      maxBuffer: 1024 * 1024 * 1024,
-      encoding: 'buffer',
-    });
-    await fs.writeFile(file, stdout);
+    // Container mode: the container cannot see the host output directory,
+    // so docker-exec stdout is piped straight into the host-side file
+    // (binary bytes, no decode step, no RAM buffer).
+    await streamPgDumpTo(dbUrl, file, 300_000);
   } else {
     await pgExec('pg_dump', ['-Fc', '-f', file, dbUrl], { timeout: 300_000 });
   }

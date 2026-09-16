@@ -41,7 +41,7 @@ Honest assessment of what works today:
 | Plugin SDK (bundled plugins) | ✅ Available |
 | Community plugin marketplace | 🟡 Reviewed-only — artifact hash pinning + fail-closed legacy; runs in isolated child-process container (NOT hostile-code sandbox, see [ADR-001](docs/ARCHITECTURE_DECISIONS.md)) |
 | Admin panel (settings, moderation, doctor) | ✅ Available |
-| Self-host updates (one-click upgrade) | ✅ Available — `lfctl update apply --yes` (safety gates + verified backup + build + health check) |
+| Self-host updates (one-click upgrade) | ✅ Available — each tagged release publishes a `release-manifest.json` (Ed25519-signed when the release key is configured); `lfctl update check/plan/apply` gates on it (signature, minimum version, major-version consent) and refuses to touch anything without a verified backup |
 | Backups (create/restore) | ✅ Available — streaming SHA-256, formatVersion:1 manifest, destructive restore drill in CI |
 | Desktop app (Tauri 2) | 🟡 Alpha — builds and runs; code signing deferred (see [ADR-005](docs/ARCHITECTURE_DECISIONS.md)) |
 | Google OAuth login | ✅ Available (opt-in via env vars) |

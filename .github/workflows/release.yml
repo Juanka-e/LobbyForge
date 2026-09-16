@@ -12,27 +12,23 @@ permissions:
   id-token: write
 
 jobs:
-  # Verify all CI/security checks pass on the tagged commit
+  # 20th-audit: a REAL gate. The tag push triggers ci.yml + security.yml
+  # (both have `tags: ['v*']`), and scripts/release-gate.mjs waits until
+  # every expected check context is completed on the tagged SHA, then
+  # requires success. A release cannot ship from a commit with a red or
+  # missing check.
   verify:
     name: Pre-release verification
     runs-on: ubuntu-latest
+    timeout-minutes: 75
     steps:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Verify CI passed on this commit
-        run: |
-          # The tag push also triggers ci + security workflows.
-          # Wait briefly for them to start, then check status.
-          sleep 30
-          COMMIT_SHA="${{ github.sha }}"
-          echo "Checking CI status for $COMMIT_SHA..."
-          # If CI hasn't started yet, this will show as pending.
-          # The release job below depends on this, so it blocks.
-          gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/check-runs" \
-            --jq '.check_runs[] | select(.name | test("verify|Docker|compose|audit|Trivy|CodeQL|RustSec")) | {name: .name, status: .status, conclusion: .conclusion}'
+      - name: Wait for CI + security checks, then gate on success
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/release-gate.mjs
 
   # Build and publish the production Docker image
   docker-publish:
@@ -79,11 +75,17 @@ jobs:
           provenance: mode=max
           sbom: true
 
-  # Build desktop bundles with checksums
+  # Build desktop installers. Honest about status (ADR-005: unsigned,
+  # experimental): the job is continue-on-error at the JOB level so a
+  # broken desktop build is VISIBLE as a failed check but cannot block
+  # the server release — and when it does build, the real Tauri
+  # bundles (dmg/msi/deb/AppImage) are collected and checksummed.
   desktop:
-    name: Desktop bundles
+    name: Desktop bundles (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     needs: verify
+    continue-on-error: true
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -98,6 +100,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Install Tauri system dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
@@ -111,47 +121,56 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build desktop shell
-        run: |
-          cd apps/desktop
-          pnpm build 2>/dev/null || true
-          # Build the shell UI
-          npx esbuild --bundle --minify --outfile=dist-shell/index.js --loader:.html=text src/shell.ts 2>/dev/null || true
+      # Workspace packages the desktop shell imports must be built first.
+      - name: Build workspace packages
+        run: pnpm build:packages
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target == 'linux' && 'x86_64-unknown-linux-gnu' || matrix.target == 'windows' && 'x86_64-pc-windows-msvc' || 'aarch64-apple-darwin' }}
 
-      - name: Build Tauri app
-        run: |
-          cd apps/desktop/src-tauri
-          cargo build --release
-        continue-on-error: true  # Desktop builds are experimental
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
 
-      - name: Generate checksums
+      # tsc + tauri build — the committed dist-shell/ is the frontendDist,
+      # and tauri build produces the installers under target/release/bundle/.
+      - name: Build desktop app (tsc + tauri build)
+        run: pnpm --filter @lobbyforge/desktop build
+
+      - name: Collect bundles + checksums
         if: always()
         run: |
-          mkdir -p release-artifacts
-          # Checksum the binary if it was built
-          find apps/desktop/src-tauri/target/release -maxdepth 1 -type f \
-            \( -name "lobbyforge*" -o -name "LobbyForge*" \) 2>/dev/null | while read f; do
-            cp "$f" release-artifacts/
-          done
-          cd release-artifacts
-          if ls *.exe *.bin lobbyforge* LobbyForge* 2>/dev/null; then
-            sha256sum * > SHA256SUMS.txt
+          set -euo pipefail
+          ROOT="${GITHUB_WORKSPACE:-$(pwd)}"
+          BUNDLE_DIR="$ROOT/apps/desktop/src-tauri/target/release/bundle"
+          mkdir -p "$ROOT/release-artifacts"
+          if [ -d "$BUNDLE_DIR" ]; then
+            find "$BUNDLE_DIR" -type f \
+              \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
+                 -o -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' \) \
+              -exec cp '{}' "$ROOT/release-artifacts/" ';'
+          fi
+          cd "$ROOT/release-artifacts"
+          COUNT=$(find . -maxdepth 1 -type f | wc -l | tr -d ' ')
+          if [ "$COUNT" -gt 0 ]; then
+            sha256sum -- * > SHA256SUMS.txt
+            cat SHA256SUMS.txt
           else
-            echo "No desktop binaries built (experimental)" > SHA256SUMS.txt
+            echo "No Tauri bundles were produced (desktop build experimental — see ADR-005)." | tee DESKTOP-BUNDLES-MISSING.txt
           fi
 
       - name: Upload artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.target }}
           path: release-artifacts/
 
-  # Create the GitHub Release with all artifacts + SBOM + checksums
+  # Create the GitHub Release with all artifacts + SBOM + checksums +
+  # the signed release manifest that `lfctl update` consumes.
   github-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
@@ -171,22 +190,49 @@ jobs:
           find . -type f ! -name "SHA256SUMS*" -exec sha256sum {} \; > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+      - name: Compute release coordinates
+        run: |
+          # metadata-action tags are lowercase repo + semver WITHOUT the v
+          # prefix — the release body must quote the tag it actually pushed.
+          echo "IMAGE_REF=ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
       - name: Extract changelog for this version
         id: changelog
         run: |
-          VERSION="${GITHUB_REF#refs/tags/}"
-          # Extract the section for this version from docs/CHANGELOG.md
-          # Use awk to find the section between this version and the next
-          CHANGELOG=$(awk -v ver="$VERSION" '
-            /^## \[/ { if (found) exit; if (index($0, ver)) found=1 }
-            found { print }
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Prefer the section for THIS version; fall back to the newest
+          # section (Unreleased) when the changelog hasn't been retitled yet.
+          CHANGELOG=$(awk -v ver="v$VERSION" -v bare="$VERSION" '
+            /^## \[/ {
+              if (started) exit
+              if (index($0, ver) || index($0, "[" bare "]")) { started=1 }
+              else if (!taken) { taken=1; started=1 }
+            }
+            started { print }
           ' docs/CHANGELOG.md)
           if [ -z "$CHANGELOG" ]; then
             CHANGELOG="See [docs/CHANGELOG.md](docs/CHANGELOG.md) for details."
           fi
-          echo "changelog<<EOF" >> $GITHUB_OUTPUT
-          echo "$CHANGELOG" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT)
+          {
+            echo "changelog<<EOF"
+            echo "$CHANGELOG"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # The manifest `lfctl update check --manifest <release-asset-url>`
+      # consumes. Signed (Ed25519, signature embedded) when the
+      # LF_RELEASE_SIGNING_KEY secret is configured; unsigned otherwise —
+      # clients without a pinned public key treat signature as optional.
+      - name: Generate release manifest (lfctl update)
+        env:
+          LF_RELEASE_SIGNING_KEY: ${{ secrets.LF_RELEASE_SIGNING_KEY }}
+        run: |
+          node scripts/release-manifest.mjs \
+            --version "$VERSION" \
+            --changelog docs/CHANGELOG.md \
+            --out release-manifest.json
+          cat release-manifest.json
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -197,21 +243,34 @@ jobs:
             ${{ steps.changelog.outputs.changelog }}
 
             ### Artifacts
-            - Docker image: `ghcr.io/${{ github.repository }}:${{ github.ref_name }}`
-            - Desktop bundles with SHA256 checksums attached
-            - SBOM generated via build provenance
+            - Docker image: `${{ env.IMAGE_REF }}` (also `sha-<commit>` and `${{ env.VERSION }}`-line tags)
+            - Desktop installers with SHA256 checksums attached (unsigned — ADR-005)
+            - SBOM generated via build provenance attestations
+            - `release-manifest.json` — consumed by `lfctl update check`
 
-            ### Install
+            ### Install (self-host)
             ```bash
-            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/install.sh | bash
+            # The installer needs the repo files (compose stack, nginx/livekit
+            # templates, lfctl) — clone the tagged tree, don't curl-pipe it.
+            git clone --branch ${{ github.ref_name }} --depth 1 \
+              https://github.com/${{ github.repository }}.git lobbyforge
+            cd lobbyforge
+            bash install.sh
             ```
 
-            ### Verify
+            ### Update (existing install)
+            ```bash
+            node scripts/lfctl.mjs update check \
+              --manifest https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/release-manifest.json
+            ```
+
+            ### Verify artifacts
             ```bash
             sha256sum -c SHA256SUMS.txt
             ```
           files: |
             release-artifacts/**
+            release-manifest.json
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}

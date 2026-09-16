@@ -3,6 +3,9 @@ name: security
 on:
   push:
     branches: [main]
+    # 20th-audit: release gate — tag pushes must run the security scans so
+    # the release workflow can require them completed+success on the tag SHA.
+    tags: ['v*']
   pull_request:
     branches: [main]
   schedule:

@@ -2,6 +2,60 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - release + update chain hardening (20th audit) - 2026-09-16
+
+### Fixed
+
+- **`lfctl update apply` variable bugs (20th-audit P0)**: the safety
+  gates referenced a `check` variable that only exists inside
+  `buildPlan()` — the apply path uses the flattened `plan`. Signature
+  gate now matches the verifier's actual shape
+  (`signature.required && !signature.verified`) instead of the
+  non-existent `signature.valid`, and `--force-major` is recognized by
+  the argument parser.
+- **Release workflow changelog step**: stray `)` at the end of the
+  heredoc block broke the shell step with a syntax error on every
+  release.
+- **GHCR tag mismatch in release text**: the body advertised
+  `ghcr.io/…:v1.2.3` but metadata-action publishes the v-stripped
+  semver tag on the lowercased repo name. The body now derives the
+  image ref from `GITHUB_REPOSITORY` + `GITHUB_REF_NAME` the same way
+  metadata-action does.
+- **Install instructions**: `curl | bash` against install.sh never
+  worked — the installer needs the repo files (compose stack, nginx/
+  livekit templates, lfctl) next to it. Release body and beta docs now
+  use `git clone --branch <tag> --depth 1`.
+
+### Changed
+
+- **Pre-release verification is a real gate** (was: printed check runs
+  and moved on): `scripts/release-gate.mjs` polls the check-runs API
+  for the tagged SHA until all 19 required CI+security contexts are
+  completed, then requires success on every run (a stale failed branch
+  run cannot be outvoted by the tag run). Fails closed on failed /
+  missing / timeout. `ci.yml` and `security.yml` now also trigger on
+  `v*` tags so the gate has check runs to wait for.
+- **Desktop release job is honest**: job-level `continue-on-error`
+  (failures are visible but cannot block the server release — ADR-005),
+  a real `tsc + tauri build` (the old step built nothing: it esbuilt a
+  non-existent `src/shell.ts` behind `|| true`), and bundles are
+  collected from `target/release/bundle/` (dmg/msi/nsis/deb/AppImage)
+  instead of the raw binary path.
+- **Container-mode backup streams to disk** (was: buffered the entire
+  `-Fc` dump in RAM with `maxBuffer` up to 1 GiB): `docker exec` stdout
+  is piped straight into the output file; a failed or timed-out dump
+  deletes the partial file so it can never masquerade as restorable.
+
+### Added
+
+- **Signed release manifests for `lfctl update`**
+  (`scripts/release-manifest.mjs`): every release publishes a
+  `release-manifest.json` asset — Ed25519-signed (signature embedded,
+  canonicalization byte-identical to lfctl's verifier, round-trip
+  checked before publishing) when the `LF_RELEASE_SIGNING_KEY` secret
+  is configured. The release body includes the `lfctl update check`
+  command pointing at the asset.
+
 ## [Unreleased] - release engineering + beta readiness - 2026-09-16
 
 ### Added

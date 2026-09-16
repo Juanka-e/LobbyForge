@@ -3,6 +3,10 @@ name: ci
 on:
   push:
     branches: [main]
+    # 20th-audit: tag pushes run the same gate so the release workflow's
+    # verify job has real check runs to gate on (check runs are per-SHA;
+    # without this a tag pointing at an unmerged commit would wait forever).
+    tags: ['v*']
   pull_request:
     branches: [main]
 
