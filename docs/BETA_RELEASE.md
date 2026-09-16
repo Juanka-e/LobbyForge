@@ -23,6 +23,7 @@ Status: Ready for closed beta — 2026-09-16
 - [x] Updates: Safety gates (available/supported/signature/major) + strict backup + build + health check
 - [x] Release: tag push gates on ALL CI+security checks (19 contexts, completed+success) before publishing
 - [x] Release: `release-manifest.json` generated per release (Ed25519-signed when `LF_RELEASE_SIGNING_KEY` secret is set)
+- [x] Release signing key provisioned: public half committed at `infra/update/release-public.pem` (keyId `34c793ff090fc436`), private half in the `LF_RELEASE_SIGNING_KEY` secret — every release manifest ships signed
 
 ## Known limitations (documented in ADRs)
 
@@ -46,8 +47,9 @@ node scripts/lfctl.mjs update check \
   --manifest https://github.com/Juanka-e/LobbyForge/releases/latest/download/release-manifest.json
 node scripts/lfctl.mjs update plan    # review the plan
 node scripts/lfctl.mjs update apply --yes  # execute (verified backup + safety gates required)
-# Optional trust hardening: pin the release public key with --public-key <pem>
-# (a client with a pinned key fails closed on unsigned/tampered manifests).
+# Trust hardening: pin the release public key (committed in the repo) —
+# a client with a pinned key fails closed on unsigned/tampered manifests:
+#   --public-key infra/update/release-public.pem
 ```
 
 ## What to test in beta

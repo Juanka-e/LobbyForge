@@ -54,7 +54,10 @@ All notable changes to the LobbyForge monorepo skeleton.
   canonicalization byte-identical to lfctl's verifier, round-trip
   checked before publishing) when the `LF_RELEASE_SIGNING_KEY` secret
   is configured. The release body includes the `lfctl update check`
-  command pointing at the asset.
+  command pointing at the asset. The signing key pair is provisioned:
+  public half committed at `infra/update/release-public.pem` (keyId
+  `34c793ff090fc436`) for client pinning, private half held as the
+  GitHub secret (local backup at `infra/keys/`, git-ignored).
 
 ## [Unreleased] - release engineering + beta readiness - 2026-09-16
 

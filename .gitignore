@@ -80,3 +80,10 @@ infra/certbot/
 
 # plugin-worker test fixtures (created at runtime)
 apps/plugin-worker/.plugin-fixtures/
+
+# Release signing keys — the PRIVATE half is generated locally and held
+# as the LF_RELEASE_SIGNING_KEY GitHub secret; only *-public.pem is
+# ever committed. infra/keys/ (per-instance directory keys) stays local.
+infra/keys/
+*-private.pem
+*.private.pem
