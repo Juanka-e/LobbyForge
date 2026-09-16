@@ -752,7 +752,25 @@ async function backupCreate(options = {}) {
   const sha256 = hash.digest('hex');
   const buf = { byteLength: stat.size }; // size-only shim (no full read)
 
-  // Write a sidecar manifest with metadata for verify.
+  // 19th-audit: emit the CANONICAL formatVersion:1 manifest — the
+  // same shape `lfctl update apply --backup-manifest` and `lfctl
+  // backup verify` consume, so `backup create` output feeds directly
+  // into the update flow without format conversion.
+  const backupId = `backup-${Date.now()}`;
+  const manifest = {
+    formatVersion: 1,
+    backupId,
+    completed: true,
+    createdAt: new Date().toISOString(),
+    databaseDump: {
+      path: path.basename(file),
+      sha256,
+      sizeBytes: buf.byteLength ?? buf.length,
+    },
+    includes: { database: true },
+  };
+  await fs.writeFile(`${file}.manifest.json`, JSON.stringify(manifest, null, 2));
+  // Legacy sidecar for `backup restore` (reads sha256 from `${file}.json`).
   const meta = {
     file: path.basename(file),
     sha256,
@@ -762,7 +780,7 @@ async function backupCreate(options = {}) {
   };
   await fs.writeFile(`${file}.json`, JSON.stringify(meta, null, 2));
 
-  return { file, sha256, sizeBytes: buf.byteLength ?? buf.length };
+  return { file, sha256, sizeBytes: buf.byteLength ?? buf.length, manifestPath: `${file}.manifest.json`, backupId };
 }
 
 async function backupRestore(file, targetUrl, options = {}) {

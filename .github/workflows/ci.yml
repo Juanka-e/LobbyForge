@@ -310,6 +310,9 @@ jobs:
           cd packages/db
           DATABASE_URL="postgres://postgres:t@127.0.0.1:$PORT/d" node dist/migrate.js
           TEST_DATABASE_URL="postgres://postgres:t@127.0.0.1:$PORT/d" pnpm vitest run src/__tests__/channel-visibility.integration.test.ts
+          # 19th-audit: real-Postgres ownership tests (plugin catalog
+          # first-submit/race/NULL-publisher + registry concurrent/NULL-owner)
+          TEST_DATABASE_URL="postgres://postgres:t@127.0.0.1:$PORT/d" pnpm vitest run src/__tests__/ownership.integration.test.ts
           docker rm -f lf-pg-test
 
   # LF-023: end-to-end against the REAL compose stack — Postgres, Redis,

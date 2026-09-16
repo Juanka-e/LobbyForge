@@ -2,6 +2,28 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - backup manifest unification + real-Postgres ownership tests - 2026-09-16
+
+### Fixed
+
+- **Backup manifest formatVersion:1 (19th-audit P2)**: `lfctl backup
+  create` now emits the canonical manifest alongside the dump — the
+  same format `lfctl update apply --backup-manifest` and `lfctl
+  backup verify` consume. The output feeds directly into the update
+  flow without format conversion. The legacy sidecar (for restore
+  checksum) is still written for backward compatibility.
+
+### Added
+
+- **Real-Postgres ownership integration tests (19th-audit)**: 10 tests
+  against a real migrated Postgres covering the paths multiple audits
+  flagged as mock-only — plugin catalog (first-submit regression,
+  same-publisher update, foreign-publisher no-op, NULL-publisher
+  legacy lock, concurrent unique constraint) and registry instances
+  (first registrant ownership, foreign-user no-op, owner metadata
+  update, NULL-owner legacy lock, concurrent unique constraint).
+  Wired into the CI migration-check job's existing ephemeral Postgres.
+
 ## [Unreleased] - 19th-audit final fixes - 2026-09-16
 
 ### Fixed
