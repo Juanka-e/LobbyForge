@@ -11,7 +11,7 @@ Status: Ready for closed beta — 2026-09-16
 - [x] CI: Destructive backup drill (backup → destroy → restore → verify)
 - [x] CI: Real-Postgres migration + channel visibility + ownership integration tests
 - [x] Security: CodeQL security-extended, RustSec (Cargo.lock), pnpm audit (prod)
-- [x] Security: Trivy CRITICAL+HIGH on web image + all third-party images (per-image ignores)
+- [x] Security: Trivy CRITICAL+HIGH gate on OUR web image (CI + the exact released digest pre-publish); third-party images gate CRITICAL with HIGH reported (upstream base-layer HIGHs are outside our control — per-image ignores document exceptions)
 - [x] Security: Branch protection with 16+ required checks, force-push disabled
 - [x] Supply chain: All Docker images digest-pinned (@sha256), Dependabot docker-compose
 - [x] Supply chain: Dockerfile base image digest-pinned (node:22-bookworm-slim)
@@ -20,7 +20,7 @@ Status: Ready for closed beta — 2026-09-16
 - [x] Registry: Account-bound challenge + domain proof + SSRF-safe fetch + key rotation
 - [x] Realtime: WS event-driven invalidation + 30s periodic reauth + SSE instant abort
 - [x] Authorization: Centralized membership+visibility gates, moderation hierarchy
-- [x] Updates: Safety gates (available/supported/signature/major) + strict backup + build + health check
+- [x] Updates: Safety gates (available/supported/signature/major) + strict (auto-created) backup + signed-digest deploy + migrate + health check + persisted version state + app-level rollback
 - [x] Release: tag push gates on ALL CI+security checks (19 contexts, completed+success) before publishing
 - [x] Release: `release-manifest.json` generated per release (Ed25519-signed when `LF_RELEASE_SIGNING_KEY` secret is set)
 - [x] Release signing key provisioned: public half committed at `infra/update/release-public.pem` (keyId `34c793ff090fc436`), private half in the `LF_RELEASE_SIGNING_KEY` secret — every release manifest ships signed
@@ -42,14 +42,15 @@ Status: Ready for closed beta — 2026-09-16
 git clone --branch <release-tag> --depth 1 https://github.com/Juanka-e/LobbyForge.git
 cd LobbyForge && bash install.sh
 
-# Updates — every GitHub release publishes a release-manifest.json asset
-node scripts/lfctl.mjs update check \
-  --manifest https://github.com/Juanka-e/LobbyForge/releases/latest/download/release-manifest.json
-node scripts/lfctl.mjs update plan    # review the plan
-node scripts/lfctl.mjs update apply --yes  # execute (verified backup + safety gates required)
-# Trust hardening: pin the release public key (committed in the repo) —
-# a client with a pinned key fails closed on unsigned/tampered manifests:
-#   --public-key infra/update/release-public.pem
+# Updates — every GitHub release publishes a SIGNED release-manifest.json
+# that pins the immutable image digest. Defaults just work: the manifest
+# URL and the committed official public key are picked up automatically.
+node scripts/lfctl.mjs update check    # what's available (signature verified)
+node scripts/lfctl.mjs update plan     # review the plan
+node scripts/lfctl.mjs update apply --yes   # auto-backup + gates + signed-digest deploy + migrate + health
+node scripts/lfctl.mjs update rollback     # restore the previous recorded image + version
+# Forks: override with --manifest <url> / --public-key <pem> or
+# LOBBYFORGE_RELEASE_MANIFEST / LOBBYFORGE_RELEASE_PUBLIC_KEY_PEM.
 ```
 
 ## What to test in beta

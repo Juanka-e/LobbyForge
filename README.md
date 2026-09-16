@@ -41,7 +41,7 @@ Honest assessment of what works today:
 | Plugin SDK (bundled plugins) | ✅ Available |
 | Community plugin marketplace | 🟡 Reviewed-only — artifact hash pinning + fail-closed legacy; runs in isolated child-process container (NOT hostile-code sandbox, see [ADR-001](docs/ARCHITECTURE_DECISIONS.md)) |
 | Admin panel (settings, moderation, doctor) | ✅ Available |
-| Self-host updates (one-click upgrade) | ✅ Available — each tagged release publishes a `release-manifest.json` (Ed25519-signed when the release key is configured); `lfctl update check/plan/apply` gates on it (signature, minimum version, major-version consent) and refuses to touch anything without a verified backup |
+| Self-host updates (one-click upgrade) | ✅ Available — signed release manifests pin the immutable GHCR image digest; `lfctl update check/plan/apply` verifies the signature against the committed official public key, auto-creates + strictly verifies a backup, deploys exactly the signed digest, persists deployed-version state and records a rollback pointer (`lfctl update rollback`; app-level — DB migrations are forward-only) |
 | Backups (create/restore) | ✅ Available — streaming SHA-256, formatVersion:1 manifest, destructive restore drill in CI |
 | Desktop app (Tauri 2) | 🟡 Alpha — builds and runs; code signing deferred (see [ADR-005](docs/ARCHITECTURE_DECISIONS.md)) |
 | Google OAuth login | ✅ Available (opt-in via env vars) |

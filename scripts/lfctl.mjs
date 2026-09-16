@@ -6,6 +6,16 @@ import process from 'node:process';
 
 const DEFAULT_CHANNEL = 'stable';
 const DEFAULT_CURRENT_VERSION = '0.2.0';
+// 21st-audit: check/plan/apply work with NO arguments — the documented
+// chain must run verbatim. Forks point this (or per-invocation --manifest)
+// at their own releases.
+const DEFAULT_MANIFEST_URL = 'https://github.com/Juanka-e/LobbyForge/releases/latest/download/release-manifest.json';
+// The official release public key ships in the repo — pinned by default so
+// unsigned/tampered manifests fail closed out of the box.
+const DEFAULT_PUBLIC_KEY_PATH = 'infra/update/release-public.pem';
+const ENV_FILE = '.env.prod';
+const COMPOSE_FILE = 'infra/docker/docker-compose.prod.yml';
+const STATE_FILE = 'infra/update/deployment-state.json';
 
 function usage() {
   return `LobbyForge control CLI
@@ -13,7 +23,7 @@ function usage() {
 Usage:
   node scripts/lfctl.mjs update check [--manifest <path-or-url>] [--current-version <version>] [--channel stable] [--public-key <pem-file>] [--json]
   node scripts/lfctl.mjs update plan  [--manifest <path-or-url>] [--current-version <version>] [--channel stable] [--public-key <pem-file>] [--json]
-  node scripts/lfctl.mjs update apply [--manifest <path-or-url>] [--current-version <version>] [--channel stable] [--public-key <pem-file>] [--yes]
+  node scripts/lfctl.mjs update apply [--manifest <path-or-url>] [--backup-manifest <path>] [--current-version <version>] [--channel stable] [--public-key <pem-file>] [--yes] [--force-major]
   node scripts/lfctl.mjs update rollback
   node scripts/lfctl.mjs backup verify [--manifest <path>] [--require-files] [--json]
   node scripts/lfctl.mjs backup create [--out <dir>] [--database-url <url>] [--json]
@@ -25,7 +35,17 @@ Usage:
       [--once | --interval <seconds>] [--json]
 
 Notes:
-  update apply requires a verified backup before destructive steps.
+  update check/plan/apply default to the official latest release manifest
+  (${DEFAULT_MANIFEST_URL}); override with --manifest or
+  LOBBYFORGE_RELEASE_MANIFEST (forks).
+  Signature verification defaults to the committed official public key
+  (${DEFAULT_PUBLIC_KEY_PATH}); override with --public-key.
+  update apply creates + verifies a FRESH backup automatically unless
+  --backup-manifest points at an existing one. Deployed version state is
+  read from .env.prod/deployment-state.json (no hardcoded current version).
+  update rollback restores the previous recorded image+version (app-level;
+  DB migrations are forward-only — restore the pre-update backup if a
+  release shipped breaking migrations).
   Add --force-major for major version upgrades.
 `;
 }
@@ -34,7 +54,6 @@ function parseArgs(argv) {
   const [domain, action, ...rest] = argv;
   const options = {
     channel: DEFAULT_CHANNEL,
-    currentVersion: process.env.LOBBYFORGE_VERSION ?? DEFAULT_CURRENT_VERSION,
     json: false,
     yes: false,
   };
@@ -181,13 +200,38 @@ function printBackup(backup) {
 }
 
 function parseVersion(version) {
-  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(version);
+  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(version);
   if (!match) throw new Error(`Invalid semantic version: ${version}`);
   return {
     major: Number.parseInt(match[1], 10),
     minor: Number.parseInt(match[2], 10),
     patch: Number.parseInt(match[3], 10),
+    // 21st-audit: pre-release identifiers decide ordering —
+    // 0.2.0-rc.1 < 0.2.0-rc.2 < 0.2.0 (semver §11). The old parser
+    // matched but then DROPPED the suffix, making all three "equal".
+    prerelease: match[4] ? match[4].split('.') : [],
   };
+}
+
+function comparePrerelease(a, b) {
+  if (a.length === 0 && b.length === 0) return 0;
+  if (a.length === 0) return 1; // a release outranks any of its pre-releases
+  if (b.length === 0) return -1;
+  for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
+    const x = a[i];
+    const y = b[i];
+    if (x === undefined) return -1; // fewer identifiers = LOWER precedence
+    if (y === undefined) return 1;
+    const xNumeric = /^\d+$/.test(x);
+    const yNumeric = /^\d+$/.test(y);
+    if (xNumeric && yNumeric) {
+      const delta = Number.parseInt(x, 10) - Number.parseInt(y, 10);
+      if (delta !== 0) return delta < 0 ? -1 : 1;
+    } else if (xNumeric) return -1; // numeric identifiers sort below alphanumeric
+    else if (yNumeric) return 1;
+    else if (x !== y) return x < y ? -1 : 1; // ASCII lexical order
+  }
+  return 0;
 }
 
 function compareVersions(a, b) {
@@ -197,16 +241,15 @@ function compareVersions(a, b) {
     if (left[key] > right[key]) return 1;
     if (left[key] < right[key]) return -1;
   }
-  return 0;
+  return comparePrerelease(left.prerelease, right.prerelease);
 }
 
 async function loadManifest(source) {
   if (!source) {
-    const envSource = process.env.LOBBYFORGE_RELEASE_MANIFEST;
-    if (!envSource) {
-      throw new Error('Missing release manifest. Pass --manifest or set LOBBYFORGE_RELEASE_MANIFEST.');
-    }
-    source = envSource;
+    // 21st-audit: the documented `check → plan → apply` chain passes NO
+    // --manifest on the 2nd/3rd command — default to the official latest
+    // release asset instead of erroring out.
+    source = process.env.LOBBYFORGE_RELEASE_MANIFEST ?? DEFAULT_MANIFEST_URL;
   }
 
   if (/^https?:\/\//i.test(source)) {
@@ -238,6 +281,14 @@ function validateManifest(manifest) {
   if (manifest.keyId !== undefined && typeof manifest.keyId !== 'string') {
     throw new Error('Manifest keyId must be a string.');
   }
+  // 21st-audit: when present, the digest binding must be well-formed —
+  // it is what apply deploys, byte-exact.
+  if (manifest.gitSha !== undefined && !/^[0-9a-f]{40}$/i.test(manifest.gitSha)) {
+    throw new Error('Manifest gitSha must be a 40-hex commit SHA.');
+  }
+  if (manifest.imageDigest !== undefined && !/^[\w.\-/]+@sha256:[a-f0-9]{64}$/i.test(manifest.imageDigest)) {
+    throw new Error('Manifest imageDigest must be <image-ref>@sha256:<64hex>.');
+  }
   return manifest;
 }
 
@@ -258,7 +309,16 @@ async function loadPublicKey(options) {
   if (options.publicKeyPath) {
     return fs.readFile(path.resolve(process.cwd(), options.publicKeyPath), 'utf8');
   }
-  return process.env.LOBBYFORGE_RELEASE_PUBLIC_KEY_PEM;
+  const envPem = process.env.LOBBYFORGE_RELEASE_PUBLIC_KEY_PEM;
+  if (envPem) return envPem;
+  // 21st-audit: the official public key is committed in the repo — pin it
+  // by DEFAULT so unsigned/tampered manifests fail closed out of the box.
+  // Forks override with --public-key / LOBBYFORGE_RELEASE_PUBLIC_KEY_PEM.
+  try {
+    return await fs.readFile(path.resolve(process.cwd(), DEFAULT_PUBLIC_KEY_PATH), 'utf8');
+  } catch {
+    return null;
+  }
 }
 
 async function verifyManifestSignature(manifest, options) {
@@ -308,15 +368,144 @@ function command(manifestCommand, fallback) {
   return typeof manifestCommand === 'string' && manifestCommand.trim() ? manifestCommand : fallback;
 }
 
+// ── Deployed-state helpers (21st-audit) ──────────────────────────────
+// The updater must know what is ACTUALLY deployed: the current version
+// is read from the environment / .env.prod / deployment-state.json —
+// never hardcoded — and every successful apply persists the new state
+// so rollback has a real previous pointer.
+
+async function readEnvProdValue(key) {
+  try {
+    const raw = await fs.readFile(path.resolve(process.cwd(), ENV_FILE), 'utf8');
+    for (const line of raw.split(/\r?\n/)) {
+      const match = new RegExp(`^\\s*${key}=(.*)$`).exec(line);
+      if (match) return match[1].trim().replace(/^["']|["']$/g, '');
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function setEnvProdValue(key, value) {
+  const file = path.resolve(process.cwd(), ENV_FILE);
+  let raw = '';
+  try {
+    raw = await fs.readFile(file, 'utf8');
+  } catch {
+    // first write creates the file
+  }
+  const re = new RegExp(`^\\s*${key}=.*$`);
+  let replaced = false;
+  const out = raw
+    .split(/\r?\n/)
+    .map((line) => {
+      if (!replaced && re.test(line)) {
+        replaced = true;
+        return `${key}=${value}`;
+      }
+      return line;
+    });
+  if (!replaced) out.push(`${key}=${value}`);
+  await fs.writeFile(file, `${out.join('\n').replace(/^\n+/, '').replace(/\n+$/, '')}\n`);
+}
+
+async function readDeploymentState() {
+  try {
+    return JSON.parse(await fs.readFile(path.resolve(process.cwd(), STATE_FILE), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+async function writeDeploymentState(state) {
+  const file = path.resolve(process.cwd(), STATE_FILE);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, `${JSON.stringify({ ...state, updatedAt: state.updatedAt ?? new Date().toISOString() }, null, 2)}\n`);
+}
+
+async function resolveCurrentVersion(options) {
+  if (options.currentVersion) return options.currentVersion; // explicit --current-version
+  if (process.env.LOBBYFORGE_VERSION) return process.env.LOBBYFORGE_VERSION;
+  const fromEnvFile = await readEnvProdValue('LOBBYFORGE_VERSION');
+  if (fromEnvFile) return fromEnvFile;
+  const state = await readDeploymentState();
+  if (state && typeof state.version === 'string') return state.version;
+  return DEFAULT_CURRENT_VERSION;
+}
+
+async function resolveDatabaseUrl() {
+  return process.env.DATABASE_URL ?? (await readEnvProdValue('DATABASE_URL'));
+}
+
+const COMPOSE_BASE_ARGS = ['compose', '-f', COMPOSE_FILE, '--env-file', ENV_FILE];
+const HEALTH_PROBE_SCRIPT =
+  "fetch('http://localhost:3000/api/health').then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);process.exit(0)}).catch(e=>{console.error(e.message);process.exit(1)})";
+
+async function composeExec(args, timeoutMs = 300_000) {
+  const { stdout, stderr } = await execFileAsync('docker', [...COMPOSE_BASE_ARGS, ...args], { timeout: timeoutMs });
+  return { stdout, stderr };
+}
+
+async function composeHealthCheck() {
+  await composeExec(['exec', '-T', 'web', 'node', '-e', HEALTH_PROBE_SCRIPT], 60_000);
+}
+
+// 21st-audit: rollback is REAL now — it restores the previously recorded
+// image ref + version, recreates services on it and health-checks. DB
+// migrations are forward-only (drizzle journals have no down); the
+// previous app image runs against the current schema. Releases with
+// breaking migrations must be recovered via `lfctl backup restore`.
+async function updateRollback(options = {}) {
+  const state = await readDeploymentState();
+  if (!state || !state.previous || !state.previous.image) {
+    console.error(`No previous deployment recorded in ${STATE_FILE} — nothing to roll back to.`);
+    console.error(
+      `If an update failed midway, .env.prod already kept/restored the old image ref;\n` +
+      `recreate the stack with:\n  docker compose -f ${COMPOSE_FILE} --env-file ${ENV_FILE} up -d --remove-orphans --wait`
+    );
+    process.exitCode = 2;
+    return;
+  }
+  const target = state.previous;
+  console.log(`Rolling back ${state.version} -> ${target.version} (image ${target.image})`);
+  console.log(
+    'NOTE: database migrations are forward-only — the previous image runs against the\n' +
+    'current schema. If the failed release shipped breaking migrations, restore the\n' +
+    'pre-update backup instead: lfctl backup restore --file <dump> --to <empty-database-url>'
+  );
+  await setEnvProdValue('LOBBYFORGE_IMAGE', target.image);
+  await setEnvProdValue('LOBBYFORGE_VERSION', target.version);
+  try {
+    await composeExec(['up', '-d', '--remove-orphans', '--wait'], 600_000);
+    await composeHealthCheck();
+  } catch (err) {
+    console.error(`Rollback FAILED: ${err.stderr || err.message}`);
+    process.exitCode = 2;
+    return;
+  }
+  await writeDeploymentState({
+    version: target.version,
+    image: target.image,
+    gitSha: null,
+    previous: null, // pointer consumed — a second rollback is refused
+    rolledBackFrom: state.version,
+  });
+  console.log(`Rollback complete — running ${target.version}.`);
+}
+
 async function buildPlan(manifest, options) {
   const check = await buildCheck(manifest, options);
   const commands = manifest.commands && typeof manifest.commands === 'object' ? manifest.commands : {};
   const migrations = manifest.migrations && typeof manifest.migrations === 'object' ? manifest.migrations : {};
 
+  // 21st-audit: the pull step is DIGEST-driven when the manifest pins
+  // one — apply deploys the exact signed bytes, not a mutable tag.
+  const digest = typeof manifest.imageDigest === 'string' ? manifest.imageDigest : null;
   const steps = [
     {
       id: 'preflight-doctor',
-      title: 'Run Doctor preflight',
+      title: 'Run Doctor preflight (current stack health)',
       required: true,
       command: command(commands.doctor, 'lfctl doctor'),
     },
@@ -328,27 +517,29 @@ async function buildPlan(manifest, options) {
     },
     {
       id: 'pull-images',
-      title: 'Pull new Docker images',
+      title: digest ? `Pull signed image digest (${digest})` : 'Pull new Docker images',
       required: true,
-      command: command(commands.composePull, 'docker compose pull'),
+      command: digest
+        ? `docker compose pull web ws-gateway plugin-worker migrate  # ${digest}`
+        : command(commands.composePull, 'docker compose build --pull'),
     },
     {
       id: 'migration-dry-run',
-      title: 'Review migration plan',
-      required: true,
-      command: command(migrations.dryRunCommand, 'pnpm --filter @lobbyforge/db db:generate -- --dry-run'),
+      title: 'Review migration plan (informational — drizzle journals are forward-only)',
+      required: false,
+      command: command(migrations.dryRunCommand, 'inspect packages/db/drizzle/ migrations between versions'),
     },
     {
       id: 'apply-migrations',
       title: 'Apply database migrations',
       required: true,
-      command: command(migrations.applyCommand, 'pnpm --filter @lobbyforge/db db:migrate'),
+      command: command(migrations.applyCommand, 'docker compose run --rm migrate'),
     },
     {
       id: 'recreate-services',
       title: 'Recreate services',
       required: true,
-      command: command(commands.composeUp, 'docker compose up -d --remove-orphans'),
+      command: command(commands.composeUp, 'docker compose up -d --remove-orphans --wait'),
     },
     {
       id: 'health-check',
@@ -360,10 +551,12 @@ async function buildPlan(manifest, options) {
 
   return {
     ...check,
+    targetImage: digest,
+    gitSha: typeof manifest.gitSha === 'string' ? manifest.gitSha : null,
     safeToAutoApply: false,
     requiresAdminConfirmation: true,
     requiresExtraMajorConfirmation: check.majorUpgrade,
-    rollbackCommand: command(commands.rollback, 'docker compose up -d --remove-orphans'),
+    rollbackCommand: command(commands.rollback, 'node scripts/lfctl.mjs update rollback'),
     steps,
   };
 }
@@ -376,6 +569,7 @@ function printCheck(check) {
   console.log(`Major upgrade: ${check.majorUpgrade ? 'yes' : 'no'}`);
   console.log(`Current version supported: ${check.currentSupported ? 'yes' : 'no'}`);
   console.log(`Manifest signature: ${check.signature.status}`);
+  if (check.targetImage) console.log(`Target image: ${check.targetImage}`);
   if (check.releaseNotes) console.log(`\nRelease notes:\n${check.releaseNotes}`);
   if (check.breakingChanges.length > 0) {
     console.log('\nBreaking changes:');
@@ -391,7 +585,7 @@ function printPlan(plan) {
     console.log(`  ${step.command}`);
   }
   console.log(`\nRollback command: ${plan.rollbackCommand}`);
-  console.log('Auto-apply: locked until the self-host script runner is wired.');
+  console.log('Auto-apply: gated on --yes + strictly verified backup (safety gates enforced).');
 }
 
 // ── Directory heartbeat signing (LF-SEC-007) ─────────────────────────
@@ -572,8 +766,7 @@ async function main() {
   if (domain !== 'update') throw new Error(`Unknown command domain: ${domain}`);
 
   if (action === 'rollback') {
-    console.log('Rollback execution is locked until the self-host script runner is wired.');
-    process.exitCode = 2;
+    await updateRollback(options);
     return;
   }
 
@@ -581,11 +774,21 @@ async function main() {
     throw new Error(`Unknown update action: ${action ?? '(missing)'}`);
   }
 
+  // 21st-audit: the deployed version comes from the machine's own state
+  // (.env.prod / deployment-state.json), not a hardcoded constant.
+  options.currentVersion = await resolveCurrentVersion(options);
   const manifest = await loadManifest(options.manifest);
   if (action === 'check') {
     const check = await buildCheck(manifest, options);
     if (options.json) console.log(JSON.stringify(check, null, 2));
     else printCheck(check);
+    // 21st-audit: with a pinned key (default: the committed official
+    // public key) an unsigned/tampered manifest fails CLOSED even for the
+    // informational command — scripts gating on `update check` stay safe.
+    if (check.signature.required && !check.signature.verified) {
+      console.error(`\nManifest signature ${check.signature.status.toUpperCase()} — refusing to trust this release source.`);
+      process.exitCode = 2;
+    }
     return;
   }
 
@@ -622,7 +825,25 @@ async function main() {
     return;
   }
 
-  const { manifest: backupManifest, baseDir } = await loadBackupManifest(options.backupManifest);
+  // 21st-audit: apply must never depend on a hand-written backup manifest.
+  // With --backup-manifest it verifies THAT dump; without it, a FRESH
+  // backup is created right here (database URL resolved from the
+  // environment / .env.prod, pg tools inside the compose postgres when
+  // the URL is compose-internal) and strictly verified.
+  let backupManifestPath = options.backupManifest;
+  if (!backupManifestPath) {
+    console.log('\nNo --backup-manifest given — creating a fresh backup...');
+    const dbUrl = await resolveDatabaseUrl();
+    if (!dbUrl) {
+      console.error('Cannot auto-backup: no DATABASE_URL in env or .env.prod. Pass --database-url or --backup-manifest.');
+      process.exitCode = 2;
+      return;
+    }
+    const created = await backupCreate({ 'database-url': dbUrl });
+    console.log(`Backup created: ${created.file} (sha256 ${created.sha256.slice(0, 16)}…)`);
+    backupManifestPath = created.manifestPath;
+  }
+  const { manifest: backupManifest, baseDir } = await loadBackupManifest(backupManifestPath);
   // 19th-audit: STRICT backup verification — requireFiles is MANDATORY
   // for destructive operations, not opt-in.
   const backup = await verifyBackup(backupManifest, baseDir, { ...options, requireFiles: true });
@@ -639,53 +860,94 @@ async function main() {
     return;
   }
 
-  const { execFile } = await import('node:child_process');
-  const execFileAsync = (cmd, args, opts = {}) =>
-    new Promise((resolveExec, rejectExec) => {
-      execFile(cmd, args, { timeout: 300000, ...opts }, (err, stdout, stderr) => {
-        if (err) rejectExec(Object.assign(err, { stdout, stderr }));
-        else resolveExec({ stdout, stderr });
-      });
-    });
-
-  const COMPOSE_FILE = 'infra/docker/docker-compose.prod.yml';
-  const ENV_FILE = '.env.prod';
+  // 21st-audit: capture the previous deployment for rollback BEFORE
+  // mutating anything.
+  const previousImage = (await readEnvProdValue('LOBBYFORGE_IMAGE')) ?? 'lobbyforge-web:latest';
+  const previousVersion = options.currentVersion;
+  const usesDigest = typeof manifest.imageDigest === 'string' && manifest.imageDigest.length > 0;
+  let envImageMutated = false;
 
   console.log('\nExecuting update plan...\n');
   for (const step of plan.steps) {
     const label = step.title || step.id;
     process.stdout.write(`  ${step.id}: ${label}... `);
     try {
-      if (step.id === 'pull-images') {
-        // 19th-audit: lobbyforge-web:latest is LOCALLY-BUILT, not from
-        // a registry — `docker compose pull` would fail on it. BUILD
-        // with --pull (refreshes base images) so new source actually
-        // gets compiled into the image.
-        await execFileAsync('docker', ['compose', '-f', COMPOSE_FILE, '--env-file', ENV_FILE, 'build', '--pull']);
-        console.log('ok (built)');
+      if (step.id === 'preflight-doctor') {
+        // The CURRENT stack must be healthy before we touch it — an
+        // update that starts from a broken deployment has no baseline.
+        await composeHealthCheck();
+        console.log('ok (current stack healthy)');
+      } else if (step.id === 'backup') {
+        console.log('ok (verified above)');
+      } else if (step.id === 'pull-images') {
+        if (usesDigest) {
+          // Digest model: the signed manifest pins the exact image bytes.
+          // Point compose at the digest, then pull the four app services.
+          await setEnvProdValue('LOBBYFORGE_IMAGE', manifest.imageDigest);
+          envImageMutated = true;
+          await composeExec(['pull', 'web', 'ws-gateway', 'plugin-worker', 'migrate'], 600_000);
+          console.log('ok (pulled signed digest)');
+        } else {
+          // Legacy manifest without a digest binding: build the current
+          // checkout. The signature does NOT vouch for these bytes.
+          console.log('\n    WARNING: manifest has no imageDigest — building the LOCAL checkout.');
+          console.log('    The signed manifest does not vouch for locally-built bytes.');
+          await composeExec(['build', '--pull'], 1_800_000);
+          console.log('    built (unsigned deployment path)');
+        }
+      } else if (step.id === 'migration-dry-run') {
+        console.log('informational (drizzle migrations are forward-only)');
+      } else if (step.id === 'apply-migrations') {
+        // Run the NEW image's migrator before recreating services.
+        await composeExec(['run', '--rm', 'migrate'], 900_000);
+        console.log('ok');
       } else if (step.id === 'recreate-services') {
-        await execFileAsync('docker', ['compose', '-f', COMPOSE_FILE, '--env-file', ENV_FILE, 'up', '-d', '--remove-orphans', '--wait']);
+        await composeExec(['up', '-d', '--remove-orphans', '--wait'], 900_000);
         console.log('ok');
       } else if (step.id === 'health-check') {
-        // 19th-audit: the plan generates 'health-check' (the old code
-        // looked for 'post-health-check' which never matched). Real
-        // HTTP health check through the compose network.
-        const { stdout } = await execFileAsync('docker', ['compose', '-f', COMPOSE_FILE, '--env-file', ENV_FILE, 'exec', '-T', 'web', 'node', '-e',
-          "fetch('http://localhost:3000/api/health').then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);process.exit(0)}).catch(e=>{console.error(e.message);process.exit(1)})"]);
+        await composeHealthCheck();
         console.log('ok');
+      } else if (step.required) {
+        // 21st-audit: a required step without an executor ABORTS the
+        // update — "skipped" followed by "completed successfully" was
+        // dishonest runner semantics.
+        throw new Error(`no executor implemented for required step "${step.id}"`);
       } else {
-        console.log('skipped');
+        console.log('informational');
       }
     } catch (err) {
       console.log('FAILED');
       console.error(`    ${err.stderr || err.message}`);
-      console.error(`\nUpdate step "${step.id}" failed. Recovery:\n  ${plan.rollbackCommand}`);
+      // Restore the recorded image ref so a retry/rollback isn't fighting
+      // a half-written .env.prod.
+      if (envImageMutated) {
+        await setEnvProdValue('LOBBYFORGE_IMAGE', previousImage).catch(() => {});
+      }
+      await writeDeploymentState({
+        version: previousVersion,
+        image: previousImage,
+        gitSha: null,
+        previous: null,
+        note: `update to ${plan.latestVersion} failed at step "${step.id}"; .env.prod image ref restored`,
+      });
+      console.error(`\nUpdate step "${step.id}" failed. .env.prod image ref restored to ${previousImage}.`);
+      console.error(`Recovery:\n  ${plan.rollbackCommand}`);
       process.exitCode = 2;
       return;
     }
   }
 
-  console.log('\nUpdate completed successfully.');
+  // 21st-audit: persist what is now deployed — future check/plan/apply
+  // invocations read this instead of assuming a hardcoded version.
+  await setEnvProdValue('LOBBYFORGE_VERSION', plan.latestVersion);
+  await writeDeploymentState({
+    version: plan.latestVersion,
+    image: usesDigest ? manifest.imageDigest : previousImage,
+    gitSha: plan.gitSha,
+    previous: { version: previousVersion, image: previousImage },
+  });
+  console.log(`\nUpdate completed successfully — deployed ${plan.latestVersion}`);
+  console.log(`Version state persisted (${ENV_FILE} + ${STATE_FILE}).`);
   console.log('Rollback if needed:', plan.rollbackCommand);
 }
 
@@ -710,7 +972,30 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
-const PG_CONTAINER = process.env.LFCTL_PG_CONTAINER ?? '';
+let PG_CONTAINER = process.env.LFCTL_PG_CONTAINER ?? '';
+
+// 21st-audit: install.sh writes a compose-internal DATABASE_URL
+// (host "postgres") — unreachable from the host. When no container is
+// configured explicitly, resolve the compose postgres container so the
+// auto-backup in `update apply` works with zero operator config.
+async function ensurePgContainer() {
+  if (PG_CONTAINER) return PG_CONTAINER;
+  const dbUrl = await resolveDatabaseUrl();
+  if (dbUrl && !/@(localhost|127\.0\.0\.1|\[::1\])/.test(dbUrl.split('?')[0])) {
+    try {
+      const { stdout } = await execFileAsync(
+        'docker',
+        [...COMPOSE_BASE_ARGS, 'ps', '-q', 'postgres'],
+        { timeout: 60_000 }
+      );
+      const id = stdout.trim();
+      if (id) PG_CONTAINER = id;
+    } catch {
+      // compose not reachable — fall through to host tools on PATH
+    }
+  }
+  return PG_CONTAINER;
+}
 
 async function pgExec(tool, args, options = {}) {
   if (PG_CONTAINER) {
@@ -764,6 +1049,7 @@ async function backupCreate(options = {}) {
   const outDir = options.out ?? 'backups';
   const dbUrl = options['database-url'] ?? process.env.DATABASE_URL;
   if (!dbUrl) throw new Error('backup create requires --database-url or DATABASE_URL');
+  await ensurePgContainer();
 
   await fs.mkdir(outDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');

@@ -31,6 +31,9 @@ function parseArgs(argv) {
     else if (arg === '--minimum-version') options.minimumVersion = argv[++i];
     else if (arg === '--out') options.out = argv[++i];
     else if (arg === '--key-file') options.keyFile = argv[++i];
+    else if (arg === '--git-sha') options.gitSha = argv[++i];
+    else if (arg === '--image-digest') options.imageDigest = argv[++i];
+    else if (arg === '--allow-unsigned') options.allowUnsigned = true;
     else if (arg === '--help' || arg === '-h') options.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -65,14 +68,25 @@ async function main() {
   if (options.help || !options.version) {
     console.log(
       'Usage: node scripts/release-manifest.mjs --version <semver> [--changelog docs/CHANGELOG.md] ' +
-        '[--channel stable] [--minimum-version <semver>] [--out release-manifest.json] [--key-file <pem>]\n' +
-        'Signing key: --key-file <pem> or LF_RELEASE_SIGNING_KEY env (Ed25519 PKCS#8 PEM).'
+        '[--channel stable] [--minimum-version <semver>] [--git-sha <sha>] [--image-digest <ref@sha256:...>] ' +
+        '[--out release-manifest.json] [--key-file <pem>] [--allow-unsigned]\n' +
+      'Signing key: --key-file <pem> or LF_RELEASE_SIGNING_KEY env (Ed25519 PKCS#8 PEM).\n' +
+      'Signing is fail-closed: without a key the script errors unless --allow-unsigned.'
     );
     process.exitCode = options.version ? 0 : 1;
     return;
   }
   if (!/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(options.version)) {
     throw new Error(`--version must be bare semver (no v prefix): ${options.version}`);
+  }
+  // 21st-audit: the manifest binds version -> git SHA -> immutable image
+  // digest. lfctl deploys exactly this digest, making the signed manifest
+  // a statement about the DEPLOYED BYTES, not just a version number.
+  if (options.gitSha && !/^[0-9a-f]{40}$/i.test(options.gitSha)) {
+    throw new Error(`--git-sha must be a 40-hex commit SHA: ${options.gitSha}`);
+  }
+  if (options.imageDigest && !/^[\w.\-/]+@sha256:[a-f0-9]{64}$/i.test(options.imageDigest)) {
+    throw new Error(`--image-digest must be <image-ref>@sha256:<64hex>: ${options.imageDigest}`);
   }
 
   let releaseNotes = '';
@@ -87,11 +101,25 @@ async function main() {
     releaseNotes,
   };
   if (options.minimumVersion) manifest.minimumVersion = options.minimumVersion;
+  if (options.gitSha) manifest.gitSha = options.gitSha;
+  if (options.imageDigest) manifest.imageDigest = options.imageDigest;
 
   const keyPem = options.keyFile
     ? await fs.readFile(options.keyFile, 'utf8')
     : process.env.LF_RELEASE_SIGNING_KEY;
-  if (keyPem && keyPem.trim()) {
+  // 21st-audit: signing is FAIL-CLOSED. A release whose signing key is
+  // missing (secret deleted, renamed, wrong environment) must break the
+  // build — an unsigned manifest slipping out would silently downgrade
+  // every pinning client's trust guarantee. --allow-unsigned is the
+  // explicit escape hatch for local testing only.
+  if (!keyPem || !keyPem.trim()) {
+    if (!options.allowUnsigned) {
+      throw new Error(
+        'No signing key configured (LF_RELEASE_SIGNING_KEY / --key-file) — refusing to write an unsigned manifest. Pass --allow-unsigned only for local testing.'
+      );
+    }
+    console.error('Writing UNSIGNED manifest (--allow-unsigned).');
+  } else {
     const privateKey = createPrivateKey(keyPem.trim());
     if (privateKey.asymmetricKeyType !== 'ed25519') {
       throw new Error(`Signing key must be Ed25519, got ${privateKey.asymmetricKeyType}`);
@@ -114,8 +142,6 @@ async function main() {
     );
     if (!ok) throw new Error('Internal error: manifest signature failed round-trip verification.');
     console.error(`Signed release manifest (keyId ${manifest.keyId}).`);
-  } else {
-    console.error('No signing key configured — writing UNSIGNED manifest.');
   }
 
   await fs.writeFile(options.out, `${JSON.stringify(manifest, null, 2)}\n`);

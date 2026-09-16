@@ -87,3 +87,5 @@ apps/plugin-worker/.plugin-fixtures/
 infra/keys/
 *-private.pem
 *.private.pem
+# Per-machine deployment state written by lfctl update apply/rollback
+infra/update/deployment-state.json

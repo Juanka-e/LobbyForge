@@ -2,6 +2,87 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - signed-digest update chain (21st audit) - 2026-09-16
+
+### Fixed
+
+- **BLOCKER — updater never deployed the target release** (21st-audit):
+  `lfctl update apply` only rebuilt the CURRENT checkout (`compose
+  build --pull`) — a signed manifest saying "0.2.1" changed nothing
+  about the deployed bytes. Updates are now DIGEST-driven: the release
+  workflow exports the pushed image digest, the signed manifest pins
+  `gitSha` + `imageDigest`, and apply sets `LOBBYFORGE_IMAGE` in
+  .env.prod to that digest, pulls it, runs the new migrator, recreates
+  services and health-checks. Legacy unsigned manifests fall back to
+  the local-build path with an explicit warning that the signature
+  does not vouch for those bytes.
+- **BLOCKER — release gate had no `checks: read`**: with workflow-level
+  permissions defined, unspecified scopes are `none`; the verify job
+  now carries explicit `contents: read` + `checks: read`.
+- **BLOCKER — documented check → plan → apply chain didn't run**:
+  `--manifest` isn't carried between invocations. check/plan/apply now
+  default to the official latest-release manifest URL, apply
+  auto-creates a FRESH backup (pg tools resolved into the compose
+  postgres when DATABASE_URL is compose-internal) instead of pointing
+  at the example manifest, and `update check` fails closed (exit 2) on
+  unsigned/tampered manifests when a key is pinned.
+- **Desktop release job on Windows**: collection step is Bash but the
+  windows-latest default shell is pwsh — the desktop job now forces
+  `defaults.run.shell: bash`.
+- **Semver pre-release ordering**: the parser captured but then
+  dropped pre-release identifiers (0.2.0-rc.1 == 0.2.0-rc.2 ==
+  0.2.0). Full semver §11 precedence implemented (numeric <
+  alphanumeric, fewer identifiers = lower, release > pre-release) —
+  RC pipelines can now be tested with lfctl.
+- **Checksum structure vs release assets**: per-platform SHA256SUMS
+  collided as identically-named assets and aggregate paths didn't
+  match flat asset names. Installers now stage FLAT with
+  `desktop-<platform>-` prefixes and a single aggregate SHA256SUMS
+  whose lines match the exact downloadable filenames.
+
+### Changed
+
+- **Update runner semantics are honest**: required steps without an
+  executor ABORT the update (previously "skipped" then "Update
+  completed successfully"). Doctor runs a real preflight health probe,
+  backup is actually created (auto) and verified, migrations run via
+  `docker compose run --rm migrate` with the NEW image before services
+  recreate, and the migration dry-run is labeled informational
+  (drizzle journals are forward-only).
+- **Rollback is implemented** (was "locked"): apply records the
+  previous image+version to `infra/update/deployment-state.json` (and
+  restores .env.prod's image ref if a step fails); `lfctl update
+  rollback` redeploys the recorded previous state and health-checks.
+  App-level only — DB migrations are forward-only, documented inline.
+- **Deployed version state is persisted**: install.sh writes
+  `LOBBYFORGE_VERSION` (+ `LOBBYFORGE_IMAGE`) to .env.prod from the
+  cloned tag; apply updates both and writes deployment-state.json;
+  lfctl resolves the current version from flags > env > .env.prod >
+  state file — no hardcoded assumption.
+- **Release signing is fail-closed**: release-manifest.mjs refuses to
+  write an unsigned manifest when the key is missing (secret deleted /
+  wrong environment breaks the build); `--allow-unsigned` is the
+  explicit local-testing escape hatch.
+- **Public key pinned by default**: lfctl verifies signatures against
+  the committed official key (`infra/update/release-public.pem`) when
+  no --public-key/env override is given — unsigned/tampered manifests
+  fail closed out of the box; forks override explicitly.
+- **Actions pinned to full commit SHAs** in release.yml (write-scope
+  workflow) per GitHub's supply-chain guidance.
+- **Branch protection tightened to 19 required checks** (added DB
+  migration integrity, Desktop shell cargo check, scheduled dependency
+  audit) matching the release gate; new `release-tags-immutable`
+  ruleset forbids force-push/deletion of `v*` tags.
+
+### Added
+
+- **Trivy scan of the exact released digest** (new release workflow
+  `scan` job): CRITICAL+HIGH gate on `ghcr.io/...@sha256:<digest>`
+  before the GitHub Release is created.
+- **Desktop version follows the unified release tag**: the workflow
+  injects the tag version into tauri.conf.json + package.json before
+  building, so installer filenames/metadata match the release.
+
 ## [Unreleased] - release + update chain hardening (20th audit) - 2026-09-16
 
 ### Fixed
