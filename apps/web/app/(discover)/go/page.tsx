@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { getCatalogEntry, getRegistryInstanceByInstanceId } from '@lobbyforge/db';
+import { getRegistryInstanceByInstanceId } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';

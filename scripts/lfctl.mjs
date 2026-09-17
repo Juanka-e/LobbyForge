@@ -1262,6 +1262,12 @@ async function backupCreate(options = {}) {
 
 async function backupRestore(file, targetUrl, options = {}) {
   try {
+    // 30th-audit P1: a normal production install has NO host psql tools
+    // and a compose-internal DATABASE_URL (host "postgres") — without
+    // container discovery the restore below would try host psql/pg_restore
+    // and die. The CI drill missed this because it sets
+    // LFCTL_PG_CONTAINER explicitly; production has no such luxury.
+    await ensurePgContainer(targetUrl);
     // V5-004: checksum verification is FAIL-CLOSED. A missing or
     // malformed sidecar, or a digest mismatch, refuses the restore —
     // restoring a silently-corrupted dump over a destroyed database is

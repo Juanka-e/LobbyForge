@@ -407,10 +407,16 @@ jobs:
             --out release-staging/release-manifest.json
           cat release-staging/release-manifest.json
 
-      - name: Generate aggregate checksums
+      - name: Generate checksums (aggregate + per-artifact)
         run: |
           cd release-staging
-          find . -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' -printf '%f\0' \
+          # Per-artifact .sha256 files (standard "hash  filename" format so
+          # `sha256sum -c file.sha256` / `shasum -a 256 -c` work on the ONE
+          # file a user actually downloaded — the aggregate SHA256SUMS.txt
+          # errors on every file they didn't).
+          find . -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' ! -name '*.sha256' \
+            -exec sh -c 'sha256sum "${1#./}" > "$1.sha256"' _ '{}' ';'
+          find . -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' ! -name '*.sha256' -printf '%f\0' \
             | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
           cat SHA256SUMS.txt
 

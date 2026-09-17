@@ -48,7 +48,8 @@ export default function DownloadPage() {
         </h1>
         <p className="font-body-lg text-body-lg text-text-secondary text-pretty">
           A native window, tray and global push-to-talk for your communities. The web app is fully
-          functional on its own — the desktop shell is an opt-in extra.
+          functional on its own — the desktop shell is an opt-in extra, and per-platform
+          availability may vary between beta releases.
         </p>
       </div>
 
@@ -83,9 +84,10 @@ export default function DownloadPage() {
               Beta builds are unsigned — verify what you download
             </h2>
             <p className="text-sm text-text-secondary leading-relaxed mb-3">
-              Windows SmartScreen and macOS Gatekeeper will show a warning on first launch. Before
-              trusting a file, check it against the <span className="font-mono">SHA256SUMS.txt</span>{' '}
-              attached to the release ({' '}
+              Windows SmartScreen and macOS Gatekeeper will show a warning on first launch. Every
+              release attaches a matching <span className="font-mono">&lt;installer&gt;.sha256</span>{' '}
+              file next to each installer — download the installer AND its{' '}
+              <span className="font-mono">.sha256</span> into the same folder, then verify ({' '}
               <a
                 href={`${REPO}/blob/main/docs/ARCHITECTURE_DECISIONS.md`}
                 target="_blank"
@@ -94,18 +96,23 @@ export default function DownloadPage() {
               >
                 ADR-005
               </a>
-              ). Download both files to the same folder, then:
+              ):
             </p>
             <div className="flex flex-col gap-2">
               <code className="block rounded-lg bg-surface-container px-4 py-2.5 text-sm text-text-secondary overflow-x-auto">
                 <span className="text-text-muted"># Windows (PowerShell)</span>
                 <br />
-                Get-FileHash .\LobbyForge-setup.exe -Algorithm SHA256
+                Get-FileHash .\desktop-windows-LobbyForge_*_x64-setup.exe -Algorithm SHA256
               </code>
               <code className="block rounded-lg bg-surface-container px-4 py-2.5 text-sm text-text-secondary overflow-x-auto">
-                <span className="text-text-muted"># macOS / Linux</span>
+                <span className="text-text-muted"># macOS</span>
                 <br />
-                sha256sum -c SHA256SUMS.txt
+                shasum -a 256 -c desktop-macos-LobbyForge_*.dmg.sha256
+              </code>
+              <code className="block rounded-lg bg-surface-container px-4 py-2.5 text-sm text-text-secondary overflow-x-auto">
+                <span className="text-text-muted"># Linux</span>
+                <br />
+                sha256sum -c desktop-linux-LobbyForge_*.AppImage.sha256
               </code>
             </div>
           </div>
