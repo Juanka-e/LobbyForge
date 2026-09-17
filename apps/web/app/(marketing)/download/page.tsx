@@ -16,10 +16,12 @@ export const metadata: Metadata = {
 };
 
 const PLATFORMS = [
+  // Beta ships Windows as NSIS only — the MSI target cannot hold semver
+  // pre-release identifiers (rc.2 drill finding). Revisit at stable.
   {
     icon: 'laptop_windows',
     name: 'Windows',
-    formats: 'MSI / NSIS installer',
+    formats: 'NSIS installer (.exe)',
   },
   {
     icon: 'laptop_mac',
@@ -29,7 +31,7 @@ const PLATFORMS = [
   {
     icon: 'laptop_chromebook',
     name: 'Linux',
-    formats: 'DEB / AppImage',
+    formats: 'DEB / AppImage / RPM',
   },
 ];
 
@@ -71,19 +73,19 @@ export default function DownloadPage() {
         ))}
       </div>
 
-      <div className="rounded-2xl border border-border-subtle/40 bg-surface/60 p-6 md:p-8 flex flex-col gap-3 mb-10">
+      <div className="rounded-2xl border border-border-subtle/40 bg-surface/60 p-6 md:p-8 flex flex-col gap-4 mb-10">
         <div className="flex items-start gap-3">
           <span className="material-symbols-outlined text-ember" aria-hidden>
             gpp_maybe
           </span>
           <div>
             <h2 className="font-label-sm text-label-sm text-text-primary mb-1">
-              Beta builds are unsigned
+              Beta builds are unsigned — verify what you download
             </h2>
-            <p className="text-sm text-text-secondary leading-relaxed">
-              Windows SmartScreen and macOS Gatekeeper will show a warning on first launch. Verify
-              each download against the <span className="font-mono">SHA256SUMS.txt</span> attached
-              to the release before trusting it — see{' '}
+            <p className="text-sm text-text-secondary leading-relaxed mb-3">
+              Windows SmartScreen and macOS Gatekeeper will show a warning on first launch. Before
+              trusting a file, check it against the <span className="font-mono">SHA256SUMS.txt</span>{' '}
+              attached to the release ({' '}
               <a
                 href={`${REPO}/blob/main/docs/ARCHITECTURE_DECISIONS.md`}
                 target="_blank"
@@ -92,8 +94,20 @@ export default function DownloadPage() {
               >
                 ADR-005
               </a>
-              .
+              ). Download both files to the same folder, then:
             </p>
+            <div className="flex flex-col gap-2">
+              <code className="block rounded-lg bg-surface-container px-4 py-2.5 text-sm text-text-secondary overflow-x-auto">
+                <span className="text-text-muted"># Windows (PowerShell)</span>
+                <br />
+                Get-FileHash .\LobbyForge-setup.exe -Algorithm SHA256
+              </code>
+              <code className="block rounded-lg bg-surface-container px-4 py-2.5 text-sm text-text-secondary overflow-x-auto">
+                <span className="text-text-muted"># macOS / Linux</span>
+                <br />
+                sha256sum -c SHA256SUMS.txt
+              </code>
+            </div>
           </div>
         </div>
       </div>

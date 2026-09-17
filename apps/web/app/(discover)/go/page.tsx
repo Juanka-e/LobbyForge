@@ -87,7 +87,8 @@ export default async function GoPage({
             <ul className="mt-3 space-y-1 text-xs text-text-muted">
               <li className="flex items-start gap-1.5">
                 <span className="material-symbols-outlined text-[12px] mt-0.5">check_circle</span>
-                Your LobbyForge account stays here — it does not transfer.
+                Your session and credentials are not shared with this community — you sign in
+                separately on its own site.
               </li>
               <li className="flex items-start gap-1.5">
                 <span className="material-symbols-outlined text-[12px] mt-0.5">check_circle</span>

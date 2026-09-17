@@ -23,8 +23,9 @@ All notable changes to the LobbyForge monorepo skeleton.
 - **Instance detail pages** (`/discover/[instanceId]`): identity +
   verified state, description, live stats (online / public rooms /
   doctor score / heartbeat freshness), region / languages / tags /
-  version. Exits ALWAYS through the /discover/go external-redirect
-  interceptor; desktop deep link included.
+  version. Browser exits go through the /discover/go external-redirect
+  interceptor; native desktop launches use the protected lobbyforge://
+  flow.
 - **/register route**: invite-preserving deep link into the auth
   shell's Create-account tab (`/login?mode=register` — all guards run
   on /login; LoginForm takes an initialMode).

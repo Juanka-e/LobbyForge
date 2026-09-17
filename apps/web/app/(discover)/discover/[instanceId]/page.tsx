@@ -11,9 +11,10 @@ export const runtime = 'nodejs';
 /**
  * /discover/[instanceId] — instance detail. People see who a community is
  * BEFORE being sent to an unknown domain: identity, live stats, policies
- * and trust signals (verified, heartbeat freshness, version). The exit
- * goes through /discover/go (the external-redirect interceptor), never a
- * bare external link.
+ * and trust signals (verified, heartbeat freshness, version). BROWSER
+ * exits go through /discover/go (the external-redirect interceptor) —
+ * never a bare external link; native desktop launches use the protected
+ * lobbyforge:// deep-link flow instead.
  *
  * English-only for this increment (i18n keys to follow — the grid above
  * is already translated).
