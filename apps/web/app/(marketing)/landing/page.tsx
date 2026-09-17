@@ -1,20 +1,24 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import { isOfficialDeployment } from '@/lib/deployment-mode';
+import VoiceStrip from './VoiceStrip';
 
 export const metadata: Metadata = {
-  title: 'LobbyForge — Build the voice community you control',
+  title: 'LobbyForge — Your community. Your server. Your rules.',
   description:
-    'LobbyForge is an open-source platform for self-hosted voice rooms, built-in games, bots, and public discovery.',
+    'Self-hosted voice, chat and live activities — without handing your community to a centralized platform.',
 };
+
+const REPO = 'https://github.com/Juanka-e/LobbyForge';
 
 export default function LandingPage() {
   if (!isOfficialDeployment()) redirect('/lobby');
   return (
     <>
       <Hero />
-      <FeatureStrip />
-      <ProductPreview />
+      <RoomPreview />
+      <Values />
+      <SelfHost />
       <FinalCta />
     </>
   );
@@ -22,43 +26,58 @@ export default function LandingPage() {
 
 function Hero() {
   return (
-    <section className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop w-full text-center">
-      <h1 className="font-hero-h1-mobile md:font-hero-h1 text-hero-h1-mobile md:text-hero-h1 text-text-primary mb-6 max-w-4xl mx-auto">
-        Build the voice community you control.
-      </h1>
-      <p className="font-body-lg text-body-lg text-text-secondary max-w-2xl mx-auto mb-10">
-        LobbyForge is an open-source platform for self-hosted voice rooms, built-in games, bots, and
-        public discovery.
-      </p>
-      <div className="flex flex-col sm:flex-row justify-center items-center gap-4 mb-12">
-        <a
-          href="/lobby"
-          className="w-full sm:w-auto bg-primary-container text-[#07101E] px-8 py-4 rounded-lg font-label-sm text-label-sm hover:brightness-110 transition-all"
-        >
-          Explore LobbyForge
-        </a>
-        <a
-          href="#self-host"
-          className="w-full sm:w-auto border border-border-strong text-secondary px-8 py-4 rounded-lg font-label-sm text-label-sm hover:bg-surface-variant/30 transition-all"
-        >
-          View self-host setup
-        </a>
-        <a
-          href="https://github.com/Juanka-e/LobbyForge"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="w-full sm:w-auto flex items-center justify-center gap-2 border border-border-strong text-text-primary px-6 py-4 rounded-lg font-label-sm text-label-sm hover:bg-surface-variant/30 transition-all"
-        >
-          {/* GitHub mark (public domain shape) */}
-          <svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor" aria-hidden>
-            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
-          </svg>
-          Star on GitHub
-          <GitHubStars />
-        </a>
+    <section className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop w-full">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] gap-10 lg:gap-16 items-center">
+        <div>
+          <p className="font-label-xs text-label-xs text-ember tracking-[0.2em] uppercase mb-5">
+            Self-hosted voice communities
+          </p>
+          <h1 className="font-display font-extrabold text-[40px] leading-[1.05] sm:text-[56px] lg:text-[68px] tracking-tight text-text-primary mb-6 text-balance">
+            Your community. Your server. Your rules.
+          </h1>
+          <p className="font-body-lg text-body-lg text-text-secondary mb-10 max-w-xl text-pretty">
+            Self-hosted voice, chat and live activities — without handing your community to a
+            centralized platform.
+          </p>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
+            <a
+              href="/discover"
+              className="bg-primary-container text-[#07101E] px-8 py-4 rounded-lg font-label-sm text-label-sm hover:brightness-110 transition-all text-center"
+            >
+              Explore communities
+            </a>
+            <a
+              href="#self-host"
+              className="border border-border-strong text-text-secondary px-8 py-4 rounded-lg font-label-sm text-label-sm hover:bg-surface-variant/30 hover:text-text-primary transition-all text-center"
+            >
+              Host LobbyForge
+            </a>
+            <a
+              href={REPO}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 text-text-muted px-4 py-4 rounded-lg font-label-sm text-label-sm hover:text-text-primary transition-colors"
+            >
+              {/* GitHub mark (public domain shape) */}
+              <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden>
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+              </svg>
+              Star on GitHub
+              <GitHubStars />
+            </a>
+          </div>
+        </div>
+        <VoiceStrip />
       </div>
-      <p className="font-label-sm text-label-sm text-text-muted mb-16 tracking-widest uppercase">
-        Open source • Self-hosted • Voice rooms • Built-in games
+    </section>
+  );
+}
+
+function RoomPreview() {
+  return (
+    <section className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop w-full">
+      <p className="font-label-xs text-label-xs text-text-muted tracking-[0.2em] uppercase mb-6">
+        Inside a room
       </p>
       <HeroMockup />
     </section>
@@ -197,22 +216,52 @@ function HeroMockup() {
   );
 }
 
-function FeatureStrip() {
-  const features = [
-    { icon: 'dns', label: 'Own your instance', colorClass: 'text-primary' },
-    { icon: 'record_voice_over', label: 'Voice rooms and chat', colorClass: 'text-primary' },
-    { icon: 'sports_esports', label: 'Games inside rooms', colorClass: 'text-[#E7B86A]' },
-    { icon: 'public', label: 'Public discovery optional', colorClass: 'text-primary' },
+function Values() {
+  const values = [
+    {
+      icon: 'record_voice_over',
+      iconColor: 'text-primary',
+      title: 'Voice-first',
+      body: 'Low-latency voice rooms on LiveKit with TURN fallback — talking is the product, not an add-on.',
+    },
+    {
+      icon: 'dns',
+      iconColor: 'text-primary',
+      title: 'Self-hosted',
+      body: 'Your domain, your data, your rules. One VPS and a Docker install — no central account, ever.',
+    },
+    {
+      icon: 'sports_esports',
+      iconColor: 'text-ember',
+      title: 'Live activities',
+      body: 'Hushle and Quiz run inside voice rooms today; the plugin SDK turns your ideas into the next one.',
+    },
+    {
+      icon: 'extension',
+      iconColor: 'text-ember',
+      title: 'Open ecosystem',
+      body: 'A reviewed marketplace for community plugins — artifact hashes pin the exact bytes you install.',
+    },
   ];
   return (
     <section className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop w-full">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-8 py-8 border-y border-border-subtle/30">
-        {features.map((f) => (
-          <div key={f.label} className="flex flex-col items-center text-center gap-3">
-            <span className={`material-symbols-outlined ${f.colorClass} text-3xl font-light`}>
-              {f.icon}
-            </span>
-            <h3 className="font-label-sm text-label-sm text-text-primary">{f.label}</h3>
+      <h2 className="font-display font-bold text-[32px] md:text-[44px] leading-tight tracking-tight text-text-primary mb-4">
+        Built around the room.
+      </h2>
+      <p className="font-body-lg text-body-lg text-text-secondary mb-12 max-w-2xl">
+        Everything LobbyForge does serves the room where your community actually talks.
+      </p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {values.map((v) => (
+          <div
+            key={v.title}
+            className="bg-surface/80 backdrop-blur-sm rounded-2xl border border-border-subtle/30 p-8 flex flex-col gap-4"
+          >
+            <div className="flex items-center gap-3">
+              <span className={`material-symbols-outlined ${v.iconColor}`}>{v.icon}</span>
+              <h3 className="font-display font-bold text-xl text-text-primary">{v.title}</h3>
+            </div>
+            <p className="text-text-secondary text-sm leading-relaxed">{v.body}</p>
           </div>
         ))}
       </div>
@@ -220,53 +269,66 @@ function FeatureStrip() {
   );
 }
 
-function ProductPreview() {
-  const cards = [
+function SelfHost() {
+  const steps = [
     {
-      icon: 'record_voice_over',
-      iconColor: 'text-primary',
-      title: 'Voice room + chat',
-      body: 'Persistent text channels integrated natively with low-latency voice rooms.',
+      title: 'Clone a tagged release',
+      body: 'git clone --branch <release-tag> — the installer needs the repo files next to it.',
     },
     {
-      icon: 'sports_esports',
-      iconColor: 'text-[#E7B86A]',
-      title: 'Start Activity / Hushle',
-      body: 'Launch built-in games and activities directly within the room with one click.',
+      title: 'Run the installer',
+      body: 'bash install.sh — it asks for your domain, generates secrets and provisions TLS.',
     },
     {
-      icon: 'smart_toy',
-      iconColor: 'text-primary',
-      title: 'Bots and roles',
-      body: 'Powerful permission systems and bot integrations to moderate and manage your community.',
+      title: 'Complete first-run setup',
+      body: 'Open your domain, walk the setup wizard, remove the setup token from .env.prod.',
     },
     {
-      icon: 'health_and_safety',
-      iconColor: 'text-primary',
-      title: 'Doctor health checks',
-      body: 'Real-time diagnostics and performance monitoring for your self-hosted instance.',
+      title: 'Invite your community',
+      body: 'Share an invite link — guests join a voice room with one click, no account needed.',
     },
   ];
   return (
-    <section className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop w-full">
-      <h2 className="font-section-h2-mobile md:font-section-h2 text-section-h2-mobile md:text-section-h2 text-text-primary mb-12 text-center">
-        Built for communities.
-      </h2>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {cards.map((c) => (
-          <div
-            key={c.title}
-            className="bg-surface/80 backdrop-blur-sm rounded-2xl border border-border-subtle/30 p-8 flex flex-col gap-4 shadow-mockup"
-          >
-            <div className="flex items-center gap-3">
-              <span className={`material-symbols-outlined ${c.iconColor}`}>{c.icon}</span>
-              <h3 className="font-body-lg text-body-lg font-semibold text-text-primary">
-                {c.title}
-              </h3>
-            </div>
-            <p className="text-text-secondary text-sm">{c.body}</p>
-          </div>
-        ))}
+    <section id="self-host" className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop w-full">
+      <div className="rounded-2xl border border-border-subtle/40 bg-surface/60 p-8 md:p-12 flex flex-col gap-10">
+        <div>
+          <p className="font-label-xs text-label-xs text-ember tracking-[0.2em] uppercase mb-4">
+            Host your own
+          </p>
+          <h2 className="font-display font-bold text-[32px] md:text-[44px] leading-tight tracking-tight text-text-primary mb-4">
+            Yours in an afternoon.
+          </h2>
+          <p className="text-text-secondary text-sm leading-relaxed">
+            What it really takes: a Linux VPS with Docker, a domain, and 2–4 GB of RAM. Let&apos;s
+            Encrypt by default — behind Cloudflare with an Origin certificate instead?{' '}
+            <a
+              href={`${REPO}/blob/main/docs/DEPLOY_CLOUDFLARE.md`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary underline decoration-primary/40 underline-offset-4 hover:decoration-primary"
+            >
+              Read the Cloudflare guide
+            </a>
+            .
+          </p>
+        </div>
+        <ol className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {steps.map((step, i) => (
+            <li key={step.title} className="flex flex-col gap-2">
+              <span className="font-display font-bold text-ember text-lg">{i + 1}</span>
+              <h3 className="font-label-sm text-label-sm text-text-primary">{step.title}</h3>
+              <p className="text-text-muted text-sm leading-relaxed">{step.body}</p>
+            </li>
+          ))}
+        </ol>
+        <a
+          href={`${REPO}#install`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="self-start border border-border-strong text-text-secondary px-6 py-3 rounded-lg font-label-sm text-label-sm hover:bg-surface-variant/30 hover:text-text-primary transition-all"
+        >
+          View the installation guide
+        </a>
       </div>
     </section>
   );
@@ -275,21 +337,21 @@ function ProductPreview() {
 function FinalCta() {
   return (
     <section className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop w-full text-center py-section-gap">
-      <h2 className="font-section-h2-mobile md:font-section-h2 text-section-h2-mobile md:text-section-h2 text-text-primary mb-8 max-w-3xl mx-auto">
+      <h2 className="font-display font-bold text-[32px] md:text-[44px] leading-tight tracking-tight text-text-primary mb-8 max-w-3xl mx-auto text-balance">
         A voice platform for communities that want ownership.
       </h2>
       <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
         <a
-          href="/lobby"
+          href="/discover"
           className="w-full sm:w-auto bg-primary-container text-[#07101E] px-8 py-4 rounded-lg font-label-sm text-label-sm hover:brightness-110 transition-all"
         >
-          Explore LobbyForge
+          Explore communities
         </a>
         <a
-          href="#"
-          className="w-full sm:w-auto border border-border-strong text-secondary px-8 py-4 rounded-lg font-label-sm text-label-sm hover:bg-surface-variant/30 transition-all"
+          href="#self-host"
+          className="w-full sm:w-auto border border-border-strong text-text-secondary px-8 py-4 rounded-lg font-label-sm text-label-sm hover:bg-surface-variant/30 hover:text-text-primary transition-all"
         >
-          Read the docs
+          Host LobbyForge
         </a>
       </div>
     </section>

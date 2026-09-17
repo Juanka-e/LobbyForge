@@ -29,6 +29,9 @@ const config: Config = {
       colors: {
         background: '#101419',
         'bg-soft': '#0B1018',
+        // "On-air" signal — the live-activities accent promoted to a named
+        // token. Used sparingly: speaking states, live indicators.
+        ember: '#E7B86A',
         surface: '#111722',
         'surface-raised': '#171E2B',
         'surface-floating': '#1D2533',
@@ -100,6 +103,9 @@ const config: Config = {
         'section-gap': '120px',
       },
       fontFamily: {
+        // Hub display face — loaded only by the (marketing) layout. The
+        // app shell stays on Geist; the hub's voice is Bricolage.
+        display: ['var(--font-display)', 'Geist', 'sans-serif'],
         'hero-h1': ['Geist', 'sans-serif'],
         'hero-h1-mobile': ['Geist', 'sans-serif'],
         'section-h2': ['Geist', 'sans-serif'],

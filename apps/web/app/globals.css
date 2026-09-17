@@ -418,3 +418,23 @@
   }
 }
 
+
+/* ── Voice strip (hub signature element) ────────────────────────────
+   A room of speakers rendered as vertical bars; the "on air" speaker
+   animates in ember. Static (varied heights, no motion) under
+   prefers-reduced-motion. */
+@keyframes lf-voice-bar {
+  0%, 100% { transform: scaleY(0.3); }
+  50% { transform: scaleY(1); }
+}
+
+.lf-voice-bar {
+  transform-origin: bottom;
+  animation: lf-voice-bar 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lf-voice-bar {
+    animation: none;
+  }
+}
