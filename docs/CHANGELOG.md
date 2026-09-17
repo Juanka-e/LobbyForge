@@ -2,6 +2,21 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - fleet-wide drift preflight (26th audit) - 2026-09-17
+
+### Changed
+
+- **Drift preflight covers the whole app fleet and runs BEFORE the
+  backup**: the running-image ground-truth check now resolves web +
+  ws-gateway + plugin-worker (migrate is one-shot, not a running
+  container) and requires all three to share one image ID — a
+  hand-edited ws-gateway no longer slips past a web-only check. The
+  preflight is read-only and moved ahead of the auto-backup, so a drift
+  abort now has literally zero side effects (previously a fresh backup
+  file could be created first). The rollback-anchor tag creation stays
+  after the --yes gate. New mixed-fleet regression scenario (spec 7/7).
+- BETA_RELEASE audit line no longer carries a hardcoded round count.
+
 ## [Unreleased] - drift invariant + explicit platform (25th audit) - 2026-09-17
 
 ### Changed

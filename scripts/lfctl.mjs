@@ -859,6 +859,73 @@ async function main() {
     return;
   }
 
+  // ── Running-bytes preflight (22nd/24th/25th/26th audits) ───────────
+  // READ-ONLY and BEFORE the backup: a drift abort must have ZERO side
+  // effects — not even a backup file. The RUNNING containers decide what
+  // a rollback must restore and what "currently deployed" means — never
+  // the mutable .env.prod ref.
+  let previousImage = (await readEnvProdValue('LOBBYFORGE_IMAGE')) ?? 'lobbyforge-web:latest';
+  let runningImageId;
+  try {
+    // 26th-audit: ALL long-running app services share ${LOBBYFORGE_IMAGE}
+    // (migrate is one-shot and not checked as a running container) — a
+    // hand-edited ws-gateway/plugin-worker must not slip past a web-only
+    // check.
+    for (const svc of ['web', 'ws-gateway', 'plugin-worker']) {
+      const { stdout: psOut } = await composeExec(['ps', '-q', svc], 60_000);
+      const containerId = psOut.trim();
+      if (!containerId) throw new Error(`no running ${svc} container`);
+      const { stdout: insOut } = await execFileAsync(
+        DOCKER_PREFIX[0],
+        dockerArgs(['inspect', containerId, '--format', '{{.Image}}']),
+        { timeout: 60_000 }
+      );
+      const id = insOut.trim();
+      if (!/^sha256:[a-f0-9]{64}$/.test(id)) {
+        throw new Error(`unexpected image id for ${svc}: ${id}`);
+      }
+      if (runningImageId === undefined) runningImageId = id;
+      else if (runningImageId !== id) {
+        throw new Error(`${svc} runs ${id.slice(0, 19)}… while web runs ${runningImageId.slice(0, 19)}…`);
+      }
+    }
+  } catch (err) {
+    console.error(`Cannot establish the running deployment's image (${err.message}).`);
+    console.error('Updates require a running, internally-consistent deployment — aborting with zero side effects.');
+    process.exitCode = 2;
+    return;
+  }
+
+  if (/@sha256:[a-f0-9]{64}$/i.test(previousImage)) {
+    // Configured as an immutable digest — verify the RUNNING bytes match
+    // it. (The registry manifest digest and the container image ID are
+    // different hashes, so resolve the configured ref locally first.)
+    // 25th-audit: without this, an operator hand-changing the deployment
+    // would leave both the rollback target and "previous" state fiction.
+    let configuredImageId;
+    try {
+      const { stdout } = await execFileAsync(
+        DOCKER_PREFIX[0],
+        dockerArgs(['image', 'inspect', previousImage, '--format', '{{.Id}}']),
+        { timeout: 60_000 }
+      );
+      configuredImageId = stdout.trim();
+    } catch (err) {
+      console.error(`Configured image ${previousImage} is not present locally (${err.message}) — aborting.`);
+      process.exitCode = 2;
+      return;
+    }
+    if (configuredImageId !== runningImageId) {
+      console.error(`Deployed-image drift: .env.prod pins ${previousImage}`);
+      console.error(`but the running app containers are ${runningImageId}.`);
+      console.error('The deployment was changed outside lfctl. Reconcile (docker compose up -d --wait on the pinned digest) before updating.');
+      process.exitCode = 2;
+      return;
+    }
+    console.log(`Configured digest matches the running containers (${runningImageId.slice(0, 19)}…).`);
+    // Immutable ref — no anchor needed; the digest IS byte-exact.
+  }
+
   // 21st-audit: apply must never depend on a hand-written backup manifest.
   // With --backup-manifest it verifies THAT dump; without it, a FRESH
   // backup is created right here (database URL resolved from the
@@ -895,8 +962,8 @@ async function main() {
   }
 
   // 21st-audit: capture the previous deployment for rollback BEFORE
-  // mutating anything.
-  let previousImage = (await readEnvProdValue('LOBBYFORGE_IMAGE')) ?? 'lobbyforge-web:latest';
+  // mutating anything. (previousImage/runningImageId were resolved by the
+  // preflight above.)
   const previousVersion = options.currentVersion;
   const usesDigest = typeof manifest.imageDigest === 'string' && manifest.imageDigest.length > 0;
   let envImageMutated = false;
@@ -906,61 +973,9 @@ async function main() {
   // the failure handler always attempts container recovery.
   let servicesMayHaveChanged = false;
 
-  // ── Running-bytes ground truth (22nd/24th/25th audits) ────────────
-  // The RUNNING web container decides what a rollback must restore and
-  // what "currently deployed" means — never the mutable .env.prod ref.
-  let runningImageId;
-  try {
-    const { stdout: psOut } = await composeExec(['ps', '-q', 'web'], 60_000);
-    const containerId = psOut.trim();
-    if (!containerId) throw new Error('no running web container');
-    const { stdout: insOut } = await execFileAsync(
-      DOCKER_PREFIX[0],
-      dockerArgs(['inspect', containerId, '--format', '{{.Image}}']),
-      { timeout: 60_000 }
-    );
-    runningImageId = insOut.trim();
-    if (!/^sha256:[a-f0-9]{64}$/.test(runningImageId)) {
-      throw new Error(`unexpected image id: ${runningImageId}`);
-    }
-  } catch (err) {
-    console.error(`Cannot determine the RUNNING web container's image (${err.message}).`);
-    console.error('Updates require a running, identifiable deployment — aborting before touching anything.');
-    process.exitCode = 2;
-    return;
-  }
-
-  if (/@sha256:[a-f0-9]{64}$/i.test(previousImage)) {
-    // Configured as an immutable digest — verify the RUNNING bytes match
-    // it. (The registry manifest digest and the container image ID are
-    // different hashes, so resolve the configured ref locally first.)
-    // 25th-audit: without this, an operator hand-changing the deployment
-    // would leave both the rollback target and "previous" state fiction.
-    let configuredImageId;
-    try {
-      const { stdout } = await execFileAsync(
-        DOCKER_PREFIX[0],
-        dockerArgs(['image', 'inspect', previousImage, '--format', '{{.Id}}']),
-        { timeout: 60_000 }
-      );
-      configuredImageId = stdout.trim();
-    } catch (err) {
-      console.error(`Configured image ${previousImage} is not present locally (${err.message}) — aborting.`);
-      process.exitCode = 2;
-      return;
-    }
-    if (configuredImageId !== runningImageId) {
-      console.error(`Deployed-image drift: .env.prod pins ${previousImage}`);
-      console.error(`but the running web container is ${runningImageId}.`);
-      console.error('The deployment was changed outside lfctl. Reconcile (docker compose up -d --wait on the pinned digest) before updating.');
-      process.exitCode = 2;
-      return;
-    }
-    console.log(`Configured digest matches the running container (${runningImageId.slice(0, 19)}…).`);
-    // Immutable ref — no anchor needed; the digest IS byte-exact.
-  } else {
-    // Mutable local ref (fresh install): pin the RUNNING container's
-    // image ID (not the ref — if `latest` was rebuilt since the container
+  if (!/@sha256:[a-f0-9]{64}$/i.test(previousImage)) {
+    // Mutable local ref (fresh install): pin the RUNNING containers'
+    // image ID (not the ref — if `latest` was rebuilt since the containers
     // started, tagging the ref would pin the WRONG bytes) to a
     // timestamped rollback tag. Fail-CLOSED: without a byte-exact anchor
     // the first digest transition has no guaranteed rollback.

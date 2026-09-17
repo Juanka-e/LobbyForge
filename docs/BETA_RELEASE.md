@@ -4,7 +4,7 @@ Status: Ready for closed beta — 2026-09-16
 
 ## Pre-beta verification (ALL COMPLETE)
 
-- [x] Security audit findings remediated (25 static audit rounds; further hardening now comes from the RC drill, not more static review)
+- [x] Security audit findings remediated; further hardening now comes from release drills and runtime testing
 - [x] CI: Ubuntu + Windows verify, Docker build, production compose config
 - [x] CI: Production TLS E2E (HTTPS, HTTP→HTTPS redirect, WSS upgrade, CSP nonce + hydration)
 - [x] CI: Two-client voice E2E (real WebRTC through LiveKit)

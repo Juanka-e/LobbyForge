@@ -40,10 +40,12 @@ function canonicalize(value: unknown): string {
 const FAKE_DOCKER = `#!/bin/sh
 # Records every invocation; 'up -d --remove-orphans --wait' returns the
 # Nth exit code from FAKE_UP_RCS (comma separated, default 0).
-# 'ps -q web' reports FAKE_WEB_CONTAINER (empty = no running web).
-# 'inspect <container>' and 'image inspect <ref>' report the running /
-# configured image IDs (FAKE_IMAGE_ID / FAKE_CONFIGURED_IMAGE_ID) — the
-# drift scenarios make them disagree.
+# 'ps -q <svc>' reports the service's container (FAKE_WEB_CONTAINER;
+# empty = not running — ws-gateway may differ via FAKE_WS_CONTAINER).
+# 'inspect <cid>' reports the container's image (the ws-gateway
+# container can carry a DIFFERENT image via FAKE_WS_IMAGE_ID); 'image
+# inspect <ref>' reports the configured ref's local ID
+# (FAKE_CONFIGURED_IMAGE_ID) — the drift scenarios make these disagree.
 printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
 case " $* " in
   *" tag "*) exit 0 ;;
@@ -51,12 +53,24 @@ case " $* " in
     [ -n "$FAKE_WEB_CONTAINER" ] && echo "$FAKE_WEB_CONTAINER"
     exit 0
     ;;
+  *" ps -q ws-gateway "*)
+    echo "\${FAKE_WS_CONTAINER:-\$FAKE_WEB_CONTAINER}"
+    exit 0
+    ;;
+  *" ps -q plugin-worker "*)
+    echo "$FAKE_WEB_CONTAINER"
+    exit 0
+    ;;
   *" image inspect "*)
     echo "$FAKE_CONFIGURED_IMAGE_ID"
     exit 0
     ;;
   *" inspect "*)
-    echo "$FAKE_IMAGE_ID"
+    if [ -n "$FAKE_WS_IMAGE_ID" ] && [ "$2" = "$FAKE_WS_CONTAINER" ]; then
+      echo "$FAKE_WS_IMAGE_ID"
+    else
+      echo "$FAKE_IMAGE_ID"
+    fi
     exit 0
     ;;
   *" up -d --remove-orphans --wait "*)
@@ -145,7 +159,12 @@ function makeSandbox(): Sandbox {
 function runApply(
   sandbox: Sandbox,
   upRcs: string,
-  opts: { webContainer?: string; configuredImageId?: string } = {}
+  opts: {
+    webContainer?: string;
+    configuredImageId?: string;
+    wsContainer?: string;
+    wsImageId?: string;
+  } = {}
 ) {
   const fakeViaBash = `bash ${sandbox.fakeDocker.replace(/\\/g, '/')}`;
   const res = spawnSync(
@@ -153,7 +172,7 @@ function runApply(
     [
       '-c',
       `cd "$1" && FAKE_DOCKER_LOG="$2" FAKE_UP_RCS="$3" LFCTL_DOCKER="$4" FAKE_WEB_CONTAINER="$5" \
-         FAKE_IMAGE_ID="$6" FAKE_CONFIGURED_IMAGE_ID="$7" node "$8" update apply \
+         FAKE_IMAGE_ID="$6" FAKE_CONFIGURED_IMAGE_ID="$7" FAKE_WS_CONTAINER="$8" FAKE_WS_IMAGE_ID="$9" node "\${10}" update apply \
         --manifest release-manifest.json --backup-manifest backup.manifest.json \
         --public-key release-public.pem --yes --force-major`,
       'run',
@@ -164,6 +183,8 @@ function runApply(
       opts.webContainer ?? 'fake-web-container',
       RUNNING_IMAGE_ID,
       opts.configuredImageId ?? RUNNING_IMAGE_ID,
+      opts.wsContainer ?? '',
+      opts.wsImageId ?? '',
       LFCTL,
     ],
     { encoding: 'utf8', timeout: 60_000 }
@@ -247,7 +268,7 @@ describe('lfctl update apply — rollout failure recovery (23rd-audit)', () => {
     // update must abort before mutating env or state.
     const { rc, out } = runApply(sandbox, '', { webContainer: '' });
     expect(rc, out).toBe(2);
-    expect(out).toContain('Cannot determine the RUNNING web container');
+    expect(out).toContain('no running web container');
     expect(upCount(sandbox)).toBe(0);
     expect(envValue(sandbox, 'LOBBYFORGE_IMAGE')).toBe('lobbyforge-web:latest'); // untouched
     expect(envValue(sandbox, 'LOBBYFORGE_VERSION')).toBe('0.2.0');
@@ -283,5 +304,20 @@ describe('lfctl update apply — rollout failure recovery (23rd-audit)', () => {
     expect(upCount(sandbox)).toBe(0);
     expect(envValue(sandbox, 'LOBBYFORGE_IMAGE')).toBe(CONFIGURED_DIGEST_REF); // untouched
     expect(envValue(sandbox, 'LOBBYFORGE_VERSION')).toBe('9.9.8');
+  });
+
+  it('mixed fleet (ws-gateway hand-edited to another image): abort BEFORE touching anything', () => {
+    const sandbox = makeSandbox();
+    // 26th-audit: web/plugin-worker match each other, but ws-gateway was
+    // hand-pointed at a different image — a web-only check would miss it.
+    const { rc, out } = runApply(sandbox, '', {
+      wsContainer: 'fake-ws-container',
+      wsImageId: `sha256:${'f'.repeat(64)}`,
+    });
+    expect(rc, out).toBe(2);
+    expect(out).toContain('ws-gateway runs');
+    expect(out).toContain('while web runs');
+    expect(upCount(sandbox)).toBe(0);
+    expect(envValue(sandbox, 'LOBBYFORGE_IMAGE')).toBe('lobbyforge-web:latest'); // untouched
   });
 });
