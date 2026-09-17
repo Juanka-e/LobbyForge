@@ -2,6 +2,50 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - recovery timing + staged image publishing (23rd audit) - 2026-09-17
+
+### Fixed
+
+- **P1 — recovery flag was set AFTER `compose up --wait`**: `up` is not
+  atomic — it can create the NEW containers and still exit non-zero
+  when a healthcheck fails, which left `servicesRecreated` false and
+  the recovery branch unreachable exactly when it was needed. The flag
+  (`servicesMayHaveChanged`) is now set BEFORE the command.
+- **P1 — image was public under release tags BEFORE its scan**: the
+  build pushed semver tags + made the package public, and only then did
+  a separate job scan the digest. Publishing is now staged: build+push
+  to a `candidate-<sha>` ref → Trivy scan of the exact digest → only
+  then does `promote` attach the public semver tags (metadata-only
+  `buildx imagetools create`, no rebuild) and ensure package
+  visibility. A scan-failing build never exists under a release tag.
+
+### Changed
+
+- **Rollback anchor is fail-closed**: if the currently-running mutable
+  image cannot be pinned to `lobbyforge-web:rollback-<ts>`, the first
+  digest update ABORTS instead of proceeding with a rollback promise
+  it cannot keep.
+- **lfctl docker invocation overridable** (`LFCTL_DOCKER`, may carry a
+  launcher prefix) — operators can wrap docker, and the new recovery
+  regression spec drives the REAL CLI through a fake docker.
+
+### Added
+
+- **CLI rollout-failure regression spec**
+  (`apps/web/lib/__tests__/lfctl-update-recovery.test.ts`): runs
+  `lfctl update apply` end-to-end against a fake docker that scripts
+  `up` exit codes — asserts the partial-failure sequence (new
+  containers created, `up` fails → old containers restored +
+  health-checked; recovery fails → previous pointer kept), the
+  byte-exact rollback anchor in `.env.prod`, and deployment-state
+  contents. This is the test that would have caught the flag-timing
+  bug.
+- **Expand/contract migration release policy** documented in
+  docs/BETA_RELEASE.md — app rollback restores the previous image
+  against a forward-only schema, so releases must keep the old image
+  compatible with the expanded schema (destructive cleanup only in a
+  later release).
+
 ## [Unreleased] - update recovery + GHCR access hardening (22nd audit) - 2026-09-16
 
 ### Fixed

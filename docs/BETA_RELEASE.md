@@ -11,7 +11,7 @@ Status: Ready for closed beta — 2026-09-16
 - [x] CI: Destructive backup drill (backup → destroy → restore → verify)
 - [x] CI: Real-Postgres migration + channel visibility + ownership integration tests
 - [x] Security: CodeQL security-extended, RustSec (Cargo.lock), pnpm audit (prod)
-- [x] Security: Trivy CRITICAL+HIGH gate on OUR web image (CI + the exact released digest pre-publish); third-party images gate CRITICAL with HIGH reported (upstream base-layer HIGHs are outside our control — per-image ignores document exceptions)
+- [x] Security: Trivy CRITICAL+HIGH gate on OUR web image (CI + the exact released digest BEFORE release tags are attached — candidate push → digest scan → promote); third-party images gate CRITICAL with HIGH reported (upstream base-layer HIGHs are outside our control — per-image ignores document exceptions)
 - [x] Security: Branch protection with 16+ required checks, force-push disabled
 - [x] Supply chain: All Docker images digest-pinned (@sha256), Dependabot docker-compose
 - [x] Supply chain: Dockerfile base image digest-pinned (node:22-bookworm-slim)
@@ -24,6 +24,23 @@ Status: Ready for closed beta — 2026-09-16
 - [x] Release: tag push gates on ALL CI+security checks (19 contexts, completed+success) before publishing
 - [x] Release: `release-manifest.json` generated per release (Ed25519-signed when `LF_RELEASE_SIGNING_KEY` secret is set)
 - [x] Release signing key provisioned: public half committed at `infra/update/release-public.pem` (keyId `34c793ff090fc436`), private half in the `LF_RELEASE_SIGNING_KEY` secret — every release manifest ships signed
+
+## Release policy: migrations must be rollback-safe (expand/contract)
+
+App rollback (`lfctl update rollback`) restores the previous image — the
+database schema is NOT rolled back (drizzle migrations are forward-only).
+For that to be safe, releases MUST use expand/contract migrations:
+
+1. **Expand release**: additive schema changes only (new nullable
+   columns, new tables). The OLD app image must run correctly against
+   the expanded schema — this is what rollback re-deploys.
+2. **Contract release (later)**: only after the release that stopped
+   reading/writing the old shape has been deployed everywhere, a
+   subsequent release may drop columns/tables.
+
+A release that DROPS or narrows schema the previous image still uses
+makes rollback a lie; breaking migrations require a backup restore
+instead (`lfctl backup restore --file <dump> --to <empty-db>`).
 
 ## Known limitations (documented in ADRs)
 

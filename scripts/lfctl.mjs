@@ -27,6 +27,14 @@ const STATE_FILE = 'infra/update/deployment-state.json';
 const execFileAsync = promisify(execFile);
 let PG_CONTAINER = process.env.LFCTL_PG_CONTAINER ?? '';
 
+// Docker invocation prefix — LFCTL_DOCKER overrides the binary and may
+// carry a launcher (e.g. "bash /path/to/fake-docker" in the recovery
+// regression tests; operators can point at a docker wrapper too).
+const DOCKER_PREFIX = (process.env.LFCTL_DOCKER ?? 'docker').split(/\s+/).filter(Boolean);
+function dockerArgs(args) {
+  return [...DOCKER_PREFIX.slice(1), ...args];
+}
+
 function usage() {
   return `LobbyForge control CLI
 
@@ -459,7 +467,7 @@ const HEALTH_PROBE_SCRIPT =
   "fetch('http://localhost:3000/api/health').then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);process.exit(0)}).catch(e=>{console.error(e.message);process.exit(1)})";
 
 async function composeExec(args, timeoutMs = 300_000) {
-  const { stdout, stderr } = await execFileAsync('docker', [...COMPOSE_BASE_ARGS, ...args], { timeout: timeoutMs });
+  const { stdout, stderr } = await execFileAsync(DOCKER_PREFIX[0], dockerArgs([...COMPOSE_BASE_ARGS, ...args]), { timeout: timeoutMs });
   return { stdout, stderr };
 }
 
@@ -892,20 +900,30 @@ async function main() {
   const previousVersion = options.currentVersion;
   const usesDigest = typeof manifest.imageDigest === 'string' && manifest.imageDigest.length > 0;
   let envImageMutated = false;
-  let servicesRecreated = false;
+  // 23rd-audit: `compose up` is NOT atomic — it can create the NEW
+  // containers and still exit non-zero when a healthcheck fails. The
+  // flag is therefore set BEFORE the command ("may have changed"), so
+  // the failure handler always attempts container recovery.
+  let servicesMayHaveChanged = false;
 
   // 22nd-audit: the FIRST update's rollback target is a MUTABLE local
   // tag (lobbyforge-web:latest) — a later build could silently replace
   // those bytes. Pin the currently-running image to a timestamped
   // rollback tag so the pointer stays byte-exact even if `latest` moves.
+  // 23rd-audit: fail-CLOSED — without a byte-exact anchor the first
+  // digest transition has no guaranteed rollback, so abort instead of
+  // promising a rollback we cannot deliver.
   if (!/@sha256:[a-f0-9]{64}$/i.test(previousImage)) {
-    try {
       const rollbackTag = `lobbyforge-web:rollback-${Date.now()}`;
-      await execFileAsync('docker', ['tag', previousImage, rollbackTag], { timeout: 60_000 });
+    try {
+      await execFileAsync(DOCKER_PREFIX[0], dockerArgs(['tag', previousImage, rollbackTag]), { timeout: 60_000 });
       console.log(`Rollback anchor: ${previousImage} -> ${rollbackTag} (byte-exact rollback target)`);
       previousImage = rollbackTag;
     } catch (err) {
-      console.error(`WARNING: could not pin a rollback tag for ${previousImage} (${err.message}) — rollback will use the mutable ref.`);
+      console.error(`Cannot pin a rollback anchor for ${previousImage} (${err.message}).`);
+      console.error('A mutable rollback target cannot guarantee recovery from the first digest update — aborting.');
+      process.exitCode = 2;
+      return;
     }
   }
 
@@ -944,8 +962,10 @@ async function main() {
         await composeExec(['run', '--rm', 'migrate'], 900_000);
         console.log('ok');
       } else if (step.id === 'recreate-services') {
+        // Set BEFORE the command: a non-zero exit does NOT mean nothing
+        // changed — containers may be running the broken new image.
+        servicesMayHaveChanged = true;
         await composeExec(['up', '-d', '--remove-orphans', '--wait'], 900_000);
-        servicesRecreated = true;
         console.log('ok');
       } else if (step.id === 'health-check') {
         await composeHealthCheck();
@@ -971,7 +991,7 @@ async function main() {
       // while .env.prod claims otherwise. Bring the stack back up on the
       // restored ref and health-check it for real.
       let recovery = 'old containers untouched (failure happened before recreate)';
-      if (servicesRecreated) {
+      if (servicesMayHaveChanged) {
         try {
           await composeExec(['up', '-d', '--remove-orphans', '--wait'], 900_000);
           await composeHealthCheck();
@@ -1051,8 +1071,8 @@ async function ensurePgContainer(dbUrl = null) {
   if (url && !/@(localhost|127\.0\.0\.1|\[::1\])/.test(url.split('?')[0])) {
     try {
       const { stdout } = await execFileAsync(
-        'docker',
-        [...COMPOSE_BASE_ARGS, 'ps', '-q', 'postgres'],
+        DOCKER_PREFIX[0],
+        dockerArgs([...COMPOSE_BASE_ARGS, 'ps', '-q', 'postgres']),
         { timeout: 60_000 }
       );
       const id = stdout.trim();
@@ -1066,7 +1086,7 @@ async function ensurePgContainer(dbUrl = null) {
 
 async function pgExec(tool, args, options = {}) {
   if (PG_CONTAINER) {
-    return execFileAsync('docker', ['exec', PG_CONTAINER, tool, ...args], options);
+    return execFileAsync(DOCKER_PREFIX[0], dockerArgs(['exec', PG_CONTAINER, tool, ...args]), options);
   }
   return execFileAsync(tool, args, options);
 }
@@ -1078,7 +1098,7 @@ async function pgExec(tool, args, options = {}) {
 // as a restorable backup.
 function streamPgDumpTo(dbUrl, outFile, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const child = spawn('docker', ['exec', PG_CONTAINER, 'pg_dump', '-Fc', dbUrl], {
+    const child = spawn(DOCKER_PREFIX[0], dockerArgs(['exec', PG_CONTAINER, 'pg_dump', '-Fc', dbUrl]), {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const out = createWriteStream(outFile);
@@ -1232,11 +1252,11 @@ async function backupRestore(file, targetUrl, options = {}) {
       // Container mode: the dump lives on the host — copy it in, restore,
       // remove it again.
       const inContainer = '/tmp/lfctl-restore.dump';
-      await execFileAsync('docker', ['cp', file, `${PG_CONTAINER}:${inContainer}`], { timeout: 120_000 });
+      await execFileAsync(DOCKER_PREFIX[0], dockerArgs(['cp', file, `${PG_CONTAINER}:${inContainer}`]), { timeout: 120_000 });
       try {
         await pgExec('pg_restore', ['--no-owner', '--no-privileges', '-d', targetUrl, inContainer], { timeout: 600_000 });
       } finally {
-        await execFileAsync('docker', ['exec', PG_CONTAINER, 'rm', '-f', inContainer], { timeout: 30_000 }).catch(() => {});
+        await execFileAsync(DOCKER_PREFIX[0], dockerArgs(['exec', PG_CONTAINER, 'rm', '-f', inContainer]), { timeout: 30_000 }).catch(() => {});
       }
     } else {
       await pgExec('pg_restore', ['--no-owner', '--no-privileges', '-d', targetUrl, file], { timeout: 600_000 });
