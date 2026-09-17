@@ -80,7 +80,7 @@ actions to commit SHAs.
 
 ## ADR-006: No Central Authentication — the Hub Is Unauthenticated
 
-**Decision**: The Official Hub (lobbyforge.com) has NO login/register
+**Decision**: The Official Hub (lobbyforge.org) has NO login/register
 for end users. Identity is INSTANCE-LOCAL; self-hosting never depends
 on a central LobbyForge account. (Accepted — 2026-09-17.)
 

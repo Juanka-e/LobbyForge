@@ -89,3 +89,5 @@ infra/keys/
 *.private.pem
 # Per-machine deployment state written by lfctl update apply/rollback
 infra/update/deployment-state.json
+# Optional Cloudflare real-IP restore (copied from cf-real-ip.conf.example)
+infra/nginx/conf.d/cf-real-ip.conf

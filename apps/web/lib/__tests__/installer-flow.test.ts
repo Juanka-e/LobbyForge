@@ -17,10 +17,11 @@
  *   4. stack stopped, DIFFERENT domain, certbot FAILS → 1, hashes unchanged
  *   5. stack stopped, DIFFERENT domain, certbot OK → 0, files switched
  */
-import { spawnSync } from 'node:child_process';
+import { spawnSync, execSync } from 'node:child_process';
 import {
   chmodSync,
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -201,6 +202,66 @@ describe('install.sh — V4-003 safe activation', () => {
     expect(out).toContain('lfctl.mjs update apply --yes');
     expect(out).toContain('No changes were made');
     expect(fileState(sandbox)).toEqual(before); // the installer never rebuilds a live stack
+  });
+
+  it('scenario 6: bring-your-own certificate (Cloudflare Origin CA path) — PEM installed, activation proceeds', () => {
+    const sandbox = makeSandbox();
+    sandboxes.push(sandbox);
+    const certDir = join(sandbox, 'certs');
+    mkdirSync(certDir);
+    execSync(
+      'openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 2 -subj "/CN=own.example.com"',
+      { cwd: certDir, stdio: 'pipe' }
+    );
+    const cert = join(certDir, 'cert.pem').replace(/\\/g, '/');
+    const key = join(certDir, 'key.pem').replace(/\\/g, '/');
+
+    // domain, community, official=n, certbot=n, own-cert=y, cert, key
+    const res = spawnSync(
+      'bash',
+      ['-c', `cd "$1" && PATH="$2:$PATH" bash ./install.sh`, 'run', sandbox, join(sandbox, 'bin')],
+      { input: `own.example.com\nE2E Community\nn\nn\ny\n${cert}\n${key}\n`, encoding: 'utf8', timeout: 60_000 }
+    );
+    const rc = res.status ?? -1;
+    const out = (res.stdout ?? '') + (res.stderr ?? '');
+    expect(rc, out).toBe(0);
+    expect(out).toContain('Certificate installed at');
+    // Installed at the exact path nginx expects.
+    const fullchain = readFileSync(
+      join(sandbox, 'infra', 'certbot', 'conf', 'live', 'own.example.com', 'fullchain.pem'),
+      'utf8'
+    );
+    expect(fullchain).toContain('BEGIN CERTIFICATE');
+    expect(content(sandbox, '.env.prod')).toContain('NEXT_PUBLIC_BASE_URL=https://own.example.com');
+  });
+
+  it('scenario 6b: own certificate that does NOT match the key → abort, nothing activated', () => {
+    const sandbox = makeSandbox();
+    sandboxes.push(sandbox);
+    const certDir = join(sandbox, 'certs');
+    mkdirSync(certDir);
+    // Two INDEPENDENT pairs — passing cert from pair A with key from pair B
+    // must be rejected by the public-key match check.
+    for (const name of ['a', 'b']) {
+      execSync(
+        `openssl req -x509 -newkey rsa:2048 -nodes -keyout ${name}-key.pem -out ${name}-cert.pem -days 2 -subj "/CN=own.example.com"`,
+        { cwd: certDir, stdio: 'pipe' }
+      );
+    }
+    const cert = join(certDir, 'a-cert.pem').replace(/\\/g, '/');
+    const wrongKey = join(certDir, 'b-key.pem').replace(/\\/g, '/');
+
+    const res = spawnSync(
+      'bash',
+      ['-c', `cd "$1" && PATH="$2:$PATH" bash ./install.sh`, 'run', sandbox, join(sandbox, 'bin')],
+      { input: `own.example.com\nE2E Community\nn\nn\ny\n${cert}\n${wrongKey}\n`, encoding: 'utf8', timeout: 60_000 }
+    );
+    const rc = res.status ?? -1;
+    const out = (res.stdout ?? '') + (res.stderr ?? '');
+    expect(rc, out).toBe(1);
+    expect(out).toContain('does not match the private key');
+    // Nothing activated — the fail-closed P0-D path.
+    expect(existsSync(join(sandbox, '.env.prod'))).toBe(false);
   });
 
   it('scenario 3: RUNNING stack + DIFFERENT domain → early exit, NOTHING modified', () => {

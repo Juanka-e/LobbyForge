@@ -78,6 +78,8 @@ instead (`lfctl backup restore --file <dump> --to <empty-db>`).
 # curl | bash does NOT work.
 git clone --branch <release-tag> --depth 1 https://github.com/Juanka-e/LobbyForge.git
 cd LobbyForge && bash install.sh
+# Default TLS: Let's Encrypt. Behind Cloudflare with an Origin CA
+# certificate instead? See docs/DEPLOY_CLOUDFLARE.md.
 
 # Updates — every GitHub release publishes a SIGNED release-manifest.json
 # that pins the immutable image digest. Defaults just work: the manifest

@@ -15,12 +15,12 @@ identity provider only — see ADR-006.
 
 | Surface | Address | Role |
 |---------|---------|------|
-| Official Hub | lobbyforge.com | Landing + discovery + downloads + docs |
-| Instance Directory | lobbyforge.com/discover | Public LobbyForge servers |
-| Instance detail | lobbyforge.com/discover/[instanceId] | Card → details before the jump |
-| Connect flow | lobbyforge.com/connect | Instance URL entry / QR / deep link |
-| Official Instance | community.lobbyforge.com | LobbyForge's own real community (dogfood) |
-| Docs | docs.lobbyforge.com (or /docs) | Self-host guides |
+| Official Hub | lobbyforge.org | Landing + discovery + downloads + docs |
+| Instance Directory | lobbyforge.org/discover | Public LobbyForge servers |
+| Instance detail | lobbyforge.org/discover/[instanceId] | Card → details before the jump |
+| Connect flow | lobbyforge.org/connect | Instance URL entry / QR / deep link |
+| Official Instance | community.lobbyforge.org | LobbyForge's own real community (dogfood) |
+| Docs | docs.lobbyforge.org (or /docs) | Self-host guides |
 | Registry API | existing apps/registry service | Directory backend (unchanged) |
 
 ## Current state → target (honest gap list)
@@ -42,7 +42,7 @@ identity provider only — see ADR-006.
   (abuse-resistant ranking is its own project), hub login/register,
   LobbyForge ID implementation.
 
-## Landing (lobbyforge.com/)
+## Landing (lobbyforge.org/)
 
 First screen is one message, not a 40-feature dashboard:
 
@@ -97,7 +97,7 @@ Register reflects the instance's actual backend policy: open
 registration (form) · invite-only (invite code field) · closed (notice)
 · guest enabled (`Continue as Guest` on login).
 
-## Official Instance (community.lobbyforge.com)
+## Official Instance (community.lobbyforge.org)
 
 Real `/login` `/register` `/lobby` `/servers/...` `/settings` flows —
 the product demo that needs no install, and our real-world dogfood:
@@ -129,7 +129,7 @@ share components; the Hub having no login keeps it unambiguous.
 3. `/discover/[id]` instance detail
 4. `/connect` product connect page (replaces the M9 demo)
 5. `/download` desktop downloads
-6. community.lobbyforge.com official instance + polish of existing
+6. community.lobbyforge.org official instance + polish of existing
    `/login` `/register` `/setup`
 
 Deferred: LobbyForge ID (optional IdP concept — see ADR-006),

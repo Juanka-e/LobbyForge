@@ -329,8 +329,45 @@ if [[ "$DO_CERTBOT" =~ ^[Yy]$ ]]; then
     CERT_FAILED=true
   fi
 else
-  echo -e "${YELLOW}Skipping certbot.${NC}"
-  CERT_FAILED=true
+  echo -e "${YELLOW}Skipping Let's Encrypt.${NC}"
+  # Bring-your-own certificate — e.g. a 15-year Cloudflare Origin CA
+  # .pem pair (see docs/DEPLOY_CLOUDFLARE.md). Files are installed at the
+  # exact path nginx expects (infra/certbot/conf/live/<domain>, which is
+  # git-ignored); the certbot sidecar simply finds nothing to renew and
+  # its "No renewals were attempted" logs are harmless.
+  read -rp "$(echo -e ${BOLD}'Provide your own certificate instead? (Cloudflare Origin CA etc.) [y/N]: '${NC})" OWN_CERT
+  if [[ "$OWN_CERT" =~ ^[Yy]$ ]]; then
+    read -rp "$(echo -e ${BOLD}'Certificate (fullchain) PEM path: '${NC})" CERT_PEM_PATH
+    read -rp "$(echo -e ${BOLD}'Private key PEM path: '${NC})" KEY_PEM_PATH
+    # Expand a leading ~ so users can paste shell-style paths.
+    CERT_PEM_PATH="${CERT_PEM_PATH/#\~/$HOME}"
+    KEY_PEM_PATH="${KEY_PEM_PATH/#\~/$HOME}"
+    LIVE_DIR="$SCRIPT_DIR/infra/certbot/conf/live/$DOMAIN"
+    if [ ! -f "$CERT_PEM_PATH" ] || [ ! -f "$KEY_PEM_PATH" ]; then
+      echo -e "${RED}✗ Certificate or key file not found.${NC}"
+      CERT_FAILED=true
+    elif ! openssl x509 -noout -in "$CERT_PEM_PATH" 2>/dev/null; then
+      echo -e "${RED}✗ $CERT_PEM_PATH is not a valid PEM X.509 certificate.${NC}"
+      CERT_FAILED=true
+    elif ! openssl pkey -in "$KEY_PEM_PATH" -noout 2>/dev/null; then
+      echo -e "${RED}✗ $KEY_PEM_PATH is not a valid PEM private key.${NC}"
+      CERT_FAILED=true
+    elif [ "$(openssl x509 -noout -pubkey -in "$CERT_PEM_PATH" 2>/dev/null | openssl sha256)" != \
+           "$(openssl pkey -in "$KEY_PEM_PATH" -pubout 2>/dev/null | openssl sha256)" ]; then
+      echo -e "${RED}✗ Certificate does not match the private key (public keys differ).${NC}"
+      CERT_FAILED=true
+    else
+      mkdir -p "$LIVE_DIR"
+      cp "$CERT_PEM_PATH" "$LIVE_DIR/fullchain.pem"
+      cp "$KEY_PEM_PATH" "$LIVE_DIR/privkey.pem"
+      chmod 600 "$LIVE_DIR/privkey.pem"
+      echo -n "Installed certificate valid until: "
+      openssl x509 -noout -enddate -in "$LIVE_DIR/fullchain.pem" | cut -d= -f2 || true
+      echo -e "${GREEN}✓ Certificate installed at infra/certbot/conf/live/$DOMAIN (nginx picks it up as-is).${NC}"
+    fi
+  else
+    CERT_FAILED=true
+  fi
 fi
 
 # P0-D: Fail-closed — WebRTC requires HTTPS (secure context). Without a

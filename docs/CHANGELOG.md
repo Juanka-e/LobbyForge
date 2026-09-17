@@ -2,6 +2,36 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - lobbyforge.org + Cloudflare deployment support - 2026-09-17
+
+### Added
+
+- **Bring-your-own certificate path in install.sh**: skipping certbot now
+  offers installing an existing PEM pair (e.g. a 15-year Cloudflare
+  Origin CA certificate) instead of aborting. The installer validates
+  that both files parse AND that the certificate matches the key
+  (public-key comparison) before installing them at the exact path nginx
+  expects; the fail-closed no-certificate abort stays. Two new
+  installer-flow scenarios cover the happy path and the mismatch
+  rejection (9/9).
+- **docs/DEPLOY_CLOUDFLARE.md** — the full Cloudflare deployment guide:
+  proxy matrix (HTTP/WS proxied; TURN hostname must be DNS-only; ICE
+  media is direct-to-server-IP), Full (strict) + Origin CA (15y .pem)
+  provisioning steps, certbot-sidecar noise note, 15-year replacement
+  via the cert-watcher, troubleshooting table — and an explicit
+  "not everyone deploys like this": Let's Encrypt stays the documented
+  default.
+- **infra/nginx/cf-real-ip.conf.example** — opt-in real-visitor-IP
+  restore behind Cloudflare (set_real_ip_from CF ranges +
+  CF-Connecting-IP); without it every visitor shares an edge IP and
+  IP-based rate limits aggregate. Copied into conf.d/ to activate.
+
+### Changed
+
+- **Domain switched to lobbyforge.org** across the product plan and
+  ADR-006 (official hub lobbyforge.org, instance community.lobbyforge.org,
+  docs.lobbyforge.org).
+
 ## [Unreleased] - product direction: Hub/Discover/Official Instance plan - 2026-09-17
 
 ### Added
