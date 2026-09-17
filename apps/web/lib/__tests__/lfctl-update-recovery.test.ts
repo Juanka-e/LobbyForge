@@ -18,7 +18,7 @@
 import { describe, expect, it } from 'vitest';
 import { generateKeyPairSync, createHash, sign } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -40,9 +40,18 @@ function canonicalize(value: unknown): string {
 const FAKE_DOCKER = `#!/bin/sh
 # Records every invocation; 'up -d --remove-orphans --wait' returns the
 # Nth exit code from FAKE_UP_RCS (comma separated, default 0).
+# 'ps -q web' reports FAKE_WEB_CONTAINER (empty = no running web).
 printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
 case " $* " in
   *" tag "*) exit 0 ;;
+  *" ps -q web "*)
+    [ -n "$FAKE_WEB_CONTAINER" ] && echo "$FAKE_WEB_CONTAINER"
+    exit 0
+    ;;
+  *" inspect "*)
+    echo "sha256:$(printf 'c%.0s' $(seq 1 64))"
+    exit 0
+    ;;
   *" up -d --remove-orphans --wait "*)
     n=$(grep -c "up -d --remove-orphans --wait" "$FAKE_DOCKER_LOG" 2>/dev/null || true)
     rc=$(printf '%s' "$FAKE_UP_RCS" | cut -d, -f"$n")
@@ -123,13 +132,13 @@ function makeSandbox(): Sandbox {
   return sandbox;
 }
 
-function runApply(sandbox: Sandbox, upRcs: string) {
+function runApply(sandbox: Sandbox, upRcs: string, webContainer = 'fake-web-container') {
   const fakeViaBash = `bash ${sandbox.fakeDocker.replace(/\\/g, '/')}`;
   const res = spawnSync(
     'bash',
     [
       '-c',
-      `cd "$1" && FAKE_DOCKER_LOG="$2" FAKE_UP_RCS="$3" LFCTL_DOCKER="$4" node "$5" update apply \
+      `cd "$1" && FAKE_DOCKER_LOG="$2" FAKE_UP_RCS="$3" LFCTL_DOCKER="$4" FAKE_WEB_CONTAINER="$5" node "$6" update apply \
         --manifest release-manifest.json --backup-manifest backup.manifest.json \
         --public-key release-public.pem --yes --force-major`,
       'run',
@@ -137,6 +146,7 @@ function runApply(sandbox: Sandbox, upRcs: string) {
       sandbox.dockerLog,
       upRcs,
       fakeViaBash,
+      webContainer,
       LFCTL,
     ],
     { encoding: 'utf8', timeout: 60_000 }
@@ -211,5 +221,18 @@ describe('lfctl update apply — rollout failure recovery (23rd-audit)', () => {
     expect(previous.version).toBe('0.2.0');
     expect(String(previous.image)).toMatch(/^lobbyforge-web:rollback-\d+$/);
     expect(envValue(sandbox, 'LOBBYFORGE_IMAGE')).toMatch(/^lobbyforge-web:rollback-\d+$/);
+  });
+
+  it('no running web container: abort BEFORE touching anything (anchor fail-closed)', () => {
+    const sandbox = makeSandbox();
+    // 24th-audit: the anchor pins the RUNNING container's image ID — when
+    // no container is running there is nothing byte-exact to pin, and the
+    // update must abort before mutating env or state.
+    const { rc, out } = runApply(sandbox, '', ''); // FAKE_WEB_CONTAINER empty
+    expect(rc, out).toBe(2);
+    expect(out).toContain('Cannot determine the RUNNING web container');
+    expect(upCount(sandbox)).toBe(0);
+    expect(envValue(sandbox, 'LOBBYFORGE_IMAGE')).toBe('lobbyforge-web:latest'); // untouched
+    expect(envValue(sandbox, 'LOBBYFORGE_VERSION')).toBe('0.2.0');
   });
 });

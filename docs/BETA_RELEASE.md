@@ -25,6 +25,20 @@ Status: Ready for closed beta — 2026-09-16
 - [x] Release: `release-manifest.json` generated per release (Ed25519-signed when `LF_RELEASE_SIGNING_KEY` secret is set)
 - [x] Release signing key provisioned: public half committed at `infra/update/release-public.pem` (keyId `34c793ff090fc436`), private half in the `LF_RELEASE_SIGNING_KEY` secret — every release manifest ships signed
 
+## Known release-engineering constraints (pre-stable decisions)
+
+- **Release image is linux/amd64 only** (GitHub runner default). Beta targets
+  standard x86_64 VPSes. ARM64 (Oracle ARM, Raspberry Pi class) requires
+  `platforms: linux/amd64,linux/arm64` + QEMU in the build and a
+  multi-arch scan strategy — evaluate after beta.
+- **Candidates live in the public package**: GHCR visibility is
+  package-level and public→private is not reversible, so after the first
+  release the `candidate-<sha>` refs are anonymously pullable pre-scan.
+  They are the exact bytes the scan gates; release tags/manifests still
+  only appear post-scan. If the strict "no unscanned bytes publicly
+  readable" bar is wanted for stable, move candidates to a separate
+  private package (e.g. `lobbyforge-candidates`) before v1.0.
+
 ## Release policy: migrations must be rollback-safe (expand/contract)
 
 App rollback (`lfctl update rollback`) restores the previous image — the

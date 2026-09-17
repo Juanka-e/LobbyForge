@@ -124,7 +124,7 @@ jobs:
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v "$PWD/.trivyignore.d/web-image:/tmp/.trivyignore:ro" \
-            aquasec/trivy:0.65.0 \
+            aquasec/trivy:0.65.0@sha256:a22415a38938a56c379387a8163fcb0ce38b10ace73e593475d3658d578b2436 \
             image --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed \
             --ignorefile /tmp/.trivyignore \
             --scanners vuln \
@@ -158,14 +158,16 @@ jobs:
           IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
           DIGEST="${IMAGE}@${{ needs.docker-publish.outputs.digest }}"
           VERSION="${GITHUB_REF_NAME#v}"
-          MAJOR_MINOR="${VERSION%.*}"
           SHORT_SHA="${GITHUB_SHA::7}"
-          echo "Promoting $DIGEST -> :$VERSION :$MAJOR_MINOR :sha-$SHORT_SHA"
-          docker buildx imagetools create \
-            --tag "$IMAGE:$VERSION" \
-            --tag "$IMAGE:$MAJOR_MINOR" \
-            --tag "$IMAGE:sha-$SHORT_SHA" \
-            "$DIGEST"
+          # 24th-audit: the rolling MAJOR.MINOR tag is a FINAL-release
+          # alias — 0.2.0-rc.1 must not also mint "0.2.0-rc". Prereleases
+          # (dash separator) get only their exact version + sha tags.
+          TAG_ARGS=(--tag "$IMAGE:$VERSION" --tag "$IMAGE:sha-$SHORT_SHA")
+          if [[ "$VERSION" != *-* ]]; then
+            TAG_ARGS+=(--tag "$IMAGE:${VERSION%.*}")
+          fi
+          echo "Promoting $DIGEST -> ${TAG_ARGS[*]}"
+          docker buildx imagetools create "${TAG_ARGS[@]}" "$DIGEST"
 
       # 22nd-audit: GHCR container packages default to PRIVATE on first
       # publish — self-hosters must be able to `docker compose pull` the

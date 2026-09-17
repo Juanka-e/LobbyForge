@@ -907,21 +907,42 @@ async function main() {
   let servicesMayHaveChanged = false;
 
   // 22nd-audit: the FIRST update's rollback target is a MUTABLE local
-  // tag (lobbyforge-web:latest) — a later build could silently replace
-  // those bytes. Pin the currently-running image to a timestamped
+  // tag (lobbyforge-web:latest) — pin the running image to a timestamped
   // rollback tag so the pointer stays byte-exact even if `latest` moves.
+  // 24th-audit: pin the RUNNING CONTAINER's image ID, not the mutable
+  // ref — if `latest` was rebuilt since the container started, tagging
+  // the ref would pin the WRONG bytes.
   // 23rd-audit: fail-CLOSED — without a byte-exact anchor the first
   // digest transition has no guaranteed rollback, so abort instead of
   // promising a rollback we cannot deliver.
   if (!/@sha256:[a-f0-9]{64}$/i.test(previousImage)) {
-      const rollbackTag = `lobbyforge-web:rollback-${Date.now()}`;
+    let runningImageId;
     try {
-      await execFileAsync(DOCKER_PREFIX[0], dockerArgs(['tag', previousImage, rollbackTag]), { timeout: 60_000 });
-      console.log(`Rollback anchor: ${previousImage} -> ${rollbackTag} (byte-exact rollback target)`);
+      const { stdout: psOut } = await composeExec(['ps', '-q', 'web'], 60_000);
+      const containerId = psOut.trim();
+      if (!containerId) throw new Error('no running web container');
+      const { stdout: insOut } = await execFileAsync(
+        DOCKER_PREFIX[0],
+        dockerArgs(['inspect', containerId, '--format', '{{.Image}}']),
+        { timeout: 60_000 }
+      );
+      runningImageId = insOut.trim();
+      if (!/^sha256:[a-f0-9]{64}$/.test(runningImageId)) {
+        throw new Error(`unexpected image id: ${runningImageId}`);
+      }
+    } catch (err) {
+      console.error(`Cannot determine the RUNNING web container's image (${err.message}).`);
+      console.error('A byte-exact rollback anchor is required before the first digest update — aborting.');
+      process.exitCode = 2;
+      return;
+    }
+    const rollbackTag = `lobbyforge-web:rollback-${Date.now()}`;
+    try {
+      await execFileAsync(DOCKER_PREFIX[0], dockerArgs(['tag', runningImageId, rollbackTag]), { timeout: 60_000 });
+      console.log(`Rollback anchor: running image ${runningImageId.slice(0, 19)}… -> ${rollbackTag} (byte-exact)`);
       previousImage = rollbackTag;
     } catch (err) {
-      console.error(`Cannot pin a rollback anchor for ${previousImage} (${err.message}).`);
-      console.error('A mutable rollback target cannot guarantee recovery from the first digest update — aborting.');
+      console.error(`Cannot pin the running image to ${rollbackTag} (${err.message}) — aborting.`);
       process.exitCode = 2;
       return;
     }

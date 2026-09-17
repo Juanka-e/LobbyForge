@@ -2,6 +2,31 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - release hardening follow-ups (24th audit) - 2026-09-17
+
+### Changed
+
+- **Trivy scanner digest-pinned** (all three scan invocations — security
+  workflow x2 + release exact-digest scan): the scanner container mounts
+  the docker socket, so its own bytes must be immutable too.
+- **Rollback anchor pins the RUNNING container's image ID** (`compose
+  ps -q web` → `inspect .Image` → `tag sha256:… rollback-<ts>`) instead
+  of the mutable `:latest` ref — if the tag drifted since the container
+  started, the old code would have pinned the WRONG bytes. No running
+  container / unresolvable image aborts the update before touching
+  anything (new 4th regression scenario).
+- **Rolling MAJOR.MINOR tag only for final releases**: prereleases no
+  longer mint `0.2.0-rc` aliases (`0.2.0-rc.1` promotes only itself +
+  the sha tag).
+
+### Docs
+
+- BETA_RELEASE: linux/amd64-only release image stated as a beta
+  constraint (ARM64 = post-beta evaluation), and the public-package
+  candidate visibility trade-off recorded as an explicit pre-stable
+  decision (separate private candidates package if the strict bar is
+  wanted).
+
 ## [Unreleased] - recovery timing + staged image publishing (23rd audit) - 2026-09-17
 
 ### Fixed
