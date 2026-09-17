@@ -144,6 +144,16 @@ export interface GamePlugin<TState = unknown, TAction = unknown, TProps = unknow
   createInitialState: (ctx: GamePluginContext<TState>) => TState;
   handleAction: (ctx: GamePluginContext<TState>, state: TState, action: TAction) => TState;
   /**
+   * 31st-audit: OPTIONAL runtime action guard. The host's activity API
+   * only validates `{ type: string }` at its boundary — plugin-specific
+   * fields arrive as raw JSON from ANY client. When a plugin declares
+   * validateAction, the host calls it BEFORE dispatch: a returned string
+   * rejects the request with 400 (malformed, not a crash); null lets it
+   * through. Reducers should still be written defensively — this is the
+   * outer belt, not the only one.
+   */
+  validateAction?: (action: unknown) => string | null;
+  /**
    * Optional state migrator. The host runs `migrateState(raw)` on the
    * `state` JSONB returned from the database before handing it to the
    * plugin's reducer / renderClient. This is the migration seam:
@@ -170,6 +180,8 @@ export interface RegisteredGamePlugin {
   actionPolicies?: Record<string, GamePluginActionPolicy>;
   createInitialState: (ctx: GamePluginContext) => unknown;
   handleAction: (ctx: GamePluginContext, state: unknown, action: unknown) => unknown;
+  /** Mirrors GamePlugin.validateAction (31st-audit runtime guard). */
+  validateAction?: (action: unknown) => string | null;
   /**
    * Optional state migrator. Mirrors `GamePlugin.migrateState` —
    * the host runs it on every read so old sessions upgrade to the
@@ -193,6 +205,7 @@ export function registerGamePlugin<TState, TAction, TProps>(
         state as TState,
         action as TAction
       ),
+    validateAction: plugin.validateAction,
     migrateState: plugin.migrateState
       ? (raw: unknown) => plugin.migrateState!(raw)
       : undefined,

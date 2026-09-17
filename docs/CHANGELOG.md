@@ -2,6 +2,45 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - plugin action hardening (31st audit) - 2026-09-17
+
+### Security / correctness
+
+- **SDK `validateAction` contract**: the activity API only validates
+  `{ type }` at its boundary — plugin-specific fields arrive as raw
+  JSON from any client. Plugins may now declare `validateAction`; the
+  host calls it BEFORE dispatch (and before the idempotency claim) and
+  rejects malformed payloads with a clean 400 instead of letting the
+  reducer crash into a 500. Reducers stay defensive anyway (belt and
+  braces).
+- **Poll — anonymous by construction (product decision)**: state now
+  stores per-option VOTE COUNTS + a ballot box (who has voted) and
+  never WHO voted for WHAT — the canonical projector passes plugin
+  state to every viewer, so per-option voter lists would have
+  published every ballot. Trade-off documented: no server-side
+  "my vote" indicator.
+- **Poll — honest voter contract**: any channel member may vote
+  (`role: member`); the host voice context is still a stub, so
+  voice-presence enforcement is not server-side possible today —
+  `requiresVoiceRoom` set to false to state the real contract.
+- **Poll/Dice malformed-payload coverage**: null questions, non-array
+  options, non-integer dice sides (6.5 could roll a 7; strings/objects
+  could inject NaN into state) — all rejected at the boundary AND
+  ignored by the reducers (tests: Poll 13, Dice 9).
+
+### Reliability
+
+- **React type unification (root pnpm overrides)**: packages/ui and
+  hushle carried their own react/@types/react (hushle on the 18.x
+  line while the app is on 19.x) — the rc.5 first-attempt Docker build
+  failed on React type-identity duplication. All react/react-dom/
+  @types/* now resolve to one workspace-wide version; hushle's
+  declared devDeps aligned.
+- **Windows checksum UX**: the PowerShell example now compares
+  expected (.sha256) vs actual and throws on mismatch — same
+  fail/pass semantics as shasum -c.
+
+
 ## [Unreleased] - restore auto-discovery + checksum UX + Poll & Dice Bot plugins - 2026-09-17
 
 ### Fixed (30th audit)

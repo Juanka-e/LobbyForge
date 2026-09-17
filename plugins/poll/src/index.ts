@@ -2,14 +2,23 @@ import type { GamePlugin } from '@lobbyforge/plugin-sdk';
 import { PluginPermission } from '@lobbyforge/plugin-sdk';
 
 /**
- * Poll — a live poll for voice rooms.
+ * Poll — an anonymous live poll for channels.
  *
- * The host opens a question with 2–6 options; every participant votes
- * exactly once (one-vote-per-player is enforced in state, not UI);
- * the host closes the poll and the room sees the tally. Simple on
- * purpose: it is the reference example for the plugin reducer model
- * (pure State → Action → State, server-side projection, no trust in
- * the client).
+ * DESIGN DECISIONS (31st audit):
+ * - **Anonymous by construction.** State stores per-option VOTE COUNTS
+ *   and a ballot box (who has voted) — never WHO voted for WHAT. The
+ *   canonical projector passes plugin state through to every viewer, so
+ *   storing per-option voter IDs would publish everyone's ballot. Counts
+ *   cannot leak what they do not contain. (Trade-off: no server-side
+ *   "my vote" indicator — the client tracks it optimistically per
+ *   session.)
+ * - **Any channel member may vote.** The action policy is `role: member`;
+ *   the host's voice context is still a stub (getParticipants → []),
+ *   so "only people in the voice room" is not enforceable server-side
+ *   today. `requiresVoiceRoom: false` states the honest contract.
+ * - **Malformed actions are rejected before dispatch** via validateAction
+ *   (the activity API only checks `{ type }` at its boundary); the
+ *   reducer still guards defensively.
  */
 
 export const POLL_PLUGIN_ID = 'poll';
@@ -21,7 +30,7 @@ export const POLL_MAX_OPTION_LENGTH = 80;
 export interface PollOption {
   id: string;
   text: string;
-  voterIds: string[];
+  votes: number;
 }
 
 export interface PollState {
@@ -29,7 +38,7 @@ export interface PollState {
   options: PollOption[];
   phase: 'idle' | 'open' | 'closed';
   hostId: string | null;
-  /** Players who voted in the CURRENT poll — reset on open. */
+  /** Players who cast a ballot in the CURRENT poll — counts only, no choices. */
   ballotBox: string[];
   createdAt: string | null;
   closedAt: string | null;
@@ -42,45 +51,98 @@ export type PollAction =
   | { type: 'reopen-poll'; hostId: string }
   | { type: 'clear-poll'; hostId: string };
 
-function countVotes(options: PollOption[]): number {
-  return options.reduce((sum, option) => sum + option.voterIds.length, 0);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function pollValidateAction(action: unknown): string | null {
+  if (!isRecord(action)) return 'Action must be an object.';
+  switch (action.type) {
+    case 'open-poll': {
+      if (typeof action.hostId !== 'string' || action.hostId.length === 0) {
+        return 'open-poll requires a hostId string.';
+      }
+      if (typeof action.question !== 'string') return 'question must be a string.';
+      const question = action.question.trim();
+      if (question.length < 1 || question.length > POLL_MAX_QUESTION_LENGTH) {
+        return `question must be 1–${POLL_MAX_QUESTION_LENGTH} characters.`;
+      }
+      if (!Array.isArray(action.options)) return 'options must be an array of strings.';
+      if (action.options.some((o) => typeof o !== 'string')) {
+        return 'options must be an array of strings.';
+      }
+      const texts = (action.options as string[]).map((t) => t.trim()).filter(Boolean);
+      if (texts.length < POLL_MIN_OPTIONS || texts.length > POLL_MAX_OPTIONS) {
+        return `options must contain ${POLL_MIN_OPTIONS}–${POLL_MAX_OPTIONS} non-empty entries.`;
+      }
+      if (texts.some((t) => t.length > POLL_MAX_OPTION_LENGTH)) {
+        return `each option must be at most ${POLL_MAX_OPTION_LENGTH} characters.`;
+      }
+      return null;
+    }
+    case 'vote':
+      if (typeof action.playerId !== 'string' || action.playerId.length === 0) {
+        return 'vote requires a playerId string.';
+      }
+      if (typeof action.optionId !== 'string' || action.optionId.length === 0) {
+        return 'vote requires an optionId string.';
+      }
+      return null;
+    case 'close-poll':
+    case 'reopen-poll':
+    case 'clear-poll':
+      if (typeof action.hostId !== 'string' || action.hostId.length === 0) {
+        return `${String(action.type)} requires a hostId string.`;
+      }
+      return null;
+    default:
+      return `Unknown action type: ${String(action.type)}`;
+  }
 }
 
 export function pollTally(state: PollState): { optionId: string; votes: number }[] {
-  return state.options.map((option) => ({ optionId: option.id, votes: option.voterIds.length }));
+  return state.options.map((option) => ({ optionId: option.id, votes: option.votes }));
 }
 
 export function pollLeader(state: PollState): string | null {
   let best: { id: string; votes: number } | null = null;
   let tie = false;
   for (const option of state.options) {
-    const votes = option.voterIds.length;
-    if (!best || votes > best.votes) {
-      best = { id: option.id, votes };
+    if (!best || option.votes > best.votes) {
+      best = { id: option.id, votes: option.votes };
       tie = false;
-    } else if (votes === best.votes && votes > 0) {
+    } else if (option.votes === best.votes && option.votes > 0) {
       tie = true;
     }
   }
   return best && best.votes > 0 && !tie ? best.id : null;
 }
 
+function pristineState(): PollState {
+  return {
+    question: null,
+    options: [],
+    phase: 'idle',
+    hostId: null,
+    ballotBox: [],
+    createdAt: null,
+    closedAt: null,
+  };
+}
+
 export const pollPlugin: GamePlugin<PollState, PollAction> = {
   manifest: {
     id: POLL_PLUGIN_ID,
     name: 'Poll',
-    version: '0.1.0',
+    version: '0.2.0',
     type: 'utility',
     minAppVersion: '0.1.0',
-    permissions: [
-      PluginPermission.MANAGE_GAME_SESSION,
-      PluginPermission.SEND_ROOM_MESSAGE,
-    ],
+    permissions: [PluginPermission.MANAGE_GAME_SESSION, PluginPermission.SEND_ROOM_MESSAGE],
     locales: ['en', 'tr'],
     entryClient: './client.js',
     catalog: {
       category: 'utility',
-      summary: 'Live one-vote-per-player polls for voice rooms.',
+      summary: 'Anonymous one-vote-per-player polls for channels.',
       publisher: 'LobbyForge',
       trustLevel: 'official',
       playerConfig: {
@@ -91,7 +153,9 @@ export const pollPlugin: GamePlugin<PollState, PollAction> = {
         supportsQueue: false,
         overflowPolicy: 'spectator',
       },
-      requiresVoiceRoom: true,
+      // Honest contract: any channel member can vote. Voice-presence
+      // enforcement becomes possible once the host voice context is live.
+      requiresVoiceRoom: false,
       externalAccountRequired: false,
       compatibleAppVersion: '>=0.1.0',
       tags: ['poll', 'voting', 'utility'],
@@ -104,26 +168,19 @@ export const pollPlugin: GamePlugin<PollState, PollAction> = {
     'reopen-poll': { role: 'host', actorFields: ['hostId'] },
     'clear-poll': { role: 'host', actorFields: ['hostId'] },
   },
-  createInitialState: (): PollState => ({
-    question: null,
-    options: [],
-    phase: 'idle',
-    hostId: null,
-    ballotBox: [],
-    createdAt: null,
-    closedAt: null,
-  }),
+  createInitialState: (): PollState => pristineState(),
+  validateAction: pollValidateAction,
   handleAction: (_ctx, state, action) => {
+    // Defense in depth: validateAction guards the API boundary, but the
+    // reducer never trusts shape either.
+    if (pollValidateAction(action) !== null) return state;
     switch (action.type) {
       case 'open-poll': {
         const question = action.question.trim();
         const options = action.options.map((text) => text.trim()).filter(Boolean);
-        if (question.length < 1 || question.length > POLL_MAX_QUESTION_LENGTH) return state;
-        if (options.length < POLL_MIN_OPTIONS || options.length > POLL_MAX_OPTIONS) return state;
-        if (options.some((text) => text.length > POLL_MAX_OPTION_LENGTH)) return state;
         return {
           question,
-          options: options.map((text, index) => ({ id: `opt-${index + 1}`, text, voterIds: [] })),
+          options: options.map((text, index) => ({ id: `opt-${index + 1}`, text, votes: 0 })),
           phase: 'open',
           hostId: action.hostId,
           ballotBox: [],
@@ -140,7 +197,7 @@ export const pollPlugin: GamePlugin<PollState, PollAction> = {
         return {
           ...state,
           options: state.options.map((o) =>
-            o.id === action.optionId ? { ...o, voterIds: [...o.voterIds, action.playerId] } : o
+            o.id === action.optionId ? { ...o, votes: o.votes + 1 } : o
           ),
           ballotBox: [...state.ballotBox, action.playerId],
         };
@@ -151,12 +208,12 @@ export const pollPlugin: GamePlugin<PollState, PollAction> = {
       }
       case 'reopen-poll': {
         if (state.phase !== 'closed') return state;
-        // Reopening keeps the tally but allows NEW voters only — the
-        // ballot box is NOT reset, so nobody votes twice across the gap.
+        // Keeps the tally AND the ballot box — nobody votes twice across
+        // the close/reopen gap.
         return { ...state, phase: 'open', closedAt: null };
       }
       case 'clear-poll': {
-        return pollPlugin.createInitialState(_ctx);
+        return pristineState();
       }
       default:
         return state;
@@ -164,5 +221,3 @@ export const pollPlugin: GamePlugin<PollState, PollAction> = {
   },
   renderClient: () => null,
 };
-
-export { countVotes };

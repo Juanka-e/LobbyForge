@@ -245,6 +245,18 @@ async function handlePost(
     });
     if (!actionAuth.ok) return actionAuth.response;
 
+    // 31st-audit: plugin-specific action fields are NOT covered by the
+    // generic { type } schema — they arrive as raw JSON from any client.
+    // A plugin-declared validateAction rejects malformed payloads with a
+    // clean 400 BEFORE dispatch (and before the idempotency claim, so
+    // junk cannot poison an honest client's actionId).
+    if (plugin.validateAction) {
+      const validationError = plugin.validateAction(forwardedAction);
+      if (validationError) {
+        return NextResponse.json({ error: validationError }, { status: 400 });
+      }
+    }
+
     // LF-002: exactly-once dispatch per (sessionId, actionId). Claimed
     // only AFTER auth — unauthorized junk must not poison the key — and
     // RELEASED on every failure path below so an honest retry works.

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   diceBotPlugin,
+  diceValidateAction,
   diceLeader,
   rollDie,
   DICE_MAX_SIDES,
@@ -96,5 +97,33 @@ describe('dice bot — helpers + manifest', () => {
     expect(diceBotPlugin.manifest.type).toBe('utility');
     expect(diceBotPlugin.actionPolicies?.roll).toEqual({ role: 'member', actorFields: ['playerId'] });
     expect(diceBotPlugin.actionPolicies?.['reset-stats']).toEqual({ role: 'host', actorFields: ['hostId'] });
+  });
+});
+
+describe('dice bot — validateAction (malformed HTTP payloads)', () => {
+  it('rejects non-integer, non-finite and non-number sides before the reducer', () => {
+    expect(diceValidateAction({ type: 'roll', playerId: 'p', sides: 6.5 })).toContain('integer');
+    expect(diceValidateAction({ type: 'roll', playerId: 'p', sides: 'foo' })).toContain('integer');
+    expect(diceValidateAction({ type: 'roll', playerId: 'p', sides: {} })).toContain('integer');
+    expect(diceValidateAction({ type: 'roll', playerId: 'p', sides: Number.NaN })).toContain('integer');
+    expect(diceValidateAction({ type: 'roll', playerId: 'p' })).toBeNull(); // default d6
+    expect(diceValidateAction({ type: 'roll', playerId: 'p', sides: 20 })).toBeNull();
+  });
+
+  it('rejects non-string ids, unknown types, non-object actions', () => {
+    expect(diceValidateAction({ type: 'roll', playerId: 42 })).toContain('playerId');
+    expect(diceValidateAction({ type: 'roll' })).toContain('playerId');
+    expect(diceValidateAction({ type: 'loaded-dice', hostId: 'h' })).toContain('Unknown action');
+    expect(diceValidateAction('roll')).toContain('object');
+    expect(diceValidateAction(null)).toContain('object');
+  });
+
+  it('the reducer ignores anything validateAction rejects (defense in depth)', () => {
+    const state = initial();
+    // Even if a malformed action reached the reducer, no NaN enters state.
+    const malformed = { type: 'roll', playerId: 'p1', sides: 'foo' } as never;
+    const next = diceBotPlugin.handleAction(null as never, state, malformed);
+    expect(next).toBe(state);
+    expect(JSON.stringify(next)).not.toContain('NaN');
   });
 });

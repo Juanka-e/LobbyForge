@@ -48,6 +48,40 @@ export function rollDie(sides: number): number {
   return 1 + Math.floor(Math.random() * sides);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * 31st-audit runtime guard: the activity API only validates { type } at
+ * its boundary, so `sides` arrives as raw JSON — "6.5" must not slip
+ * through the clamp (Math.random()*6.5 can roll a 7), and strings or
+ * objects must not become NaN in state.
+ */
+export function diceValidateAction(action: unknown): string | null {
+  if (!isRecord(action)) return 'Action must be an object.';
+  switch (action.type) {
+    case 'roll': {
+      if (typeof action.playerId !== 'string' || action.playerId.length === 0) {
+        return 'roll requires a playerId string.';
+      }
+      if (action.sides === undefined) return null; // default d6
+      if (typeof action.sides !== 'number' || !Number.isFinite(action.sides) || !Number.isInteger(action.sides)) {
+        return 'sides must be an integer.';
+      }
+      return null;
+    }
+    case 'reset-stats':
+    case 'toggle':
+      if (typeof action.hostId !== 'string' || action.hostId.length === 0) {
+        return `${String(action.type)} requires a hostId string.`;
+      }
+      return null;
+    default:
+      return `Unknown action type: ${String(action.type)}`;
+  }
+}
+
 export function diceLeader(state: DiceState): { playerId: string; best: number } | null {
   let best: { playerId: string; best: number } | null = null;
   for (const [playerId, stats] of Object.entries(state.stats)) {
@@ -96,7 +130,11 @@ export const diceBotPlugin: GamePlugin<DiceState, DiceAction> = {
     history: [],
     stats: {},
   }),
+  validateAction: diceValidateAction,
   handleAction: (_ctx, state, action) => {
+    // Defense in depth: validateAction guards the API boundary, but the
+    // reducer never trusts shape either.
+    if (diceValidateAction(action) !== null) return state;
     switch (action.type) {
       case 'roll': {
         if (!state.enabled) return state;

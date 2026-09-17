@@ -100,9 +100,11 @@ export default function DownloadPage() {
             </p>
             <div className="flex flex-col gap-2">
               <code className="block rounded-lg bg-surface-container px-4 py-2.5 text-sm text-text-secondary overflow-x-auto">
-                <span className="text-text-muted"># Windows (PowerShell)</span>
+                <span className="text-text-muted"># Windows (PowerShell) — prints OK or throws</span>
                 <br />
-                Get-FileHash .\desktop-windows-LobbyForge_*_x64-setup.exe -Algorithm SHA256
+                {'$e=(Get-Content .\\desktop-windows-*.exe.sha256)[0].Split(\' \')[0]; '}
+                {'$a=(Get-FileHash .\\desktop-windows-*.exe -Algorithm SHA256).Hash.ToLower(); '}
+                {"if($e -ne $a){throw 'Checksum mismatch'}else{'OK'}"}
               </code>
               <code className="block rounded-lg bg-surface-container px-4 py-2.5 text-sm text-text-secondary overflow-x-auto">
                 <span className="text-text-muted"># macOS</span>
