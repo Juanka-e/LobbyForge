@@ -91,3 +91,4 @@ infra/keys/
 infra/update/deployment-state.json
 # Optional Cloudflare real-IP restore (copied from cf-real-ip.conf.example)
 infra/nginx/conf.d/cf-real-ip.conf
+.rc2-manifest.json
