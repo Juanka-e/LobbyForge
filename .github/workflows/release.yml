@@ -282,8 +282,17 @@ jobs:
 
       # tsc + tauri build — the committed dist-shell/ is the frontendDist,
       # and tauri build produces the installers under target/release/bundle/.
+      # rc.2-drill: the MSI (WiX) target CANNOT hold semver pre-release
+      # identifiers ("rc.2" must be numeric) — on Windows bundle NSIS only,
+      # which accepts full semver. Linux/macOS keep every target.
       - name: Build desktop app (tsc + tauri build)
-        run: pnpm --filter @lobbyforge/desktop build
+        run: |
+          pnpm --filter @lobbyforge/desktop exec tsc
+          if [ "${{ matrix.target }}" = "windows" ]; then
+            pnpm --filter @lobbyforge/desktop exec tauri build --bundles nsis
+          else
+            pnpm --filter @lobbyforge/desktop exec tauri build
+          fi
 
       # 21st-audit: FLAT staging with platform-prefixed unique names — the
       # release job then assembles ONE SHA256SUMS.txt whose entries match

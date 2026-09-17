@@ -101,29 +101,36 @@ node scripts/lfctl.mjs update rollback     # restore the previous recorded image
 5. **Self-host**: Install, configure, update, backup + restore
 6. **Desktop**: Connect to instance, login handoff, global push-to-talk
 
-## Release drill — v0.2.0-rc.1 (before any final tag)
+## Release drill — v0.2.0-rc (results: rc.1 + rc.2)
 
-The unified `v*` release pipeline is only "tested" after this passes once
-end-to-end on GitHub. Notes:
+The unified `v*` release pipeline ran for real on GitHub. rc.1 exercised
+the chain up to promote and caught two integration bugs (desktop pnpm
+ordering; artifact download pattern); rc.2 completed the release.
 
 - GitHub `releases/latest` does NOT include prereleases — for RC updater
   tests pass the manifest explicitly:
-  `--manifest https://github.com/Juanka-e/LobbyForge/releases/download/v0.2.0-rc.1/release-manifest.json`
-- The release fails closed if the GHCR package is not PUBLIC (anonymous
-  pull is how every self-host updater fetches the digest). First publish
-  may need a one-time manual visibility flip in package settings.
+  `--manifest https://github.com/Juanka-e/LobbyForge/releases/download/v0.2.0-rc.2/release-manifest.json`
 
-Checklist:
+Results:
 
-- [ ] RC tag pushed → 19 checks green → release gate passes → GHCR push
-- [ ] ghcr.io/juanka-e/lobbyforge package is PUBLIC
-- [ ] Clean VPS, NO GitHub credentials: `docker pull ghcr.io/juanka-e/lobbyforge@sha256:<digest>` succeeds
-- [ ] Fresh tagged install (`git clone --branch v0.2.0-rc.1` + install.sh) healthy
-- [ ] `lfctl update check` against the RC manifest verifies the signature and shows the pinned digest
-- [ ] Old install (0.1.x/0.2.0-source) → RC update: backup auto-created, digest deployed, migrations ran, health green, version state persisted
-- [ ] Forced failure drill: make `/api/health` fail after recreate → updater restores OLD containers + `.env.prod` (or leaves a working `update rollback` pointer)
-- [ ] `lfctl backup restore` round-trip from the pre-update dump into an empty DB
-- [ ] Desktop artifacts present for linux/windows/macos with matching single SHA256SUMS.txt
+- [x] RC tag pushed → 19 checks green → release gate passed → GHCR push (rc.1 + rc.2)
+- [x] ghcr.io/juanka-e/lobbyforge package is PUBLIC
+- [x] Anonymous digest pull (no GitHub credentials) — verified locally for rc.1 and rc.2 digests
+- [x] `lfctl update check` against the REAL rc.2 release manifest: signature
+      valid (committed public key), target digest pinned, and semver is
+      correct (0.2.0 final is NOT "upgraded" to 0.2.0-rc.2)
+- [x] Desktop artifacts: linux (rpm + AppImage + deb) and macOS (dmg)
+      shipped with a single flat SHA256SUMS.txt; Windows MSI target cannot
+      hold semver pre-release identifiers — NSIS-only on Windows from rc.3
+- [ ] Fresh tagged install (`git clone --branch <rc>` + install.sh) on a clean VPS
+- [ ] Real old → RC update via `lfctl update apply` on a VPS (backup auto-created,
+      digest deployed, migrations ran, health green, version state persisted)
+- [ ] Forced failure drill on a real VPS: health fails after recreate →
+      old containers restored (covered by the CLI regression suite; do it live once)
+- [ ] `lfctl backup restore` round-trip on the VPS
+
+The remaining unchecked items need a real VPS (they exercise the
+installer + updater against real infrastructure, not the CI sandbox).
 
 ## Reporting issues
 

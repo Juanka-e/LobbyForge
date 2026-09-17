@@ -1,0 +1,9 @@
+{
+  "version": "0.2.0-rc.2",
+  "channel": "stable",
+  "releaseNotes": "## [Unreleased] - lobbyforge.org + Cloudflare deployment support - 2026-09-17\n\n### Added\n\n- **Bring-your-own certificate path in install.sh**: skipping certbot now\n  offers installing an existing PEM pair (e.g. a 15-year Cloudflare\n  Origin CA certificate) instead of aborting. The installer validates\n  that both files parse AND that the certificate matches the key\n  (public-key comparison) before installing them at the exact path nginx\n  expects; the fail-closed no-certificate abort stays. Two new\n  installer-flow scenarios cover the happy path and the mismatch\n  rejection (9/9).\n- **docs/DEPLOY_CLOUDFLARE.md** — the full Cloudflare deployment guide:\n  proxy matrix (HTTP/WS proxied; TURN hostname must be DNS-only; ICE\n  media is direct-to-server-IP), Full (strict) + Origin CA (15y .pem)\n  provisioning steps, certbot-sidecar noise note, 15-year replacement\n  via the cert-watcher, troubleshooting table — and an explicit\n  \"not everyone deploys like this\": Let's Encrypt stays the documented\n  default.\n- **infra/nginx/cf-real-ip.conf.example** — opt-in real-visitor-IP\n  restore behind Cloudflare (set_real_ip_from CF ranges +\n  CF-Connecting-IP); without it every visitor shares an edge IP and\n  IP-based rate limits aggregate. Copied into conf.d/ to activate.\n\n### Changed\n\n- **Domain switched to lobbyforge.org** across the product plan and\n  ADR-006 (official hub lobbyforge.org, instance community.lobbyforge.org,\n  docs.lobbyforge.org).",
+  "gitSha": "eafccf74f6bda10786dcab7b8a6eb18a7ea796a2",
+  "imageDigest": "ghcr.io/juanka-e/lobbyforge@sha256:1dffbe700484052dc78f65eee6ed9a4188f321d6dc3e75f82286243ca505eb5f",
+  "keyId": "34c793ff090fc436",
+  "signature": "QELZcllNBGrFmjtoIJoR7zx3G5xr7y1MYDw1yYe2wyBP8-7vbvPINPT2vJ_WYGFd8ZzYhavPTTxTtVX7qMvWAA"
+}

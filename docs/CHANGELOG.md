@@ -2,6 +2,41 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - hub design sprint: landing, connect, download, discover, register - 2026-09-17
+
+### Added
+
+- **Landing redesign** (the hub thesis surface): left-aligned hero with
+  the approved line "Your community. Your server. Your rules.",
+  Bricolage Grotesque display face (marketing shell only), honest
+  self-host section (real requirements + the four real steps +
+  Cloudflare guide link). Signature element: the **Voice Strip** — a
+  voice room reduced to its signal, one speaker ON AIR in the new
+  `ember` token; pure CSS, reduced-motion safe.
+- **Product Connect page** (the M9 demo moved to /connect/demo for the
+  dev e2e specs): instance-URL entry with normalization + inline
+  validation, opens the community's OWN /login (ADR-006), recent
+  communities in localStorage, desktop deep-link note.
+- **Download page** (marketing shell): platform cards → GitHub
+  Releases, honest unsigned-build notice (ADR-005) with SHA256SUMS
+  verification guidance.
+- **Instance detail pages** (`/discover/[instanceId]`): identity +
+  verified state, description, live stats (online / public rooms /
+  doctor score / heartbeat freshness), region / languages / tags /
+  version. Exits ALWAYS through the /discover/go external-redirect
+  interceptor; desktop deep link included.
+- **/register route**: invite-preserving deep link into the auth
+  shell's Create-account tab (`/login?mode=register` — all guards run
+  on /login; LoginForm takes an initialMode).
+
+### Changed
+
+- **Discover quick filters**: Verified only / Online now / language
+  chips (client-side; the server keeps search + region), cards link to
+  instance detail, empty state offers connect-by-address.
+- **Hub nav** per ADR-006: Sign In removed → Communities / Connect /
+  Download / Self-host; footer links wired to real targets.
+
 ## [Unreleased] - lobbyforge.org + Cloudflare deployment support - 2026-09-17
 
 ### Added
