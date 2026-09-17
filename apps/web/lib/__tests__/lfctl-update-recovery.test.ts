@@ -18,7 +18,7 @@
 import { describe, expect, it } from 'vitest';
 import { generateKeyPairSync, createHash, sign } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -342,12 +342,23 @@ describe('lfctl update apply — rollout failure recovery (23rd-audit)', () => {
     expect(rc, out).toBe(2);
     expect(out).toContain('Deployed-image drift');
     expect(upCount(sandbox)).toBe(0);
-    // auto-backup writes to ./backups/ — it must not exist at all.
-    // (backup.dump/backup.manifest.json are staged by makeSandbox for the
-    // explicit-manifest flow and are expected.)
+    // Three invariants, each directly:
+    // 1. NO filesystem mutation — auto-backup writes to ./backups/ which
+    //    must not exist (backup.dump/backup.manifest.json are staged by
+    //    makeSandbox for the explicit-manifest flow and are expected).
     expect(readdirSync(sandbox.dir)).not.toContain('backups');
+    // 2. NO .env.prod mutation.
+    expect(envValue(sandbox, 'LOBBYFORGE_IMAGE')).toBe(CONFIGURED_DIGEST_REF);
+    // 3. NO Docker mutation — every docker invocation is on the read-only
+    //    preflight allowlist (compose ps / inspect / image inspect); a
+    //    stray tag/build/rm/… would fail this.
     const dockerCallsList = dockerCalls(sandbox);
-    // Read-only preflight only — no pull/run/up ever issued.
-    expect(dockerCallsList.some((c) => /\b(pull|run|up)\b/.test(c))).toBe(false);
+    expect(
+      dockerCallsList.every(
+        (c) => c.includes(' ps -q ') || c.startsWith('inspect ') || c.startsWith('image inspect ')
+      )
+    ).toBe(true);
+    // And no deployment state was written either.
+    expect(existsSync(join(sandbox.dir, 'infra', 'update', 'deployment-state.json'))).toBe(false);
   });
 });

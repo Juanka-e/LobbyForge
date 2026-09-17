@@ -2,6 +2,15 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - strict allowlist for the zero-side-effect test (28th audit) - 2026-09-17
+
+- The drift-abort scenario now proves all three invariants directly:
+  no filesystem mutation (no backups/ dir, no deployment-state.json),
+  no .env.prod mutation, and every docker invocation on a read-only
+  allowlist (compose ps / inspect / image inspect) — a stray
+  tag/build/rm would fail the suite, not slip past a pull/run/up
+  blacklist.
+
 ## [Unreleased] - drift side-effect coverage + doc nits (27th audit) - 2026-09-17
 
 - New regression scenario asserting the zero-side-effect drift abort
