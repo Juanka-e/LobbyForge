@@ -4,7 +4,7 @@ Status: Ready for closed beta — 2026-09-16
 
 ## Pre-beta verification (ALL COMPLETE)
 
-- [x] 20 security audit rounds remediated
+- [x] Security audit findings remediated (25 static audit rounds; further hardening now comes from the RC drill, not more static review)
 - [x] CI: Ubuntu + Windows verify, Docker build, production compose config
 - [x] CI: Production TLS E2E (HTTPS, HTTP→HTTPS redirect, WSS upgrade, CSP nonce + hydration)
 - [x] CI: Two-client voice E2E (real WebRTC through LiveKit)
@@ -38,6 +38,11 @@ Status: Ready for closed beta — 2026-09-16
   only appear post-scan. If the strict "no unscanned bytes publicly
   readable" bar is wanted for stable, move candidates to a separate
   private package (e.g. `lobbyforge-candidates`) before v1.0.
+- **Scanner pin ≠ pin forever**: the Trivy scanner image is digest-pinned
+  for immutability, but its VERSION must still be bumped deliberately as
+  maintenance (0.74.0 is current; 0.65.0 is pinned). The vulnerability DB
+  refreshes on every run regardless — the pin only fixes the scanner
+  binary itself.
 
 ## Release policy: migrations must be rollback-safe (expand/contract)
 

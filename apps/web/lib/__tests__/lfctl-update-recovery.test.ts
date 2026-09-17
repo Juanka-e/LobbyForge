@@ -41,6 +41,9 @@ const FAKE_DOCKER = `#!/bin/sh
 # Records every invocation; 'up -d --remove-orphans --wait' returns the
 # Nth exit code from FAKE_UP_RCS (comma separated, default 0).
 # 'ps -q web' reports FAKE_WEB_CONTAINER (empty = no running web).
+# 'inspect <container>' and 'image inspect <ref>' report the running /
+# configured image IDs (FAKE_IMAGE_ID / FAKE_CONFIGURED_IMAGE_ID) — the
+# drift scenarios make them disagree.
 printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
 case " $* " in
   *" tag "*) exit 0 ;;
@@ -48,8 +51,12 @@ case " $* " in
     [ -n "$FAKE_WEB_CONTAINER" ] && echo "$FAKE_WEB_CONTAINER"
     exit 0
     ;;
+  *" image inspect "*)
+    echo "$FAKE_CONFIGURED_IMAGE_ID"
+    exit 0
+    ;;
   *" inspect "*)
-    echo "sha256:$(printf 'c%.0s' $(seq 1 64))"
+    echo "$FAKE_IMAGE_ID"
     exit 0
     ;;
   *" up -d --remove-orphans --wait "*)
@@ -61,6 +68,9 @@ case " $* " in
 esac
 exit 0
 `;
+
+const RUNNING_IMAGE_ID = `sha256:${'c'.repeat(64)}`;
+const CONFIGURED_DIGEST_REF = `ghcr.io/juanka-e/lobbyforge@sha256:${'d'.repeat(64)}`;
 
 interface Sandbox {
   dir: string;
@@ -132,13 +142,18 @@ function makeSandbox(): Sandbox {
   return sandbox;
 }
 
-function runApply(sandbox: Sandbox, upRcs: string, webContainer = 'fake-web-container') {
+function runApply(
+  sandbox: Sandbox,
+  upRcs: string,
+  opts: { webContainer?: string; configuredImageId?: string } = {}
+) {
   const fakeViaBash = `bash ${sandbox.fakeDocker.replace(/\\/g, '/')}`;
   const res = spawnSync(
     'bash',
     [
       '-c',
-      `cd "$1" && FAKE_DOCKER_LOG="$2" FAKE_UP_RCS="$3" LFCTL_DOCKER="$4" FAKE_WEB_CONTAINER="$5" node "$6" update apply \
+      `cd "$1" && FAKE_DOCKER_LOG="$2" FAKE_UP_RCS="$3" LFCTL_DOCKER="$4" FAKE_WEB_CONTAINER="$5" \
+         FAKE_IMAGE_ID="$6" FAKE_CONFIGURED_IMAGE_ID="$7" node "$8" update apply \
         --manifest release-manifest.json --backup-manifest backup.manifest.json \
         --public-key release-public.pem --yes --force-major`,
       'run',
@@ -146,7 +161,9 @@ function runApply(sandbox: Sandbox, upRcs: string, webContainer = 'fake-web-cont
       sandbox.dockerLog,
       upRcs,
       fakeViaBash,
-      webContainer,
+      opts.webContainer ?? 'fake-web-container',
+      RUNNING_IMAGE_ID,
+      opts.configuredImageId ?? RUNNING_IMAGE_ID,
       LFCTL,
     ],
     { encoding: 'utf8', timeout: 60_000 }
@@ -228,11 +245,43 @@ describe('lfctl update apply — rollout failure recovery (23rd-audit)', () => {
     // 24th-audit: the anchor pins the RUNNING container's image ID — when
     // no container is running there is nothing byte-exact to pin, and the
     // update must abort before mutating env or state.
-    const { rc, out } = runApply(sandbox, '', ''); // FAKE_WEB_CONTAINER empty
+    const { rc, out } = runApply(sandbox, '', { webContainer: '' });
     expect(rc, out).toBe(2);
     expect(out).toContain('Cannot determine the RUNNING web container');
     expect(upCount(sandbox)).toBe(0);
     expect(envValue(sandbox, 'LOBBYFORGE_IMAGE')).toBe('lobbyforge-web:latest'); // untouched
     expect(envValue(sandbox, 'LOBBYFORGE_VERSION')).toBe('0.2.0');
+  });
+
+  it('digest-configured deployment: running bytes verified, digest kept as rollback target', () => {
+    const sandbox = makeSandbox();
+    // A server already updated once by lfctl: .env.prod pins a digest.
+    writeFileSync(
+      join(sandbox.dir, '.env.prod'),
+      `LOBBYFORGE_VERSION=9.9.8\nLOBBYFORGE_IMAGE=${CONFIGURED_DIGEST_REF}\nNODE_ENV=production\n`
+    );
+    const { rc, out } = runApply(sandbox, ''); // configured resolves to the running image
+    expect(rc, out).toBe(0);
+    expect(out).toContain('Configured digest matches the running container');
+    // No rollback anchor tag needed — the digest IS byte-exact.
+    expect(dockerCalls(sandbox).some((c) => c.startsWith('tag '))).toBe(false);
+    const st = state(sandbox);
+    expect(st.previous).toEqual({ version: '9.9.8', image: CONFIGURED_DIGEST_REF });
+  });
+
+  it('operator drift (configured digest != running bytes): abort BEFORE touching anything', () => {
+    const sandbox = makeSandbox();
+    writeFileSync(
+      join(sandbox.dir, '.env.prod'),
+      `LOBBYFORGE_VERSION=9.9.8\nLOBBYFORGE_IMAGE=${CONFIGURED_DIGEST_REF}\nNODE_ENV=production\n`
+    );
+    // .env.prod's digest resolves to DIFFERENT bytes than the running
+    // container — someone changed the deployment outside lfctl.
+    const { rc, out } = runApply(sandbox, '', { configuredImageId: `sha256:${'e'.repeat(64)}` });
+    expect(rc, out).toBe(2);
+    expect(out).toContain('Deployed-image drift');
+    expect(upCount(sandbox)).toBe(0);
+    expect(envValue(sandbox, 'LOBBYFORGE_IMAGE')).toBe(CONFIGURED_DIGEST_REF); // untouched
+    expect(envValue(sandbox, 'LOBBYFORGE_VERSION')).toBe('9.9.8');
   });
 });

@@ -906,36 +906,64 @@ async function main() {
   // the failure handler always attempts container recovery.
   let servicesMayHaveChanged = false;
 
-  // 22nd-audit: the FIRST update's rollback target is a MUTABLE local
-  // tag (lobbyforge-web:latest) — pin the running image to a timestamped
-  // rollback tag so the pointer stays byte-exact even if `latest` moves.
-  // 24th-audit: pin the RUNNING CONTAINER's image ID, not the mutable
-  // ref — if `latest` was rebuilt since the container started, tagging
-  // the ref would pin the WRONG bytes.
-  // 23rd-audit: fail-CLOSED — without a byte-exact anchor the first
-  // digest transition has no guaranteed rollback, so abort instead of
-  // promising a rollback we cannot deliver.
-  if (!/@sha256:[a-f0-9]{64}$/i.test(previousImage)) {
-    let runningImageId;
+  // ── Running-bytes ground truth (22nd/24th/25th audits) ────────────
+  // The RUNNING web container decides what a rollback must restore and
+  // what "currently deployed" means — never the mutable .env.prod ref.
+  let runningImageId;
+  try {
+    const { stdout: psOut } = await composeExec(['ps', '-q', 'web'], 60_000);
+    const containerId = psOut.trim();
+    if (!containerId) throw new Error('no running web container');
+    const { stdout: insOut } = await execFileAsync(
+      DOCKER_PREFIX[0],
+      dockerArgs(['inspect', containerId, '--format', '{{.Image}}']),
+      { timeout: 60_000 }
+    );
+    runningImageId = insOut.trim();
+    if (!/^sha256:[a-f0-9]{64}$/.test(runningImageId)) {
+      throw new Error(`unexpected image id: ${runningImageId}`);
+    }
+  } catch (err) {
+    console.error(`Cannot determine the RUNNING web container's image (${err.message}).`);
+    console.error('Updates require a running, identifiable deployment — aborting before touching anything.');
+    process.exitCode = 2;
+    return;
+  }
+
+  if (/@sha256:[a-f0-9]{64}$/i.test(previousImage)) {
+    // Configured as an immutable digest — verify the RUNNING bytes match
+    // it. (The registry manifest digest and the container image ID are
+    // different hashes, so resolve the configured ref locally first.)
+    // 25th-audit: without this, an operator hand-changing the deployment
+    // would leave both the rollback target and "previous" state fiction.
+    let configuredImageId;
     try {
-      const { stdout: psOut } = await composeExec(['ps', '-q', 'web'], 60_000);
-      const containerId = psOut.trim();
-      if (!containerId) throw new Error('no running web container');
-      const { stdout: insOut } = await execFileAsync(
+      const { stdout } = await execFileAsync(
         DOCKER_PREFIX[0],
-        dockerArgs(['inspect', containerId, '--format', '{{.Image}}']),
+        dockerArgs(['image', 'inspect', previousImage, '--format', '{{.Id}}']),
         { timeout: 60_000 }
       );
-      runningImageId = insOut.trim();
-      if (!/^sha256:[a-f0-9]{64}$/.test(runningImageId)) {
-        throw new Error(`unexpected image id: ${runningImageId}`);
-      }
+      configuredImageId = stdout.trim();
     } catch (err) {
-      console.error(`Cannot determine the RUNNING web container's image (${err.message}).`);
-      console.error('A byte-exact rollback anchor is required before the first digest update — aborting.');
+      console.error(`Configured image ${previousImage} is not present locally (${err.message}) — aborting.`);
       process.exitCode = 2;
       return;
     }
+    if (configuredImageId !== runningImageId) {
+      console.error(`Deployed-image drift: .env.prod pins ${previousImage}`);
+      console.error(`but the running web container is ${runningImageId}.`);
+      console.error('The deployment was changed outside lfctl. Reconcile (docker compose up -d --wait on the pinned digest) before updating.');
+      process.exitCode = 2;
+      return;
+    }
+    console.log(`Configured digest matches the running container (${runningImageId.slice(0, 19)}…).`);
+    // Immutable ref — no anchor needed; the digest IS byte-exact.
+  } else {
+    // Mutable local ref (fresh install): pin the RUNNING container's
+    // image ID (not the ref — if `latest` was rebuilt since the container
+    // started, tagging the ref would pin the WRONG bytes) to a
+    // timestamped rollback tag. Fail-CLOSED: without a byte-exact anchor
+    // the first digest transition has no guaranteed rollback.
     const rollbackTag = `lobbyforge-web:rollback-${Date.now()}`;
     try {
       await execFileAsync(DOCKER_PREFIX[0], dockerArgs(['tag', runningImageId, rollbackTag]), { timeout: 60_000 });

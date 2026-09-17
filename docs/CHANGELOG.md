@@ -2,6 +2,31 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - drift invariant + explicit platform (25th audit) - 2026-09-17
+
+### Changed
+
+- **Deployed-image drift check**: when `.env.prod` pins an immutable
+  digest, `lfctl update apply` now resolves that ref locally
+  (`docker image inspect`) and compares it with the RUNNING container's
+  image ID — a mismatch (someone changed the deployment outside lfctl)
+  aborts the update before touching anything. Registry manifest digests
+  and container image IDs are different hashes, so the configured ref is
+  resolved rather than string-compared. Two new regression scenarios
+  cover the match and the drift paths (spec now 6/6).
+- **Release build platform is explicit**: `platforms: linux/amd64` on
+  the candidate build instead of relying on the runner default — the
+  amd64-only beta policy is now code, not ambient behavior.
+
+### Docs
+
+- BETA_RELEASE audit-rounds line made version-independent ("findings
+  remediated; hardening continues via the RC drill, not more static
+  review") — it no longer goes stale every round.
+- Scanner pin policy clarified: digest-pinning the Trivy image fixes the
+  scanner binary, not its version forever — deliberate version bumps
+  remain maintenance (DB refreshes every run regardless).
+
 ## [Unreleased] - release hardening follow-ups (24th audit) - 2026-09-17
 
 ### Changed

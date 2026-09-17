@@ -82,6 +82,10 @@ jobs:
         with:
           context: .
           push: true
+          # Explicit (not runner-default): the beta release policy is
+          # linux/amd64 only — see docs/BETA_RELEASE.md. ARM64 support
+          # means adding it here + a multi-arch scan strategy.
+          platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
