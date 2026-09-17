@@ -44,23 +44,33 @@ function worstState(a, b) {
 
 function evaluate(checkRuns) {
   // Check runs are per-SHA: a tag on an already-merged commit carries the
-  // branch-triggered runs PLUS the tag-triggered ones. Rule per context:
-  // wait while ANY run is non-completed, then require EVERY run to have
-  // succeeded (a stale failed branch run cannot be outvoted).
+  // branch-triggered runs PLUS the tag-triggered ones — and GitHub's
+  // per-ref concurrency groups can leave CANCELLED runs behind (rc.3
+  // drill: the same SHA had a cancelled main-run and a green tag-run).
+  // Rule per context: CANCELLED/SKIPPED runs are non-authoritative
+  // (superseded, not a verdict). Among the remaining runs: wait while any
+  // is non-completed, then require at least one success and NO
+  // failure/timed_out — a real failure cannot be outvoted.
+  const isAuthoritative = (run) => run.conclusion !== 'cancelled' && run.conclusion !== 'skipped';
   let state = 'ok';
   const detail = [];
   for (const name of EXPECTED_CHECKS) {
-    const mine = checkRuns.filter((run) => run.name === name);
+    const all = checkRuns.filter((run) => run.name === name);
+    const mine = all.filter(isAuthoritative);
     let itemState;
     if (mine.length === 0) itemState = 'missing';
     else if (mine.some((run) => run.status !== 'completed')) itemState = 'pending';
-    else if (mine.every((run) => run.conclusion === 'success')) itemState = 'ok';
-    else itemState = 'failed';
+    else if (
+      mine.some((run) => run.conclusion === 'success') &&
+      !mine.some((run) => run.conclusion === 'failure' || run.conclusion === 'timed_out')
+    ) {
+      itemState = 'ok';
+    } else itemState = 'failed';
     state = worstState(state, itemState);
     detail.push({
       name,
       state: itemState,
-      runs: mine.map((run) => `${run.status}/${run.conclusion ?? '-'}`),
+      runs: all.map((run) => `${run.status}/${run.conclusion ?? '-'}`),
     });
   }
   return { state, detail };
@@ -107,8 +117,11 @@ async function main() {
     try {
       evaluation = evaluate(await fetchCheckRuns());
     } catch (err) {
-      // Transient API failure — keep polling until the deadline.
+      // Live mode: transient API failures keep polling until the
+      // deadline. Offline mode (local test payload): polling can never
+      // fix a bad payload — abort immediately instead of hanging.
       console.error(`check-runs fetch failed: ${err.message}`);
+      if (offline) process.exit(1);
     }
     if (evaluation) {
       console.log(`check state: ${evaluation.state} (${new Date().toISOString()})`);
