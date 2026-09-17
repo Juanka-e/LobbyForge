@@ -111,18 +111,27 @@ ordering; artifact download pattern); rc.2 completed the release.
   tests pass the manifest explicitly:
   `--manifest https://github.com/Juanka-e/LobbyForge/releases/download/v0.2.0-rc.2/release-manifest.json`
 
-Results:
+Results (final: **v0.2.0-rc.4 — all jobs green, full artifact set**):
 
-- [x] RC tag pushed → 19 checks green → release gate passed → GHCR push (rc.1 + rc.2)
+- [x] RC tag pushed → 19 checks green → release gate passed → GHCR push
 - [x] ghcr.io/juanka-e/lobbyforge package is PUBLIC
-- [x] Anonymous digest pull (no GitHub credentials) — verified locally for rc.1 and rc.2 digests
-- [x] `lfctl update check` against the REAL rc.2 release manifest: signature
-      valid (committed public key), target digest pinned, and semver is
-      correct (0.2.0 final is NOT "upgraded" to 0.2.0-rc.2)
-- [x] Desktop artifacts: linux (rpm + AppImage + deb) and macOS (dmg)
-      shipped with a single flat SHA256SUMS.txt; Windows MSI target cannot
-      hold semver pre-release identifiers — NSIS-only on Windows from rc.3
-- [ ] Fresh tagged install (`git clone --branch <rc>` + install.sh) on a clean VPS
+- [x] Anonymous digest pull (no GitHub credentials) — verified locally (rc.1, rc.2 digests)
+- [x] `lfctl update check` against REAL release manifests: signature valid
+      (committed public key), digest pinned; semver correct both ways
+      (0.1.9 → rc.4 offered; 0.2.0 final is NOT "upgraded" to an RC)
+- [x] Desktop artifacts for ALL THREE platforms with one flat
+      SHA256SUMS.txt: linux rpm + AppImage + deb, macOS dmg,
+      Windows NSIS setup.exe (MSI can't hold semver prereleases — NSIS-only on Windows)
+- [x] Fail-closed gate proven live: rc.3 was REFUSED (a check state the
+      gate could not accept), no release created — then the rule was
+      refined (cancelled runs are non-authoritative) and rc.4 shipped
+
+Iterations caught by the drill (exactly its purpose): rc.1 — desktop
+pnpm setup order + SBOM artifact in the download; rc.2 — Windows MSI
+semver limit; rc.3 — cancelled duplicate check runs tripping the gate;
+rc.4 — clean end-to-end.
+
+- [ ] Fresh tagged install (`git clone --branch v0.2.0-rc.4` + install.sh) on a clean VPS
 - [ ] Real old → RC update via `lfctl update apply` on a VPS (backup auto-created,
       digest deployed, migrations ran, health green, version state persisted)
 - [ ] Forced failure drill on a real VPS: health fails after recreate →
