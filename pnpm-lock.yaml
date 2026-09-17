@@ -97,6 +97,9 @@ importers:
       '@lobbyforge/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@lobbyforge/dice-bot':
+        specifier: workspace:*
+        version: link:../../plugins/dice-bot
       '@lobbyforge/hushle':
         specifier: workspace:*
         version: link:../../plugins/hushle
@@ -106,6 +109,9 @@ importers:
       '@lobbyforge/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
+      '@lobbyforge/poll':
+        specifier: workspace:*
+        version: link:../../plugins/poll
       '@lobbyforge/quiz':
         specifier: workspace:*
         version: link:../../plugins/quiz
@@ -386,6 +392,22 @@ importers:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@22.19.20)(happy-dom@14.12.3)
 
+  plugins/dice-bot:
+    dependencies:
+      '@lobbyforge/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+    devDependencies:
+      '@lobbyforge/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      typescript:
+        specifier: ^5.4.5
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@22.19.20)(happy-dom@14.12.3)
+
   plugins/hushle:
     dependencies:
       '@lobbyforge/db':
@@ -404,6 +426,22 @@ importers:
       react:
         specifier: ^18.3.1
         version: 18.3.1
+      typescript:
+        specifier: ^5.4.5
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@22.19.20)(happy-dom@14.12.3)
+
+  plugins/poll:
+    dependencies:
+      '@lobbyforge/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+    devDependencies:
+      '@lobbyforge/config':
+        specifier: workspace:*
+        version: link:../../packages/config
       typescript:
         specifier: ^5.4.5
         version: 5.9.3

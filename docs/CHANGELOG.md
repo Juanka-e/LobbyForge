@@ -2,6 +2,36 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - restore auto-discovery + checksum UX + Poll & Dice Bot plugins - 2026-09-17
+
+### Fixed (30th audit)
+
+- **P1 — backup restore on a real production install**: restore now runs
+  ensurePgContainer(targetUrl) first — the CI drill masked the missing
+  discovery by exporting LFCTL_PG_CONTAINER explicitly. New
+  production-shape regression spec (container env unset; fake docker
+  proves psql/pg_restore run via docker exec; a tampered dump is
+  refused before any tool runs).
+- **install.sh closing hint** no longer says "git pull && bash
+  install.sh" (it told operators to move a production checkout to
+  live main, bypassing the signed-release model) — only the lfctl
+  update commands are shown.
+- **Per-artifact checksums**: every release asset now ships a
+  matching `<file>.sha256` (standard hash+filename format) so users
+  verify exactly the file they downloaded; download-page commands use
+  real asset names and `shasum -a 256` on macOS.
+
+### Added
+
+- **Poll plugin** (`@lobbyforge/poll`): live one-vote-per-player polls
+  for voice rooms — state-enforced single ballot (kept across
+  close/reopen), host lifecycle, decisive-leader tally helpers;
+  9 reducer/policy tests; registered as a bundled plugin.
+- **Dice Bot plugin** (`@lobbyforge/dice-bot`): bot-style utility —
+  server-side rolls (client never supplies the outcome), clamped dice
+  sides, per-player stats (rolls/sum/best), capped newest-first
+  history, host toggle + stats reset; 6 tests; bundled.
+
 ## [Unreleased] - hub design sprint: landing, connect, download, discover, register - 2026-09-17
 
 ### Added

@@ -10,12 +10,16 @@
  */
 import { hushlePlugin } from '@lobbyforge/hushle';
 import { quizPlugin } from '@lobbyforge/quiz';
+import { pollPlugin } from '@lobbyforge/poll';
+import { diceBotPlugin } from '@lobbyforge/dice-bot';
 import { registerGamePlugin, type RegisteredGamePlugin } from '@lobbyforge/plugin-sdk';
 import type { PluginCatalogMetadata } from '@lobbyforge/plugin-sdk';
 
 export const PLUGINS: readonly RegisteredGamePlugin[] = [
   registerGamePlugin(hushlePlugin),
   registerGamePlugin(quizPlugin),
+  registerGamePlugin(pollPlugin),
+  registerGamePlugin(diceBotPlugin),
 ] as const;
 
 export type PluginSummary = {
