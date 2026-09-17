@@ -2,6 +2,24 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - product direction: Hub/Discover/Official Instance plan - 2026-09-17
+
+### Added
+
+- **ADR-006 — no central authentication**: the Official Hub has no
+  login/register; identity stays instance-local; self-hosting never
+  depends on a central account. A future LobbyForge ID would be an
+  OPTIONAL identity provider (hub conveniences + instance OAuth),
+  never a self-host requirement.
+- **docs/PRODUCT_HUB_PLAN.md** — the accepted direction for the first
+  post-RC product sprint: real landing at `/`, product `/discover` +
+  instance detail pages, `/connect` (replacing the phase-1 M9 demo),
+  `/download`, the official dogfood instance at
+  community.lobbyforge.com, the shared instance auth shell (with
+  registration-policy states), and an honest current-state → target
+  gap list. Trending/ranking, hub login and LobbyForge ID are
+  explicitly out of beta scope.
+
 ## [Unreleased] - strict allowlist for the zero-side-effect test (28th audit) - 2026-09-17
 
 - The drift-abort scenario now proves all three invariants directly:

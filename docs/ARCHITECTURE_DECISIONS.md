@@ -77,3 +77,25 @@ unsigned binaries, but this is acceptable for beta/closed testing.
 set up macOS Developer ID + notarization, add SHA-256 checksums and
 GitHub artifact attestations to the release workflow, pin release
 actions to commit SHAs.
+
+## ADR-006: No Central Authentication — the Hub Is Unauthenticated
+
+**Decision**: The Official Hub (lobbyforge.com) has NO login/register
+for end users. Identity is INSTANCE-LOCAL; self-hosting never depends
+on a central LobbyForge account. (Accepted — 2026-09-17.)
+
+Rationale: a hub-level login creates the user expectation "one
+LobbyForge account works on every LobbyForge server" — the opposite of
+the instance-local account model the platform is built on, and a
+central dependency for every self-host.
+
+Consequences:
+- Hub surfaces (landing, discover, connect, download, docs) are public
+  and read-only for visitors.
+- "Sign in" flows START at an instance: discover → community → the
+  instance's own `/login`.
+- The future **LobbyForge ID** (if built) is an OPTIONAL identity
+  provider for hub conveniences (starred communities, marketplace
+  developer profile, plugin publishing, synced desktop instance list)
+  and may be offered to instances as an OAuth provider — it is NEVER
+  required to self-host or to run an instance.
