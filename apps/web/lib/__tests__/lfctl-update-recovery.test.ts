@@ -18,7 +18,7 @@
 import { describe, expect, it } from 'vitest';
 import { generateKeyPairSync, createHash, sign } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -164,16 +164,19 @@ function runApply(
     configuredImageId?: string;
     wsContainer?: string;
     wsImageId?: string;
+    /** Run WITHOUT --backup-manifest (exercises the auto-backup path). */
+    noBackupManifest?: boolean;
   } = {}
 ) {
   const fakeViaBash = `bash ${sandbox.fakeDocker.replace(/\\/g, '/')}`;
+  const backupArg = opts.noBackupManifest ? '' : '--backup-manifest backup.manifest.json ';
   const res = spawnSync(
     'bash',
     [
       '-c',
       `cd "$1" && FAKE_DOCKER_LOG="$2" FAKE_UP_RCS="$3" LFCTL_DOCKER="$4" FAKE_WEB_CONTAINER="$5" \
          FAKE_IMAGE_ID="$6" FAKE_CONFIGURED_IMAGE_ID="$7" FAKE_WS_CONTAINER="$8" FAKE_WS_IMAGE_ID="$9" node "\${10}" update apply \
-        --manifest release-manifest.json --backup-manifest backup.manifest.json \
+        --manifest release-manifest.json ${backupArg}\
         --public-key release-public.pem --yes --force-major`,
       'run',
       sandbox.dir,
@@ -310,6 +313,8 @@ describe('lfctl update apply — rollout failure recovery (23rd-audit)', () => {
     const sandbox = makeSandbox();
     // 26th-audit: web/plugin-worker match each other, but ws-gateway was
     // hand-pointed at a different image — a web-only check would miss it.
+    // Only READ-ONLY preflight compose calls happen; no mutating up/update
+    // runs and .env.prod stays untouched.
     const { rc, out } = runApply(sandbox, '', {
       wsContainer: 'fake-ws-container',
       wsImageId: `sha256:${'f'.repeat(64)}`,
@@ -319,5 +324,30 @@ describe('lfctl update apply — rollout failure recovery (23rd-audit)', () => {
     expect(out).toContain('while web runs');
     expect(upCount(sandbox)).toBe(0);
     expect(envValue(sandbox, 'LOBBYFORGE_IMAGE')).toBe('lobbyforge-web:latest'); // untouched
+  });
+
+  it('drift + NO --backup-manifest: auto-backup never runs (zero side effects, directly)', () => {
+    const sandbox = makeSandbox();
+    writeFileSync(
+      join(sandbox.dir, '.env.prod'),
+      `LOBBYFORGE_VERSION=9.9.8\nLOBBYFORGE_IMAGE=${CONFIGURED_DIGEST_REF}\nNODE_ENV=production\n`
+    );
+    // 27th-audit: the preflight ordering means a drift abort must not even
+    // create a backup FILE — assert it directly on the auto-backup path
+    // (no --backup-manifest, no DATABASE_URL around to make one with).
+    const { rc, out } = runApply(sandbox, '', {
+      noBackupManifest: true,
+      configuredImageId: `sha256:${'e'.repeat(64)}`,
+    });
+    expect(rc, out).toBe(2);
+    expect(out).toContain('Deployed-image drift');
+    expect(upCount(sandbox)).toBe(0);
+    // auto-backup writes to ./backups/ — it must not exist at all.
+    // (backup.dump/backup.manifest.json are staged by makeSandbox for the
+    // explicit-manifest flow and are expected.)
+    expect(readdirSync(sandbox.dir)).not.toContain('backups');
+    const dockerCallsList = dockerCalls(sandbox);
+    // Read-only preflight only — no pull/run/up ever issued.
+    expect(dockerCallsList.some((c) => /\b(pull|run|up)\b/.test(c))).toBe(false);
   });
 });

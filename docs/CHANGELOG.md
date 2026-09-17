@@ -2,6 +2,15 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - drift side-effect coverage + doc nits (27th audit) - 2026-09-17
+
+- New regression scenario asserting the zero-side-effect drift abort
+  DIRECTLY on the auto-backup path (no --backup-manifest): no backups/
+  directory is ever created and the only docker invocations are the
+  read-only preflight ones (recovery spec 8/8).
+- BETA_RELEASE platform wording matches the workflow: the amd64 pin is
+  explicit in code, not a "GitHub runner default".
+
 ## [Unreleased] - fleet-wide drift preflight (26th audit) - 2026-09-17
 
 ### Changed

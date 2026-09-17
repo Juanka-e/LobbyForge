@@ -27,9 +27,10 @@ Status: Ready for closed beta — 2026-09-16
 
 ## Known release-engineering constraints (pre-stable decisions)
 
-- **Release image is linux/amd64 only** (GitHub runner default). Beta targets
-  standard x86_64 VPSes. ARM64 (Oracle ARM, Raspberry Pi class) requires
-  `platforms: linux/amd64,linux/arm64` + QEMU in the build and a
+- **Release image is explicitly pinned to linux/amd64 for beta** (the
+  workflow sets `platforms: linux/amd64` — not a runner default). Beta
+  targets standard x86_64 VPSes. ARM64 (Oracle ARM, Raspberry Pi class)
+  requires `platforms: linux/amd64,linux/arm64` + QEMU in the build and a
   multi-arch scan strategy — evaluate after beta.
 - **Candidates live in the public package**: GHCR visibility is
   package-level and public→private is not reversible, so after the first
