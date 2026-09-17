@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 interface DirectoryCard {
   instanceId: string;
@@ -39,6 +39,26 @@ export default function DiscoveryGrid({
   labels: Labels;
 }) {
   const [reporting, setReporting] = useState<DirectoryCard | null>(null);
+  // Client-side quick filters (the server already handles search + region).
+  const [verifiedOnly, setVerifiedOnly] = useState(false);
+  const [onlineOnly, setOnlineOnly] = useState(false);
+  const [language, setLanguage] = useState('');
+
+  const languages = useMemo(
+    () => Array.from(new Set(instances.flatMap((i) => i.languages ?? []))).sort(),
+    [instances]
+  );
+
+  const visible = useMemo(
+    () =>
+      instances.filter(
+        (i) =>
+          (!verifiedOnly || i.isVerified) &&
+          (!onlineOnly || i.onlineUsers > 0) &&
+          (!language || (i.languages ?? []).includes(language))
+      ),
+    [instances, verifiedOnly, onlineOnly, language]
+  );
 
   return (
     <div className="min-h-dvh bg-background">
@@ -47,8 +67,9 @@ export default function DiscoveryGrid({
         <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link
-              href="/lobby"
+              href="/discover"
               className="rounded-md p-1.5 text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors"
+              aria-label="Back to the directory"
             >
               <span className="material-symbols-outlined text-[20px]">arrow_back</span>
             </Link>
@@ -107,15 +128,63 @@ export default function DiscoveryGrid({
           </details>
         </div>
 
+        {/* Quick filters (client-side) */}
+        <div className="flex flex-wrap items-center gap-2 mb-8">
+          <button
+            type="button"
+            aria-pressed={verifiedOnly}
+            onClick={() => setVerifiedOnly((v) => !v)}
+            className={`rounded-full border px-4 py-1.5 text-xs transition-colors ${
+              verifiedOnly
+                ? 'border-primary/50 bg-primary/10 text-primary'
+                : 'border-border-subtle bg-surface-raised text-text-secondary hover:text-text-primary'
+            }`}
+          >
+            <span className="material-symbols-outlined text-[13px] align-middle mr-1">verified</span>
+            Verified only
+          </button>
+          <button
+            type="button"
+            aria-pressed={onlineOnly}
+            onClick={() => setOnlineOnly((v) => !v)}
+            className={`rounded-full border px-4 py-1.5 text-xs transition-colors ${
+              onlineOnly
+                ? 'border-ember/50 bg-ember/10 text-ember'
+                : 'border-border-subtle bg-surface-raised text-text-secondary hover:text-text-primary'
+            }`}
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-current inline-block mr-1.5" />
+            Online now
+          </button>
+          {languages.length > 1 ? (
+            <label className="flex items-center gap-2 rounded-full border border-border-subtle bg-surface-raised px-4 py-1.5 text-xs text-text-secondary">
+              <span className="material-symbols-outlined text-[13px]">translate</span>
+              <select
+                value={language}
+                onChange={(e) => setLanguage(e.target.value)}
+                className="bg-transparent text-text-secondary outline-none cursor-pointer"
+                aria-label="Filter by language"
+              >
+                <option value="">All languages</option>
+                {languages.map((lang) => (
+                  <option key={lang} value={lang}>
+                    {lang}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+        </div>
+
         {/* Results count */}
         <p className="text-sm text-text-muted mb-4">
-          {instances.length === 1
+          {visible.length === 1
             ? labels.communityFound
-            : (labels.communitiesFound ?? '').replace('{{count}}', String(instances.length))}
+            : (labels.communitiesFound ?? '').replace('{{count}}', String(visible.length))}
         </p>
 
         {/* Grid */}
-        {instances.length === 0 ? (
+        {visible.length === 0 ? (
           <div className="rounded-2xl border border-border-subtle bg-surface p-12 text-center">
             <span className="material-symbols-outlined text-5xl text-text-muted mb-3 block">explore_off</span>
             <h2 className="text-base font-semibold text-text-primary">{labels.noResults}</h2>
@@ -124,10 +193,17 @@ export default function DiscoveryGrid({
                 ? (labels.noResultsQuery ?? '').replace('{{query}}', query)
                 : labels.noListedYet}
             </p>
+            <p className="mt-3 text-sm text-text-muted">
+              Try clearing the filters above, or{' '}
+              <Link href="/connect" className="text-primary hover:underline underline-offset-4">
+                connect by address
+              </Link>
+              .
+            </p>
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {instances.map((inst) => (
+            {visible.map((inst) => (
               <DirectoryCard
                 key={inst.instanceId}
                 instance={inst}
@@ -158,8 +234,8 @@ function DirectoryCard({
   const tags = (instance.tags as string[]).slice(0, 4);
   return (
     <div className="group relative rounded-2xl border border-border-subtle bg-surface hover:border-primary/40 transition-all">
-      <a
-        href={`/discover/go?id=${encodeURIComponent(instance.instanceId)}`}
+      <Link
+        href={`/discover/${encodeURIComponent(instance.instanceId)}`}
         className="block p-5 h-full"
       >
         <div className="flex items-start gap-3 mb-3">
@@ -222,7 +298,7 @@ function DirectoryCard({
             </span>
           ) : null}
         </div>
-      </a>
+      </Link>
       {/* Faz D: report entry point on the card */}
       <button
         type="button"

@@ -9,18 +9,23 @@ export default function LoginForm({
   guestEnabled,
   registrationMode,
   initialInviteCode,
+  initialMode = 'login',
   desktopLoginState,
 }: {
   guestEnabled: boolean;
   registrationMode: RegistrationMode;
   initialInviteCode: string;
+  /** Deep-link start mode (/register and ?mode=register land on the tab). */
+  initialMode?: 'login' | 'register';
   /** Native shell's pending handoff state (?desktopLoginState=...). */
   desktopLoginState?: string;
 }) {
   const router = useRouter();
   const canRegister = registrationMode !== 'closed';
   const inviteOnly = registrationMode === 'invite_only';
-  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [mode, setMode] = useState<'login' | 'register'>(
+    initialMode === 'register' && canRegister ? 'register' : 'login'
+  );
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [accountDisplayName, setAccountDisplayName] = useState('');

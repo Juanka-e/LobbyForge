@@ -60,9 +60,7 @@ function MarketingNav() {
         </div>
         <div className="flex items-center gap-4">
           <a
-            href={`${REPO}/releases`}
-            target="_blank"
-            rel="noopener noreferrer"
+            href="/download"
             className="hidden md:block text-text-secondary hover:text-text-primary font-label-sm text-label-sm"
           >
             Download

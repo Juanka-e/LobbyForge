@@ -6,7 +6,7 @@ test.beforeEach(async ({ request }) => {
 
 test('renders dashboard layout and navigates servers', async ({ page }) => {
   // 1. Create a guest session and log in
-  await page.goto('/connect');
+  await page.goto('/connect/demo');
   await page.click('button:has-text("Create Guest")');
   
   // Wait for the cookie to be set and successful connection

@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ invite?: string; desktopLoginState?: string }>;
+  searchParams: Promise<{ invite?: string; mode?: string; desktopLoginState?: string }>;
 }) {
   if (isOfficialDeployment()) redirect('/landing');
   const setup = await getInstanceBootstrapStatus(getDb());
@@ -24,7 +24,7 @@ export default async function LoginPage({
   if (session?.uid) redirect('/lobby');
 
   const settings = await getEffectiveInstanceAccessSettings(getDb());
-  const { invite = '', desktopLoginState } = await searchParams;
+  const { invite = '', desktopLoginState, mode } = await searchParams;
   const instanceName =
     setup.instanceName || process.env.LOBBYFORGE_INSTANCE_NAME?.trim() || 'LobbyForge Community';
   const inviteOnly = settings.registrationMode === 'invite_only';
@@ -73,7 +73,20 @@ export default async function LoginPage({
           guestEnabled={settings.guestAccessEnabled && settings.registrationMode !== 'closed'}
           registrationMode={settings.registrationMode}
           initialInviteCode={invite}
-         desktopLoginState={desktopLoginState} />
+          initialMode={mode === 'register' ? 'register' : 'login'}
+          desktopLoginState={desktopLoginState} />
+
+        <p className="mt-7 text-center text-xs text-text-muted">
+          Powered by{' '}
+          <a
+            href="https://github.com/Juanka-e/LobbyForge"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-text-muted underline decoration-border-strong underline-offset-2 hover:text-text-secondary"
+          >
+            LobbyForge
+          </a>
+        </p>
       </section>
     </div>
   );

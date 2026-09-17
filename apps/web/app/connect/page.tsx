@@ -1,214 +1,179 @@
 /**
- * Client-side "Connect" demo. Walks a fresh visitor through the M9 flow:
- *   1. POST /api/auth/guest     → sets lf_guest cookie, returns the identity
- *   2. POST /api/livekit/token  → exchanges the cookie for a LiveKit JWT
- *   3. The token + identity are then used by the LiveKit client SDK
- *      (added in a later pass) to actually connect to a room.
+ * Product Connect page — the front door for "I have an instance URL".
  *
- * This page is intentionally a thin shell — it exists to make the "two
- * browsers in the same room" success criterion from Phase 1 of the roadmap
- * verifiable end-to-end without a custom UI framework. Once the real
- * voice-room UI lands, this page is removed.
+ * Per ADR-006 the hub has NO accounts: you enter a community's address
+ * and sign in ON THAT COMMUNITY'S OWN SITE. This page never handles
+ * credentials.
+ *
+ * (The phase-1 guest/LiveKit walkthrough this route used to host lives
+ * on at /connect/demo — the dev e2e specs still exercise it.)
  */
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 
-type Guest = { gid: string; name: string; ttlSeconds?: number; iat?: number; exp?: number };
-type Token = { token: string; identity: string; room: string; ttlSeconds: number; expiresAt: number };
-type Status = { kind: 'idle' } | { kind: 'busy' } | { kind: 'error'; message: string } | { kind: 'ok'; message: string };
+const RECENT_KEY = 'lf-recent-instances';
+
+function normalizeHost(input: string): string | null {
+  const trimmed = input.trim().toLowerCase();
+  if (!trimmed) return null;
+  // Accept bare hosts (community.example.com) or full https URLs.
+  const candidate = /^https?:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const url = new URL(candidate);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+    if (!url.hostname.includes('.') && url.hostname !== 'localhost') return null;
+    return url.hostname + (url.port ? `:${url.port}` : '');
+  } catch {
+    return null;
+  }
+}
 
 export default function ConnectPage() {
-  const [guest, setGuest] = useState<Guest | null>(null);
-  const [token, setToken] = useState<Token | null>(null);
-  const [serverId, setServerId] = useState('');
-  const [channelId, setChannelId] = useState('');
-  const [status, setStatus] = useState<Status>({ kind: 'idle' });
+  const [value, setValue] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [recent, setRecent] = useState<string[]>([]);
 
-  // Probe the current session on mount so a returning visitor sees their gid.
   useEffect(() => {
-    void refreshGuest();
+    try {
+      const raw = window.localStorage.getItem(RECENT_KEY);
+      if (raw) setRecent(JSON.parse(raw).filter((h: unknown) => typeof h === 'string').slice(0, 5));
+    } catch {
+      // localStorage unavailable/blocked — recents are cosmetic, ignore.
+    }
   }, []);
 
-  const refreshGuest = useCallback(async () => {
-    setStatus({ kind: 'busy' });
-    try {
-      const res = await fetch('/api/auth/guest', { method: 'GET', credentials: 'same-origin' });
-      if (res.status === 401) {
-        setGuest(null);
-        setStatus({ kind: 'idle' });
-        return;
+  function remember(host: string) {
+    setRecent((prev) => {
+      const next = [host, ...prev.filter((h) => h !== host)].slice(0, 5);
+      try {
+        window.localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
       }
-      if (!res.ok) throw new Error(`GET /api/auth/guest → ${res.status}`);
-      const data = (await res.json()) as { guest: Guest };
-      setGuest(data.guest);
-      setStatus({ kind: 'ok', message: `Existing session for ${data.guest.name}` });
-    } catch (err) {
-      setStatus({ kind: 'error', message: (err as Error).message });
-    }
-  }, []);
+      return next;
+    });
+  }
 
-  const createGuest = useCallback(async () => {
-    setStatus({ kind: 'busy' });
-    try {
-      const res = await fetch('/api/auth/guest', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
-      if (!res.ok) throw new Error(`POST /api/auth/guest → ${res.status}`);
-      const data = (await res.json()) as { guest: Guest };
-      setGuest(data.guest);
-      setStatus({ kind: 'ok', message: `Created guest ${data.guest.name}` });
-    } catch (err) {
-      setStatus({ kind: 'error', message: (err as Error).message });
-    }
-  }, []);
-
-  const getToken = useCallback(async () => {
-    if (!guest) {
-      setStatus({ kind: 'error', message: 'Create a guest first.' });
+  function connect(rawInput: string) {
+    const host = normalizeHost(rawInput);
+    if (!host) {
+      setError('Enter a valid community address, e.g. community.example.com');
       return;
     }
-    if (!serverId || !channelId) {
-      setStatus({ kind: 'error', message: 'Server id and channel id are required.' });
-      return;
-    }
-    setStatus({ kind: 'busy' });
-    try {
-      const res = await fetch('/api/livekit/token', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serverId, channelId }),
-      });
-      if (res.status === 401) {
-        setStatus({ kind: 'error', message: 'Session expired. Click "Create guest" again.' });
-        return;
-      }
-      if (!res.ok) {
-        const detail = await res.json().catch(() => ({}));
-        throw new Error(`POST /api/livekit/token → ${res.status} ${JSON.stringify(detail)}`);
-      }
-      const data = (await res.json()) as Token;
-      setToken(data);
-      setStatus({ kind: 'ok', message: `Token issued for room "${data.room}", identity ${data.identity}` });
-    } catch (err) {
-      setStatus({ kind: 'error', message: (err as Error).message });
-    }
-  }, [guest, serverId, channelId]);
+    setError(null);
+    remember(host);
+    window.open(`https://${host}/login`, '_blank', 'noopener');
+  }
 
   return (
-    <section>
-      <h1 style={{ marginTop: 0 }}>Connect (developer surface)</h1>
-      <p style={{ color: '#9aa3ad' }}>
-        Step 1 creates a guest session cookie. Step 2 exchanges that cookie for a LiveKit access token
-        for the room you specify. Open this page in two browsers (or one normal + one incognito) to
-        verify the two-browser voice test from the roadmap.
-      </p>
+    <section className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop w-full flex flex-col items-center pt-8">
+      <div className="w-full max-w-xl flex flex-col gap-8">
+        <div className="text-center flex flex-col gap-4">
+          <h1 className="font-display font-bold text-[36px] sm:text-[44px] leading-tight tracking-tight text-text-primary text-balance">
+            Connect to a LobbyForge community
+          </h1>
+          <p className="font-body-lg text-body-lg text-text-secondary text-pretty">
+            Enter the address of the community you want to join.
+          </p>
+        </div>
 
-      <div style={{ display: 'grid', gap: 16, maxWidth: 640 }}>
-        <Step
-          step={1}
-          title="Guest session"
-          description={guest ? `Active: ${guest.name} (${guest.gid})` : 'No active guest session.'}
-          actions={
-            <>
-              <button onClick={createGuest} disabled={status.kind === 'busy'}>
-                {guest ? 'Recreate guest' : 'Create guest'}
-              </button>
-              <button onClick={refreshGuest} disabled={status.kind === 'busy'}>
-                Refresh
-              </button>
-            </>
-          }
-        />
-        <Step
-          step={2}
-          title="LiveKit token"
-          description={
-            token
-              ? `Issued for room "${token.room}", identity ${token.identity}, ttl ${token.ttlSeconds}s.`
-              : 'Enter a server id and voice channel id, then click "Get token".'
-          }
-          actions={
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <input
-                value={serverId}
-                onChange={(e) => setServerId(e.target.value)}
-                placeholder="server uuid"
-                style={{
-                  padding: '6px 8px',
-                  background: '#0f1115',
-                  color: '#e6e8eb',
-                  border: '1px solid #1f242c',
-                  borderRadius: 4,
-                }}
-              />
-              <input
-                value={channelId}
-                onChange={(e) => setChannelId(e.target.value)}
-                placeholder="voice channel uuid"
-                style={{
-                  padding: '6px 8px',
-                  background: '#0f1115',
-                  color: '#e6e8eb',
-                  border: '1px solid #1f242c',
-                  borderRadius: 4,
-                }}
-              />
-              <button onClick={getToken} disabled={status.kind === 'busy'}>
-                Get token
-              </button>
-            </div>
-          }
-        />
-      </div>
-
-      <StatusLine status={status} />
-      {token ? (
-        <details style={{ marginTop: 16 }}>
-          <summary>Show token (JWT)</summary>
-          <pre
-            style={{
-              background: '#0a0c0f',
-              padding: 12,
-              borderRadius: 4,
-              overflow: 'auto',
-              maxWidth: 880,
+        <form
+          className="flex flex-col sm:flex-row gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            connect(value);
+          }}
+        >
+          <label htmlFor="instance-url" className="sr-only">
+            Community address
+          </label>
+          <input
+            id="instance-url"
+            name="instance-url"
+            type="text"
+            inputMode="url"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="community.example.com"
+            value={value}
+            onChange={(e) => {
+              setValue(e.target.value);
+              if (error) setError(null);
             }}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? 'instance-url-error' : undefined}
+            className="auth-input flex-grow font-mono"
+          />
+          <button
+            type="submit"
+            className="bg-primary-container text-[#07101E] px-8 py-2.5 rounded-lg font-label-sm text-label-sm hover:brightness-110 transition-all shrink-0"
           >
-            {token.token}
-          </pre>
-        </details>
-      ) : null}
+            Continue
+          </button>
+        </form>
+        {error ? (
+          <p id="instance-url-error" role="alert" className="text-sm text-ember -mt-4">
+            {error}
+          </p>
+        ) : null}
+
+        <p className="text-sm text-text-muted leading-relaxed text-center">
+          You&apos;ll sign in on the community&apos;s own site — LobbyForge has no central account.
+        </p>
+
+        {recent.length > 0 ? (
+          <div className="flex flex-col gap-3">
+            <h2 className="font-label-xs text-label-xs text-text-muted tracking-[0.15em] uppercase">
+              Recent communities
+            </h2>
+            <ul className="flex flex-col gap-2">
+              {recent.map((host) => (
+                <li key={host} className="flex items-center gap-2 bg-surface-raised border border-border-subtle rounded-lg px-4 py-3">
+                  <button
+                    type="button"
+                    onClick={() => connect(host)}
+                    className="flex-grow text-left text-text-primary font-mono text-sm hover:text-primary transition-colors truncate"
+                  >
+                    {host}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${host} from recent communities`}
+                    onClick={() => {
+                      setRecent((prev) => {
+                        const next = prev.filter((h) => h !== host);
+                        try {
+                          window.localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+                        } catch {
+                          // ignore
+                        }
+                        return next;
+                      });
+                    }}
+                    className="material-symbols-outlined text-text-muted hover:text-text-primary transition-colors text-lg"
+                  >
+                    close
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <p className="text-sm text-text-muted text-center">
+            No communities yet —{' '}
+            <a href="/discover" className="text-primary underline decoration-primary/40 underline-offset-4 hover:decoration-primary">
+              browse the directory
+            </a>{' '}
+            or connect by address above.
+          </p>
+        )}
+
+        <p className="text-sm text-text-muted text-center">
+          Using the desktop app? It accepts <span className="font-mono">lobbyforge://</span> links
+          from any instance.
+        </p>
+      </div>
     </section>
   );
-}
-
-function Step(props: { step: number; title: string; description: string; actions: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        border: '1px solid #1f242c',
-        borderRadius: 8,
-        padding: 16,
-        background: '#11151b',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
-        <strong style={{ fontSize: 18 }}>Step {props.step}: {props.title}</strong>
-      </div>
-      <p style={{ color: '#9aa3ad', margin: '8px 0' }}>{props.description}</p>
-      <div style={{ display: 'flex', gap: 8 }}>{props.actions}</div>
-    </div>
-  );
-}
-
-function StatusLine({ status }: { status: Status }) {
-  if (status.kind === 'idle') return null;
-  const color =
-    status.kind === 'busy' ? '#9aa3ad' : status.kind === 'error' ? '#e36049' : '#5ad48a';
-  return <p style={{ color, marginTop: 16 }}>{status.kind === 'busy' ? '…' : status.message}</p>;
 }
