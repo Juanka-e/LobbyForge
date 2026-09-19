@@ -36,13 +36,17 @@ vi.mock('@/lib/security-headers', () => ({
   withApiSecurity: (handler: unknown) => handler,
 }));
 
+const { recordSession } = vi.hoisted(() => ({ recordSession: vi.fn() }));
+vi.mock('@/lib/session-tracker', () => ({ recordSession }));
+
 const envSnapshot = { ...process.env };
 
 beforeEach(() => {
   process.env.LOBBYFORGE_SESSION_SECRET = 'x'.repeat(32);
-  for (const fn of [redisGet, redisSet, redisDel, redisGetdel, getUserCredentialsByEmail, getUserById, verifyPassword]) {
+  for (const fn of [redisGet, redisSet, redisDel, redisGetdel, getUserCredentialsByEmail, getUserById, verifyPassword, recordSession]) {
     fn.mockReset();
   }
+  recordSession.mockResolvedValue(undefined);
   redisSet.mockResolvedValue('OK');
   redisDel.mockResolvedValue(1);
   redisGetdel.mockResolvedValue(null);
@@ -166,5 +170,51 @@ describe('POST /api/auth/desktop-session/complete', () => {
   it('400 for a too-short code', async () => {
     const res = await complete({ code: 'short', state: STATE });
     expect(res.status).toBe(400);
+  });
+});
+
+// beta-review (S7): the handoff-minted session must be RECORDED (and so
+// revocable by a password change) before the cookie is handed out.
+describe('POST /api/auth/desktop-session/complete — beta-review S7 session tracking', () => {
+  const CODE = 'c'.repeat(48);
+  const STATE = 's'.repeat(32);
+
+  it('records the minted session under the cookie gid', async () => {
+    redisGetdel.mockResolvedValue(JSON.stringify({ userId: 'u-1', state: STATE, used: false }));
+    const res = await complete({ code: CODE, state: STATE });
+    expect(res.status).toBe(200);
+    const { readGuestSession } = await import('@/lib/guest-session');
+    const session = readGuestSession(res.headers.get('set-cookie'), 'x'.repeat(32));
+    expect(session?.uid).toBe('u-1');
+    expect(recordSession).toHaveBeenCalledWith('u-1', session?.gid, expect.any(Request));
+  });
+
+  it('outside production a tracking failure only logs', async () => {
+    recordSession.mockRejectedValue(new Error('redis down'));
+    redisGetdel.mockResolvedValue(JSON.stringify({ userId: 'u-1', state: STATE, used: false }));
+    const res = await complete({ code: CODE, state: STATE });
+    expect(res.status).toBe(200);
+  });
+
+  it('in production an unrecorded session is never handed out', async () => {
+    const env = process.env as Record<string, string | undefined>;
+    const previous = env.NODE_ENV;
+    env.NODE_ENV = 'production';
+    try {
+      recordSession.mockRejectedValue(new Error('redis down'));
+      redisGetdel.mockResolvedValue(JSON.stringify({ userId: 'u-1', state: STATE, used: false }));
+      const res = await complete({ code: CODE, state: STATE });
+      expect(res.status).toBe(503);
+      expect(res.headers.get('set-cookie')).toBeNull();
+    } finally {
+      env.NODE_ENV = previous;
+    }
+  });
+
+  it('no session is recorded when the handoff fails', async () => {
+    redisGetdel.mockResolvedValue(null);
+    const res = await complete({ code: CODE, state: STATE });
+    expect(res.status).toBe(401);
+    expect(recordSession).not.toHaveBeenCalled();
   });
 });

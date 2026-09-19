@@ -25,9 +25,13 @@ export const runtime = 'nodejs';
  *   2. possession of the CURRENT stored private key — a nonce
  *      challenge signed with it (proves key control, not just session);
  *   3. the NEW domain to serve a valid .well-known verification
- *      document for the same instanceId + publicKey (the same
- *      server-side SSRF-safe proof registration uses);
+ *      document for the same instanceId + the STORED publicKey (the
+ *      same server-side SSRF-safe proof registration uses);
  *   4. a timestamp window + one-time nonce (replay guard).
+ *
+ * beta-review (S10): a moved instance goes back through directory
+ * review — the change resets isVerified/isListed (an admin re-lists it),
+ * so a listed + verified badge never silently follows a domain move.
  */
 const ChangeDomainSchema = z.object({
   instanceId: z.string().min(3).max(128),
@@ -39,6 +43,24 @@ const ChangeDomainSchema = z.object({
 }).strict();
 
 const MAX_SKEW_SECONDS = 300;
+
+/**
+ * beta-review (S10): are two public keys the SAME key? Compared on the
+ * canonical SPKI DER bytes so PEM vs base64-DER encodings of one key
+ * still match, while any other key is refused.
+ */
+function isSamePublicKey(
+  a: ReturnType<typeof createPublicKey>,
+  b: ReturnType<typeof createPublicKey>
+): boolean {
+  try {
+    const da = a.export({ type: 'spki', format: 'der' });
+    const db = b.export({ type: 'spki', format: 'der' });
+    return da.length === db.length && da.equals(db);
+  } catch {
+    return false;
+  }
+}
 
 function parsePublicKeyPemOrDer(stored: string): ReturnType<typeof createPublicKey> | null {
   try {
@@ -143,6 +165,16 @@ async function handlePost(req: Request): Promise<NextResponse> {
     if (!docKey) {
       return NextResponse.json({ error: 'Document publicKey is not usable' }, { status: 400 });
     }
+    // beta-review (S10): the document must carry the instance's STORED
+    // key. Verifying only the document's self-signed proof let the new
+    // domain vouch for itself with ANY key pair — the new domain must be
+    // controlled by the same key holder that signed the change.
+    if (!isSamePublicKey(docKey, oldKey)) {
+      return NextResponse.json(
+        { error: 'Verification document publicKey does not match the registered key' },
+        { status: 401 }
+      );
+    }
     // Verify the DOCUMENT's own proof (13th-audit cleanup: one proof
     // source — the document — instead of a request-carried twin).
     const canonicalDomain = JSON.stringify({
@@ -182,7 +214,8 @@ async function handlePost(req: Request): Promise<NextResponse> {
     if (!changed) {
       return NextResponse.json({ error: 'Domain change failed' }, { status: 500 });
     }
-    return NextResponse.json({ ok: true, domain: normalizedDomain });
+    // The change also unlisted + unverified the entry (re-review).
+    return NextResponse.json({ ok: true, domain: normalizedDomain, isListed: false, isVerified: false });
   } catch {
     return NextResponse.json({ error: 'Domain change failed' }, { status: 500 });
   }

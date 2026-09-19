@@ -13,6 +13,8 @@ const getServerById = vi.fn();
 const isServerMember = vi.fn();
 const getUserSettings = vi.fn();
 const getBlockedUserIds = vi.fn();
+const getUserPermissions = vi.fn();
+const listVisibleChannelsForMember = vi.fn();
 
 vi.mock('@/lib/api-auth', () => ({
   requireMaterializedSession,
@@ -26,13 +28,24 @@ vi.mock('@/lib/redis', () => ({
   getUserPresenceInServer,
 }));
 vi.mock('@/lib/presence-bus', () => ({ publishPresenceChange }));
-vi.mock('@/lib/presence-privacy', () => ({ applyPresencePrivacy: (p: unknown) => p }));
+// beta-review: the REAL privacy projector runs here — the route's
+// contract is what a viewer actually receives.
 vi.mock('@lobbyforge/db', () => ({
-  DEFAULT_USER_PRIVACY_SETTINGS: { hidePresence: false },
+  DEFAULT_USER_PRIVACY_SETTINGS: {
+    profileVisibility: 'server_members',
+    onlineStatusVisibility: 'server_members',
+    activityVisibility: 'server_members',
+    showCurrentGame: true,
+    showMusicStatus: true,
+    showWatchPartyStatus: true,
+    showServerNameInActivity: false,
+  },
   getServerById,
   isServerMember,
   getUserSettings,
   getBlockedUserIds,
+  getUserPermissions,
+  listVisibleChannelsForMember,
 }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
 vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));
@@ -61,6 +74,8 @@ beforeEach(() => {
   isServerMember.mockReset();
   getUserSettings.mockReset();
   getBlockedUserIds.mockReset();
+  getUserPermissions.mockReset().mockResolvedValue([]);
+  listVisibleChannelsForMember.mockReset().mockResolvedValue([]);
   // Defaults for POST.
   requireMaterializedSession.mockReturnValue({
     ok: true,
@@ -99,6 +114,24 @@ describe('POST /api/presence', () => {
     expect(res.status).toBe(200);
     expect(setUserPresence).toHaveBeenCalledWith(UID, SERVER_ID, CHANNEL_ID, 'online', 90, undefined);
     expect(publishPresenceChange).toHaveBeenCalled();
+  });
+
+  it('publishes a content-free signal — no status, channel, activity or user id (beta-review S5)', async () => {
+    const { POST } = await loadRoute();
+    await POST(
+      new Request('https://example.test/api/presence', {
+        method: 'POST',
+        body: JSON.stringify({
+          serverId: SERVER_ID,
+          channelId: CHANNEL_ID,
+          status: 'dnd',
+          activity: { kind: 'game', label: 'Secret game', serverName: 'Hidden server' },
+        }),
+      }),
+      {}
+    );
+    expect(publishPresenceChange).toHaveBeenCalledTimes(1);
+    expect(publishPresenceChange).toHaveBeenCalledWith({ serverId: SERVER_ID });
   });
 
   it('forwards bandwidthDeltaBytes to incrServerBandwidth when present and positive', async () => {
@@ -210,5 +243,85 @@ describe('GET /api/presence', () => {
     const { GET } = await loadRoute();
     const res = await GET(new Request(`https://example.test/api/presence?serverId=${SERVER_ID}`), {});
     expect(res.status).toBe(401);
+  });
+});
+
+describe('GET /api/presence — beta-review F8 channel visibility + privacy', () => {
+  const PRIVATE_CH = '00000000-0000-0000-0000-0000000000C1';
+  const OTHER = '00000000-0000-0000-0000-0000000000D1';
+  const OWNER = '00000000-0000-0000-0000-0000000000BB';
+
+  async function getAs(uid: string) {
+    const { GET } = await loadRoute();
+    const res = await GET(
+      new Request(`https://example.test/api/presence?serverId=${SERVER_ID}`, {
+        headers: { cookie: makeCookie(uid) },
+      }),
+      {}
+    );
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { presences: Array<Record<string, unknown>> }).presences;
+  }
+
+  beforeEach(() => {
+    getServerById.mockResolvedValue({ ownerUserId: OWNER });
+    isServerMember.mockResolvedValue(true);
+    getBlockedUserIds.mockResolvedValue(new Set());
+    getUserSettings.mockResolvedValue(null);
+    getUserPresenceInServer.mockResolvedValue([
+      { userId: OTHER, status: 'online', channelId: PRIVATE_CH, lastSeen: 1 },
+      { userId: OWNER, status: 'online', channelId: CHANNEL_ID, lastSeen: 1 },
+      { userId: UID, status: 'online', channelId: PRIVATE_CH, lastSeen: 1 },
+    ]);
+  });
+
+  it('strips channelId for channels the member cannot see (self keeps its own)', async () => {
+    listVisibleChannelsForMember.mockResolvedValue([{ id: CHANNEL_ID }]);
+    const presences = await getAs(UID);
+    const byUser = new Map(presences.map((p) => [p.userId, p]));
+    expect(byUser.get(OTHER)?.channelId).toBeNull();
+    expect(byUser.get(OWNER)?.channelId).toBe(CHANNEL_ID);
+    expect(byUser.get(UID)?.channelId).toBe(PRIVATE_CH);
+    expect(listVisibleChannelsForMember).toHaveBeenCalledWith(expect.anything(), SERVER_ID, UID);
+  });
+
+  it('MANAGE_CHANNELS sees every channel (no visibility lookup)', async () => {
+    getUserPermissions.mockResolvedValue(['manage_channels']);
+    const presences = await getAs(UID);
+    expect(presences.find((p) => p.userId === OTHER)?.channelId).toBe(PRIVATE_CH);
+    expect(listVisibleChannelsForMember).not.toHaveBeenCalled();
+  });
+
+  it('the owner sees every channel', async () => {
+    const presences = await getAs(OWNER);
+    expect(presences.find((p) => p.userId === OTHER)?.channelId).toBe(PRIVATE_CH);
+    expect(listVisibleChannelsForMember).not.toHaveBeenCalled();
+  });
+
+  it('applies the target user privacy settings (hidden status, no activity)', async () => {
+    listVisibleChannelsForMember.mockResolvedValue([{ id: CHANNEL_ID }, { id: PRIVATE_CH }]);
+    getUserPresenceInServer.mockResolvedValue([
+      {
+        userId: OTHER,
+        status: 'dnd',
+        channelId: CHANNEL_ID,
+        lastSeen: 1,
+        activity: { kind: 'game', label: 'Quiz', serverName: 'Secret' },
+      },
+    ]);
+    getUserSettings.mockResolvedValue({
+      privacy: {
+        profileVisibility: 'server_members',
+        onlineStatusVisibility: 'nobody',
+        activityVisibility: 'nobody',
+        showCurrentGame: true,
+        showMusicStatus: true,
+        showWatchPartyStatus: true,
+        showServerNameInActivity: true,
+      },
+    });
+    const [presence] = await getAs(UID);
+    expect(presence?.status).toBe('hidden');
+    expect(presence?.activity).toBeUndefined();
   });
 });

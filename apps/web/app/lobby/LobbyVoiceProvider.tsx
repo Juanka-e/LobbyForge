@@ -10,11 +10,14 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Room,
   RoomEvent,
   ConnectionState,
+  DisconnectReason,
   Track,
+  supportsAudioOutputSelection,
   type LocalTrack,
   type Participant,
   type RemoteTrack,
@@ -23,6 +26,7 @@ import {
   type VideoCaptureOptions,
   type ScreenShareCaptureOptions,
 } from 'livekit-client';
+import { resolveBrowserLiveKitUrl } from '@/lib/public-endpoints';
 import {
   mergeVoiceVideoPreferences,
   type ScreenFps,
@@ -66,6 +70,8 @@ export interface LobbyVoiceParticipant {
   cameraEnabled: boolean;
   /** True when this participant is publishing a screen-share track. */
   hasScreenShare: boolean;
+  /** Moderator server mute (the participant may not publish a microphone). */
+  serverMuted?: boolean;
 }
 
 export interface LobbyVoiceContextValue {
@@ -106,6 +112,11 @@ export interface LobbyVoiceContextValue {
   setRemoteVolume: (identity: string, volume: number) => void;
   /** Get the current local playback volume for a remote participant. */
   getRemoteVolume: (identity: string) => number;
+  /** A moderator server-muted this user (the mic cannot be turned on). */
+  serverMuted?: boolean;
+  /** The browser blocked audio playback; `startAudio` must run from a click. */
+  audioBlocked?: boolean;
+  startAudio?: () => Promise<void>;
 }
 
 // Exported so component tests can wrap consumers (e.g. LobbyVoiceFooter) in
@@ -126,9 +137,12 @@ interface TokenResponse {
   identity: string;
   room: string;
   expiresAt: number;
+  /** Runtime LiveKit URL (null → same-origin /livekit). */
+  livekitUrl?: string | null;
   // VOICE-001: per-user ephemeral TURN credentials (coturn REST auth).
   iceServers?: RTCIceServer[];
   serverVoiceSettings?: {
+    serverMuted?: boolean;
     requirePushToTalk: boolean;
     startMuted: boolean;
     maxScreenShareHeight: number;
@@ -152,6 +166,64 @@ function audioCaptureOptions(prefs: VoiceVideoPreferences): AudioCaptureOptions 
     noiseSuppression: prefs.noiseSuppression,
     autoGainControl: prefs.automaticGainControl,
   };
+}
+
+/** LiveKit's proto TrackSource.MICROPHONE (livekit-client exposes permissions as proto enums). */
+const PROTO_SOURCE_MICROPHONE = 2;
+
+function publishSourcesExcludeMic(sources: readonly number[] | undefined): boolean {
+  return !!sources && sources.length > 0 && !sources.includes(PROTO_SOURCE_MICROPHONE);
+}
+
+function isMicrophoneRevoked(room: Room): boolean {
+  return publishSourcesExcludeMic(room.localParticipant.permissions?.canPublishSources);
+}
+
+function localMicOn(room: Room): boolean {
+  const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+  return !!pub?.track && !pub.isMuted;
+}
+
+function microphoneErrorMessage(error: unknown, joinedListenOnly: boolean): string {
+  const name = error instanceof DOMException ? error.name : (error as { name?: string } | null)?.name ?? '';
+  const suffix = joinedListenOnly ? ' You joined listen-only.' : '';
+  if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+    return `Microphone permission was denied. Allow microphone access in the browser to talk.${suffix}`;
+  }
+  if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+    return `No usable microphone was found. Pick another input in Voice & Video settings.${suffix}`;
+  }
+  if (name === 'NotReadableError') {
+    return `The microphone is in use by another application.${suffix}`;
+  }
+  return `The microphone could not be started.${suffix}`;
+}
+
+const SERVER_MUTED_MESSAGE = 'You cannot speak here right now — a moderator muted you or your role lacks the Speak permission.';
+
+function disconnectReasonMessage(reason: DisconnectReason | undefined): string | null {
+  switch (reason) {
+    case DisconnectReason.DUPLICATE_IDENTITY:
+      return 'You joined this voice channel from another tab or device, so this one was disconnected.';
+    case DisconnectReason.PARTICIPANT_REMOVED:
+      return 'You were removed from the voice channel.';
+    case DisconnectReason.ROOM_DELETED:
+      return 'The voice channel was closed.';
+    case DisconnectReason.SERVER_SHUTDOWN:
+      return 'The voice server restarted — rejoin the channel.';
+    default:
+      return null;
+  }
+}
+
+function storedRemoteVolume(identity: string): number {
+  try {
+    const stored = window.localStorage.getItem(`lf-vol-${identity}`);
+    const value = stored !== null ? Number(stored) : 1;
+    return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 1;
+  } catch {
+    return 1;
+  }
 }
 
 function cameraCaptureOptions(prefs: VoiceVideoPreferences): VideoCaptureOptions {
@@ -214,9 +286,11 @@ function participantToView(
   const identity = p.identity;
   const isLocal = p.isLocal;
   const pubs = Array.from(p.videoTrackPublications.values());
-  const audioPub = Array.from(p.audioTrackPublications.values())[0];
+  // beta-review: the MICROPHONE publication (not screen-share audio), and a
+  // muted local track counts as off — it stays published while muted.
+  const audioPub = p.getTrackPublication(Track.Source.Microphone);
   const micEnabled = isLocal
-    ? !!audioPub?.track
+    ? !!audioPub?.track && !audioPub.isMuted
     : !!audioPub?.track && !audioPub.track.isMuted;
   const cameraEnabled = pubs.some((pub) =>
     pub.source === Track.Source.Camera
@@ -237,6 +311,7 @@ function participantToView(
     micEnabled,
     cameraEnabled,
     hasScreenShare,
+    serverMuted: publishSourcesExcludeMic(p.permissions?.canPublishSources),
   };
 }
 
@@ -275,6 +350,8 @@ export function LobbyVoiceProvider({
   const [screenSharePreference, setScreenSharePreferenceState] = useState<{ quality: ScreenQuality; fps: ScreenFps }>({ quality: 'auto', fps: '30' });
   const [joinedScreenShares, setJoinedScreenShares] = useState<Set<string>>(() => new Set());
   const [deafenEnabled, setDeafenEnabled] = useState(false);
+  const [serverMuted, setServerMuted] = useState(false);
+  const [audioBlocked, setAudioBlocked] = useState(false);
   const [participants, setParticipants] = useState<LobbyVoiceParticipant[]>([]);
   const [mainViewMode, setMainViewMode] = useState<'chat' | 'voice'>('chat');
   const [activeTextChannelId, setActiveTextChannelId] = useState<string | null>(initialTextChannelId ?? null);
@@ -306,6 +383,12 @@ export function LobbyVoiceProvider({
   // Live copy for event handlers (avoid re-subscribing on every render).
   const knownNamesRef = useRef<Record<string, string>>(knownNames);
   knownNamesRef.current = knownNames;
+  // beta-review: deafen must also cover publications that appear LATER
+  // (new joiners, first unmute, reconnect) — handlers read this ref.
+  const deafenRef = useRef(false);
+  deafenRef.current = deafenEnabled;
+  // Mic state the user asked for before deafening (restored on undeafen).
+  const micBeforeDeafenRef = useRef<boolean | null>(null);
 
   const loadVoicePreferences = useCallback(async (): Promise<VoiceVideoPreferences> => {
     try {
@@ -338,8 +421,15 @@ export function LobbyVoiceProvider({
       for (const element of track.detach()) {
         element.remove();
       }
+      // beta-review: livekit-client may already have detached the track
+      // internally (unsubscribe on participant leave), in which case
+      // `track.detach()` returns [] and our element lingered in the DOM —
+      // one stale <audio> per rejoin. Remove by our own key as well.
       for (const [key, element] of remoteAudioElementsRef.current) {
-        if (!element.isConnected) remoteAudioElementsRef.current.delete(key);
+        if (key.endsWith(`:${track.sid}`) || !element.isConnected) {
+          element.remove();
+          remoteAudioElementsRef.current.delete(key);
+        }
       }
       return;
     }
@@ -361,8 +451,25 @@ export function LobbyVoiceProvider({
     // parent. Use absolute positioning with zero size + zero opacity
     // instead. The element stays in the DOM and plays, but is invisible.
     element.style.cssText = 'position:absolute;width:0;height:0;opacity:0;pointer-events:none';
+    // beta-review: re-apply the saved per-user volume on every attach
+    // (rejoin / reconnect used to reset it to 100% while the slider
+    // still showed the saved value).
+    element.volume = storedRemoteVolume(participant.identity);
     remoteAudioContainerRef.current?.appendChild(element);
     remoteAudioElementsRef.current.set(key, element);
+    // Autoplay can still be refused (Safari, no prior gesture): surface it
+    // instead of silently playing nothing.
+    void element.play?.()?.catch(() => setAudioBlocked(true));
+  }, []);
+
+  /** Remove every remote audio element that belongs to `identity`. */
+  const detachParticipantAudio = useCallback((identity: string) => {
+    for (const [key, element] of remoteAudioElementsRef.current) {
+      if (key.startsWith(`${identity}:`)) {
+        element.remove();
+        remoteAudioElementsRef.current.delete(key);
+      }
+    }
   }, []);
 
   // 1. Mint/rebind guest session once on mount. The lobby page's server
@@ -599,15 +706,32 @@ export function LobbyVoiceProvider({
             publication.source === Track.Source.ScreenShare ||
             publication.source === Track.Source.ScreenShareAudio;
           publication.setSubscribed(!isScreenShare);
+          // beta-review: a deafened user must stay deaf for audio that
+          // appears after they deafened (new joiner, first unmute, reconnect).
+          if (publication.kind === Track.Kind.Audio && deafenRef.current) {
+            publication.setEnabled(false);
+          }
+        };
+        const syncLocalMic = () => {
+          if (roomRef.current !== room) return;
+          const revoked = isMicrophoneRevoked(room);
+          setServerMuted(revoked);
+          setMicEnabled(localMicOn(room));
         };
 
         room.on(RoomEvent.ConnectionStateChanged, (state: ConnectionState) => {
           if (connectTokenRef.current !== myToken) return;
           setConnectionState(state);
         });
-        room.on(RoomEvent.Disconnected, () => {
+        room.on(RoomEvent.Disconnected, (reason?: DisconnectReason) => {
           if (roomRef.current !== room) return;
           roomRef.current = null;
+          // beta-review: say WHY (another tab took over, moderator removal…)
+          // instead of silently flipping back to "Voice Ready".
+          const message = disconnectReasonMessage(reason);
+          if (message) setError(message);
+          setServerMuted(false);
+          setAudioBlocked(false);
           detachRemoteAudio();
           stopHeartbeat();
           setActiveChannelId(null);
@@ -620,11 +744,30 @@ export function LobbyVoiceProvider({
           setConnectionState(ConnectionState.Disconnected);
         });
         room.on(RoomEvent.ParticipantConnected, () => collectParticipants(room));
-        room.on(RoomEvent.ParticipantDisconnected, () => collectParticipants(room));
+        room.on(RoomEvent.ParticipantDisconnected, (participant) => {
+          detachParticipantAudio(participant.identity);
+          collectParticipants(room);
+        });
         room.on(RoomEvent.ActiveSpeakersChanged, () => collectParticipants(room));
-        room.on(RoomEvent.TrackMuted, () => collectParticipants(room));
-        room.on(RoomEvent.TrackUnmuted, () => collectParticipants(room));
-        room.on(RoomEvent.TrackSubscribed, (track, _publication, participant) => {
+        // beta-review: the footer's mic state follows the ACTUAL local
+        // publication (a moderator mute used to leave it showing "on").
+        room.on(RoomEvent.TrackMuted, (_publication, participant) => {
+          if (participant.isLocal) syncLocalMic();
+          collectParticipants(room);
+        });
+        room.on(RoomEvent.TrackUnmuted, (_publication, participant) => {
+          if (participant.isLocal) syncLocalMic();
+          collectParticipants(room);
+        });
+        room.on(RoomEvent.ParticipantPermissionsChanged, (_previous, participant) => {
+          if (participant.isLocal) syncLocalMic();
+          collectParticipants(room);
+        });
+        room.on(RoomEvent.AudioPlaybackStatusChanged, () => {
+          if (roomRef.current === room) setAudioBlocked(!room.canPlaybackAudio);
+        });
+        room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+          if (track.kind === Track.Kind.Audio && deafenRef.current) publication.setEnabled(false);
           attachRemoteAudio(track, participant);
           queueMicrotask(() => {
             if (roomRef.current === room) collectParticipants(room);
@@ -656,6 +799,7 @@ export function LobbyVoiceProvider({
           });
         });
         room.on(RoomEvent.LocalTrackPublished, (publication) => {
+          if (publication.source === Track.Source.Microphone) syncLocalMic();
           if (publication.source === Track.Source.Camera) setCameraEnabled(true);
           if (publication.source === Track.Source.ScreenShare) setScreenShareEnabled(true);
           queueMicrotask(() => {
@@ -663,6 +807,7 @@ export function LobbyVoiceProvider({
           });
         });
         room.on(RoomEvent.LocalTrackUnpublished, (publication) => {
+          if (publication.source === Track.Source.Microphone) syncLocalMic();
           if (publication.source === Track.Source.Camera) setCameraEnabled(false);
           if (publication.source === Track.Source.ScreenShare) {
             setScreenShareEnabled(false);
@@ -679,7 +824,7 @@ export function LobbyVoiceProvider({
 
         // VOICE-001: apply the server-issued ephemeral TURN servers so
         // ICE can fall back to coturn (direct/STUN still tried first).
-        await room.connect(livekitUrl, token.token, {
+        await room.connect(resolveBrowserLiveKitUrl(token.livekitUrl, livekitUrl), token.token, {
           autoSubscribe: false,
           ...(token.iceServers?.length
             ? { rtcConfig: { iceServers: token.iceServers } }
@@ -708,10 +853,42 @@ export function LobbyVoiceProvider({
         setScreenSharePolicy(screenSharePolicyRef.current);
         const effectiveInputMode = serverRequiresPTT ? 'push_to_talk' : voicePrefs.inputMode;
         effectiveInputModeRef.current = effectiveInputMode;
-        const shouldStartMic = !serverStartMuted && effectiveInputMode === 'voice_activity';
-        await room.localParticipant.setMicrophoneEnabled(shouldStartMic, audioCaptureOptions(voicePrefs));
+        const moderatorMuted = token.serverVoiceSettings?.serverMuted === true || isMicrophoneRevoked(room);
+        setServerMuted(moderatorMuted);
+        const shouldStartMic = !moderatorMuted && !serverStartMuted && effectiveInputMode === 'voice_activity';
         voicePrefsRef.current = voicePrefs;
-        setMicEnabled(shouldStartMic);
+        setAudioBlocked(!room.canPlaybackAudio);
+        // beta-review: output device preference applies to the call, not
+        // only to the settings test page (Chromium; others use the default).
+        if (voicePrefs.outputDeviceId && voicePrefs.outputDeviceId !== 'default' && supportsAudioOutputSelection()) {
+          void room.switchActiveDevice('audiooutput', voicePrefs.outputDeviceId).catch(() => {});
+        }
+        // beta-review: a microphone problem (permission denied, no device,
+        // unplugged saved device, device busy) no longer aborts the whole
+        // join — retry on the default device, else stay connected
+        // listen-only with a readable message.
+        if (shouldStartMic) {
+          try {
+            await room.localParticipant.setMicrophoneEnabled(true, audioCaptureOptions(voicePrefs));
+          } catch (micErr) {
+            const retryDefault = voicePrefs.inputDeviceId && voicePrefs.inputDeviceId !== 'default';
+            let recovered = false;
+            if (retryDefault) {
+              try {
+                await room.localParticipant.setMicrophoneEnabled(true, {
+                  ...audioCaptureOptions(voicePrefs),
+                  deviceId: undefined,
+                });
+                recovered = true;
+              } catch {
+                /* fall through to listen-only */
+              }
+            }
+            if (!recovered) setError(microphoneErrorMessage(micErr, true));
+          }
+        }
+        if (connectTokenRef.current !== myToken || roomRef.current !== room) return;
+        setMicEnabled(localMicOn(room));
         collectParticipants(room);
         startHeartbeat(channelId);
       } catch (err) {
@@ -739,6 +916,7 @@ export function LobbyVoiceProvider({
       stopHeartbeat,
       attachRemoteAudio,
       detachRemoteAudio,
+      detachParticipantAudio,
       loadVoicePreferences,
     ]
   );
@@ -755,6 +933,9 @@ export function LobbyVoiceProvider({
     setCameraEnabled(false);
     setScreenShareEnabled(false);
     setDeafenEnabled(false);
+    setServerMuted(false);
+    setAudioBlocked(false);
+    micBeforeDeafenRef.current = null;
     setMainViewMode('chat');
     setConnectionState(ConnectionState.Disconnected);
     setError(null);
@@ -769,16 +950,31 @@ export function LobbyVoiceProvider({
   const toggleMic = useCallback(async () => {
     const r = roomRef.current;
     if (!r) return;
-    const next = !micEnabled;
-    try {
-      const prefs = await loadVoicePreferences();
-      await r.localParticipant.setMicrophoneEnabled(next, audioCaptureOptions(prefs));
-      setMicEnabled(next);
-      collectParticipants(r);
-    } catch (err) {
-      setError((err instanceof Error ? err.message : String(err)));
+    // beta-review: derive from the real publication (not render state) so
+    // the callback is stable and a moderator mute cannot desync it; muting
+    // no longer waits for a settings round-trip.
+    const next = !localMicOn(r);
+    if (next && isMicrophoneRevoked(r)) {
+      setServerMuted(true);
+      setError(SERVER_MUTED_MESSAGE);
+      return;
     }
-  }, [micEnabled, collectParticipants, loadVoicePreferences]);
+    try {
+      const prefs = next ? await loadVoicePreferences() : voicePrefsRef.current;
+      try {
+        await r.localParticipant.setMicrophoneEnabled(next, audioCaptureOptions(prefs));
+      } catch (err) {
+        // A saved-but-unplugged input device: fall back to the default.
+        if (!next || !prefs.inputDeviceId || prefs.inputDeviceId === 'default') throw err;
+        await r.localParticipant.setMicrophoneEnabled(true, { ...audioCaptureOptions(prefs), deviceId: undefined });
+      }
+      setError(null);
+    } catch (err) {
+      setError(microphoneErrorMessage(err, false));
+    }
+    setMicEnabled(localMicOn(r));
+    collectParticipants(r);
+  }, [collectParticipants, loadVoicePreferences]);
 
   const toggleCamera = useCallback(async () => {
     const r = roomRef.current;
@@ -828,10 +1024,30 @@ export function LobbyVoiceProvider({
   const toggleDeafen = useCallback(() => {
     const r = roomRef.current;
     if (!r) return;
-    const next = !deafenEnabled;
+    const next = !deafenRef.current;
+    deafenRef.current = next;
     applyRemoteAudio(r, !next);
     setDeafenEnabled(next);
-  }, [applyRemoteAudio, deafenEnabled]);
+    // beta-review: deafen also mutes the microphone (a deafened user
+    // assumes they are not being heard); undeafen restores what they had.
+    if (next) {
+      const wasOn = localMicOn(r);
+      micBeforeDeafenRef.current = wasOn;
+      if (wasOn) {
+        void r.localParticipant.setMicrophoneEnabled(false)
+          .then(() => setMicEnabled(localMicOn(r)))
+          .catch(() => {});
+      }
+      return;
+    }
+    const restore = micBeforeDeafenRef.current;
+    micBeforeDeafenRef.current = null;
+    if (restore && !isMicrophoneRevoked(r) && effectiveInputModeRef.current === 'voice_activity') {
+      void r.localParticipant.setMicrophoneEnabled(true, audioCaptureOptions(voicePrefsRef.current))
+        .then(() => setMicEnabled(localMicOn(r)))
+        .catch((err) => setError(microphoneErrorMessage(err, false)));
+    }
+  }, [applyRemoteAudio]);
 
   useEffect(() => {
     const handleVoiceTest = (event: Event) => {
@@ -873,28 +1089,62 @@ export function LobbyVoiceProvider({
     return () => window.removeEventListener(VOICE_TEST_STATE_EVENT, handleVoiceTest);
   }, [applyRemoteAudio, collectParticipants, deafenEnabled, micEnabled]);
 
+  // Latest shortcut actions for the keybind listener, which is bound ONCE
+  // per connection (see below).
+  const shortcutActionsRef = useRef({ toggleMic, toggleDeafen, toggleCamera, toggleScreenShare });
+  shortcutActionsRef.current = { toggleMic, toggleDeafen, toggleCamera, toggleScreenShare };
+  const pttDesiredRef = useRef(false);
+  const pttApplyingRef = useRef(false);
+  const router = useRouter();
+  const routerRef = useRef(router);
+  routerRef.current = router;
+
   useEffect(() => {
     if (connectionState !== ConnectionState.Connected || !activeChannelId) return;
 
+    // beta-review: this effect used to depend on toggleMic → micEnabled, so
+    // opening the mic on PTT re-ran it and the cleanup released the key
+    // while it was still held (the listener heard nothing). Listeners are
+    // now bound once per connection and read the latest actions from a
+    // ref, and the mic follows the DESIRED PTT state through a
+    // single-flight loop, so a fast press/release can never leave it open.
     let held = false;
     const isEditableTarget = (target: EventTarget | null): boolean => {
       if (!(target instanceof HTMLElement)) return false;
       const tag = target.tagName.toLowerCase();
       return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable;
     };
-    const setPushToTalkMic = async (next: boolean) => {
-      const r = roomRef.current;
-      const prefs = voicePrefsRef.current;
-      // Honor the effective input mode — which may be forced to
-      // push_to_talk by the server's requirePushToTalk policy.
-      if (!r || effectiveInputModeRef.current !== 'push_to_talk') return;
+    const applyPushToTalk = async () => {
+      if (pttApplyingRef.current) return;
+      pttApplyingRef.current = true;
       try {
-        await r.localParticipant.setMicrophoneEnabled(next, audioCaptureOptions(prefs));
-        setMicEnabled(next);
-        collectParticipants(r);
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          const r = roomRef.current;
+          // Honor the effective input mode — which may be forced to
+          // push_to_talk by the server's requirePushToTalk policy.
+          if (!r || effectiveInputModeRef.current !== 'push_to_talk') return;
+          const want = pttDesiredRef.current && !isMicrophoneRevoked(r) && !deafenRef.current;
+          if (localMicOn(r) === want) return;
+          await r.localParticipant.setMicrophoneEnabled(want, audioCaptureOptions(voicePrefsRef.current));
+          setMicEnabled(localMicOn(r));
+          collectParticipants(r);
+        }
       } catch (err) {
-        setError((err instanceof Error ? err.message : String(err)));
+        setError(microphoneErrorMessage(err, false));
+      } finally {
+        // Presses/releases that arrive while a call is in flight are picked
+        // up by the loop's next iteration (it re-reads the desired state).
+        pttApplyingRef.current = false;
       }
+    };
+    const setPushToTalk = (pressed: boolean) => {
+      pttDesiredRef.current = pressed;
+      void applyPushToTalk();
+    };
+    const release = () => {
+      if (!held) return;
+      held = false;
+      setPushToTalk(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.repeat || isEditableTarget(event.target)) return;
@@ -902,15 +1152,19 @@ export function LobbyVoiceProvider({
       if (event.code === binds.pushToTalk.code && effectiveInputModeRef.current === 'push_to_talk') {
         held = true;
         event.preventDefault();
-        void setPushToTalkMic(true);
+        setPushToTalk(true);
         return;
       }
+      // Shortcuts are single keys — never hijack browser/OS combinations
+      // (Ctrl+V, Ctrl+S, Ctrl+D …).
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      const actions = shortcutActionsRef.current;
       const action = (
         [
-          ['toggleMute', toggleMic],
-          ['toggleDeafen', toggleDeafen],
-          ['toggleCamera', toggleCamera],
-          ['toggleScreenShare', toggleScreenShare],
+          ['toggleMute', actions.toggleMic],
+          ['toggleDeafen', actions.toggleDeafen],
+          ['toggleCamera', actions.toggleCamera],
+          ['toggleScreenShare', actions.toggleScreenShare],
         ] as const
       ).find(([name]) => event.code === binds[name].code);
       if (!action) return;
@@ -918,10 +1172,14 @@ export function LobbyVoiceProvider({
       void action[1]();
     };
     const onKeyUp = (event: KeyboardEvent) => {
-      if (event.code !== keybindPrefsRef.current.pushToTalk.code || isEditableTarget(event.target)) return;
-      held = false;
+      if (event.code !== keybindPrefsRef.current.pushToTalk.code || !held) return;
       event.preventDefault();
-      void setPushToTalkMic(false);
+      release();
+    };
+    // Losing focus while holding the key swallows the keyup — treat it as
+    // a release instead of leaving an open mic.
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') release();
     };
 
     // Desktop shell (Tauri) PTT events — the shell forwards the global
@@ -929,21 +1187,36 @@ export function LobbyVoiceProvider({
     // navigation replaced the old iframe + shell.js listener.
     const onShellMessage = (event: MessageEvent) => {
       if (event.source !== window) return;
-      const data = event.data as { type?: string; pressed?: boolean } | null;
-      if (!data || data.type !== 'lobbyforge:ptt') return;
-      void setPushToTalkMic(data.pressed === true);
+      const data = event.data as { type?: string; pressed?: boolean; action?: string } | null;
+      if (!data) return;
+      if (data.type === 'lobbyforge:ptt') {
+        setPushToTalk(data.pressed === true);
+        return;
+      }
+      // Desktop global shortcuts (Ctrl+Shift+M / Ctrl+Shift+D / Ctrl+,).
+      if (data.type === 'lobbyforge:shortcut') {
+        const actions = shortcutActionsRef.current;
+        if (data.action === 'toggleMute') void actions.toggleMic();
+        else if (data.action === 'toggleDeafen') actions.toggleDeafen();
+        else if (data.action === 'openSettings') routerRef.current.push('/settings/voice-video');
+      }
     };
 
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', release);
+    document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('message', onShellMessage);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', release);
+      document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('message', onShellMessage);
-      if (held) void setPushToTalkMic(false);
+      held = false;
+      if (pttDesiredRef.current) setPushToTalk(false);
     };
-  }, [activeChannelId, collectParticipants, connectionState, toggleCamera, toggleDeafen, toggleMic, toggleScreenShare]);
+  }, [activeChannelId, collectParticipants, connectionState]);
 
   /**
    * Look up a remote participant's camera track. Used by the video tile
@@ -1073,6 +1346,20 @@ export function LobbyVoiceProvider({
     }
   }, []);
 
+  /** Must run from a user gesture (the "Enable audio" button). */
+  const startAudio = useCallback(async () => {
+    const r = roomRef.current;
+    try {
+      if (r) await r.startAudio();
+    } catch {
+      /* the button stays visible */
+    }
+    for (const element of remoteAudioElementsRef.current.values()) {
+      void element.play?.()?.catch(() => {});
+    }
+    setAudioBlocked(r ? !r.canPlaybackAudio : false);
+  }, []);
+
   // Unmount: tear down room + heartbeat.
   useEffect(() => {
     return () => {
@@ -1106,6 +1393,8 @@ export function LobbyVoiceProvider({
       setCameraEnabled(false);
       setScreenShareEnabled(false);
       setDeafenEnabled(false);
+      setServerMuted(false);
+      setAudioBlocked(false);
       setConnectionState(ConnectionState.Disconnected);
     }
   }, [serverId, stopHeartbeat]);
@@ -1164,6 +1453,9 @@ export function LobbyVoiceProvider({
       leaveScreenShare,
       setRemoteVolume,
       getRemoteVolume,
+      serverMuted,
+      audioBlocked,
+      startAudio,
     }),
     [
       serverId,
@@ -1198,6 +1490,9 @@ export function LobbyVoiceProvider({
       leaveScreenShare,
       setRemoteVolume,
       getRemoteVolume,
+      serverMuted,
+      audioBlocked,
+      startAudio,
     ]
   );
 

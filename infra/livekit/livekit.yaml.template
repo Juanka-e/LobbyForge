@@ -43,7 +43,9 @@ logging:
 
 room:
   auto_create: true
-  enable_remote_unmute: true
+  # beta-review: never let the server API switch a participant's mic ON —
+  # a moderator "unmute" only re-allows publishing (canPublishSources).
+  enable_remote_unmute: false
   empty_timeout: 300
 
 webhook:

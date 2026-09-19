@@ -33,6 +33,20 @@ vi.mock('@/lib/db', () => ({
   getDb: () => ({ __mockDbClient: true }),
 }));
 
+const callOrder: string[] = [];
+const publishAccessInvalidation = vi.fn((..._args: unknown[]) => {
+  callOrder.push('invalidate');
+});
+vi.mock('@/lib/access-invalidation', () => ({
+  publishAccessInvalidation: (...args: unknown[]) => publishAccessInvalidation(...args),
+}));
+const queueMemberVoiceSync = vi.fn((..._args: unknown[]) => {
+  callOrder.push('voice');
+});
+vi.mock('@/lib/voice-moderation', () => ({
+  queueMemberVoiceSync: (...args: unknown[]) => queueMemberVoiceSync(...args),
+}));
+
 const SECRET = 'x'.repeat(32);
 const envSnapshot = { ...process.env };
 
@@ -53,6 +67,9 @@ beforeEach(() => {
   listBansForServer.mockReset();
   logAction.mockReset();
   logAction.mockResolvedValue(undefined);
+  publishAccessInvalidation.mockClear();
+  queueMemberVoiceSync.mockClear();
+  callOrder.length = 0;
 });
 
 afterEach(() => {
@@ -357,5 +374,69 @@ describe('DELETE /api/servers/{id}/bans?userId=…', () => {
     const json = (await res.json()) as { ok: boolean; removed: boolean };
     expect(json.removed).toBe(true);
     expect(unbanUser).toHaveBeenCalledWith(expect.anything(), SERVER_ID, TARGET_ID);
+  });
+});
+
+// beta-review (S2): a ban must REVOKE access. The membership removal
+// itself lives in banUser (same transaction — see the db integration
+// test); the route must invalidate live WS/SSE topics AFTER the ban
+// commits and push the user out of LiveKit rooms.
+describe('POST /api/servers/{id}/bans — beta-review S2 access revocation', () => {
+  function banOk() {
+    banUser.mockImplementation(async () => {
+      callOrder.push('ban');
+      return {
+        ok: true,
+        ban: {
+          id: 'ban-new',
+          serverId: SERVER_ID,
+          userId: TARGET_ID,
+          bannedBy: USER_ID,
+          reason: null,
+          expiresAt: null,
+          createdAt: new Date('2026-06-11T00:00:00Z'),
+        },
+      };
+    });
+  }
+
+  async function postBan() {
+    const { POST } = await loadRoute();
+    return POST(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/bans`, {
+        method: 'POST',
+        headers: { cookie: makeSessionCookie() },
+        body: JSON.stringify({ userId: TARGET_ID }),
+      }),
+      { params: Promise.resolve({ id: SERVER_ID }) }
+    );
+  }
+
+  it('invalidates live topics AFTER the ban commits and evicts the user from voice', async () => {
+    getServerById.mockResolvedValue(mockServer(OWNER_ID));
+    isServerMember.mockResolvedValue(true);
+    getUserPermissions.mockResolvedValue(['ban_members']);
+    banOk();
+    const res = await postBan();
+    expect(res.status).toBe(201);
+    expect(publishAccessInvalidation).toHaveBeenCalledWith({
+      kind: 'user-server-access',
+      serverId: SERVER_ID,
+      userId: TARGET_ID,
+      reason: 'ban',
+    });
+    expect(queueMemberVoiceSync).toHaveBeenCalledWith(SERVER_ID, TARGET_ID);
+    expect(callOrder).toEqual(['ban', 'invalidate', 'voice']);
+  });
+
+  it('a failed ban neither invalidates nor touches voice', async () => {
+    getServerById.mockResolvedValue(mockServer(OWNER_ID));
+    isServerMember.mockResolvedValue(true);
+    getUserPermissions.mockResolvedValue(['ban_members']);
+    banUser.mockResolvedValue({ ok: false, error: 'cannot_ban_owner' });
+    const res = await postBan();
+    expect(res.status).toBe(400);
+    expect(publishAccessInvalidation).not.toHaveBeenCalled();
+    expect(queueMemberVoiceSync).not.toHaveBeenCalled();
   });
 });

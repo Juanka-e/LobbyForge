@@ -12,6 +12,7 @@ import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
 import { authorizeModerationTarget } from '@/lib/member-authorization';
+import { queueMemberVoiceSync } from '@/lib/voice-moderation';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -105,6 +106,10 @@ async function handlePut(
     if (!gate.ok) return gate.response;
 
     const updated = await setMemberTimeout(getDb(), serverId, targetUserId, until);
+    // beta-review (S2): revoke (or restore) the microphone of a member
+    // who is ALREADY in a voice room — the token grant only applies on
+    // the next join.
+    queueMemberVoiceSync(serverId, targetUserId);
     void logAction(getDb(), {
       serverId,
       actorUserId: session.uid,

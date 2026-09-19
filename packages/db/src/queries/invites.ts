@@ -125,8 +125,15 @@ export async function getInviteByCode(db: DbClient, code: string): Promise<Invit
  * List invites for a server, newest first. The route layer is responsible
  * for the membership / permission check; this helper only filters out
  * invites whose parent server is soft-deleted.
+ *
+ * beta-review (F7): `createdBy` narrows the list to one creator — members
+ * without MANAGE_SERVER only see (and may only revoke) their own invites.
  */
-export async function listInvitesForServer(db: DbClient, serverId: string): Promise<InviteRow[]> {
+export async function listInvitesForServer(
+  db: DbClient,
+  serverId: string,
+  options: { createdBy?: string } = {}
+): Promise<InviteRow[]> {
   const rows = await db
     .select({
       id: invites.id,
@@ -140,7 +147,13 @@ export async function listInvitesForServer(db: DbClient, serverId: string): Prom
     })
     .from(invites)
     .innerJoin(servers, eq(servers.id, invites.serverId))
-    .where(and(eq(invites.serverId, serverId), isNull(servers.deletedAt)))
+    .where(
+      and(
+        eq(invites.serverId, serverId),
+        isNull(servers.deletedAt),
+        ...(options.createdBy !== undefined ? [eq(invites.createdBy, options.createdBy)] : [])
+      )
+    )
     .orderBy(sql`${invites.createdAt} DESC`);
   return rows as InviteRow[];
 }
@@ -212,11 +225,13 @@ export type RedeemInviteResult =
  * transaction so two concurrent redeems can't both push `currentUses`
  * past `maxUses`:
  *   1. Lock the invite row.
- *   2. Verify the user is not already a member.
- *   3. Verify `expiresAt` + `currentUses < maxUses`.
- *   4. Look up the server's `@everyone` role.
- *   5. Insert the `memberships` row with `roleId = @everyone.id`.
- *   6. Increment `currentUses`.
+ *   2. Verify the user is not banned (BEFORE the membership probe — a
+ *      banned user must never be told "already a member").
+ *   3. Verify the user is not already a member.
+ *   4. Verify `expiresAt` + `currentUses < maxUses`.
+ *   5. Look up the server's `@everyone` role.
+ *   6. Insert the `memberships` row with `roleId = @everyone.id`.
+ *   7. Increment `currentUses`.
  *
  * Returns a discriminated-union result so the route layer can map errors
  * to status codes without parsing strings.
@@ -255,20 +270,13 @@ export async function redeemInvite(
       return { ok: false as const, error: 'not_found' as RedeemInviteError };
     }
 
-    // 2. Already a member?
-    const existingMember = await tx
-      .select({ id: memberships.id })
-      .from(memberships)
-      .where(and(eq(memberships.userId, userId), eq(memberships.serverId, invite.server_id)))
-      .limit(1);
-    if (existingMember.length > 0) {
-      return { ok: false as const, error: 'already_member' as RedeemInviteError };
-    }
-
-    // 2b. Banned? A ban with a past `expiresAt` is treated as not-banned;
-    //     the row sticks around as an audit artifact but the read path
-    //     ignores it. The UI surfaces "you were banned from this server"
-    //     with a 403-ish status.
+    // 2. Banned? A ban with a past `expiresAt` is treated as not-banned;
+    //    the row sticks around as an audit artifact but the read path
+    //    ignores it. The UI surfaces "you were banned from this server"
+    //    with a 403-ish status.
+    //    beta-review (S2): checked BEFORE the membership probe — a banned
+    //    user whose membership row survived a pre-fix ban used to get
+    //    "already_member" (409) instead of "banned".
     const banRows = await tx
       .select({ expiresAt: serverBans.expiresAt })
       .from(serverBans)
@@ -280,7 +288,17 @@ export async function redeemInvite(
       return { ok: false as const, error: 'banned' as RedeemInviteError };
     }
 
-    // 3. Expired?
+    // 3. Already a member?
+    const existingMember = await tx
+      .select({ id: memberships.id })
+      .from(memberships)
+      .where(and(eq(memberships.userId, userId), eq(memberships.serverId, invite.server_id)))
+      .limit(1);
+    if (existingMember.length > 0) {
+      return { ok: false as const, error: 'already_member' as RedeemInviteError };
+    }
+
+    // 4. Expired?
     if (invite.expires_at && invite.expires_at.getTime() < Date.now()) {
       return { ok: false as const, error: 'expired' as RedeemInviteError };
     }
@@ -289,7 +307,7 @@ export async function redeemInvite(
       return { ok: false as const, error: 'exhausted' as RedeemInviteError };
     }
 
-    // 4. Look up the server's @everyone role. The M13 seed runs on
+    // 5. Look up the server's @everyone role. The M13 seed runs on
     //    `createServer`; if the role is missing something is very wrong,
     //    so we surface the error to the route layer.
     const everyoneRows = await tx
@@ -302,7 +320,7 @@ export async function redeemInvite(
       return { ok: false as const, error: 'no_everyone_role' as RedeemInviteError };
     }
 
-    // 5. Insert the membership.
+    // 6. Insert the membership.
     const [member] = await tx
       .insert(memberships)
       .values({
@@ -321,7 +339,7 @@ export async function redeemInvite(
       roleId: everyoneId,
     });
 
-    // 6. Increment currentUses.
+    // 7. Increment currentUses.
     await tx
       .update(invites)
       .set({ currentUses: sql`${invites.currentUses} + 1` })

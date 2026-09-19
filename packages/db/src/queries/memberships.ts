@@ -17,9 +17,10 @@
  *   - Soft-deleted users are excluded by joining the `users` table and
  *     filtering on `deletedAt IS NULL`.
  */
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, not } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
 import { membershipRoles, memberships, roles, users } from '../schema.js';
+import { activeBanOnMembershipSql, isCurrentlyBanned } from './bans.js';
 
 export interface MembershipRow {
   id: string;
@@ -40,6 +41,10 @@ export interface MembershipRow {
  * Owners always count as members — the `createServer` query in
  * `queries/servers.ts` inserts a memberships row for the owner in the same
  * transaction, so no separate code path is needed.
+ *
+ * beta-review (S2): a user with an ACTIVE ban is never a member, even if
+ * a memberships row survived (pre-fix bans left it in place; a redeem
+ * can race the ban). Every route gate bottoms out here.
  */
 export async function isServerMember(
   db: DbClient,
@@ -54,7 +59,8 @@ export async function isServerMember(
       and(
         eq(memberships.userId, userId),
         eq(memberships.serverId, serverId),
-        isNull(users.deletedAt)
+        isNull(users.deletedAt),
+        not(activeBanOnMembershipSql())
       )
     )
     .limit(1);
@@ -93,11 +99,20 @@ export async function getServerMember(
   return (rows[0] as MembershipRow | undefined) ?? null;
 }
 
+/**
+ * Idempotently make `userId` a member of `serverId` (the /lobby
+ * auto-join on open instances). Returns `null` — and creates nothing —
+ * when the user holds an ACTIVE ban on the server.
+ *
+ * beta-review (S2): the lobby called this unconditionally, so a banned
+ * user on an open instance was silently re-joined on their next visit.
+ */
 export async function ensureServerMembership(
   db: DbClient,
   serverId: string,
   userId: string
-): Promise<MembershipRow> {
+): Promise<MembershipRow | null> {
+  if (await isCurrentlyBanned(db, serverId, userId)) return null;
   const existing = await getServerMember(db, serverId, userId);
   if (existing) return existing;
 

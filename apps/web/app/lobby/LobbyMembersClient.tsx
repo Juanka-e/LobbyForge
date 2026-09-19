@@ -41,12 +41,17 @@ interface ApiSnapshot {
 }
 
 const POLL_FALLBACK_MS = 15_000;
+/** beta-review (S5): minimum gap between event-driven presence re-fetches. */
+const PRESENCE_EVENT_REFETCH_MS = 5_000;
 
 function deriveStatus(
-  p: { channelId: string; lastSeen: number },
+  p: { channelId: string | null; lastSeen: number; status?: string },
   voiceChannelIds: Set<string>,
   now: number = Date.now()
 ): Member['status'] {
+  // beta-review: honor "online status: nobody/friends" — the projection
+  // returns status 'hidden' (and lastSeen 0) for those users.
+  if (p.status === 'hidden') return 'offline';
   if (now - p.lastSeen > 90_000) return 'offline';
   if (p.channelId && voiceChannelIds.has(p.channelId)) return 'in-voice';
   return 'online';
@@ -72,22 +77,6 @@ export function LobbyMembersClient({
   // Shared popover state — only one popover can be open at a time.
   const [openUserId, setOpenUserId] = useState<string | null>(null);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
-
-  // WS presence subscribe
-  useEffect(() => {
-    const topic = `presence:${serverId}` as const;
-    const rc = getRealtimeClient();
-    const unsubscribe = rc.subscribe<{ userId: string; status: string; channelId: string; lastSeen: number }>(topic, (event) => {
-      if (!event || !event.userId) return;
-      setMembers((prev) => {
-        const status = deriveStatus(event, voiceChannelIdsRef.current);
-        return prev.map((m) =>
-          m.id === event.userId ? { ...m, status, grayscale: status === 'offline' || undefined } : m
-        );
-      });
-    });
-    return () => { unsubscribe(); };
-  }, [serverId]);
 
   // Polling fallback
   const refresh = useCallback(async () => {
@@ -122,6 +111,31 @@ export function LobbyMembersClient({
     const id = window.setInterval(refresh, POLL_FALLBACK_MS);
     return () => window.clearInterval(id);
   }, [refresh]);
+
+  // WS presence subscribe. beta-review (S5): the event is a content-free
+  // "presence changed" signal — re-fetch the per-viewer REST snapshot
+  // (privacy, blocks and channel visibility applied server-side) instead
+  // of reading any payload. Bursts coalesce into one trailing fetch at
+  // most every PRESENCE_EVENT_REFETCH_MS.
+  useEffect(() => {
+    const topic = `presence:${serverId}` as const;
+    const rc = getRealtimeClient();
+    let timer: number | null = null;
+    let lastFetchAt = 0;
+    const unsubscribe = rc.subscribe(topic, () => {
+      if (timer !== null) return;
+      const wait = Math.max(0, lastFetchAt + PRESENCE_EVENT_REFETCH_MS - Date.now());
+      timer = window.setTimeout(() => {
+        timer = null;
+        lastFetchAt = Date.now();
+        void refresh();
+      }, wait);
+    });
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+      unsubscribe();
+    };
+  }, [serverId, refresh]);
 
   const online = members.filter((m) => m.status === 'online' || m.status === 'in-voice');
   const offline = members.filter((m) => m.status === 'offline');

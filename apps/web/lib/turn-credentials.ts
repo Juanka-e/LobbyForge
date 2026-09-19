@@ -11,15 +11,22 @@
  * The old deployment handed ONE permanent credential to every community
  * member via LiveKit's rtc.turn_servers — anyone who ever joined a voice
  * channel could relay through the server forever. Now the web app mints a
- * per-user credential alongside each LiveKit token (1h, matching the token
- * TTL) and clients pass it in rtcConfig. coturn expires the username, so
+ * per-user credential alongside each LiveKit token (12h — see
+ * TURN_CREDENTIAL_TTL_SECONDS) and clients pass it in rtcConfig. coturn expires the username, so
  * the credential dies on its own; `user-quota` in turnserver.conf now
  * counts allocations per USER again (the suffix is the user id).
  */
 import { createHmac } from 'node:crypto';
 
-/** Matches the LiveKit token TTL — one voice session, one credential. */
-export const TURN_CREDENTIAL_TTL_SECONDS = 60 * 60;
+/**
+ * One voice SESSION, one credential. beta-review: this used to be 1h (the
+ * LiveKit token TTL), but LiveKit refreshes its own token while the ICE
+ * servers passed in rtcConfig at connect time are reused for every ICE
+ * restart — any reconnect after the first hour gathered relay candidates
+ * with an expired credential, stranding TURN-only users. 12h covers a long
+ * session; the credential stays per-user (coturn user-quota) and expiring.
+ */
+export const TURN_CREDENTIAL_TTL_SECONDS = 12 * 60 * 60;
 
 const SECRET_PATTERN = /^[0-9a-fA-F]{32,128}$/;
 

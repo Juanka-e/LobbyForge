@@ -1,12 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import {
-  DEFAULT_USER_PRIVACY_SETTINGS,
-  getBlockedUserIds,
-  getServerById,
-  getUserSettings,
-  isServerMember,
-} from '@lobbyforge/db';
+import { getServerById, isServerMember } from '@lobbyforge/db';
 import {
   requireVisibleChannelInServer,
   requireMaterializedSession,
@@ -17,7 +11,7 @@ import { withApiSecurity } from '@/lib/security-headers';
 import { getUserPresenceInServer, setUserPresence, incrServerBandwidth } from '@/lib/redis';
 import { publishPresenceChange } from '@/lib/presence-bus';
 import { getDb } from '@/lib/db';
-import { applyPresencePrivacy } from '@/lib/presence-privacy';
+import { projectServerPresenceForViewer } from '@/lib/presence-view';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -71,18 +65,11 @@ async function handlePost(req: Request): Promise<NextResponse> {
     const channel = await requireVisibleChannelInServer(session.uid, body.channelId, body.serverId);
     if (!channel.ok) return channel.response;
     await setUserPresence(session.uid, body.serverId, body.channelId, body.status, 90, body.activity);
-    // Push the presence change to every WS subscriber on this server.
-    publishPresenceChange({
-      serverId: body.serverId,
-      event: {
-        type: 'presence-update',
-        userId: session.uid,
-        status: body.status,
-        channelId: body.channelId,
-        lastSeen: Date.now(),
-        ...(body.activity ? { activity: body.activity } : {}),
-      },
-    });
+    // beta-review (S5): tell WS subscribers "presence changed — re-fetch".
+    // The event carries NO snapshot (status/channel/activity/user id);
+    // every viewer re-reads GET below, which applies privacy settings,
+    // blocks and channel visibility for THAT viewer.
+    publishPresenceChange({ serverId: body.serverId });
     if (body.bandwidthDeltaBytes && body.bandwidthDeltaBytes > 0) {
       const threshold = process.env.LOBBYFORGE_BANDWIDTH_ALERT_BYTES
         ? Number(process.env.LOBBYFORGE_BANDWIDTH_ALERT_BYTES)
@@ -137,19 +124,13 @@ async function handleGet(req: Request): Promise<NextResponse> {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }
     }
-    const [presences, blockedIds] = await Promise.all([
-      getUserPresenceInServer(serverId),
-      getBlockedUserIds(getDb(), session.uid),
-    ]);
-    const filtered = await Promise.all(
-      presences.filter((presence) => !blockedIds.has(presence.userId)).map(async (presence) => {
-        const settings = await getUserSettings(getDb(), presence.userId);
-        return applyPresencePrivacy(presence, settings?.privacy ?? DEFAULT_USER_PRIVACY_SETTINGS, {
-          isSelf: presence.userId === session.uid,
-          isServerMember: true,
-        });
-      })
-    );
+    // beta-review (F8 + privacy): one projection shared with the lobby page.
+    const filtered = await projectServerPresenceForViewer({
+      serverId,
+      viewerUserId: session.uid,
+      ownerUserId: server.ownerUserId ?? null,
+      presences: await getUserPresenceInServer(serverId),
+    });
     return NextResponse.json(
       { presences: filtered },
       { headers: { 'Cache-Control': 'no-store' } }

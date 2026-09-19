@@ -8,6 +8,7 @@ import {
   getInstanceBootstrapStatus,
   getInstanceSetupStatus,
   listServersForUser,
+  listActivelyBannedServerIds,
   ensureServerMembership,
   seedDefaultRoles,
 } from '@lobbyforge/db';
@@ -20,7 +21,6 @@ import {
   listMessagesForChannel,
   getUserById,
   getBlockedUserIds,
-  getUserPermissions,
   type ChannelRow,
   type ChannelType,
   type MemberSummary,
@@ -38,6 +38,9 @@ import DmLinkSection from './DmLinkSection';
 import MobileNav from './MobileNav';
 import { BlockListProvider } from './BlockListProvider';
 import { isLobbyDemoAllowed } from '@/lib/lobby-mode';
+import { canReadLobbyChannelMessages, resolveLobbyChannelView } from '@/lib/lobby-channel-access';
+import { getRuntimeLiveKitUrl } from '@/lib/public-endpoints';
+import { projectServerPresenceForViewer } from '@/lib/presence-view';
 
 export const dynamic = 'force-dynamic';
 
@@ -113,6 +116,8 @@ interface LobbyData {
   /** True when this view is backed by live DB/Redis data. */
   isLive: boolean;
   canManageMessages: boolean;
+  /** MUTE_MEMBERS: show the moderator server-mute control in the voice roster. */
+  canMuteMembers: boolean;
 }
 
 // ---- Demo fallback (preserves the M19 standalone lobby visual reference) ----
@@ -291,8 +296,12 @@ function buildMessages(
 async function loadLiveData(
   db: ReturnType<typeof getDb>,
   serverId: string,
-  currentUserId: string | null
+  currentUserId: string | null,
+  ownerUserId: string | null
 ): Promise<LobbyData | null> {
+  // beta-review (S3): everything below is serialized into the page, so
+  // it must be authorized for THIS viewer — no viewer, no data.
+  if (!currentUserId) return null;
   const channels: ChannelRow[] = await listChannelsForServer(db, serverId);
   // Don't bail on empty channels — a freshly set-up server may have no
   // channels yet. Return an empty LobbyData so the UI shows empty states
@@ -311,9 +320,24 @@ async function loadLiveData(
     }
   }
   // Re-fetch channels after the potential repair.
-  const allChannels = channels.length > 0
+  const serverChannels = channels.length > 0
     ? channels
     : await listChannelsForServer(db, serverId).catch(() => [] as ChannelRow[]);
+
+  // beta-review (S3): the lobby used to ship EVERY channel (role-gated
+  // ones included — their names were live-confirmed in the HTML) and the
+  // first text channel's last 50 messages, unauthorized. Apply the same
+  // rules as the channels/messages APIs: owner / MANAGE_CHANNELS see all,
+  // everyone else only visible channels (text AND voice); a banned or
+  // removed viewer gets nothing.
+  const view = await resolveLobbyChannelView(db, {
+    serverId,
+    userId: currentUserId,
+    ownerUserId,
+    channels: serverChannels,
+  });
+  if (!view.allowed) return null;
+  const allChannels = view.channels;
 
   const textChannels: Channel[] = [];
   const voiceChannels: Channel[] = [];
@@ -326,9 +350,19 @@ async function loadLiveData(
   const activeTextChannel = textChannels[0] ?? null;
   const activeVoiceChannel = voiceChannels[0] ?? null;
 
-  // Parallel: members, messages (if any text channel), presence (channel + server).
+  // beta-review (S3): messages only when the viewer passes the SAME read
+  // check GET .../messages uses (visibility + READ_MESSAGE_HISTORY).
+  const canReadActiveText = activeTextChannel
+    ? await canReadLobbyChannelMessages({
+        userId: currentUserId,
+        serverId,
+        channelId: activeTextChannel.id,
+      }).catch(() => false)
+    : false;
+
+  // Parallel: members, messages (if any readable text channel), presence (channel + server).
   const memberSummariesP = listMemberSummariesForServer(db, serverId).catch(() => [] as MemberSummary[]);
-  const messagesP: Promise<MessageRow[]> = activeTextChannel
+  const messagesP: Promise<MessageRow[]> = activeTextChannel && canReadActiveText
     ? listMessagesForChannel(db, activeTextChannel.id, { limit: 50 }).catch(() => [] as MessageRow[])
     : Promise.resolve([]);
   const voicePresenceP = activeVoiceChannel
@@ -336,7 +370,7 @@ async function loadLiveData(
     : Promise.resolve([]);
   const serverPresenceP = getUserPresenceInServer(serverId).catch(() => []);
 
-  const [memberSummaries, messageRows, voicePresence, serverPresence] = await Promise.all([
+  const [memberSummaries, messageRows, rawVoicePresence, rawServerPresence] = await Promise.all([
     memberSummariesP,
     messagesP,
     voicePresenceP,
@@ -365,17 +399,39 @@ async function loadLiveData(
   }
 
   const voiceChannelIds = new Set(voiceChannels.map((c) => c.id));
-  const members = buildMembers(memberSummaries, serverPresence, voiceChannelIds);
-  const voiceUsers = buildVoiceUsers(voicePresence, memberSummaries);
-  const voiceUsersByChannel = buildVoiceUsersByChannel(serverPresence, memberSummaries, voiceChannelIds);
+  // beta-review: the SAME presence projection as GET /api/presence —
+  // blocks, per-user privacy (online status / activity) and role-gated
+  // channels — instead of the raw Redis snapshot.
+  const projectPresence = (presences: typeof rawServerPresence) =>
+    projectServerPresenceForViewer({ serverId, viewerUserId: currentUserId, ownerUserId, presences }).catch(
+      () => []
+    );
+  const [projectedServer, projectedVoice] = await Promise.all([
+    projectPresence(rawServerPresence),
+    projectPresence(rawVoicePresence),
+  ]);
+  // Members list: a hidden online status renders as offline.
+  const memberPresence = projectedServer
+    .filter((entry) => entry.status !== 'hidden')
+    .map((entry) => ({ userId: entry.userId, channelId: entry.channelId ?? '', status: entry.status }));
+  // Voice rosters: only channels the viewer can see (joining voice is
+  // visible to the room regardless of the online-status setting).
+  const rosterPresence = projectedServer.flatMap((entry) =>
+    entry.channelId ? [{ userId: entry.userId, channelId: entry.channelId, status: entry.status }] : []
+  );
+  const members = buildMembers(memberSummaries, memberPresence, voiceChannelIds);
+  const voiceUsers = buildVoiceUsers(
+    projectedVoice.filter((entry) => !!entry.channelId).map((entry) => ({ userId: entry.userId, status: entry.status })),
+    memberSummaries
+  );
+  const voiceUsersByChannel = buildVoiceUsersByChannel(rosterPresence, memberSummaries, voiceChannelIds);
 
   // Resolve the caller's block list so blocked authors' messages are
   // masked at the server level - the content never reaches the client.
   const blockedIds = currentUserId ? await getBlockedUserIds(db, currentUserId) : new Set<string>();
   const messages = buildMessages(messageRows, authorMap, currentUserId, blockedIds);
-  const canManageMessages = currentUserId
-    ? hasPermission(await getUserPermissions(db, currentUserId, serverId), CorePermission.MANAGE_MESSAGES)
-    : false;
+  const canManageMessages = hasPermission(view.permissions, CorePermission.MANAGE_MESSAGES);
+  const canMuteMembers = hasPermission(view.permissions, CorePermission.MUTE_MEMBERS);
 
   // Resolve the local user's display name so the LiveKit voice provider
   // can send it as the participant `name` AND so the sidebar voice roster
@@ -405,6 +461,7 @@ async function loadLiveData(
     currentDisplayName,
     isLive: true,
     canManageMessages,
+    canMuteMembers,
   };
 }
 
@@ -459,11 +516,24 @@ export default async function LobbyPage({
         if (!canAutoJoin) {
           throw new Error('User has no accessible server and auto-join is disabled by instance policy.');
         }
-        await ensureServerMembership(db, setupStatus.firstServerId, userId);
+        // beta-review (S2): refuses (null) when the user is banned from
+        // the first server — the old unconditional call silently re-joined
+        // banned users on open instances.
+        const joined = await ensureServerMembership(db, setupStatus.firstServerId, userId);
+        if (!joined) {
+          throw new Error('User is banned from the default server; auto-join refused.');
+        }
         if (setupStatus.ownerUserId === userId) {
           await seedDefaultRoles(db, setupStatus.firstServerId, userId);
         }
         servers = await listServersForUser(db, userId, { limit: 50 });
+      }
+      // beta-review (S2): drop servers whose membership row outlived an
+      // active ban (pre-fix bans never removed it) — neither the rail nor
+      // the live view may offer them.
+      if (servers.length > 0) {
+        const banned = await listActivelyBannedServerIds(db, userId, servers.map((s) => s.id));
+        if (banned.size > 0) servers = servers.filter((s) => !banned.has(s.id));
       }
       for (const s of servers) {
         joinedServerList.push({ id: s.id, name: s.name });
@@ -476,7 +546,7 @@ export default async function LobbyPage({
         (requested && servers.find((s) => s.id === requested)) || servers[0];
       if (srv?.name) serverName = srv.name;
       if (srv?.id) {
-        liveData = await loadLiveData(db, srv.id, userId);
+        liveData = await loadLiveData(db, srv.id, userId, srv.ownerUserId ?? null);
         if (liveData) {
           liveData.serverName = serverName;
           liveData.serverBannerUrl = (srv as { bannerUrl?: string | null }).bannerUrl ?? null;
@@ -514,6 +584,7 @@ export default async function LobbyPage({
     currentDisplayName: 'Guest',
     isLive: false,
     canManageMessages: false,
+    canMuteMembers: false,
   };
 
   return (
@@ -560,7 +631,10 @@ function LobbyShell({
   // LiveKit is only wired in live mode - demo mode keeps the legacy
   // SSR-only ChannelGroup + VoiceControlFooter so the demo render path
   // stays server-only (no client island mounts in demo mode).
-  const livekitUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL ?? 'ws://localhost:7880';
+  // beta-review: resolved at REQUEST time (a published image is built
+  // without NEXT_PUBLIC_*). Empty → the provider uses the token response's
+  // URL, then the same-origin /livekit proxy.
+  const livekitUrl = getRuntimeLiveKitUrl() ?? '';
   const canVoiceConnect = data.isLive && !!data.serverId && hasUser;
 
   const shell = (
@@ -854,6 +928,7 @@ function Sidebar({
               initialVoiceUsersByChannel={data.voiceUsersByChannel}
               initialActiveChannelId={activeVoiceId ?? null}
               currentUserId={data.currentUserId}
+              canMuteMembers={data.canMuteMembers}
             />
           ) : (
             <ChannelGroup
@@ -894,7 +969,7 @@ function Sidebar({
 
       {/* Voice control + user status footer */}
       {voiceProvider ? (
-        <LobbyVoiceFooter serverName={serverName} hasUser={hasUser} />
+        <LobbyVoiceFooter serverName={serverName} hasUser={hasUser} displayName={data.currentDisplayName} />
       ) : (
         <VoiceControlFooter serverName={serverName} hasUser={hasUser} />
       )}

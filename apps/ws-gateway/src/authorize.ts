@@ -10,6 +10,7 @@
  * the client can multiplex across topics.
  */
 import {
+  getChannelById,
   getGameSessionById,
   getServerById,
   getUserPermissions,
@@ -20,7 +21,14 @@ import {
 import { parseTopic } from './protocol.js';
 
 export type AuthorizeResult =
-  | { ok: true; kind: 'activity-state' | 'chat' | 'presence' | 'dm'; serverId: string; resourceId: string }
+  | {
+      ok: true;
+      kind: 'activity-state' | 'chat' | 'presence' | 'dm';
+      serverId: string;
+      resourceId: string;
+      /** beta-review: the channel the topic lives in (chat / activity-state). */
+      channelId?: string;
+    }
   | { ok: false; reason: 'unknown_topic' | 'server_not_found' | 'forbidden' };
 
 export async function authorizeTopicSubscribe(
@@ -64,7 +72,17 @@ export async function authorizeTopicSubscribe(
   if (parsed.kind === 'chat' || parsed.kind === 'activity-state') {
     let channelId: string | null = null;
     if (parsed.kind === 'chat') {
-      channelId = parsed.resourceId;
+      // beta-review (S6): the channel must EXIST and belong to the
+      // topic's server. canMemberAccessChannel answers "true" for a
+      // channel with no overrides — including one that does not exist —
+      // so without this check any member could subscribe to unbounded
+      // made-up topics. Same 'forbidden' as a private channel: no
+      // existence oracle.
+      const channel = await getChannelById(db as never, parsed.resourceId);
+      if (!channel || channel.serverId !== parsed.serverId) {
+        return { ok: false, reason: 'forbidden' };
+      }
+      channelId = channel.id;
     } else {
       // The topic's resource is the SESSION — resolve its channel.
       const session = await getGameSessionById(db as never, parsed.resourceId);
@@ -86,6 +104,13 @@ export async function authorizeTopicSubscribe(
         if (!visible) return { ok: false, reason: 'forbidden' };
       }
     }
+    return {
+      ok: true,
+      kind: parsed.kind,
+      serverId: parsed.serverId,
+      resourceId: parsed.resourceId,
+      channelId,
+    };
   }
 
   return { ok: true, kind: parsed.kind, serverId: parsed.serverId, resourceId: parsed.resourceId };

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { CorePermission } from '@lobbyforge/core';
+import { CorePermission, hasPermission } from '@lobbyforge/core';
 import { getInviteById, getServerById, logAction, revokeInvite } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
@@ -63,6 +63,15 @@ async function handleDelete(
     const invite = await getInviteById(getDb(), inviteId);
     if (!invite || invite.serverId !== serverId) {
       return NextResponse.json({ error: 'Invite not found in this server' }, { status: 404 });
+    }
+    // beta-review (F7): CREATE_INVITE (default @everyone) only covers the
+    // caller's OWN invites; revoking anyone else's needs MANAGE_SERVER
+    // (the owner holds implicit administrator, which short-circuits it).
+    if (
+      invite.createdBy !== session.uid &&
+      !hasPermission(auth.permissions, CorePermission.MANAGE_SERVER)
+    ) {
+      return NextResponse.json({ error: 'You can only revoke invites you created' }, { status: 403 });
     }
     await revokeInvite(getDb(), inviteId);
     void logAction(getDb(), {

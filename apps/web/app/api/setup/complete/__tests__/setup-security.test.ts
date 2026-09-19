@@ -19,6 +19,8 @@ vi.mock('@/lib/guest-session', () => ({
   buildGuestSessionCookie: () => ({ setCookieHeader: 'lf_guest=signed; HttpOnly; SameSite=Lax' }),
 }));
 vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));
+const recordSession = vi.fn();
+vi.mock('@/lib/session-tracker', () => ({ recordSession }));
 
 const originalNodeEnv = process.env.NODE_ENV;
 const originalSetupToken = process.env.LOBBYFORGE_SETUP_TOKEN;
@@ -54,6 +56,7 @@ beforeEach(() => {
   completeInitialBootstrap.mockReset();
   getInstanceBootstrapStatus.mockReset();
   hashPassword.mockReset();
+  recordSession.mockReset().mockResolvedValue(undefined);
   env.NODE_ENV = 'production';
   process.env.LOBBYFORGE_SETUP_TOKEN = validBody.setupToken;
   getInstanceBootstrapStatus.mockResolvedValue({ bootstrapComplete: false });
@@ -134,5 +137,21 @@ describe('POST /api/setup/complete security boundary', () => {
       expect.anything(),
       expect.objectContaining({ instanceName: sqlLikeName })
     );
+  });
+});
+
+// beta-review (S7): the owner session minted by setup must be recorded so
+// a later password change can revoke it.
+describe('POST /api/setup/complete — beta-review S7 session tracking', () => {
+  it('records the owner session it mints', async () => {
+    const res = await post(validBody);
+    expect(res.status).toBe(200);
+    expect(recordSession).toHaveBeenCalledWith('owner-id', `g_${'a'.repeat(32)}`, expect.any(Request));
+  });
+
+  it('a tracking failure does not fail the (irreversible) setup response', async () => {
+    recordSession.mockRejectedValue(new Error('redis down'));
+    const res = await post(validBody);
+    expect(res.status).toBe(200);
   });
 });

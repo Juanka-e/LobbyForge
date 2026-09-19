@@ -110,9 +110,16 @@ async function handlePost(req: Request): Promise<NextResponse> {
     getSessionSecret(),
     { secure: process.env.NODE_ENV === 'production' }
   );
-  void recordSession(result.user.id, seed.gid, req).catch((error) => {
+  // beta-review (S7): awaited — the session must be listable (and so
+  // revocable by a password change) before the cookie is handed out.
+  // A failure only logs: this session belongs to the account being
+  // created (no stolen-credential vector), and failing here would strand
+  // a just-created account behind a 409 on retry.
+  try {
+    await recordSession(result.user.id, seed.gid, req);
+  } catch (error) {
     console.error('[auth/register] session tracking failed', (error as Error).message);
-  });
+  }
   return NextResponse.json(
     { user: result.user, serverId: result.serverId },
     { status: 201, headers: { 'Set-Cookie': session.setCookieHeader, 'Cache-Control': 'no-store' } }

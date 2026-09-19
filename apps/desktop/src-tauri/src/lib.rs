@@ -236,23 +236,30 @@ fn shell_flag(app: &tauri::AppHandle, key: &str, default: bool) -> bool {
 /// navigation, and the remote origin has no `__TAURI__` (IPC stays
 /// closed). `window.eval` runs on ANY page, so the shortcut keeps
 /// working after connecting to an instance.
+/// beta-review: the payload used to carry `source: window`, and a Window
+/// is not structured-cloneable — every postMessage threw DataCloneError,
+/// so desktop PTT, shortcuts and the login handoff never reached the page.
+/// The receiver checks `event.source === window`, which the browser sets
+/// itself. The payload is serialized as JSON (valid JS, safely escaped).
+fn post_message_script(payload: &serde_json::Value) -> String {
+    format!("window.postMessage({payload},'*')")
+}
+
 fn emit_ptt(window: &WebviewWindow, pressed: bool) {
     let payload = serde_json::json!({ "pressed": pressed });
     // Keep the Tauri event for the local connect screen…
     let _ = window.emit("lobbyforge://ptt", payload.clone());
     // …and postMessage into the page for the remote instance.
-    let _ = window.eval(&format!(
-        "window.postMessage({{source:window,type:'lobbyforge:ptt',pressed:{}}},'*')",
-        pressed
+    let _ = window.eval(&post_message_script(
+        &serde_json::json!({ "type": "lobbyforge:ptt", "pressed": pressed }),
     ));
 }
 
 /// DP-06: forward a shortcut action (mute/deafen/settings) to the page.
 /// Same eval bridge — the web app decides what to do with each type.
 fn emit_shortcut(window: &WebviewWindow, action: &str) {
-    let _ = window.eval(&format!(
-        "window.postMessage({{source:window,type:'lobbyforge:shortcut',action:{:?}}},'*')",
-        action
+    let _ = window.eval(&post_message_script(
+        &serde_json::json!({ "type": "lobbyforge:shortcut", "action": action }),
     ));
 }
 
@@ -287,9 +294,8 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 /// (DESK-001: on Windows/Linux a second launch carries the URL as a
 /// command-line argument — without the relay the handoff is lost).
 fn forward_handoff(window: &WebviewWindow, url_str: &str) {
-    let _ = window.eval(&format!(
-        "window.postMessage({{source:window,type:'lobbyforge:handoff',url:{:?}}},'*')",
-        url_str
+    let _ = window.eval(&post_message_script(
+        &serde_json::json!({ "type": "lobbyforge:handoff", "url": url_str }),
     ));
     let _ = window.show();
     let _ = window.set_focus();
@@ -411,4 +417,25 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running LobbyForge desktop shell");
+}
+
+#[cfg(test)]
+mod post_message_tests {
+    use super::post_message_script;
+
+    #[test]
+    fn payload_is_cloneable_json_without_a_window_reference() {
+        let script = post_message_script(&serde_json::json!({ "type": "lobbyforge:ptt", "pressed": true }));
+        assert_eq!(script, r#"window.postMessage({"pressed":true,"type":"lobbyforge:ptt"},'*')"#);
+        assert!(!script.contains("source"));
+    }
+
+    #[test]
+    fn untrusted_strings_are_escaped() {
+        let script = post_message_script(&serde_json::json!({
+            "type": "lobbyforge:handoff",
+            "url": "lobbyforge://x\"});alert(1);//"
+        }));
+        assert!(script.contains(r#"\"});alert(1);//"#));
+    }
 }

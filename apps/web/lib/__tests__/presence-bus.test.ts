@@ -19,52 +19,43 @@ beforeEach(() => {
 });
 
 describe('publishPresenceChange', () => {
-  it('publishes the event JSON to the server-wide presence topic', async () => {
+  it('publishes a content-free signal to the server-wide presence topic (beta-review S5)', async () => {
     const { publishPresenceChange } = await import('../presence-bus.js');
-    const event = {
-      type: 'presence-update' as const,
-      userId: 'user-1',
-      status: 'online',
-      channelId: 'ch-1',
-      lastSeen: 1234,
-    };
-    publishPresenceChange({ serverId: 'srv-1', event });
+    publishPresenceChange({ serverId: 'srv-1' });
     // publish is fire-and-forget (microtask) — flush before asserting.
     await new Promise((r) => setImmediate(r));
     expect(publish).toHaveBeenCalledTimes(1);
     const [topic, raw] = publish.mock.calls[0] as [string, string];
     expect(topic).toBe('lf:test:presence:srv-1');
-    expect(JSON.parse(raw)).toEqual(event);
+    expect(JSON.parse(raw)).toEqual({ type: 'presence-update' });
   });
 
-  it('includes the activity field when provided', async () => {
+  it('never forwards snapshot fields, even if a caller passes them', async () => {
     const { publishPresenceChange } = await import('../presence-bus.js');
+    // A stale caller still handing over the old snapshot shape.
     publishPresenceChange({
       serverId: 'srv-1',
       event: {
         type: 'presence-update',
         userId: 'user-1',
         status: 'online',
-        channelId: 'ch-1',
+        channelId: 'ch-private',
         lastSeen: 1,
-        activity: { kind: 'game', label: 'Hushle' },
+        activity: { kind: 'game', label: 'Hushle', serverName: 'Secret' },
       },
-    });
+    } as unknown as { serverId: string });
     await new Promise((r) => setImmediate(r));
     const raw = (publish.mock.calls[0] as [string, string])[1];
-    expect(JSON.parse(raw).activity).toEqual({ kind: 'game', label: 'Hushle' });
+    expect(JSON.parse(raw)).toEqual({ type: 'presence-update' });
+    expect(raw).not.toContain('user-1');
+    expect(raw).not.toContain('ch-private');
   });
 
   it('never throws when the publish rejects (fire-and-forget)', async () => {
     publish.mockRejectedValue(new Error('redis down'));
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { publishPresenceChange } = await import('../presence-bus.js');
-    expect(() =>
-      publishPresenceChange({
-        serverId: 'srv-1',
-        event: { type: 'presence-update', userId: 'u', status: 'online', channelId: 'c', lastSeen: 1 },
-      })
-    ).not.toThrow();
+    expect(() => publishPresenceChange({ serverId: 'srv-1' })).not.toThrow();
     await new Promise((r) => setImmediate(r));
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();

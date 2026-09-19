@@ -14,10 +14,11 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import * as http from 'node:http';
 import { getRevocationStatus, validateGuestFromHeaders, type ResolvedGuest } from './auth.js';
 import { authorizeTopicSubscribe } from './authorize.js';
-import { ConnectionSubscriptions } from './subscriptions.js';
+import { ConnectionSubscriptions, type SubscriptionCapacityError } from './subscriptions.js';
 import { ClientMessageSchema, type ServerMessage } from './protocol.js';
 import { getDb } from './db.js';
 import { initAccessInvalidationListener, topicMatchesInvalidation } from './access-invalidation.js';
+import { shutdownSubscriber } from './redis-subscriber.js';
 
 import { projectActivityState } from '@lobbyforge/core';
 import { getGameSessionById, getPluginInstall } from '@lobbyforge/db';
@@ -127,6 +128,25 @@ async function forwardProjectedActivity(
   }
 }
 
+/**
+ * beta-review (S5): the ONLY presence payload a WS subscriber ever
+ * receives. The bus event is a "something changed — re-fetch" signal;
+ * clients re-read `GET /api/presence`, which applies the privacy
+ * settings, block list and channel visibility for THAT viewer. Whatever
+ * a publisher puts on the bus (status, voice channelId, activity,
+ * serverName, even the user id), none of it is forwarded — the realtime
+ * path can never reveal more than REST.
+ */
+export function sanitizePresenceEvent(_data: unknown): { type: 'presence-update' } {
+  return { type: 'presence-update' };
+}
+
+function capacityMessage(error: SubscriptionCapacityError): string {
+  return error === 'user_limit'
+    ? 'Too many subscriptions for this user'
+    : 'Too many subscriptions on this connection';
+}
+
 function send(socket: WebSocket, msg: ServerMessage): void {
   if (socket.readyState !== socket.OPEN) return;
   try {
@@ -169,6 +189,73 @@ const PERIODIC_REAUTH_INTERVAL_MS = parseInt(
 );
 const ipConnectionCounts = new Map<string, number>();
 
+/**
+ * SEC-004: extract the client IP safely. nginx now sends
+ * X-Forwarded-For: $remote_addr ONLY (no chain), but defensively take
+ * the LAST comma-separated entry — the address the TRUSTED proxy
+ * observed — instead of the first, which an attacker controls when a
+ * chain leaks through.
+ */
+function trustedClientIp(headers: http.IncomingMessage['headers'], socketRemote: string | undefined): string {
+  const raw = headers['x-forwarded-for']?.toString();
+  if (raw) {
+    const parts = raw.split(',').map((x) => x.trim()).filter(Boolean);
+    if (parts.length > 0) return parts[parts.length - 1]!;
+  }
+  return socketRemote || 'unknown';
+}
+
+function clientIpFor(req: http.IncomingMessage): string {
+  return process.env.NODE_ENV === 'production'
+    ? trustedClientIp(req.headers, req.socket.remoteAddress)
+    : (req.socket.remoteAddress || 'unknown');
+}
+
+/** Upgrade request -> its (idempotent) per-IP slot release. */
+const ipSlotReleasers = new WeakMap<http.IncomingMessage, () => void>();
+
+/**
+ * Claim a per-IP connection slot for an upgrade request. Returns false
+ * when the IP is at its cap.
+ *
+ * beta-review (S6): the slot used to be released only by the
+ * 'connection' handler — an upgrade aborted AFTER verifyClient (client
+ * hung up mid-handshake, socket no longer writable, server closing)
+ * never reaches that handler, so the slot leaked and enough aborted
+ * handshakes locked the IP out. The release is now bound to the RAW
+ * socket's 'close', which fires on every path (aborted upgrade, normal
+ * WS close, error); it is single-fire so the handler's early releases
+ * cannot double-decrement.
+ */
+function claimIpSlot(req: http.IncomingMessage): boolean {
+  // An already-destroyed socket will never emit 'close' again — the
+  // upgrade is dead anyway; do not count it.
+  if (req.socket.destroyed) return false;
+  const ip = clientIpFor(req);
+  const count = ipConnectionCounts.get(ip) ?? 0;
+  if (count >= MAX_CONNECTIONS_PER_IP) {
+    console.warn(`[ws-gateway] rejecting connection from ${ip}: ${count} active (max ${MAX_CONNECTIONS_PER_IP})`);
+    return false;
+  }
+  ipConnectionCounts.set(ip, count + 1);
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    const current = ipConnectionCounts.get(ip) ?? 0;
+    if (current <= 1) ipConnectionCounts.delete(ip);
+    else ipConnectionCounts.set(ip, current - 1);
+  };
+  ipSlotReleasers.set(req, release);
+  req.socket.once('close', release);
+  return true;
+}
+
+/** Test/introspection: live per-IP slot count. */
+export function __ipConnectionCount(ip: string): number {
+  return ipConnectionCounts.get(ip) ?? 0;
+}
+
 export function createGateway(): { wss: WebSocketServer; server: http.Server; close: () => Promise<void> } {
   // Create an HTTP server first — it serves the /health endpoint for
   // Docker healthchecks (the WS-only server returns 426 for plain HTTP).
@@ -191,16 +278,7 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
       // Per-IP connection cap — prevents DoS via unauthenticated WS floods.
       // SEC-004: LAST XFF entry (the trusted-proxy-observed hop), never
       // the first (client-controllable in a forwarded chain).
-      const ip = process.env.NODE_ENV === 'production'
-        ? trustedClientIp(info.req.headers, info.req.socket.remoteAddress)
-        : (info.req.socket.remoteAddress || 'unknown');
-      const count = ipConnectionCounts.get(ip) ?? 0;
-      if (count >= MAX_CONNECTIONS_PER_IP) {
-        console.warn(`[ws-gateway] rejecting connection from ${ip}: ${count} active (max ${MAX_CONNECTIONS_PER_IP})`);
-        return false;
-      }
-      ipConnectionCounts.set(ip, count + 1);
-      return true;
+      return claimIpSlot(info.req);
     },
   });
 
@@ -297,22 +375,6 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
     }
   }, HEARTBEAT_INTERVAL_MS);
 
-  /**
- * SEC-004: extract the client IP safely. nginx now sends
- * X-Forwarded-For: $remote_addr ONLY (no chain), but defensively take
- * the LAST comma-separated entry — the address the TRUSTED proxy
- * observed — instead of the first, which an attacker controls when a
- * chain leaks through.
- */
-function trustedClientIp(headers: import('http').IncomingMessage['headers'], socketRemote: string | undefined): string {
-  const raw = headers['x-forwarded-for']?.toString();
-  if (raw) {
-    const parts = raw.split(',').map((x) => x.trim()).filter(Boolean);
-    if (parts.length > 0) return parts[parts.length - 1]!;
-  }
-  return socketRemote || 'unknown';
-}
-
   // LF-SEC-003: event-driven access invalidation. When the web app
   // reports a kick/ban/role loss/channel-policy/block change, re-run
   // the subscription authorization for every AFFECTED live topic and
@@ -326,7 +388,7 @@ function trustedClientIp(headers: import('http').IncomingMessage['headers'], soc
       if (event.kind === 'user-server-access' && event.userId !== state.guest.uid) continue;
 
       for (const topic of state.subs.topics()) {
-        if (!topicMatchesInvalidation(topic, event)) continue;
+        if (!topicMatchesInvalidation(topic, event, state.subs.meta(topic)?.channelId)) continue;
         void (async () => {
           try {
             const authz = await authorizeTopicSubscribe(getDb(), state.guest!.uid, topic);
@@ -351,23 +413,10 @@ function trustedClientIp(headers: import('http').IncomingMessage['headers'], soc
   });
 
   wss.on('connection', async (socket, req) => {
-    const connectionIp = process.env.NODE_ENV === 'production'
-      ? trustedClientIp(req.headers, req.socket.remoteAddress)
-      : (req.socket.remoteAddress || 'unknown');
-
-    // Single-fire cleanup — prevents counter leak/double-decrement when
-    // both 'close' and 'error' fire on the same socket.
-    let ipReleased = false;
-    const releaseIpSlot = () => {
-      if (ipReleased) return;
-      ipReleased = true;
-      const count = ipConnectionCounts.get(connectionIp) ?? 0;
-      if (count <= 1) {
-        ipConnectionCounts.delete(connectionIp);
-      } else {
-        ipConnectionCounts.set(connectionIp, count - 1);
-      }
-    };
+    // Single-fire release claimed in verifyClient — no counter leak or
+    // double-decrement when 'close', 'error' and the raw-socket 'close'
+    // all fire for the same connection.
+    const releaseIpSlot = ipSlotReleasers.get(req) ?? (() => undefined);
 
     const cookieHeader = req.headers.cookie;
     const auth = validateGuestFromHeaders(cookieHeader);
@@ -407,7 +456,8 @@ function trustedClientIp(headers: import('http').IncomingMessage['headers'], soc
 
     const state: ConnectionState = {
       guest: auth.guest,
-      subs: new ConnectionSubscriptions(),
+      // beta-review (S6): per-connection + per-user subscription caps.
+      subs: new ConnectionSubscriptions({ userId: auth.guest.uid }),
       subscribeTimestamps: [],
       alive: true,
       revocationUnavailableSince: null,
@@ -468,6 +518,18 @@ function trustedClientIp(headers: import('http').IncomingMessage['headers'], soc
           });
           return;
         }
+        // beta-review (S6): refuse before the DB round trip when the
+        // connection / user is already at its subscription cap.
+        const capacity = state.subs.capacityError();
+        if (capacity) {
+          send(socket, {
+            type: 'error',
+            topic: msg.topic,
+            code: 'rate_limited',
+            message: capacityMessage(capacity),
+          });
+          return;
+        }
         try {
           const authz = await authorizeTopicSubscribe(getDb(), state.guest.uid, msg.topic);
           if (!authz.ok) {
@@ -479,9 +541,20 @@ function trustedClientIp(headers: import('http').IncomingMessage['headers'], soc
             });
             return;
           }
-          state.subs.add(msg.topic, (raw) => {
+          const added = state.subs.add(msg.topic, (raw) => {
             try {
               const data = JSON.parse(raw);
+              // beta-review (S5): presence is a content-free "re-fetch"
+              // signal — never forward the publisher's payload.
+              if (authz.kind === 'presence') {
+                send(socket, {
+                  type: 'event',
+                  topic: msg.topic,
+                  data: sanitizePresenceEvent(data),
+                  at: new Date().toISOString(),
+                });
+                return;
+              }
               // SEC-001: the bus payload carries NO canonical state (the
               // publisher only sends status/revision/publicSummary). For
               // activity-state topics we load the session and project it
@@ -501,7 +574,20 @@ function trustedClientIp(headers: import('http').IncomingMessage['headers'], soc
             } catch {
               /* drop malformed payload — the publisher side is responsible for shape */
             }
-          });
+          }, { channelId: authz.channelId });
+          // The socket closed while authorization was in flight — the
+          // manager refused the topic; nothing to acknowledge.
+          if (added === 'closed') return;
+          if (added === 'connection_limit' || added === 'user_limit') {
+            // Concurrent subscribes raced past the pre-check.
+            send(socket, {
+              type: 'error',
+              topic: msg.topic,
+              code: 'rate_limited',
+              message: capacityMessage(added),
+            });
+            return;
+          }
           send(socket, {
             type: 'subscribed',
             topic: msg.topic,
@@ -545,6 +631,7 @@ function trustedClientIp(headers: import('http').IncomingMessage['headers'], soc
       clearInterval(heartbeat);
       clearInterval(periodicReauth);
       stopInvalidationListener();
+      shutdownSubscriber();
       for (const client of wss.clients) {
         try {
           client.close(1001, 'shutting down');

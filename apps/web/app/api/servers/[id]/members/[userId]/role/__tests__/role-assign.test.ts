@@ -12,6 +12,7 @@ import { buildGuestSessionCookie, type GuestIdentity } from '@/lib/guest-session
 
 const dbFns = {
   setMemberRoles: vi.fn(),
+  getMemberRoleIds: vi.fn(),
   getRoleById: vi.fn(),
   getHighestRolePosition: vi.fn(),
   getServerById: vi.fn(),
@@ -26,6 +27,8 @@ vi.mock('@/lib/security-headers', () => ({
   withApiSecurity: (handler: unknown) => handler,
   applySecurityHeaders: (r: unknown) => r,
 }));
+const queueMemberVoiceSync = vi.fn();
+vi.mock('@/lib/voice-moderation', () => ({ queueMemberVoiceSync }));
 
 const SECRET = 'x'.repeat(32);
 const SERVER_ID = '11111111-1111-1111-1111-111111111111';
@@ -62,6 +65,8 @@ beforeEach(() => {
       : { id, serverId: SERVER_ID, name: 'Low', position: 1 }
   );
   dbFns.setMemberRoles.mockResolvedValue({ ok: true });
+  dbFns.getMemberRoleIds.mockResolvedValue([]);
+  queueMemberVoiceSync.mockReset();
   dbFns.logAction.mockResolvedValue(undefined);
 });
 
@@ -141,5 +146,75 @@ describe('PUT members/[userId]/role — Discord hierarchy', () => {
     const res = await put({ roleIds: [ROLE_LOW] }, ADMIN_LOW, MEMBER);
     expect(res.status).toBe(404);
     expect(dbFns.setMemberRoles).not.toHaveBeenCalled();
+  });
+});
+
+// beta-review (S1): rank alone does not make a role assignable — an
+// owner-created LOW-position role may carry `administrator` or other
+// permissions the actor lacks; assigning it is the same escalation as
+// editing them into a role.
+describe('PUT members/[userId]/role — beta-review S1 grant cap', () => {
+  const ROLE_LOW_ADMIN = '44444444-4444-4444-4444-444444444444'; // position 1, administrator
+  const ROLE_LOW_BAN = '55555555-5555-5555-5555-555555555555'; // position 1, ban_members
+
+  beforeEach(() => {
+    dbFns.getRoleById.mockImplementation(async (_db: unknown, id: string) => {
+      if (id === ROLE_LOW_ADMIN) return { id, serverId: SERVER_ID, name: 'LowAdmin', position: 1, permissions: ['administrator'] };
+      if (id === ROLE_LOW_BAN) return { id, serverId: SERVER_ID, name: 'LowBan', position: 1, permissions: ['ban_members'] };
+      if (id === ROLE_HIGH) return { id, serverId: SERVER_ID, name: 'High', position: 10, permissions: [] };
+      return { id, serverId: SERVER_ID, name: 'Low', position: 1, permissions: ['send_messages'] };
+    });
+  });
+
+  it('a MANAGE_ROLES member cannot assign a low role that carries administrator', async () => {
+    dbFns.getUserPermissions.mockResolvedValue(['manage_roles', 'send_messages']);
+    const res = await put({ roleIds: [ROLE_LOW_ADMIN] }, ADMIN_LOW);
+    expect(res.status).toBe(403);
+    expect(dbFns.setMemberRoles).not.toHaveBeenCalled();
+  });
+
+  it('a non-owner ADMINISTRATOR cannot hand out administrator either', async () => {
+    const res = await put({ roleIds: [ROLE_LOW_ADMIN] }, ADMIN_LOW);
+    expect(res.status).toBe(403);
+    expect(dbFns.setMemberRoles).not.toHaveBeenCalled();
+  });
+
+  it('a MANAGE_ROLES member cannot assign a role carrying a permission they lack', async () => {
+    dbFns.getUserPermissions.mockResolvedValue(['manage_roles', 'send_messages']);
+    const res = await put({ roleIds: [ROLE_LOW_BAN] }, ADMIN_LOW);
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as { permissions: string[] };
+    expect(json.permissions).toEqual(['ban_members']);
+    expect(dbFns.setMemberRoles).not.toHaveBeenCalled();
+  });
+
+  it('roles the target ALREADY holds may be resubmitted alongside a new grantable role', async () => {
+    dbFns.getUserPermissions.mockResolvedValue(['manage_roles', 'send_messages']);
+    dbFns.getMemberRoleIds.mockResolvedValue([ROLE_LOW_BAN]);
+    const res = await put({ roleIds: [ROLE_LOW_BAN, ROLE_LOW] }, ADMIN_LOW);
+    expect(res.status).toBe(200);
+    expect(dbFns.getMemberRoleIds).toHaveBeenCalledWith(expect.anything(), SERVER_ID, MEMBER);
+    expect(dbFns.setMemberRoles).toHaveBeenCalledWith(expect.anything(), SERVER_ID, MEMBER, [
+      ROLE_LOW_BAN,
+      ROLE_LOW,
+    ]);
+  });
+
+  it('a manager holding the permission may assign the role', async () => {
+    dbFns.getUserPermissions.mockResolvedValue(['manage_roles', 'ban_members']);
+    const res = await put({ roleIds: [ROLE_LOW_BAN] }, ADMIN_LOW);
+    expect(res.status).toBe(200);
+  });
+
+  it('the owner may assign an administrator role (unchanged)', async () => {
+    const res = await put({ roleIds: [ROLE_LOW_ADMIN] }, OWNER);
+    expect(res.status).toBe(200);
+    expect(dbFns.setMemberRoles).toHaveBeenCalled();
+  });
+
+  it('beta-review S2: a successful assignment re-syncs the target voice session', async () => {
+    const res = await put({ roleIds: [ROLE_LOW] }, OWNER);
+    expect(res.status).toBe(200);
+    expect(queueMemberVoiceSync).toHaveBeenCalledWith(SERVER_ID, MEMBER);
   });
 });

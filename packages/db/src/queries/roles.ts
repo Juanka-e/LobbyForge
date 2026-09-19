@@ -14,13 +14,14 @@
  * sets one). Higher position = more authority; the order matters when
  * multiple roles are assigned to a single member.
  */
-import { and, asc, eq, inArray, isNull, sql, lt, lte, gt, gte } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, not, sql, lt, lte, gt, gte } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
 import {
   CorePermission,
   type CorePermission as CorePermissionT,
 } from '@lobbyforge/core';
 import { membershipRoles, memberships, roles, servers } from '../schema.js';
+import { activeBanOnMembershipSql } from './bans.js';
 
 export interface RoleRow {
   id: string;
@@ -342,6 +343,10 @@ export async function deleteRole(db: DbClient, roleId: string): Promise<void> {
  * join table. The single `memberships.roleId` column is kept as the
  * "primary / display role" for the UI; the permission union reads from
  * both columns.
+ *
+ * beta-review (S2): an ACTIVELY banned user has no permissions, even if
+ * a membership row survived the ban (several routes — ban/unban, invite
+ * create — gate on permissions alone, without a membership probe).
  */
 export async function getUserPermissions(
   db: DbClient,
@@ -363,7 +368,11 @@ export async function getUserPermissions(
     .select({ id: memberships.id, roleId: memberships.roleId })
     .from(memberships)
     .where(
-      and(eq(memberships.userId, userId), eq(memberships.serverId, serverId))
+      and(
+        eq(memberships.userId, userId),
+        eq(memberships.serverId, serverId),
+        not(activeBanOnMembershipSql())
+      )
     )
     .limit(1);
   if (membership.length === 0) return [];

@@ -4,7 +4,7 @@
  * Mounts the desktop deep-link listener (LF-SEC-008 client half).
  *
  * The Tauri shell injects the handoff by evaluating
- * `window.postMessage({source: window, type:'lobbyforge:handoff', …})`
+ * `window.postMessage({type:'lobbyforge:handoff', url}, '*')`
  * INSIDE this page — so a genuine handoff ALWAYS arrives with
  * event.source === window and event.origin === this page's origin.
  *

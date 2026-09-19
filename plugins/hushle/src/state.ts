@@ -120,6 +120,11 @@ export interface HushleState {
    * (in addition to the deck index) when sampling from a difficulty
    * tier to avoid repeating the same card. Resets to `[]` on
    * `set-teams` / `start-game`.
+   *
+   * beta-review: SERVER ONLY. These are stable DB card ids and the last
+   * entry is the current card, so the canonical projector
+   * (@lobbyforge/core) replaces them with `usedCardCount` for every
+   * viewer — the client must not rely on this field.
    */
   usedCardIds: string[];
   settings: HushleSettings;

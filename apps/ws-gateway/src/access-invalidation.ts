@@ -78,7 +78,13 @@ export function __resetAccessInvalidation(): void {
  */
 export function topicMatchesInvalidation(
   topic: string,
-  event: AccessInvalidationEvent
+  event: AccessInvalidationEvent,
+  /**
+   * beta-review: the channel the topic was authorized against (from
+   * authorizeTopicSubscribe). activity-state topics are keyed by SESSION
+   * id, so their channel cannot be read from the topic string.
+   */
+  topicChannelId?: string
 ): boolean {
   const parsed = parseTopic(topic);
   if (!parsed) return false;
@@ -89,11 +95,16 @@ export function topicMatchesInvalidation(
       // that server (chat/activity/presence) must be re-checked.
       return parsed.kind !== 'dm' && parsed.serverId === event.serverId;
     case 'channel-policy':
-      return (
-        parsed.kind !== 'dm' &&
-        parsed.serverId === event.serverId &&
-        parsed.resourceId === event.channelId
-      );
+      if (parsed.kind === 'dm' || parsed.serverId !== event.serverId) return false;
+      if (parsed.kind === 'activity-state') {
+        // beta-review: resourceId is the session id, never the channel
+        // id — the old comparison never matched, so activity
+        // subscriptions survived a channel lock-down until the 30s
+        // periodic reauth. Match the session's channel; when it is
+        // unknown, re-check anyway (a spare re-authorization is cheap).
+        return topicChannelId === undefined || topicChannelId === event.channelId;
+      }
+      return parsed.resourceId === event.channelId;
     case 'server-policy':
       // A role's permissions/positions changed — revalidate EVERYTHING
       // in that server (rare, coarse, correct).

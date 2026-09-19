@@ -5,19 +5,19 @@
  *   1. Mount → if no session, POST /api/auth/guest.
  *   2. POST /api/livekit/token with serverId + channelId -> get a JWT.
  *   3. new Room({ adaptiveStream, dynacast }).connect(WS_URL, JWT).
- *   4. Render the local + remote participant list. Mic toggle uses
- *      `localParticipant.setMicrophoneEnabled`. Deafen is a UI hint only
- *      in M14 (toggles a flag that mutes incoming audio via
- *      `setSubscribedTracks`); server-side mute is M15.
+ *   4. Render the local + remote participant list and attach remote
+ *      audio. Mic toggle uses `localParticipant.setMicrophoneEnabled`;
+ *      deafen disables the remote audio publications (server stops
+ *      sending) and also covers publications that appear later.
  *   5. If `serverId` + `channelId` query params are present, post a
  *      presence heartbeat every 5s to /api/servers/{id}/channels/{channelId}/presence.
  *
  * M14 scope is self-mute/deafen only. Server-side mute (M15) needs
  * `livekit-server-sdk` and a `RoomServiceClient.muteParticipant` call.
  *
- * The page reads `NEXT_PUBLIC_LIVEKIT_URL` (browser-visible) so Next can
- * inline it at build time. The token + cookie exchange happens server-side
- * and the JWT never carries the API secret.
+ * The LiveKit URL comes from the token response (resolved at request time
+ * on the server), then the build-time `NEXT_PUBLIC_LIVEKIT_URL`, then the
+ * same-origin `/livekit` proxy. The JWT never carries the API secret.
  */
 'use client';
 
@@ -27,9 +27,13 @@ import {
   Room,
   RoomEvent,
   ConnectionState,
+  Track,
   type LocalParticipant,
   type Participant,
+  type RemoteTrack,
+  type RemoteTrackPublication,
 } from 'livekit-client';
+import { resolveBrowserLiveKitUrl } from '@/lib/public-endpoints';
 import { getPlugin } from '@/lib/plugin-registry';
 import { getRealtimeClient } from '@/lib/realtime-client';
 
@@ -39,6 +43,8 @@ type Token = {
   identity: string;
   room: string;
   expiresAt: number;
+  /** Runtime LiveKit URL (null → same-origin /livekit). */
+  livekitUrl?: string | null;
   // VOICE-001: per-user ephemeral TURN credentials (coturn REST auth).
   iceServers?: RTCIceServer[];
 };
@@ -78,7 +84,7 @@ function RoomView({ roomName }: { roomName: string }) {
   const search = useSearchParams();
   const serverId = search?.get('serverId') ?? null;
   const channelId = search?.get('channelId') ?? null;
-  const livekitUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL ?? 'ws://localhost:7880';
+  const buildTimeLivekitUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL;
 
   const [guest, setGuest] = useState<Guest | null>(null);
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
@@ -87,8 +93,14 @@ function RoomView({ roomName }: { roomName: string }) {
   const [micEnabled, setMicEnabled] = useState(false);
   const [deafened, setDeafened] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [audioBlocked, setAudioBlocked] = useState(false);
 
   const roomRef = useRef<Room | null>(null);
+  // beta-review: this page used to never attach remote audio — Hushle
+  // players heard nobody. Remote audio elements live in a hidden container.
+  const audioContainerRef = useRef<HTMLDivElement | null>(null);
+  const deafenedRef = useRef(false);
+  deafenedRef.current = deafened;
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // 1. Ensure a guest session exists.
@@ -174,9 +186,28 @@ function RoomView({ roomName }: { roomName: string }) {
         room.on(RoomEvent.ParticipantConnected, () => collectParticipants(room));
         room.on(RoomEvent.ParticipantDisconnected, () => collectParticipants(room));
         room.on(RoomEvent.ActiveSpeakersChanged, () => collectParticipants(room));
+        room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack, publication: RemoteTrackPublication) => {
+          if (track.kind !== Track.Kind.Audio) return;
+          if (deafenedRef.current) publication.setEnabled(false);
+          const element = track.attach();
+          element.style.cssText = 'position:absolute;width:0;height:0;opacity:0;pointer-events:none';
+          audioContainerRef.current?.appendChild(element);
+        });
+        room.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
+          for (const element of track.detach()) element.remove();
+        });
+        room.on(RoomEvent.AudioPlaybackStatusChanged, () => setAudioBlocked(!room.canPlaybackAudio));
+        const syncMic = () => {
+          const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+          setMicEnabled(!!pub?.track && !pub.isMuted);
+        };
+        room.on(RoomEvent.LocalTrackPublished, syncMic);
+        room.on(RoomEvent.LocalTrackUnpublished, syncMic);
+        room.on(RoomEvent.TrackMuted, (_pub, participant) => { if (participant.isLocal) syncMic(); });
+        room.on(RoomEvent.TrackUnmuted, (_pub, participant) => { if (participant.isLocal) syncMic(); });
 
         // VOICE-001: server-issued ephemeral TURN servers (ICE fallback).
-        await room.connect(livekitUrl, token.token, {
+        await room.connect(resolveBrowserLiveKitUrl(token.livekitUrl, buildTimeLivekitUrl), token.token, {
           ...(token.iceServers?.length
             ? { rtcConfig: { iceServers: token.iceServers } }
             : {}),
@@ -186,6 +217,7 @@ function RoomView({ roomName }: { roomName: string }) {
           return;
         }
         collectParticipants(room);
+        setAudioBlocked(!room.canPlaybackAudio);
         setStatus({ kind: 'ok', message: `Connected to ${token.room} as ${token.identity}` });
       } catch (err) {
         if (!cancelled) setStatus({ kind: 'error', message: (err as Error).message });
@@ -199,12 +231,13 @@ function RoomView({ roomName }: { roomName: string }) {
         void r.disconnect();
         roomRef.current = null;
       }
+      if (audioContainerRef.current) audioContainerRef.current.replaceChildren();
       if (heartbeatRef.current) {
         clearInterval(heartbeatRef.current);
         heartbeatRef.current = null;
       }
     };
-  }, [guest, serverId, channelId, livekitUrl, collectParticipants]);
+  }, [guest, serverId, channelId, buildTimeLivekitUrl, collectParticipants]);
 
   // 3. Presence heartbeat — only if serverId + channelId are in the query string.
   useEffect(() => {
@@ -239,35 +272,36 @@ function RoomView({ roomName }: { roomName: string }) {
   const toggleMic = useCallback(async () => {
     const room = roomRef.current;
     if (!room) return;
+    const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+    const next = !(pub?.track && !pub.isMuted);
     try {
-      const next = !micEnabled;
       await room.localParticipant.setMicrophoneEnabled(next);
-      setMicEnabled(next);
     } catch (err) {
       setStatus({ kind: 'error', message: (err as Error).message });
     }
-  }, [micEnabled]);
+    const after = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+    setMicEnabled(!!after?.track && !after.isMuted);
+  }, []);
 
   const toggleDeafen = useCallback(() => {
     const room = roomRef.current;
     if (!room) return;
     const next = !deafened;
+    deafenedRef.current = next;
     setDeafened(next);
-    if (next) {
-      // Mute every remote track. M14 is self-only — no livekit-server-sdk.
-      for (const p of room.remoteParticipants.values()) {
-        for (const pub of p.trackPublications.values()) {
-          if (pub.track) pub.track.setMuted(true);
-        }
-      }
-    } else {
-      for (const p of room.remoteParticipants.values()) {
-        for (const pub of p.trackPublications.values()) {
-          if (pub.track) pub.track.setMuted(false);
-        }
-      }
+    // Stop receiving remote audio (new publications are covered in the
+    // TrackSubscribed handler via deafenedRef).
+    for (const p of room.remoteParticipants.values()) {
+      for (const pub of p.audioTrackPublications.values()) pub.setEnabled(!next);
     }
   }, [deafened]);
+
+  const startAudio = useCallback(async () => {
+    const room = roomRef.current;
+    if (!room) return;
+    await room.startAudio().catch(() => {});
+    setAudioBlocked(!room.canPlaybackAudio);
+  }, []);
 
   const localParticipant = roomRef.current?.localParticipant as LocalParticipant | undefined;
 
@@ -288,6 +322,7 @@ function RoomView({ roomName }: { roomName: string }) {
 
   return (
     <section>
+      <div ref={audioContainerRef} aria-hidden style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden' }} />
       <h1 style={{ marginTop: 0 }}>Voice room: {roomName}</h1>
       <p style={{ color: '#9aa3ad' }}>
         Connection: <code>{stateLabel}</code> · {participants.length} participant
@@ -301,8 +336,11 @@ function RoomView({ roomName }: { roomName: string }) {
           {micEnabled ? 'Mute mic' : 'Unmute mic'}
         </button>
         <button onClick={toggleDeafen} disabled={!roomRef.current}>
-          {deafened ? 'Undeafen' : 'Deafen (UI only)'}
+          {deafened ? 'Undeafen' : 'Deafen'}
         </button>
+        {audioBlocked ? (
+          <button onClick={() => void startAudio()}>Enable audio</button>
+        ) : null}
         <ActivityPicker
           serverId={serverId}
           channelId={channelId}

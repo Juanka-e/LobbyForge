@@ -454,3 +454,151 @@ describe('DELETE /api/servers/{id}/roles/{roleId}', () => {
     expect(deleteRole).toHaveBeenCalledWith(expect.anything(), ROLE_ID);
   });
 });
+
+// beta-review (S1): MANAGE_ROLES → ADMINISTRATOR escalation. A member with
+// MANAGE_ROLES PATCHed @everyone (position 0, below them) with
+// `administrator` and every member gained audit-log/ban access
+// (live-confirmed). Non-owners may only ADD permissions they hold, and
+// never `administrator`; the owner is unchanged.
+describe('beta-review S1: role permission grants are capped by the actor', () => {
+  const EVERYONE_ROLE = {
+    id: 'role-everyone',
+    serverId: SERVER_ID,
+    name: '@everyone',
+    color: null,
+    icon: null,
+    displaySeparately: false,
+    position: 0,
+    permissions: ['send_messages', 'read_message_history'],
+    createdAt: new Date('2026-06-10T00:00:00Z'),
+  };
+
+  function asManager(perms: string[]) {
+    getServerById.mockResolvedValue(mockServer(OWNER_ID));
+    isServerMember.mockResolvedValue(true);
+    getUserPermissions.mockResolvedValue(perms);
+    getHighestRolePosition.mockResolvedValue(50);
+  }
+
+  async function patchRole(role: typeof EVERYONE_ROLE, body: object) {
+    getRoleById.mockResolvedValue(role);
+    updateRole.mockImplementation(async (_db: unknown, _id: string, patch: object) => ({
+      ...role,
+      ...patch,
+    }));
+    const { PATCH } = await loadItemRoute();
+    return PATCH(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/roles/${role.id}`, {
+        method: 'PATCH',
+        headers: { cookie: makeSessionCookie() },
+        body: JSON.stringify(body),
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, roleId: role.id }) }
+    );
+  }
+
+  async function createRoleWith(permissions: string[]) {
+    createRole.mockImplementation(async (_db: unknown, input: { permissions: string[] }) => ({
+      ...EVERYONE_ROLE,
+      id: 'role-new',
+      name: 'New',
+      permissions: input.permissions,
+    }));
+    const { POST } = await loadListRoute();
+    return POST(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/roles`, {
+        method: 'POST',
+        headers: { cookie: makeSessionCookie() },
+        body: JSON.stringify({ name: 'New', position: 1, permissions }),
+      }),
+      { params: Promise.resolve({ id: SERVER_ID }) }
+    );
+  }
+
+  it('PATCH: a MANAGE_ROLES member cannot grant administrator to @everyone (live repro)', async () => {
+    asManager(['manage_roles', 'send_messages']);
+    const res = await patchRole(EVERYONE_ROLE, {
+      permissions: [...EVERYONE_ROLE.permissions, 'administrator'],
+    });
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as { permissions: string[] };
+    expect(json.permissions).toEqual(['administrator']);
+    expect(updateRole).not.toHaveBeenCalled();
+  });
+
+  it('PATCH: a non-owner ADMINISTRATOR still cannot grant administrator', async () => {
+    asManager(['administrator']);
+    const res = await patchRole(EVERYONE_ROLE, { permissions: ['administrator'] });
+    expect(res.status).toBe(403);
+    expect(updateRole).not.toHaveBeenCalled();
+  });
+
+  it('PATCH: a non-owner cannot add a permission they do not hold', async () => {
+    asManager(['manage_roles']);
+    const res = await patchRole(EVERYONE_ROLE, {
+      permissions: [...EVERYONE_ROLE.permissions, 'view_audit_log', 'ban_members'],
+    });
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as { permissions: string[] };
+    expect(json.permissions.sort()).toEqual(['ban_members', 'view_audit_log']);
+    expect(updateRole).not.toHaveBeenCalled();
+  });
+
+  it('PATCH: a non-owner may add permissions they hold (administrator holds all but administrator)', async () => {
+    asManager(['manage_roles', 'kick_members']);
+    const ok = await patchRole(EVERYONE_ROLE, {
+      permissions: [...EVERYONE_ROLE.permissions, 'kick_members'],
+    });
+    expect(ok.status).toBe(200);
+
+    updateRole.mockReset();
+    asManager(['administrator']);
+    const adminOk = await patchRole(EVERYONE_ROLE, { permissions: ['ban_members', 'view_audit_log'] });
+    expect(adminOk.status).toBe(200);
+    expect(updateRole).toHaveBeenCalled();
+  });
+
+  it('PATCH: permissions the role ALREADY carries may stay; removals are allowed', async () => {
+    asManager(['manage_roles']);
+    const ownerMadeRole = { ...EVERYONE_ROLE, id: 'role-low', name: 'Low', position: 3, permissions: ['ban_members', 'send_messages'] };
+    const rename = await patchRole(ownerMadeRole, { name: 'Renamed', permissions: ['ban_members', 'send_messages'] });
+    expect(rename.status).toBe(200);
+    const strip = await patchRole(ownerMadeRole, { permissions: [] });
+    expect(strip.status).toBe(200);
+  });
+
+  it('PATCH: the owner may still grant administrator', async () => {
+    getServerById.mockResolvedValue(mockServer(USER_ID));
+    getUserPermissions.mockResolvedValue(['administrator']);
+    const res = await patchRole(EVERYONE_ROLE, { permissions: ['administrator'] });
+    expect(res.status).toBe(200);
+    expect(updateRole).toHaveBeenCalledWith(
+      expect.anything(),
+      EVERYONE_ROLE.id,
+      expect.objectContaining({ permissions: ['administrator'] })
+    );
+  });
+
+  it('POST: a non-owner cannot create a role carrying administrator or permissions they lack', async () => {
+    asManager(['manage_roles', 'send_messages']);
+    expect((await createRoleWith(['administrator'])).status).toBe(403);
+    expect((await createRoleWith(['ban_members'])).status).toBe(403);
+    asManager(['administrator']);
+    expect((await createRoleWith(['administrator'])).status).toBe(403);
+    expect(createRole).not.toHaveBeenCalled();
+  });
+
+  it('POST: a non-owner may create a role with permissions they hold', async () => {
+    asManager(['manage_roles', 'send_messages']);
+    const res = await createRoleWith(['send_messages']);
+    expect(res.status).toBe(201);
+    expect(createRole).toHaveBeenCalled();
+  });
+
+  it('POST: the owner may create an administrator role', async () => {
+    getServerById.mockResolvedValue(mockServer(USER_ID));
+    getUserPermissions.mockResolvedValue(['administrator']);
+    const res = await createRoleWith(['administrator']);
+    expect(res.status).toBe(201);
+  });
+});

@@ -10,6 +10,7 @@ import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
 import { authorizeModerationTarget } from '@/lib/member-authorization';
 import { publishAccessInvalidation } from '@/lib/access-invalidation';
+import { queueMemberVoiceSync } from '@/lib/voice-moderation';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -101,6 +102,10 @@ async function handleDelete(
         reason: 'kick',
       });
     }
+    // beta-review (S2): a kicked (or departed) user must also leave any
+    // live voice room of the server — LiveKit sessions outlive the
+    // membership row.
+    queueMemberVoiceSync(serverId, targetUserId);
     void logAction(getDb(), {
       serverId,
       actorUserId: session.uid,

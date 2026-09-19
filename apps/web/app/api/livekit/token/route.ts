@@ -11,11 +11,14 @@ import {
 import {
   getActiveMemberTimeout,
   getEffectiveServerVoiceSettings,
+  getServerMember,
+  getUserById,
   getUserPermissions,
+  isMemberVoiceMuted,
 } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import {
-  CorePermission, hasPermission,
+  CorePermission,
   requireVisibleChannelInServer,
   requireMaterializedSession,
   requireServerMember,
@@ -24,6 +27,8 @@ import {
 import { withApiSecurity } from '@/lib/security-headers';
 import { liveKitRoomName } from '@/lib/livekit-room';
 import { getEphemeralTurnIceServers } from '@/lib/turn-credentials';
+import { buildAllowedPublishSources } from '@/lib/voice-moderation';
+import { getRuntimeLiveKitUrl } from '@/lib/public-endpoints';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -31,7 +36,9 @@ export const runtime = 'nodejs';
 const TokenRequestSchema = z.object({
   serverId: z.string().uuid(),
   channelId: z.string().uuid(),
-  // Display name override — sourced from the session profile server-side.
+  // beta-review: accepted for backward compatibility but IGNORED — the
+  // participant name is resolved server-side (nickname → profile name) so
+  // a member cannot appear under someone else's name in voice.
   displayName: z.string().min(1).max(64).optional(),
   // Optional narrowing of publish / subscribe capabilities (client-initiated).
   // The server intersects these with the server voice settings policy.
@@ -136,11 +143,18 @@ async function handler(req: Request): Promise<NextResponse> {
 
   const memberPermissions = await getUserPermissions(getDb(), session.uid, body.serverId);
   const activeTimeout = await getActiveMemberTimeout(getDb(), body.serverId, session.uid);
+  // beta-review: a moderator server mute is persisted and enforced in the
+  // GRANT — rejoining cannot bring the microphone back.
+  const serverMuted = await isMemberVoiceMuted(getDb(), body.serverId, session.uid);
   const allowedPublishSources = buildAllowedPublishSources(
-    { allowCamera: effectiveAllowCamera, allowScreenShare: effectiveAllowScreenShare },
-    body.canPublishSources,
-    memberPermissions,
-    activeTimeout !== null
+    {
+      allowCamera: effectiveAllowCamera,
+      allowScreenShare: effectiveAllowScreenShare,
+      memberPermissions,
+      timedOut: activeTimeout !== null,
+      voiceMuted: serverMuted,
+    },
+    body.canPublishSources
   );
   const grants: LiveKitGrants = {
     room,
@@ -156,7 +170,7 @@ async function handler(req: Request): Promise<NextResponse> {
       apiKey,
       apiSecret,
       identity,
-      name: body.displayName ?? session.name,
+      name: await resolveVoiceDisplayName(body.serverId, session.uid, session.name),
       grants,
       metadata,
     });
@@ -172,6 +186,10 @@ async function handler(req: Request): Promise<NextResponse> {
         room,
         serverId: body.serverId,
         channelId: body.channelId,
+        // beta-review: resolved at REQUEST time (NEXT_PUBLIC_* is frozen at
+        // build time; a published image must not carry localhost). null →
+        // the browser uses the same-origin /livekit reverse-proxy path.
+        livekitUrl: getRuntimeLiveKitUrl(),
         ttlSeconds: LIVEKIT_TOKEN_TTL_SECONDS,
         expiresAt: session.exp,
         ...(turnIceServers ? { iceServers: [turnIceServers] } : {}),
@@ -180,6 +198,7 @@ async function handler(req: Request): Promise<NextResponse> {
         // own preferences. Hard limits (user/camera/screen-share caps) are
         // enforced above at token-mint time.
         serverVoiceSettings: {
+          serverMuted,
           requirePushToTalk: voiceSettings.requirePushToTalk,
           startMuted: voiceSettings.startMuted,
           maxScreenShareHeight: voiceSettings.maxScreenShareHeight,
@@ -212,23 +231,14 @@ export const POST = withApiSecurity(handler, {
  *  - An active MODERATE_MEMBERS timeout strips the microphone (the
  *    timed-out member can still listen).
  */
-function buildAllowedPublishSources(
-  settings: { allowCamera: boolean; allowScreenShare: boolean },
-  requested: Array<'camera' | 'microphone' | 'screen-share' | 'screen-share-audio'> | undefined,
-  memberPerms: string[],
-  timedOut: boolean
-): Array<'camera' | 'microphone' | 'screen-share' | 'screen-share-audio'> {
-  const allowed = new Set<'camera' | 'microphone' | 'screen-share' | 'screen-share-audio'>();
-  if (hasPermission(memberPerms, CorePermission.SPEAK) && !timedOut) {
-    allowed.add('microphone');
+async function resolveVoiceDisplayName(serverId: string, userId: string, fallback: string): Promise<string> {
+  try {
+    const member = await getServerMember(getDb(), serverId, userId);
+    if (member?.nickname) return member.nickname.slice(0, 64);
+    const user = await getUserById(getDb(), userId);
+    if (user?.displayName) return user.displayName.slice(0, 64);
+  } catch {
+    // Fall back to the signed session name.
   }
-  if (settings.allowCamera && hasPermission(memberPerms, CorePermission.STREAM)) {
-    allowed.add('camera');
-  }
-  if (settings.allowScreenShare && hasPermission(memberPerms, CorePermission.STREAM)) {
-    allowed.add('screen-share');
-    allowed.add('screen-share-audio');
-  }
-  if (!requested) return Array.from(allowed);
-  return requested.filter((source) => allowed.has(source));
+  return fallback;
 }

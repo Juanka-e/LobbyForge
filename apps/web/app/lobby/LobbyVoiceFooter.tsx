@@ -16,9 +16,13 @@ import Link from 'next/link';
 export interface LobbyVoiceFooterProps {
   serverName: string;
   hasUser: boolean;
+  /** The local user's display name (avatar initial). */
+  displayName?: string;
 }
 
-export function LobbyVoiceFooter({ serverName, hasUser }: LobbyVoiceFooterProps) {
+export function LobbyVoiceFooter({ serverName, hasUser, displayName }: LobbyVoiceFooterProps) {
+  // beta-review: the avatar showed a hard-coded "J" for every user.
+  const initial = hasUser ? (displayName?.trim().charAt(0).toUpperCase() || '?') : '?';
   const voice = useLobbyVoice();
   const connected = voice.connectionState === ConnectionState.Connected && !!voice.activeChannelId;
   const connecting = voice.connecting || voice.connectionState === ConnectionState.Connecting || voice.connectionState === ConnectionState.Reconnecting;
@@ -107,9 +111,18 @@ export function LobbyVoiceFooter({ serverName, hasUser }: LobbyVoiceFooterProps)
           </div>
         </div>
         {voice.error ? (
-          <p className="text-[11px] text-danger mt-1 truncate" role="alert">
+          <p className="text-[11px] text-danger mt-1 line-clamp-3" role="alert" title={voice.error}>
             {voice.error}
           </p>
+        ) : null}
+        {connected && voice.audioBlocked && voice.startAudio ? (
+          <button
+            type="button"
+            onClick={() => void voice.startAudio?.()}
+            className="mt-2 w-full rounded bg-primary/20 px-2 py-1 text-[12px] font-medium text-primary hover:bg-primary/30 transition-colors"
+          >
+            Your browser blocked audio — click to enable
+          </button>
         ) : null}
       </div>
       <div className="p-3 bg-surface-raised">
@@ -117,7 +130,7 @@ export function LobbyVoiceFooter({ serverName, hasUser }: LobbyVoiceFooterProps)
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-8 h-8 rounded-full bg-secondary-container relative flex-shrink-0">
               <span className="absolute inset-0 flex items-center justify-center text-label-sm font-bold text-text-primary">
-                {hasUser ? 'J' : '?'}
+                {initial}
               </span>
               <div
                 className={
@@ -132,7 +145,7 @@ export function LobbyVoiceFooter({ serverName, hasUser }: LobbyVoiceFooterProps)
                 {hasUser ? 'You' : 'Guest'}
               </span>
               <span className="text-[11px] text-text-secondary">
-                {connected ? (voice.micEnabled ? 'Unmuted' : 'Muted') : 'Online'}
+                {connected ? (voice.serverMuted ? 'Server muted' : voice.micEnabled ? 'Unmuted' : 'Muted') : 'Online'}
               </span>
             </div>
           </div>
@@ -141,8 +154,8 @@ export function LobbyVoiceFooter({ serverName, hasUser }: LobbyVoiceFooterProps)
               type="button"
               disabled={!connected}
               onClick={() => void voice.toggleMic()}
-              title={voice.micEnabled ? 'Mute' : 'Unmute'}
-              aria-label={voice.micEnabled ? 'Mute microphone' : 'Unmute microphone'}
+              title={voice.serverMuted ? 'Muted by a moderator' : voice.micEnabled ? 'Mute' : 'Unmute'}
+              aria-label={voice.serverMuted ? 'Muted by a moderator' : voice.micEnabled ? 'Mute microphone' : 'Unmute microphone'}
               className={
                 connected
                   ? voice.micEnabled

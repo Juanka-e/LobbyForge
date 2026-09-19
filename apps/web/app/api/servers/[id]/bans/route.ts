@@ -16,6 +16,7 @@ import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
 import { authorizeModerationTarget } from '@/lib/member-authorization';
 import { publishAccessInvalidation } from '@/lib/access-invalidation';
+import { queueMemberVoiceSync } from '@/lib/voice-moderation';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -154,15 +155,9 @@ async function handlePost(req: Request, ctx: { params: Promise<{ id: string }> }
       return NextResponse.json({ error: 'Invalid expiresAt' }, { status: 400 });
     }
 
-    // LF-SEC-003: a ban must close the target's live server topics
-    // immediately (not just at their next reconnect).
-    publishAccessInvalidation({
-      kind: 'user-server-access',
-      serverId,
-      userId: body.userId,
-      reason: 'ban',
-    });
-
+    // beta-review (S2): banUser now removes the membership in the SAME
+    // transaction as the ban insert (it used to leave it in place — the
+    // banned user kept posting messages and minting LiveKit tokens).
     const result = await banUser(getDb(), {
       serverId,
       userId: body.userId,
@@ -180,6 +175,20 @@ async function handlePost(req: Request, ctx: { params: Promise<{ id: string }> }
           return NextResponse.json({ error: 'User is already banned' }, { status: 409 });
       }
     }
+    // LF-SEC-003: a ban must close the target's live server topics
+    // immediately (not just at their next reconnect). beta-review:
+    // published AFTER the ban commits — the gateway re-authorizes on
+    // receipt, and firing first let it re-validate against the pre-ban
+    // membership and keep the subscription.
+    publishAccessInvalidation({
+      kind: 'user-server-access',
+      serverId,
+      userId: body.userId,
+      reason: 'ban',
+    });
+    // beta-review (S2): drop the user from every live voice room of the
+    // server (a LiveKit session outlives the REST membership).
+    queueMemberVoiceSync(serverId, body.userId);
     void logAction(getDb(), {
       serverId,
       actorUserId: session.uid,

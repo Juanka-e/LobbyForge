@@ -46,7 +46,7 @@ beforeEach(() => {
   logAction.mockResolvedValue(undefined);
   // Defaults: caller is the owner (so the GET list path skips membership/perm check).
   getServerById.mockResolvedValue({ ownerUserId: UID });
-  authorizeServerPermission.mockResolvedValue({ ok: true });
+  authorizeServerPermission.mockResolvedValue({ ok: true, permissions: ['create_invite'] });
 });
 
 afterEach(() => {
@@ -191,7 +191,7 @@ describe('DELETE /api/servers/[id]/invites/[inviteId]', () => {
   }
 
   it('revokes the invite and returns ok when permission is granted', async () => {
-    getInviteById.mockResolvedValue({ serverId: SERVER_ID });
+    getInviteById.mockResolvedValue({ serverId: SERVER_ID, createdBy: UID });
     const { DELETE } = await import('../[inviteId]/route.js');
     const res = await DELETE(
       new Request(`https://example.test/api/servers/${SERVER_ID}/invites/${INVITE_ID}`, {
@@ -232,5 +232,80 @@ describe('DELETE /api/servers/[id]/invites/[inviteId]', () => {
       inviteCtx()
     );
     expect(res.status).toBe(403);
+  });
+});
+
+// beta-review (F7): CREATE_INVITE is granted to @everyone by default; it
+// used to expose — and let anyone revoke — EVERY invite of the server.
+describe('beta-review F7: invites are scoped to their creator unless MANAGE_SERVER', () => {
+  const OTHER_OWNER = '00000000-0000-0000-0000-0000000000BB';
+  const OTHER_CREATOR = '00000000-0000-0000-0000-0000000000CC';
+  const INVITE_ID = '00000000-0000-0000-0000-0000000000EE';
+
+  async function list(): Promise<Response> {
+    listInvitesForServer.mockResolvedValue([]);
+    const { GET } = await import('../route.js');
+    return GET(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/invites`, { headers: { cookie: makeCookie() } }),
+      serverCtx()
+    );
+  }
+
+  async function revoke(): Promise<Response> {
+    const { DELETE } = await import('../[inviteId]/route.js');
+    return DELETE(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/invites/${INVITE_ID}`, {
+        method: 'DELETE',
+        headers: { cookie: makeCookie() },
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, inviteId: INVITE_ID }) }
+    );
+  }
+
+  it('a plain CREATE_INVITE member only lists their own invites', async () => {
+    getServerById.mockResolvedValue({ ownerUserId: OTHER_OWNER });
+    isServerMember.mockResolvedValue(true);
+    const res = await list();
+    expect(res.status).toBe(200);
+    expect(listInvitesForServer).toHaveBeenCalledWith({ __mockDb: true }, SERVER_ID, { createdBy: UID });
+  });
+
+  it('MANAGE_SERVER (or administrator) lists every invite', async () => {
+    getServerById.mockResolvedValue({ ownerUserId: OTHER_OWNER });
+    isServerMember.mockResolvedValue(true);
+    authorizeServerPermission.mockResolvedValue({ ok: true, permissions: ['create_invite', 'manage_server'] });
+    await list();
+    expect(listInvitesForServer).toHaveBeenLastCalledWith({ __mockDb: true }, SERVER_ID, {});
+    authorizeServerPermission.mockResolvedValue({ ok: true, permissions: ['administrator'] });
+    await list();
+    expect(listInvitesForServer).toHaveBeenLastCalledWith({ __mockDb: true }, SERVER_ID, {});
+  });
+
+  it('the owner lists every invite', async () => {
+    const res = await list();
+    expect(res.status).toBe(200);
+    expect(listInvitesForServer).toHaveBeenCalledWith({ __mockDb: true }, SERVER_ID, {});
+  });
+
+  it('a plain CREATE_INVITE member cannot revoke an invite created by someone else', async () => {
+    getInviteById.mockResolvedValue({ serverId: SERVER_ID, createdBy: OTHER_CREATOR });
+    const res = await revoke();
+    expect(res.status).toBe(403);
+    expect(revokeInvite).not.toHaveBeenCalled();
+  });
+
+  it('an invite whose creator was deleted (createdBy null) needs MANAGE_SERVER', async () => {
+    getInviteById.mockResolvedValue({ serverId: SERVER_ID, createdBy: null });
+    const res = await revoke();
+    expect(res.status).toBe(403);
+    expect(revokeInvite).not.toHaveBeenCalled();
+  });
+
+  it('MANAGE_SERVER may revoke any invite of the server', async () => {
+    authorizeServerPermission.mockResolvedValue({ ok: true, permissions: ['manage_server'] });
+    getInviteById.mockResolvedValue({ serverId: SERVER_ID, createdBy: OTHER_CREATOR });
+    const res = await revoke();
+    expect(res.status).toBe(200);
+    expect(revokeInvite).toHaveBeenCalledWith({ __mockDb: true }, INVITE_ID);
   });
 });

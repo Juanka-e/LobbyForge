@@ -206,9 +206,10 @@ export async function setGameSessionState(
 /**
  * Compare-and-swap state update with optimistic concurrency.
  * Returns { ok: true, row } on success, { ok: false, row } if the
- * revision didn't match (concurrent modification). The caller should
- * retry by re-reading the state, re-running the reducer, and retrying
- * with the new revision.
+ * revision didn't match (concurrent modification) or the session is
+ * ended/cancelled. The caller should stop when `row.status` is terminal;
+ * otherwise retry by re-reading the state, re-running the reducer, and
+ * retrying with the new revision.
  */
 export async function setGameSessionStateCAS(
   db: DbClient,
@@ -222,10 +223,20 @@ export async function setGameSessionStateCAS(
   const [row] = await db
     .update(gameSessions)
     .set(patch)
-    .where(and(eq(gameSessions.id, sessionId), eq(gameSessions.revision, expectedRevision)))
+    .where(
+      and(
+        eq(gameSessions.id, sessionId),
+        eq(gameSessions.revision, expectedRevision),
+        // beta-review: a terminal session is read-only. endGameSession
+        // does not bump the revision, so without this guard an action
+        // racing a concurrent END still committed onto the ended row.
+        sql`${gameSessions.status} not in ('ended', 'cancelled')`
+      )
+    )
     .returning();
   if (row) return { ok: true, row: row as GameSessionRow };
-  // Revision didn't match — concurrent modification. Return current row.
+  // Revision didn't match (concurrent modification) or the session is
+  // terminal. Return the current row — callers check its status.
   const [current] = await db.select().from(gameSessions).where(eq(gameSessions.id, sessionId)).limit(1);
   return { ok: false, row: (current as GameSessionRow | undefined) ?? null };
 }

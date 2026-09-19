@@ -1,26 +1,41 @@
 /**
- * Redis subscriber pool for the WS gateway.
+ * Redis subscriber for the WS gateway.
  *
- * Mirrors the pattern in `apps/web/lib/activity-bus.ts`:
- *   - One ioredis connection per topic, shared across connections.
- *   - A `close()` decrements the refcount; the connection quits when
- *     nobody's left listening.
- *   - Subscriptions are fire-and-forget on the publish path; failures
- *     are logged, never thrown.
+ * beta-review (S6): ONE shared ioredis subscriber connection for the
+ * whole process, multiplexed with SUBSCRIBE/UNSUBSCRIBE refcounting —
+ * the same model `apps/web/lib/activity-bus.ts` uses (LF-029). The old
+ * pool opened a NEW Redis connection per unique topic, so any member
+ * could exhaust Redis `maxclients` by subscribing to many distinct
+ * (even non-existent) topics.
  *
- * Why a single subscriber per topic: ioredis forbids mixing regular
- * commands with subscribe on the same connection. Sharing one connection
- * across many topics also lets us pool at a coarser granularity than
- * one-per-topic-per-connection.
+ *   - The first acquire of a topic sends SUBSCRIBE on the shared
+ *     connection; later acquires only add a handler.
+ *   - `release()` removes the handler; the last release sends
+ *     UNSUBSCRIBE. The connection itself stays open for the process
+ *     lifetime (ioredis reconnects + auto-resubscribes on its own).
+ *   - Subscriptions are fire-and-forget: failures are logged, never
+ *     thrown into the socket handler.
+ *
+ * ioredis forbids regular commands on a subscriber connection — this
+ * connection only ever runs subscribe/unsubscribe/quit.
  */
 import { Redis } from 'ioredis';
 import { redisTopicName, parseTopic } from './protocol.js';
+
+/** The slice of the ioredis client this module uses (test seam). */
+export interface SubscriberConnection {
+  subscribe(channel: string): Promise<unknown>;
+  unsubscribe(channel: string): Promise<unknown>;
+  on(event: 'message', listener: (channel: string, raw: string) => void): unknown;
+  on(event: 'error', listener: (err: Error) => void): unknown;
+  quit(): Promise<unknown>;
+}
 
 function envPrefix(): string {
   return process.env.NODE_ENV || 'dev';
 }
 
-function makeRedis(): Redis {
+function makeRedis(): SubscriberConnection {
   const url = process.env.REDIS_URL;
   if (!url) {
     if (process.env.NODE_ENV === 'production') {
@@ -31,19 +46,45 @@ function makeRedis(): Redis {
   return new Redis(url);
 }
 
-const subscribers = new Map<string, Redis>();
+let connectionFactory: () => SubscriberConnection = makeRedis;
+let subscriber: SubscriberConnection | null = null;
 
-interface TopicState {
-  refcount: number;
-  handlers: Set<(raw: string) => void>;
+/** One entry per acquire() — distinct even when the same fn is reused. */
+interface HandlerEntry {
+  fn: (raw: string) => void;
 }
 
-const states = new Map<string, TopicState>();
+/** wire topic → live handler entries (size === refcount). */
+const states = new Map<string, Set<HandlerEntry>>();
 
 function topicForWire(topic: string): string | null {
   const parsed = parseTopic(topic);
   if (!parsed) return null;
   return redisTopicName(envPrefix(), parsed);
+}
+
+function getSubscriber(): SubscriberConnection {
+  if (subscriber) return subscriber;
+  const sub = connectionFactory();
+  // ONE message listener for every topic — dispatch by channel name.
+  sub.on('message', (channel: string, raw: string) => {
+    const entries = states.get(channel);
+    if (!entries) return;
+    // Snapshot: a handler may release (mutate the set) while we iterate.
+    for (const entry of [...entries]) {
+      try {
+        entry.fn(raw);
+      } catch (err) {
+        console.warn(`[ws-gateway] handler threw on ${channel}: ${(err as Error).message}`);
+      }
+    }
+  });
+  sub.on('error', (err: Error) => {
+    // ioredis reconnects (and re-subscribes) on its own.
+    console.warn(`[ws-gateway] redis subscriber error: ${err.message}`);
+  });
+  subscriber = sub;
+  return sub;
 }
 
 export function acquireTopicSubscription(
@@ -59,42 +100,18 @@ export function acquireTopicSubscription(
     };
   }
 
-  let state = states.get(wireTopic);
-  if (!state) {
-    state = { refcount: 0, handlers: new Set() };
-    states.set(wireTopic, state);
-  }
-  state.handlers.add(handler);
-  state.refcount += 1;
-
-  let sub: Redis | undefined = subscribers.get(wireTopic);
-  if (!sub) {
-    sub = makeRedis();
-    subscribers.set(wireTopic, sub);
-    const fanout = (channel: string, raw: string) => {
-      if (channel !== wireTopic) return;
-      const cur = states.get(wireTopic);
-      if (!cur) return;
-      for (const h of cur.handlers) {
-        try {
-          h(raw);
-        } catch (err) {
-          console.warn(
-            `[ws-gateway] handler threw on ${wireTopic}: ${(err as Error).message}`
-          );
-        }
-      }
-    };
-    sub.on('message', fanout);
-    sub.on('error', (err: Error) => {
-      console.warn(`[ws-gateway] redis sub error on ${wireTopic}: ${err.message}`);
-    });
-    // Subscribe is async; we fire-and-forget and let the first acquire
-    // caller see any error via a small `subscribed` flag.
+  const sub = getSubscriber();
+  let entries = states.get(wireTopic);
+  if (!entries) {
+    entries = new Set();
+    states.set(wireTopic, entries);
+    // First listener for this topic → SUBSCRIBE on the shared connection.
     sub.subscribe(wireTopic).catch((err: Error) => {
       console.warn(`[ws-gateway] subscribe failed for ${wireTopic}: ${err.message}`);
     });
   }
+  const entry: HandlerEntry = { fn: handler };
+  entries.add(entry);
 
   let released = false;
   return {
@@ -103,20 +120,36 @@ export function acquireTopicSubscription(
       released = true;
       const cur = states.get(wireTopic);
       if (!cur) return;
-      cur.handlers.delete(handler);
-      cur.refcount -= 1;
-      if (cur.refcount <= 0) {
+      cur.delete(entry);
+      if (cur.size === 0) {
         states.delete(wireTopic);
-        const conn: Redis | undefined = subscribers.get(wireTopic);
-        subscribers.delete(wireTopic);
-        if (conn) {
-          conn.unsubscribe(wireTopic).catch(() => undefined).finally(() => {
-            conn.quit().catch(() => undefined);
-          });
-        }
+        // Last listener gone → UNSUBSCRIBE; the connection stays open.
+        // Commands are pipelined in order, so an immediate re-acquire's
+        // SUBSCRIBE lands after this UNSUBSCRIBE.
+        subscriber?.unsubscribe(wireTopic).catch(() => undefined);
       }
     },
   };
+}
+
+/** Close the shared connection (gateway shutdown). Idempotent. */
+export function shutdownSubscriber(): void {
+  const sub = subscriber;
+  subscriber = null;
+  states.clear();
+  if (sub) sub.quit().catch(() => undefined);
+}
+
+/** Introspection for tests / health: live topic + connection counts. */
+export function __subscriberStats(): { connections: number; topics: number; handlers: number } {
+  let handlers = 0;
+  for (const entries of states.values()) handlers += entries.size;
+  return { connections: subscriber ? 1 : 0, topics: states.size, handlers };
+}
+
+/** Test-only: swap the Redis connection factory (no real Redis). */
+export function __setConnectionFactory(factory: (() => SubscriberConnection) | null): void {
+  connectionFactory = factory ?? makeRedis;
 }
 
 /**
@@ -124,9 +157,5 @@ export function acquireTopicSubscription(
  * so a previous case's open connection doesn't bleed across.
  */
 export function __resetSubscriberState(): void {
-  for (const conn of subscribers.values()) {
-    conn.quit().catch(() => undefined);
-  }
-  subscribers.clear();
-  states.clear();
+  shutdownSubscriber();
 }

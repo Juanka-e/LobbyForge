@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { logAction } from '@lobbyforge/db';
+import { logAction, setMemberVoiceMuted } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { withApiSecurity } from '@/lib/security-headers';
 import { authorizeModerationTarget } from '@/lib/member-authorization';
-import { getRoomServiceClient } from '@/lib/livekit';
+import { syncMemberVoiceAccess } from '@/lib/voice-moderation';
 import {
   CorePermission,
   requireVisibleChannelInServer,
@@ -62,29 +62,20 @@ async function handlePost(
       return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
     }
 
-    const identity = targetUserId;
+    // beta-review: a server mute used to be a one-shot mutePublishedTrack
+    // — the target could simply unmute (or rejoin), a user without a mic
+    // track could not be muted at all (400), and `source === 1` matched
+    // the CAMERA (TrackSource.MICROPHONE is 2). Now the mute is persisted
+    // on the membership, the token route withholds the microphone grant
+    // while it is set, and a connected participant's canPublishSources is
+    // updated live. Lifting the mute only RE-ALLOWS the mic — it never
+    // turns anyone's microphone on remotely.
+    const updated = await setMemberVoiceMuted(getDb(), serverId, targetUserId, body.muted);
+    if (!updated) {
+      return NextResponse.json({ error: 'Member not found' }, { status: 404 });
+    }
+    await syncMemberVoiceAccess(serverId, targetUserId);
     const room = liveKitRoomName(serverId, channelId);
-
-    const lk = getRoomServiceClient();
-    
-    // RoomServiceClient.mutePublishedTrack requires trackSid.
-    // We can list participants to find the microphone track.
-    const participants = await lk.listParticipants(room);
-    const participant = participants.find((p) => p.identity === identity);
-    
-    if (!participant) {
-      return NextResponse.json({ error: 'Participant not found in the room' }, { status: 404 });
-    }
-
-    const audioTrack = participant.tracks.find(
-      (t) => t.type === 0 || t.source === 1 // AUDIO = 0, MICROPHONE = 1 in livekit protos
-    );
-
-    if (!audioTrack) {
-      return NextResponse.json({ error: 'Participant has no active audio track' }, { status: 400 });
-    }
-
-    await lk.mutePublishedTrack(room, identity, audioTrack.sid, body.muted);
 
     void logAction(getDb(), {
       serverId,
@@ -95,7 +86,7 @@ async function handlePost(
       metadata: { channelId, room },
     }).catch((err) => console.error('[audit] voice mute failed:', (err as Error).message));
 
-    return NextResponse.json({ success: true }, { headers: { 'Cache-Control': 'no-store' } });
+    return NextResponse.json({ success: true, muted: body.muted }, { headers: { 'Cache-Control': 'no-store' } });
   } catch {
     return NextResponse.json({ error: 'Failed to mute participant' }, { status: 500 });
   }

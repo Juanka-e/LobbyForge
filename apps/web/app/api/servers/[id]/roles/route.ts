@@ -15,6 +15,7 @@ import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
 import { isValidRoleIcon } from '@/lib/role-icons';
+import { findUngrantablePermissions, UNGRANTABLE_PERMISSIONS_ERROR } from '@/lib/role-grant-policy';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -166,6 +167,22 @@ async function handlePost(
           { status: 403 }
         );
       }
+    }
+
+    // beta-review (S1): a non-owner may only put permissions THEY hold
+    // into a new role, and never `administrator` — otherwise MANAGE_ROLES
+    // alone mints a below-rank role carrying any permission and hands it
+    // out (escalation live-confirmed via the sibling PATCH route).
+    const ungrantable = findUngrantablePermissions({
+      actorIsOwner: server?.ownerUserId === session.uid,
+      actorPermissions: permissions,
+      requested: body.permissions,
+    });
+    if (ungrantable.length > 0) {
+      return NextResponse.json(
+        { error: UNGRANTABLE_PERMISSIONS_ERROR, permissions: ungrantable },
+        { status: 403 }
+      );
     }
 
     const role = await createRole(getDb(), {

@@ -24,6 +24,8 @@ vi.mock('@/lib/security-headers', () => ({
   withApiSecurity: (handler: unknown) => handler,
   applySecurityHeaders: (r: unknown) => r,
 }));
+const queueMemberVoiceSync = vi.fn();
+vi.mock('@/lib/voice-moderation', () => ({ queueMemberVoiceSync }));
 
 const SECRET = 'x'.repeat(32);
 const SERVER_ID = '11111111-1111-1111-1111-111111111111';
@@ -34,6 +36,7 @@ const MEMBER = 'plain-member';
 beforeEach(() => {
   process.env.LOBBYFORGE_SESSION_SECRET = SECRET;
   for (const fn of Object.values(dbFns)) fn.mockReset();
+  queueMemberVoiceSync.mockReset();
   dbFns.getServerById.mockResolvedValue({ id: SERVER_ID, ownerUserId: OWNER });
   dbFns.isServerMember.mockResolvedValue(true);
   dbFns.getUserPermissions.mockResolvedValue(['moderate_members']);
@@ -113,5 +116,26 @@ describe('PUT members/[userId]/timeout — MODERATE_MEMBERS', () => {
     expect(res.status).toBe(200);
     const passedUntil = dbFns.setMemberTimeout.mock.calls[0]![3] as Date;
     expect(passedUntil.getTime()).toBeLessThanOrEqual(Date.now() + 28 * 24 * 60 * 60 * 1000 + 1000);
+  });
+});
+
+describe('PUT members/[userId]/timeout — beta-review S2 voice enforcement', () => {
+  it('a successful timeout re-syncs the target LIVE voice session (mic revoked)', async () => {
+    const res = await put({ until: new Date(Date.now() + 60_000).toISOString() }, MOD, MEMBER);
+    expect(res.status).toBe(200);
+    expect(queueMemberVoiceSync).toHaveBeenCalledWith(SERVER_ID, MEMBER);
+  });
+
+  it('clearing a timeout re-syncs too (mic restored)', async () => {
+    const res = await put({ until: null }, MOD, MEMBER);
+    expect(res.status).toBe(200);
+    expect(queueMemberVoiceSync).toHaveBeenCalledWith(SERVER_ID, MEMBER);
+  });
+
+  it('a rejected timeout does not touch voice', async () => {
+    dbFns.getUserPermissions.mockResolvedValue([]);
+    const res = await put({ until: null }, MOD, MEMBER);
+    expect(res.status).toBe(403);
+    expect(queueMemberVoiceSync).not.toHaveBeenCalled();
   });
 });

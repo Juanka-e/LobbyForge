@@ -211,6 +211,11 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
         channelId,
         reason: 'permissions_changed',
       });
+      // beta-review: …and who may stay CONNECTED to its voice room.
+      if (access.channel.type === 'voice' || access.channel.type === 'stage') {
+        const { queueServerVoiceSync } = await import('@/lib/voice-moderation');
+        queueServerVoiceSync(serverId, [channelId]);
+      }
     }
 
     void logAction(getDb(), {

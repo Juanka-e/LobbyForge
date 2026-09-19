@@ -17,6 +17,8 @@
  */
 'use client';
 
+import { resolveBrowserRealtimeUrl } from './public-endpoints';
+
 /**
  * Inline wire types — duplicated from `@lobbyforge/ws-gateway`'s
  * `protocol.ts` to avoid pulling Node-only deps (`ws`, `ioredis`) into
@@ -91,12 +93,11 @@ const HEARTBEAT_TIMEOUT_MS = 60_000;
 
 function defaultUrl(): string {
   if (typeof window === 'undefined') return 'ws://127.0.0.1:3001';
-  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const envUrl = (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WS_URL) || '';
-  if (envUrl) return envUrl;
-  // Default: same host as the page, port 3001. The gateway runs as a
-  // sibling process in dev and as a sibling pod in prod.
-  return `${proto}//${window.location.hostname}:3001`;
+  // beta-review: a published image is built WITHOUT a WS URL, so HTTPS
+  // pages fall back to the same-origin `/ws` nginx proxy instead of a
+  // baked-in localhost; plain-HTTP dev pages keep the sibling :3001.
+  return resolveBrowserRealtimeUrl(envUrl);
 }
 
 export interface RealtimeClientOptions {
@@ -148,12 +149,15 @@ export class RealtimeClient {
 
   subscribe<T = unknown>(topic: Topic, handler: Handler<T>): () => void {
     let set = this.subscriptions.get(topic);
+    const isNewTopic = !set;
     if (!set) {
       set = new Set();
       this.subscriptions.set(topic, set);
     }
     set.add(handler as Handler);
-    this.send({ type: 'subscribe', topic });
+    // beta-review: one wire subscription per topic, however many local
+    // handlers share it (the gateway caps subscriptions per connection).
+    if (isNewTopic) this.send({ type: 'subscribe', topic });
     return () => this.unsubscribe(topic, handler);
   }
 
@@ -192,14 +196,12 @@ export class RealtimeClient {
 
     this.socket.addEventListener('open', () => {
       this.reconnectAttempt = 0;
-      // Replay all current subscriptions first so the server re-binds them.
+      // The subscription map is the desired state: replay it once and drop
+      // the queued subscribe/unsubscribe messages (replaying both sent every
+      // topic twice after each connect).
+      this.pendingQueue.length = 0;
       for (const topic of this.subscriptions.keys()) {
         this.send({ type: 'subscribe', topic });
-      }
-      // Then flush any messages queued while disconnected.
-      while (this.pendingQueue.length) {
-        const msg = this.pendingQueue.shift()!;
-        this.send(msg);
       }
       this.armHeartbeat();
     });

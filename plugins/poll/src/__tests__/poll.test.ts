@@ -73,8 +73,10 @@ describe('poll plugin — one vote per player, anonymous by construction', () =>
     // Choices are private: the OPTIONS carry counts only — no voter ids.
     expect(JSON.stringify(state.options)).not.toContain('alice');
     expect(JSON.stringify(state.options)).not.toContain('bob');
-    // Ballot-box membership (WHO voted) is public — needed for one-vote
-    // enforcement and honest turnout display.
+    // The CANONICAL state keeps the ballot box for one-vote enforcement;
+    // beta-review S11: it never reaches viewers — the core projector
+    // swaps it for ballotCount/hasVoted (covered in @lobbyforge/core's
+    // activity-projection tests).
     expect(state.ballotBox).toEqual(['alice', 'bob']);
     expect(state.options.map((o) => o.votes)).toEqual([1, 1, 0]);
   });

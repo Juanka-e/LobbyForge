@@ -6,6 +6,7 @@ import { buildGuestSessionCookie, createGuestIdentity } from '@/lib/guest-sessio
 import { getSessionSecret } from '@/lib/api-auth';
 import { DUMMY_PASSWORD_HASH, verifyPassword } from '@/lib/password';
 import { withApiSecurity } from '@/lib/security-headers';
+import { recordSession } from '@/lib/session-tracker';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -34,6 +35,24 @@ async function handlePost(req: Request): Promise<NextResponse> {
     getSessionSecret(),
     { secure: process.env.NODE_ENV === 'production' }
   );
+  // beta-review (S7): record the session BEFORE handing out the cookie.
+  // A password change revokes other sessions via `revokeOtherSessions`,
+  // which can only revoke sessions it can list — login never recorded
+  // its sessions, so an attacker signed in with a stolen password
+  // survived the victim's password change. An unrecorded session could
+  // never be revoked, so production fails closed (the same stance as the
+  // revocation check in security-headers); dev/test only logs.
+  try {
+    await recordSession(user.id, sessionSeed.gid, req);
+  } catch (error) {
+    console.error('[auth/login] session tracking failed', (error as Error).message);
+    if (process.env.NODE_ENV === 'production') {
+      return NextResponse.json(
+        { error: 'Sign-in is temporarily unavailable. Try again shortly.' },
+        { status: 503, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+  }
   return NextResponse.json(
     { user: { id: user.id, email: user.email, displayName: user.displayName } },
     { headers: { 'Set-Cookie': session.setCookieHeader, 'Cache-Control': 'no-store' } }

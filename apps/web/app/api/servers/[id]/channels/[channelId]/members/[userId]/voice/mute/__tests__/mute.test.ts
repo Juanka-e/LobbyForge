@@ -6,8 +6,15 @@ const mockRequireChannelInServer = vi.fn();
 const mockRequireServerPermission = vi.fn();
 const mockLogAction = vi.fn();
 
+const mockSetMemberVoiceMuted = vi.fn();
 vi.mock('@lobbyforge/db', () => ({
   logAction: (...args: unknown[]) => mockLogAction(...args),
+  setMemberVoiceMuted: (...args: unknown[]) => mockSetMemberVoiceMuted(...args),
+}));
+
+const mockSyncMemberVoiceAccess = vi.fn();
+vi.mock('@/lib/voice-moderation', () => ({
+  syncMemberVoiceAccess: (...args: unknown[]) => mockSyncMemberVoiceAccess(...args),
 }));
 
 vi.mock('@/lib/api-auth', async () => {
@@ -21,16 +28,6 @@ vi.mock('@/lib/api-auth', async () => {
   };
 });
 
-// Mock LiveKit
-const mockListParticipants = vi.fn();
-const mockMutePublishedTrack = vi.fn();
-
-vi.mock('@/lib/livekit', () => ({
-  getRoomServiceClient: () => ({
-    listParticipants: (...args: unknown[]) => mockListParticipants(...args),
-    mutePublishedTrack: (...args: unknown[]) => mockMutePublishedTrack(...args),
-  }),
-}));
 
 vi.mock('@/lib/security-headers', () => ({
   withApiSecurity: (handler: unknown) => handler,
@@ -64,8 +61,8 @@ beforeEach(() => {
   mockRequireServerPermission.mockResolvedValue({ ok: true, permissions: ['mute_members'] });
   mockLogAction.mockReset();
   mockLogAction.mockResolvedValue(undefined);
-  mockListParticipants.mockReset();
-  mockMutePublishedTrack.mockReset();
+  mockSetMemberVoiceMuted.mockReset().mockResolvedValue(true);
+  mockSyncMemberVoiceAccess.mockReset().mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -89,7 +86,6 @@ async function loadRoute() {
 const SERVER_ID = '00000000-0000-0000-0000-000000000001';
 const CHANNEL_ID = '00000000-0000-0000-0000-000000000010';
 const TARGET_ID = '00000000-0000-0000-0000-000000000020';
-const ROOM = 's_00000000000000000000000000000001_c_00000000000000000000000000000010';
 
 describe('POST /api/servers/{id}/channels/{channelId}/members/{userId}/voice/mute', () => {
   it('returns 403 when the caller lacks MUTE_MEMBERS (enforced by the hierarchy gate)', async () => {
@@ -109,42 +105,47 @@ describe('POST /api/servers/{id}/channels/{channelId}/members/{userId}/voice/mut
     expect(res.status).toBe(403);
   });
 
-  it('returns 404 when the participant is not in the room', async () => {
-    mockListParticipants.mockResolvedValue([]);
-    const { POST } = await loadRoute();
-    const req = new Request(`https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}/members/${TARGET_ID}/voice/mute`, {
+  function muteRequest(body: Record<string, unknown>) {
+    return new Request(`https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}/members/${TARGET_ID}/voice/mute`, {
       method: 'POST',
       headers: { cookie: makeSessionCookie(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ muted: true }),
+      body: JSON.stringify(body),
     });
-    const res = await POST(req, {
-      params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID, userId: TARGET_ID }),
-    });
-    expect(res.status).toBe(404);
+  }
+  const params = { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID, userId: TARGET_ID }) };
+
+  it('beta-review: persists the mute and enforces it live in LiveKit', async () => {
+    const { POST } = await loadRoute();
+    const res = await POST(muteRequest({ muted: true }), params);
+    expect(res.status).toBe(200);
+    expect(mockSetMemberVoiceMuted).toHaveBeenCalledWith(expect.anything(), SERVER_ID, TARGET_ID, true);
+    expect(mockSyncMemberVoiceAccess).toHaveBeenCalledWith(SERVER_ID, TARGET_ID);
+    expect(mockSetMemberVoiceMuted.mock.invocationCallOrder[0]).toBeLessThan(
+      mockSyncMemberVoiceAccess.mock.invocationCallOrder[0]!
+    );
   });
 
-  it('mutes the participant when authorized and in room', async () => {
-    mockListParticipants.mockResolvedValue([
-      {
-        identity: TARGET_ID,
-        tracks: [
-          { sid: 'track-mic', type: 0, source: 1 }, // AUDIO=0, MICROPHONE=1
-        ],
-      },
-    ]);
-    mockMutePublishedTrack.mockResolvedValue({});
+  it('beta-review: a member who is not in voice (no mic track) can still be muted ahead of time', async () => {
+    mockSyncMemberVoiceAccess.mockResolvedValue(undefined); // nothing connected
     const { POST } = await loadRoute();
-    const req = new Request(`https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}/members/${TARGET_ID}/voice/mute`, {
-      method: 'POST',
-      headers: { cookie: makeSessionCookie(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ muted: true }),
-    });
-    const res = await POST(req, {
-      params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID, userId: TARGET_ID }),
-    });
+    const res = await POST(muteRequest({ muted: true }), params);
     expect(res.status).toBe(200);
-    expect(mockListParticipants).toHaveBeenCalledWith(ROOM);
-    expect(mockMutePublishedTrack).toHaveBeenCalledWith(ROOM, TARGET_ID, 'track-mic', true);
+  });
+
+  it('beta-review: lifting the mute only re-syncs permissions (never unmutes a track remotely)', async () => {
+    const { POST } = await loadRoute();
+    const res = await POST(muteRequest({ muted: false }), params);
+    expect(res.status).toBe(200);
+    expect(mockSetMemberVoiceMuted).toHaveBeenCalledWith(expect.anything(), SERVER_ID, TARGET_ID, false);
+    expect(mockSyncMemberVoiceAccess).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns 404 when the target is not a member', async () => {
+    mockSetMemberVoiceMuted.mockResolvedValue(false);
+    const { POST } = await loadRoute();
+    const res = await POST(muteRequest({ muted: true }), params);
+    expect(res.status).toBe(404);
+    expect(mockSyncMemberVoiceAccess).not.toHaveBeenCalled();
   });
 
   it('rejects client supplied room names instead of trusting them', async () => {
@@ -158,6 +159,6 @@ describe('POST /api/servers/{id}/channels/{channelId}/members/{userId}/voice/mut
       params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID, userId: TARGET_ID }),
     });
     expect(res.status).toBe(400);
-    expect(mockListParticipants).not.toHaveBeenCalled();
+    expect(mockSetMemberVoiceMuted).not.toHaveBeenCalled();
   });
 });

@@ -17,6 +17,7 @@ import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
 import { isValidRoleIcon } from '@/lib/role-icons';
+import { findUngrantablePermissions, UNGRANTABLE_PERMISSIONS_ERROR } from '@/lib/role-grant-policy';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -79,6 +80,10 @@ interface AuthContext {
   ok: true;
   role: RoleRow;
 }
+interface WriteAuthContext extends AuthContext {
+  actorIsOwner: boolean;
+  actorPermissions: string[];
+}
 type AuthError = { ok: false; response: NextResponse };
 
 async function loadRoleForRead(serverId: string, roleId: string, userId: string): Promise<AuthContext | AuthError> {
@@ -101,7 +106,7 @@ async function loadRoleForRead(serverId: string, roleId: string, userId: string)
   return { ok: true, role };
 }
 
-async function loadRoleForWrite(serverId: string, roleId: string, userId: string): Promise<AuthContext | AuthError> {
+async function loadRoleForWrite(serverId: string, roleId: string, userId: string): Promise<WriteAuthContext | AuthError> {
   const ctx = await loadRoleForRead(serverId, roleId, userId);
   if (!ctx.ok) return ctx;
   const server = await getServerById(getDb(), serverId);
@@ -128,7 +133,7 @@ async function loadRoleForWrite(serverId: string, roleId: string, userId: string
       };
     }
   }
-  return ctx;
+  return { ...ctx, actorIsOwner: userId === server.ownerUserId, actorPermissions: permissions };
 }
 
 async function handleGet(req: Request, ctx: { params: Promise<{ id: string; roleId: string }> }): Promise<NextResponse> {
@@ -202,6 +207,24 @@ async function handlePatch(req: Request, ctx: { params: Promise<{ id: string; ro
           { status: 400 }
         );
       }
+
+      // beta-review (S1): live-confirmed escalation — a MANAGE_ROLES
+      // member PATCHed @everyone (position 0, always below them) with
+      // `administrator` and every member gained audit-log/ban access.
+      // Non-owners may only ADD permissions they hold, never
+      // `administrator`; what the role already carries may stay.
+      const ungrantable = findUngrantablePermissions({
+        actorIsOwner: access.actorIsOwner,
+        actorPermissions: access.actorPermissions,
+        requested: body.permissions,
+        alreadyGranted: access.role.permissions,
+      });
+      if (ungrantable.length > 0) {
+        return NextResponse.json(
+          { error: UNGRANTABLE_PERMISSIONS_ERROR, permissions: ungrantable },
+          { status: 403 }
+        );
+      }
     }
 
     if (body.position !== undefined && access.role.position !== body.position) {
@@ -239,6 +262,10 @@ async function handlePatch(req: Request, ctx: { params: Promise<{ id: string; ro
         serverId,
         reason: 'roles_permissions_changed',
       });
+      // beta-review: SPEAK / STREAM / CONNECT_VOICE may have changed for
+      // everyone holding this role — re-apply voice policy live.
+      const { queueServerVoiceSync } = await import('@/lib/voice-moderation');
+      queueServerVoiceSync(serverId);
     }
     void logAction(getDb(), {
       serverId,
@@ -293,6 +320,8 @@ async function handleDelete(req: Request, ctx: { params: Promise<{ id: string; r
       serverId,
       reason: 'roles_permissions_changed',
     });
+    const { queueServerVoiceSync } = await import('@/lib/voice-moderation');
+    queueServerVoiceSync(serverId);
     void logAction(getDb(), {
       serverId,
       actorUserId: session.uid,

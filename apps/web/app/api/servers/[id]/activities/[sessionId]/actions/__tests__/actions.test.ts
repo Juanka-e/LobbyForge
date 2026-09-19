@@ -75,8 +75,20 @@ const fakePlugin = {
   migrateState: (raw: unknown) => raw,
   renderClient: () => null,
 };
+// beta-review: a plugin whose validateAction REQUIRES the actor field
+// the host injects (like poll's vote.playerId / quiz's answer.playerId).
+const validatedPlugin = {
+  ...fakePlugin,
+  manifest: { ...fakePlugin.manifest, id: 'validated' },
+  actionPolicies: { vote: { role: 'member' as const, actorFields: ['playerId'] } },
+  validateAction: vi.fn((action: unknown) => {
+    const a = action as Record<string, unknown>;
+    return typeof a.playerId === 'string' && a.playerId.length > 0 ? null : 'vote requires a playerId string.';
+  }),
+};
 vi.mock('@/lib/plugin-server-registry', () => ({
-  getPluginServer: (id: string) => (id === 'fake' ? fakePlugin : null),
+  getPluginServer: (id: string) =>
+    id === 'fake' ? fakePlugin : id === 'validated' ? validatedPlugin : null,
 }));
 
 const claimActionId = vi.fn();
@@ -237,5 +249,57 @@ describe('POST activity actions — LF-002 idempotency', () => {
     const detail = (await res.json()) as { duplicate?: boolean };
     expect(detail.duplicate).toBe(true);
     expect(dbFns.setGameSessionStateCAS).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST activity actions — beta-review ended-session guard', () => {
+  it('rejects an action on a session whose ROW status is ended (409, no dispatch)', async () => {
+    dbFns.getGameSessionById.mockResolvedValue({ ...SESSION_ROW, status: 'ended' });
+    const res = await post({ type: 'bust-forbidden', bustedBy: 'u-p3' });
+    expect(res.status).toBe(409);
+    expect(dbFns.setGameSessionStateCAS).not.toHaveBeenCalled();
+  });
+
+  it('rejects a cancelled session too', async () => {
+    dbFns.getGameSessionById.mockResolvedValue({ ...SESSION_ROW, status: 'cancelled' });
+    const res = await post({ type: 'bust-forbidden', bustedBy: 'u-p3' });
+    expect(res.status).toBe(409);
+  });
+
+  it('a concurrent END wins: CAS refused on a terminal row → 409, no broadcast, claim released', async () => {
+    dbFns.setGameSessionStateCAS.mockResolvedValue({
+      ok: false,
+      row: { ...SESSION_ROW, status: 'ended', revision: 3 },
+    });
+    const { publishActivityStateChange } = (await import('@/lib/activity-bus')) as unknown as {
+      publishActivityStateChange: { mock: { calls: unknown[][] }; mockClear: () => void };
+    };
+    publishActivityStateChange.mockClear();
+    const res = await post({ type: 'bust-forbidden', actionId: UUID, bustedBy: 'u-p3' });
+    expect(res.status).toBe(409);
+    // No retry loop against an ended session.
+    expect(dbFns.setGameSessionStateCAS).toHaveBeenCalledTimes(1);
+    expect(publishActivityStateChange.mock.calls).toHaveLength(0);
+    expect(releaseActionId).toHaveBeenCalled();
+  });
+});
+
+describe('POST activity actions — beta-review validateAction sees injected actor fields', () => {
+  it('validates AFTER actor injection (client omits playerId, server supplies it)', async () => {
+    dbFns.getGameSessionById.mockResolvedValue({ ...SESSION_ROW, pluginId: 'validated' });
+    const res = await post({ type: 'vote', optionId: 'opt-1' });
+    expect(res.status).toBe(200);
+    expect(validatedPlugin.validateAction).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: 'vote', playerId: 'u-host' })
+    );
+  });
+
+  it('a client-supplied playerId is overwritten before validation and dispatch', async () => {
+    dbFns.getGameSessionById.mockResolvedValue({ ...SESSION_ROW, pluginId: 'validated' });
+    const res = await post({ type: 'vote', optionId: 'opt-1', playerId: 'someone-else' });
+    expect(res.status).toBe(200);
+    expect(validatedPlugin.validateAction).toHaveBeenLastCalledWith(
+      expect.objectContaining({ playerId: 'u-host' })
+    );
   });
 });

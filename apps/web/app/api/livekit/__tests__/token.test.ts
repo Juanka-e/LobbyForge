@@ -36,11 +36,17 @@ vi.mock('@/lib/api-auth', () => ({
 
 const getUserPermissions = vi.fn();
 const getActiveMemberTimeout = vi.fn();
+const isMemberVoiceMuted = vi.fn();
+const getServerMember = vi.fn();
+const getUserById = vi.fn();
 
 vi.mock('@lobbyforge/db', () => ({
   getEffectiveServerVoiceSettings,
   getUserPermissions,
   getActiveMemberTimeout,
+  isMemberVoiceMuted,
+  getServerMember,
+  getUserById,
 }));
 
 
@@ -85,6 +91,13 @@ beforeEach(() => {
   // Full baseline member by default (all publish sources allowed).
   getUserPermissions.mockResolvedValue(['connect_voice', 'speak', 'stream']);
   getActiveMemberTimeout.mockResolvedValue(null);
+  isMemberVoiceMuted.mockReset();
+  isMemberVoiceMuted.mockResolvedValue(false);
+  getServerMember.mockReset();
+  getServerMember.mockResolvedValue({ nickname: null });
+  getUserById.mockReset();
+  getUserById.mockResolvedValue({ displayName: 'Owner Profile' });
+  delete process.env.LOBBYFORGE_PUBLIC_LIVEKIT_URL;
 
   requireMaterializedSession.mockReturnValue({
     ok: true,
@@ -293,7 +306,7 @@ describe('POST /api/livekit/token room limits', () => {
     const res = await POST(makeRequest({ serverId: SERVER_ID, channelId: CHANNEL_ID }), {});
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.serverVoiceSettings).toEqual({ requirePushToTalk: true, startMuted: true });
+    expect(json.serverVoiceSettings).toEqual({ serverMuted: false, requirePushToTalk: true, startMuted: true });
   });
 });
 
@@ -391,5 +404,44 @@ describe('POST /api/livekit/token VOICE-003 limit failure policy', () => {
         grants: expect.objectContaining({ canPublishSources: ['microphone'] }),
       })
     );
+  });
+});
+
+describe('POST /api/livekit/token beta-review enforcement', () => {
+  it('a server-muted member gets no microphone grant (rejoin cannot undo a moderator mute)', async () => {
+    isMemberVoiceMuted.mockResolvedValue(true);
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest({ serverId: SERVER_ID, channelId: CHANNEL_ID }), {});
+    expect(res.status).toBe(200);
+    expect(issueLiveKitToken).toHaveBeenCalledWith(
+      expect.objectContaining({
+        grants: expect.objectContaining({
+          canPublishSources: ['camera', 'screen-share', 'screen-share-audio'],
+        }),
+      })
+    );
+    const body = (await res.json()) as { serverVoiceSettings: { serverMuted: boolean } };
+    expect(body.serverVoiceSettings.serverMuted).toBe(true);
+  });
+
+  it('ignores a client-supplied displayName and uses the server nickname', async () => {
+    getServerMember.mockResolvedValue({ nickname: 'Mod Nick' });
+    const { POST } = await loadRoute();
+    await POST(makeRequest({ serverId: SERVER_ID, channelId: CHANNEL_ID, displayName: 'The Owner' }), {});
+    expect(issueLiveKitToken).toHaveBeenCalledWith(expect.objectContaining({ name: 'Mod Nick' }));
+  });
+
+  it('falls back to the profile display name when there is no nickname', async () => {
+    const { POST } = await loadRoute();
+    await POST(makeRequest({ serverId: SERVER_ID, channelId: CHANNEL_ID, displayName: 'Spoof' }), {});
+    expect(issueLiveKitToken).toHaveBeenCalledWith(expect.objectContaining({ name: 'Owner Profile' }));
+  });
+
+  it('returns the runtime LiveKit URL (never a build-time constant)', async () => {
+    process.env.LOBBYFORGE_PUBLIC_LIVEKIT_URL = 'wss://voice.example.org/livekit';
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest({ serverId: SERVER_ID, channelId: CHANNEL_ID }), {});
+    const body = (await res.json()) as { livekitUrl: string | null };
+    expect(body.livekitUrl).toBe('wss://voice.example.org/livekit');
   });
 });

@@ -32,6 +32,25 @@ describe('topicMatchesInvalidation', () => {
     expect(topicMatchesInvalidation('chat:srv-2:ch-7', event)).toBe(false);
   });
 
+  it('channel-policy re-checks activity-state topics whose SESSION lives in that channel (beta-review)', () => {
+    const event = {
+      kind: 'channel-policy' as const,
+      serverId: 'srv-1',
+      channelId: 'ch-7',
+      reason: 'permissions_changed',
+    };
+    // resourceId is the session id — the channel comes from the
+    // authorization-time metadata.
+    expect(topicMatchesInvalidation('activity-state:srv-1:sess-1', event, 'ch-7')).toBe(true);
+    expect(topicMatchesInvalidation('activity-state:srv-1:sess-1', event, 'ch-8')).toBe(false);
+    // Unknown channel → re-check conservatively.
+    expect(topicMatchesInvalidation('activity-state:srv-1:sess-1', event)).toBe(true);
+    // Other servers never match.
+    expect(topicMatchesInvalidation('activity-state:srv-2:sess-1', event, 'ch-7')).toBe(false);
+    // Presence is server-wide — a channel policy does not revoke it.
+    expect(topicMatchesInvalidation('presence:srv-1', event)).toBe(false);
+  });
+
   it('server-policy revalidates EVERY topic of the server', () => {
     const event = {
       kind: 'server-policy' as const,

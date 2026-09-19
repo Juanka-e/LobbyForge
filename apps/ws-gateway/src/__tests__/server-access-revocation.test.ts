@@ -10,7 +10,15 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AddressInfo } from 'node:net';
+import * as net from 'node:net';
+import type * as http from 'node:http';
 import WebSocket from 'ws';
+
+// beta-review (S6): a tiny per-connection cap so the cap is reachable
+// under the 30-subscribes/min rate limit. Read at module load.
+vi.hoisted(() => {
+  process.env.WS_MAX_SUBS_PER_CONN = '3';
+});
 
 const authMocks = vi.hoisted(() => ({
   validateGuestFromHeaders: vi.fn(),
@@ -27,6 +35,7 @@ vi.mock('../db.js', () => ({ getDb: () => ({ __mockDb: true }) }));
 
 const subscriberMocks = vi.hoisted(() => ({
   acquireTopicSubscription: vi.fn(),
+  shutdownSubscriber: vi.fn(),
 }));
 vi.mock('../redis-subscriber.js', () => subscriberMocks);
 
@@ -47,7 +56,7 @@ vi.mock('../access-invalidation.js', async (importOriginal) => {
   };
 });
 
-import { createGateway } from '../server.js';
+import { __ipConnectionCount, createGateway } from '../server.js';
 
 const UID = 'user-a';
 const GID = 'g_a';
@@ -275,5 +284,143 @@ describe('LF-SEC-009 — revocation outage policy at the handshake', () => {
     const hello = await nextMessage(ws);
     expect(hello.type).toBe('hello');
     ws.close();
+  });
+});
+
+/** Handles returned by the acquire mock (in call order). */
+function acquiredHandle(index: number): { __handler: (raw: string) => void; __released: () => boolean } {
+  return subscriberMocks.acquireTopicSubscription.mock.results[index]!.value as {
+    __handler: (raw: string) => void;
+    __released: () => boolean;
+  };
+}
+
+describe('beta-review S5 — presence events carry no presence data', () => {
+  it('forwards ONLY { type: presence-update } whatever the publisher sent', async () => {
+    authorizeMocks.authorizeTopicSubscribe.mockResolvedValue({
+      ok: true,
+      kind: 'presence',
+      serverId: 'srv-1',
+      resourceId: 'srv-1',
+    });
+    baseUrl = await start();
+    const ws = await connect(baseUrl);
+    await nextMessage(ws); // hello
+    ws.send(JSON.stringify({ type: 'subscribe', topic: 'presence:srv-1' }));
+    expect((await nextMessage(ws)).type).toBe('subscribed');
+
+    // A legacy/rogue publisher shipping the full snapshot.
+    acquiredHandle(0).__handler(
+      JSON.stringify({
+        type: 'presence-update',
+        userId: 'hidden-user',
+        status: 'online',
+        channelId: 'private-voice',
+        lastSeen: 1,
+        activity: { kind: 'game', label: 'Secret', serverName: 'Hidden Server' },
+      })
+    );
+    const event = await nextMessage(ws);
+    expect(event.type).toBe('event');
+    expect(event.data).toEqual({ type: 'presence-update' });
+    expect(JSON.stringify(event)).not.toContain('hidden-user');
+    expect(JSON.stringify(event)).not.toContain('private-voice');
+    ws.close();
+  });
+});
+
+describe('beta-review S6 — subscription caps + in-flight subscribe on close', () => {
+  it('refuses subscriptions past the per-connection cap', async () => {
+    baseUrl = await start();
+    const ws = await connect(baseUrl);
+    await nextMessage(ws); // hello
+    for (const ch of ['a', 'b', 'c']) {
+      ws.send(JSON.stringify({ type: 'subscribe', topic: 'chat:srv-1:' + ch }));
+      expect((await nextMessage(ws)).type).toBe('subscribed');
+    }
+    ws.send(JSON.stringify({ type: 'subscribe', topic: 'chat:srv-1:d' }));
+    const refused = await nextMessage(ws);
+    expect(refused).toMatchObject({ type: 'error', code: 'rate_limited', topic: 'chat:srv-1:d' });
+    // Refused BEFORE the DB authorization round trip.
+    expect(authorizeMocks.authorizeTopicSubscribe).toHaveBeenCalledTimes(3);
+    expect(subscriberMocks.acquireTopicSubscription).toHaveBeenCalledTimes(3);
+
+    // Unsubscribing frees a slot.
+    ws.send(JSON.stringify({ type: 'unsubscribe', topic: 'chat:srv-1:a' }));
+    expect((await nextMessage(ws)).type).toBe('unsubscribed');
+    ws.send(JSON.stringify({ type: 'subscribe', topic: 'chat:srv-1:d' }));
+    expect((await nextMessage(ws)).type).toBe('subscribed');
+    ws.close();
+  });
+
+  it('does not acquire a Redis subscription when the socket closed during authorization', async () => {
+    let resolveAuthz: ((value: unknown) => void) | null = null;
+    authorizeMocks.authorizeTopicSubscribe.mockImplementation(
+      () => new Promise((resolve) => { resolveAuthz = resolve; })
+    );
+    baseUrl = await start();
+    const ws = await connect(baseUrl);
+    await nextMessage(ws); // hello
+    ws.send(JSON.stringify({ type: 'subscribe', topic: 'chat:srv-1:ch-1' }));
+    await vi.waitFor(() => expect(authorizeMocks.authorizeTopicSubscribe).toHaveBeenCalled());
+
+    ws.close();
+    await new Promise<void>((resolve) => ws.once('close', () => resolve()));
+    // Give the server a beat to run its own 'close' handler.
+    await new Promise((r) => setTimeout(r, 50));
+    resolveAuthz!({ ok: true, kind: 'chat', serverId: 'srv-1', resourceId: 'ch-1', channelId: 'ch-1' });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(subscriberMocks.acquireTopicSubscription).not.toHaveBeenCalled();
+  });
+});
+
+describe('beta-review S6 — per-IP slot accounting', () => {
+  const loopbackCount = () =>
+    __ipConnectionCount('127.0.0.1') + __ipConnectionCount('::ffff:127.0.0.1');
+
+  it('returns the slot when a normal connection closes', async () => {
+    baseUrl = await start();
+    const ws = await connect(baseUrl);
+    await nextMessage(ws); // hello
+    expect(loopbackCount()).toBe(1);
+    ws.close();
+    await vi.waitFor(() => expect(loopbackCount()).toBe(0));
+  });
+
+  it('releases the slot when the upgrade aborts AFTER verifyClient (no connection event)', async () => {
+    await start();
+    // A raw TCP pair — the server-side socket stands in for the upgrade
+    // socket of a client that sent FIN mid-handshake.
+    const tcp = net.createServer();
+    await new Promise<void>((resolve) => tcp.listen(0, '127.0.0.1', () => resolve()));
+    const port = (tcp.address() as AddressInfo).port;
+    const serverSide = new Promise<net.Socket>((resolve) => tcp.once('connection', resolve));
+    const client = net.connect(port, '127.0.0.1');
+    client.on('error', () => undefined);
+    const sock = await serverSide;
+    const ip = sock.remoteAddress!;
+    sock.end(); // no longer writable -> ws destroys it in completeUpgrade
+
+    const req = {
+      method: 'GET',
+      url: '/',
+      headers: {
+        upgrade: 'websocket',
+        connection: 'Upgrade',
+        'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==',
+        'sec-websocket-version': '13',
+      },
+      socket: sock,
+    } as unknown as http.IncomingMessage;
+    const onConnection = vi.fn();
+    const closed = new Promise<void>((resolve) => sock.once('close', () => resolve()));
+    gateway.wss.handleUpgrade(req, sock, Buffer.alloc(0), onConnection);
+    await closed;
+    await new Promise((r) => setImmediate(r));
+
+    expect(onConnection).not.toHaveBeenCalled();
+    expect(__ipConnectionCount(ip)).toBe(0);
+    client.destroy();
+    await new Promise<void>((resolve) => tcp.close(() => resolve()));
   });
 });

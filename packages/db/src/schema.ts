@@ -153,6 +153,13 @@ export const memberships = pgTable('memberships', {
   nickname: text('nickname'),
   /** MODERATE_MEMBERS timeout: mute from text+voice until this instant. */
   timedOutUntil: timestamp('timed_out_until', { withTimezone: true }),
+  /**
+   * MUTE_MEMBERS server mute: the member may not publish a microphone in
+   * any voice room of this server until a moderator lifts it. Persisted so
+   * it survives rejoin; enforced via the LiveKit token grant + live
+   * participant permission update.
+   */
+  voiceMuted: boolean('voice_muted').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
   uniqueServerUser: unique('memberships_server_id_user_id_unique').on(table.serverId, table.userId),

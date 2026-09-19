@@ -12,6 +12,7 @@ import { hashPassword } from '@/lib/password';
 import { buildGuestSessionCookie, createGuestIdentity } from '@/lib/guest-session';
 import { getSessionSecret } from '@/lib/api-auth';
 import { withApiSecurity } from '@/lib/security-headers';
+import { recordSession } from '@/lib/session-tracker';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -68,6 +69,18 @@ async function handlePost(request: Request): Promise<NextResponse> {
       getSessionSecret(),
       { secure: process.env.NODE_ENV === 'production' }
     );
+    // beta-review (S7): record the session BEFORE handing out the cookie.
+    // A password change revokes other sessions via `revokeOtherSessions`,
+    // which can only revoke sessions it can list — setup never recorded
+    // the owner's first session, so it was unrevocable. Setup is
+    // irreversible, so a tracking failure only logs (the session belongs
+    // to the account being created; every refresh via POST
+    // /api/auth/guest records it again).
+    try {
+      await recordSession(result.owner.id, sessionSeed.gid, request);
+    } catch (error) {
+      console.error('[setup/complete] session tracking failed', (error as Error).message);
+    }
     const body: SuccessResponse = { status: 'completed', setup: result.setup, serverId: result.server.id };
     return NextResponse.json(body, {
       status: 200,

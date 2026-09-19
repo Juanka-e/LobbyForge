@@ -207,14 +207,19 @@ export async function upsertRegistryInstance(
 /** 13th-audit: change the instance's domain. Requires BOTH the owner
  * session AND a proof signed with the CURRENT (stored) private key —
  * the same model rotate-key uses, so a hijacked session alone cannot
- * redirect discovery traffic to an attacker-controlled domain. */
+ * redirect discovery traffic to an attacker-controlled domain.
+ *
+ * beta-review (S10): a domain move sends the entry back through
+ * directory review — `isVerified` and `isListed` reset to false (an
+ * admin re-lists / re-verifies it via setRegistryInstanceListing). The
+ * verified badge and the listing were granted for the OLD domain. */
 export async function changeRegistryInstanceDomain(
   db: DbClient,
   input: { instanceId: string; ownerUserId: string; newDomain: string }
 ): Promise<boolean> {
   const updated = await db
     .update(registryInstances)
-    .set({ domain: input.newDomain })
+    .set({ domain: input.newDomain, isVerified: false, isListed: false })
     .where(
       and(
         eq(registryInstances.instanceId, input.instanceId),

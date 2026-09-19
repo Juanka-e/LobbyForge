@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { CorePermission } from '@lobbyforge/core';
+import { CorePermission, hasPermission } from '@lobbyforge/core';
 import {
   createInvite,
   getServerById,
@@ -76,14 +76,24 @@ async function handleGet(req: Request, ctx: { params: Promise<{ id: string }> })
     if (!server) {
       return NextResponse.json({ error: 'Server not found' }, { status: 404 });
     }
+    // beta-review (F7): CREATE_INVITE (granted to @everyone by default)
+    // used to expose — and, via DELETE, revoke — EVERY invite of the
+    // server. Members now only see their own invites; the owner and
+    // MANAGE_SERVER (administrator short-circuits it) see all of them.
+    let seeAll = true;
     if (server.ownerUserId !== session.uid) {
       if (!(await isServerMember(getDb(), session.uid, serverId))) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }
       const auth = await authorizeServerPermission(session.uid, serverId, CorePermission.CREATE_INVITE);
       if (!auth.ok) return auth.response;
+      seeAll = hasPermission(auth.permissions, CorePermission.MANAGE_SERVER);
     }
-    const rows = await listInvitesForServer(getDb(), serverId);
+    const rows = await listInvitesForServer(
+      getDb(),
+      serverId,
+      seeAll ? {} : { createdBy: session.uid }
+    );
     return NextResponse.json(
       { invites: rows.map(toJson) },
       { headers: { 'Cache-Control': 'no-store' } }

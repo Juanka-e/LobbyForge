@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import {
   setMemberRoles,
+  getMemberRoleIds,
   getRoleById,
+  getUserPermissions,
   logAction,
 } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
@@ -10,6 +12,8 @@ import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
 import { authorizeModerationTarget } from '@/lib/member-authorization';
 import { publishAccessInvalidation } from '@/lib/access-invalidation';
+import { findUngrantablePermissions, UNGRANTABLE_PERMISSIONS_ERROR } from '@/lib/role-grant-policy';
+import { queueMemberVoiceSync } from '@/lib/voice-moderation';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -93,6 +97,16 @@ async function handlePut(
     // Assigned roles must sit STRICTLY below the actor's highest role
     // (owner assigns freely — but roles must still exist in this server).
     if (session.uid !== gate.context.server.ownerUserId) {
+      // beta-review (S1): rank alone is not enough — an owner-created
+      // LOW-position role may carry `administrator` (or any permission
+      // the actor lacks); handing it out is the same escalation as
+      // editing it in. Roles the target ALREADY holds are not a new
+      // grant (the PUT replaces the full set, so they are resubmitted).
+      const [actorPermissions, heldRoleIds] = await Promise.all([
+        getUserPermissions(getDb(), session.uid, serverId),
+        getMemberRoleIds(getDb(), serverId, targetUserId),
+      ]);
+      const alreadyHeld = new Set(heldRoleIds);
       for (const roleId of uniqueRoleIds) {
         const role = await getRoleById(getDb(), roleId);
         if (!role || role.serverId !== serverId) {
@@ -101,6 +115,18 @@ async function handlePut(
         if (role.position >= gate.context.actorHighest) {
           return NextResponse.json(
             { error: `You can only assign roles below your highest role (role "${role.name}" is at or above it)` },
+            { status: 403 }
+          );
+        }
+        if (alreadyHeld.has(role.id)) continue;
+        const ungrantable = findUngrantablePermissions({
+          actorIsOwner: false,
+          actorPermissions,
+          requested: role.permissions,
+        });
+        if (ungrantable.length > 0) {
+          return NextResponse.json(
+            { error: UNGRANTABLE_PERMISSIONS_ERROR, role: role.name, permissions: ungrantable },
             { status: 403 }
           );
         }
@@ -123,6 +149,9 @@ async function handlePut(
       userId: targetUserId,
       reason: 'roles_changed',
     });
+    // beta-review (S2): losing CONNECT_VOICE / SPEAK or a gated voice
+    // channel must take effect in a LIVE LiveKit session too.
+    queueMemberVoiceSync(serverId, targetUserId);
     void logAction(getDb(), {
       serverId,
       actorUserId: session.uid,

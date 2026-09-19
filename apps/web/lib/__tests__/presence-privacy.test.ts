@@ -30,6 +30,15 @@ describe('applyPresencePrivacy', () => {
     expect(result.status).toBe('hidden');
   });
 
+  it('beta-review: a hidden status does not leak through lastSeen', () => {
+    const result = applyPresencePrivacy(
+      basePresence,
+      privacy({ onlineStatusVisibility: 'nobody' }),
+      { isSelf: false, isServerMember: true }
+    );
+    expect(result.lastSeen).toBe(0);
+  });
+
   it('keeps own status visible even when visibility is nobody', () => {
     const result = applyPresencePrivacy(
       basePresence,
@@ -65,5 +74,36 @@ describe('applyPresencePrivacy', () => {
       { isSelf: false, isServerMember: true }
     );
     expect(result.activity).toBeUndefined();
+  });
+
+  it('strips channelId when the channel is not visible to the viewer (beta-review F8)', () => {
+    const result = applyPresencePrivacy(basePresence, DEFAULT_USER_PRIVACY_SETTINGS, {
+      isSelf: false,
+      isServerMember: true,
+      visibleChannelIds: new Set(['some-other-channel']),
+    });
+    expect(result.channelId).toBeNull();
+  });
+
+  it('keeps channelId for visible channels, for self, and when no visibility set is given', () => {
+    const visible = applyPresencePrivacy(basePresence, DEFAULT_USER_PRIVACY_SETTINGS, {
+      isSelf: false,
+      isServerMember: true,
+      visibleChannelIds: new Set(['channel-1']),
+    });
+    expect(visible.channelId).toBe('channel-1');
+
+    const self = applyPresencePrivacy(basePresence, DEFAULT_USER_PRIVACY_SETTINGS, {
+      isSelf: true,
+      isServerMember: true,
+      visibleChannelIds: new Set(),
+    });
+    expect(self.channelId).toBe('channel-1');
+
+    const unrestricted = applyPresencePrivacy(basePresence, DEFAULT_USER_PRIVACY_SETTINGS, {
+      isSelf: false,
+      isServerMember: true,
+    });
+    expect(unrestricted.channelId).toBe('channel-1');
   });
 });

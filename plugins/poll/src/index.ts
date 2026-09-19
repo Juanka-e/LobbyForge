@@ -6,12 +6,15 @@ import { PluginPermission } from '@lobbyforge/plugin-sdk';
  *
  * DESIGN DECISIONS (31st audit):
  * - **Anonymous by construction.** State stores per-option VOTE COUNTS
- *   and a ballot box (who has voted) — never WHO voted for WHAT. The
- *   canonical projector passes plugin state through to every viewer, so
- *   storing per-option voter IDs would publish everyone's ballot. Counts
- *   cannot leak what they do not contain. (Trade-off: no server-side
- *   "my vote" indicator — the client tracks it optimistically per
- *   session.)
+ *   and a ballot box (who has voted) — never WHO voted for WHAT.
+ * - **The ballot box never leaves the server** (beta-review S11). It is
+ *   append-ordered, so diffing two broadcast revisions (the new id in
+ *   the box + the option whose count moved) de-anonymised every vote.
+ *   The canonical projector in @lobbyforge/core replaces it with
+ *   `ballotCount` + the viewer's own `hasVoted` (see PollViewState);
+ *   `ballotBox` stays in canonical state only for one-vote enforcement.
+ *   (Still no "which option did I pick" — the client may remember that
+ *   locally.)
  * - **Any channel member may vote.** The action policy is `role: member`;
  *   the host's voice context is still a stub (getParticipants → []),
  *   so "only people in the voice room" is not enforceable server-side
@@ -38,11 +41,23 @@ export interface PollState {
   options: PollOption[];
   phase: 'idle' | 'open' | 'closed';
   hostId: string | null;
-  /** Players who cast a ballot in the CURRENT poll — counts only, no choices. */
+  /**
+   * Players who cast a ballot in the CURRENT poll — no choices. SERVER
+   * ONLY: projected to `ballotCount` / `hasVoted` for every viewer.
+   */
   ballotBox: string[];
   createdAt: string | null;
   closedAt: string | null;
 }
+
+/**
+ * What a viewer receives (REST/SSE/WS all run the canonical projector):
+ * the ballot box is replaced by the turnout and the viewer's own flag.
+ */
+export type PollViewState = Omit<PollState, 'ballotBox'> & {
+  ballotCount: number;
+  hasVoted: boolean;
+};
 
 export type PollAction =
   | { type: 'open-poll'; hostId: string; question: string; options: string[] }

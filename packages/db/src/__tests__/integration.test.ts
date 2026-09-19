@@ -15,6 +15,30 @@ import {
   listUserIdentityLinks,
 } from '../queries/userIdentityLinks.js';
 
+/**
+ * beta-review: the account-creation tests need a bootstrapped DEFAULT
+ * instance. A fresh CI database has none, so these tests never ran in CI;
+ * bootstrap it once (idempotent — an already-set-up DB is left alone).
+ */
+async function ensureDefaultInstanceBootstrapped(db: ReturnType<typeof createDb>) {
+  const status = await getInstanceBootstrapStatus(db);
+  if (status.firstServerId && status.ownerUserId) return status;
+  try {
+    await completeInitialBootstrap(db, {
+      instanceName: 'Integration default instance',
+      ownerDisplayName: 'Integration Owner',
+      ownerEmail: `integration-owner-${crypto.randomUUID()}@example.invalid`,
+      ownerPasswordHash: '$test$not-a-real-password-hash',
+      registrationMode: 'invite_only',
+      guestAccessEnabled: false,
+      seoIndexingEnabled: false,
+    });
+  } catch (err) {
+    if (!(err instanceof SetupAlreadyCompleteError)) throw err;
+  }
+  return getInstanceBootstrapStatus(db);
+}
+
 describe('Database Integrations', () => {
   const url = process.env.TEST_DATABASE_URL;
 
@@ -87,7 +111,7 @@ describe('Database Integrations', () => {
 
   it('creates a local account and default membership atomically', async () => {
     const db = createDb(url);
-    const setup = await getInstanceBootstrapStatus(db);
+    const setup = await ensureDefaultInstanceBootstrapped(db);
     if (!setup.firstServerId) throw new Error('Default instance has no first server');
     const email = `registration-${crypto.randomUUID()}@example.invalid`;
     let userId: string | undefined;
@@ -124,7 +148,7 @@ describe('Database Integrations', () => {
 
   it('creates an invite-only local account and consumes the invite atomically', async () => {
     const db = createDb(url);
-    const setup = await getInstanceBootstrapStatus(db);
+    const setup = await ensureDefaultInstanceBootstrapped(db);
     if (!setup.firstServerId || !setup.ownerUserId) throw new Error('Default instance is not bootstrapped');
     const email = `invite-registration-${crypto.randomUUID()}@example.invalid`;
     const invite = await createInvite(db, {

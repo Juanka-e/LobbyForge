@@ -14,6 +14,7 @@ export * from './queries/gameSessions.js';
 export * from './queries/pluginInstalls.js';
 export * from './queries/serverAccessPolicies.js';
 export * from './queries/serverVoiceSettings.js';
+export * from './queries/voiceModeration.js';
 export * from './queries/bots.js';
 export * from './queries/userSettings.js';
 export { updateMemberNickname } from './queries/memberships.js';

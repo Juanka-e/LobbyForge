@@ -101,9 +101,15 @@ async function handlePost(req: Request): Promise<NextResponse> {
 
   const signed = buildGuestSessionCookie(identity, secret, { secure: process.env.NODE_ENV === 'production' });
 
-  // Fire-and-forget session fingerprint for the active-sessions feature.
+  // Session fingerprint for the active-sessions feature. beta-review
+  // (S7): awaited — this is also the cookie REFRESH path, so it is what
+  // keeps every live session listable for `revokeOtherSessions`.
   if (identity.uid) {
-    void recordSession(identity.uid, identity.gid, req);
+    try {
+      await recordSession(identity.uid, identity.gid, req);
+    } catch (error) {
+      console.error('[auth/guest] session tracking failed:', (error as Error).message);
+    }
   }
 
   return NextResponse.json(

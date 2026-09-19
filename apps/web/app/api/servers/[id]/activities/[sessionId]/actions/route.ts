@@ -30,6 +30,13 @@ import {
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
+/** Session row statuses after which no action may be applied. */
+const TERMINAL_SESSION_STATUSES = new Set(['ended', 'cancelled']);
+
+function isTerminalSessionStatus(status: string | null | undefined): boolean {
+  return typeof status === 'string' && TERMINAL_SESSION_STATUSES.has(status);
+}
+
 const ActionSchema = z.object({
   type: z.string().min(1).max(64),
   // Action-specific fields are accepted but the host does not
@@ -45,13 +52,17 @@ async function authorizePluginAction(input: {
   plugin: NonNullable<ReturnType<typeof getPluginServer>>;
   action: Record<string, unknown>;
   currentState: Record<string, unknown>;
+  /** The game_sessions ROW status (lobby/running/paused/ended/cancelled). */
+  sessionStatus: string;
 }): Promise<{ ok: true; action: Record<string, unknown> } | { ok: false; response: NextResponse }> {
   const actionType = String(input.action.type);
   const policy = input.plugin.actionPolicies?.[actionType] ?? { role: 'host' as const };
 
   // LF-014: Reject actions on ended sessions.
-  const status = (input.currentState as { status?: string })?.status;
-  if (status === 'ended' || status === 'cancelled') {
+  // beta-review: read the ROW status. The old check read
+  // `currentState.status`, a field no plugin state has, so actions on an
+  // ended session were accepted and broadcast.
+  if (isTerminalSessionStatus(input.sessionStatus)) {
     return { ok: false, response: NextResponse.json({ error: 'Activity has ended.' }, { status: 409 }) };
   }
 
@@ -242,6 +253,7 @@ async function handlePost(
       plugin,
       action: forwardedAction,
       currentState: row.state as Record<string, unknown>,
+      sessionStatus: row.status,
     });
     if (!actionAuth.ok) return actionAuth.response;
 
@@ -250,8 +262,12 @@ async function handlePost(
     // A plugin-declared validateAction rejects malformed payloads with a
     // clean 400 BEFORE dispatch (and before the idempotency claim, so
     // junk cannot poison an honest client's actionId).
+    // beta-review: validate the NORMALIZED action — actor fields
+    // (playerId/hostId/...) are injected from the session above, so a
+    // validator requiring them must see the server-set values, not the
+    // raw client body (which legitimately omits them).
     if (plugin.validateAction) {
-      const validationError = plugin.validateAction(forwardedAction);
+      const validationError = plugin.validateAction(actionAuth.action);
       if (validationError) {
         return NextResponse.json({ error: validationError }, { status: 400 });
       }
@@ -342,6 +358,12 @@ async function handlePost(
       if (!casResult.row) {
         await releaseClaim();
         return NextResponse.json({ error: 'Session not found during CAS retry.' }, { status: 404 });
+      }
+      // beta-review: the CAS refuses terminal sessions (status is part of
+      // its WHERE), so a concurrent END wins — stop instead of retrying.
+      if (isTerminalSessionStatus(casResult.row.status)) {
+        await releaseClaim();
+        return NextResponse.json({ error: 'Activity has ended.' }, { status: 409 });
       }
       currentRev = casResult.row.revision;
       currentState = plugin.migrateState

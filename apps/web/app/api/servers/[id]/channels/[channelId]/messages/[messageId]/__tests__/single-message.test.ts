@@ -19,9 +19,11 @@ const getMessageById = vi.fn();
 const updateMessage = vi.fn();
 const softDeleteMessage = vi.fn();
 const getUserPermissions = vi.fn();
+const getActiveMemberTimeout = vi.fn();
 const logAction = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('@lobbyforge/db', () => ({
+  getActiveMemberTimeout,
   getServerById,
   isServerMember,
   getChannelById,
@@ -84,10 +86,12 @@ beforeEach(() => {
     updateMessage,
     softDeleteMessage,
     getUserPermissions,
+    getActiveMemberTimeout,
     authorizeChannelVisibility,
   ]) {
     fn.mockReset();
   }
+  getActiveMemberTimeout.mockResolvedValue(null);
   logAction.mockReset().mockResolvedValue(undefined);
   getServerById.mockResolvedValue({ id: SERVER_ID, ownerUserId: OWNER_ID });
   isServerMember.mockResolvedValue(true);
@@ -205,5 +209,34 @@ describe('PATCH/DELETE single message — visibility never bypassed by authorshi
     const res = await call('DELETE', USER_ID);
     expect(res.status).toBe(200);
     expect(softDeleteMessage).toHaveBeenCalled();
+  });
+});
+
+describe('PATCH single message — beta-review: timeouts apply to edits', () => {
+  it('a timed-out author cannot edit their own message (same gate as POST)', async () => {
+    const until = new Date(Date.now() + 60_000);
+    getActiveMemberTimeout.mockResolvedValue(until);
+    const res = await call('PATCH', AUTHOR_ID, { content: 'still posting' });
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as { error: string; until: string };
+    expect(json.error).toMatch(/timed out/i);
+    expect(json.until).toBe(until.toISOString());
+    expect(getActiveMemberTimeout).toHaveBeenCalledWith(expect.anything(), SERVER_ID, AUTHOR_ID);
+    expect(updateMessage).not.toHaveBeenCalled();
+  });
+
+  it('a timed-out moderator cannot pin either', async () => {
+    getUserPermissions.mockResolvedValue(['read_message_history', 'manage_messages']);
+    getActiveMemberTimeout.mockResolvedValue(new Date(Date.now() + 60_000));
+    const res = await call('PATCH', USER_ID, { pinned: true });
+    expect(res.status).toBe(403);
+    expect(updateMessage).not.toHaveBeenCalled();
+  });
+
+  it('an expired / cleared timeout does not block the edit', async () => {
+    getActiveMemberTimeout.mockResolvedValue(null);
+    const res = await call('PATCH', AUTHOR_ID, { content: 'edited' });
+    expect(res.status).toBe(200);
+    expect(updateMessage).toHaveBeenCalled();
   });
 });

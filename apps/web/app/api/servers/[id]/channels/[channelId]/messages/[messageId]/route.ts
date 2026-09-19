@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { CorePermission, hasPermission, MessageContentSchema } from '@lobbyforge/core';
 import {
+  getActiveMemberTimeout,
   getMessageById,
   getUserPermissions,
   logAction,
@@ -179,6 +180,17 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
       return NextResponse.json(
         { message: toJson(access.message) },
         { headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
+    // beta-review: MODERATE_MEMBERS timeout applies to edits too — the
+    // same gate the message POST route uses (a timed-out member could
+    // still rewrite their existing messages, i.e. keep "posting").
+    const activeTimeout = await getActiveMemberTimeout(getDb(), serverId, session.uid);
+    if (activeTimeout) {
+      return NextResponse.json(
+        { error: 'You are timed out in this server', until: activeTimeout.toISOString() },
+        { status: 403 }
       );
     }
 

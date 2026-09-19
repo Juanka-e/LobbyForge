@@ -11,6 +11,9 @@ import {
 import { findOrCreateGuestUser } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { buildGuestSessionCookie, createGuestIdentity, GUEST_SESSION_TTL_SECONDS } from '@/lib/guest-session';
+import { isOfficialDeployment } from '@/lib/deployment-mode';
+import { authorizeGuestRegistration } from '@/lib/instance-access';
+import { recordSession } from '@/lib/session-tracker';
 import { timingSafeEqual } from 'node:crypto';
 
 export const dynamic = 'force-dynamic';
@@ -69,6 +72,25 @@ async function handleGet(req: Request): Promise<NextResponse> {
       await touchUserIdentityLink(db, link.id);
       userId = link.userId;
     } else {
+      // beta-review: account CREATION via Google ignored the instance
+      // access policy — a `closed` or `invite_only` self-host (or one
+      // with guest access disabled; OAuth accounts are guest rows) still
+      // got a brand-new account + session from any Google login. Apply
+      // the same policy POST /api/auth/guest applies to a new identity;
+      // this flow carries no invite code, so invite-only instances
+      // refuse new OAuth accounts. Already-linked accounts (above) are
+      // unaffected. The official hub keeps open OAuth sign-up (it has no
+      // instance registration policy of its own, like /register).
+      if (!isOfficialDeployment()) {
+        const access = await authorizeGuestRegistration(db, {});
+        if (!access.ok) {
+          const res = NextResponse.redirect(new URL('/login?error=registration_closed', req.url));
+          res.cookies.delete('lf_oauth_state');
+          res.cookies.delete('lf_oauth_redirect');
+          return res;
+        }
+      }
+
       // No link yet — create a new user (or find by email).
       const user = await findOrCreateGuestUser(db, {
         guestKey: `google:${googleUser.sub}`,
@@ -96,14 +118,34 @@ async function handleGet(req: Request): Promise<NextResponse> {
     const signed = buildGuestSessionCookie(identity, secret, {
       secure: process.env.NODE_ENV === 'production',
     });
+    // beta-review (S7): record the session BEFORE handing out the cookie
+    // — `revokeOtherSessions` (password change) can only revoke sessions
+    // it can list, and OAuth sign-ins were never recorded. An unrecorded
+    // session could never be revoked, so production fails closed (same
+    // stance as the security-headers revocation check); dev only logs.
+    try {
+      await recordSession(userId, identity.gid, req);
+    } catch (trackErr) {
+      console.error('[oauth/google/callback] session tracking failed:', (trackErr as Error).message);
+      if (process.env.NODE_ENV === 'production') {
+        const res = NextResponse.redirect(new URL('/login?error=session_unavailable', req.url));
+        res.cookies.delete('lf_oauth_state');
+        res.cookies.delete('lf_oauth_redirect');
+        return res;
+      }
+    }
 
     // Clear OAuth cookies + redirect to the app.
     // Use signed.setCookieHeader verbatim — buildGuestSessionCookie already
     // emits a fully-formed Set-Cookie with Path, Max-Age, HttpOnly, SameSite, Secure.
+    // beta-review: `res.cookies.delete()` re-serializes EVERY Set-Cookie
+    // header from its own cookie bag, which wiped a session cookie set
+    // beforehand via headers.set() — OAuth sign-in never delivered its
+    // session. Delete first, then APPEND the session cookie.
     const res = NextResponse.redirect(new URL(redirect, req.url));
-    res.headers.set('Set-Cookie', signed.setCookieHeader);
     res.cookies.delete('lf_oauth_state');
     res.cookies.delete('lf_oauth_redirect');
+    res.headers.append('Set-Cookie', signed.setCookieHeader);
     return res;
   } catch (err) {
     console.error('[oauth/google/callback] failed:', (err as Error).message);

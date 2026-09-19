@@ -99,15 +99,34 @@ export default function VoiceVideoSettingsPage() {
       setStatus('This browser does not expose media devices.');
       return;
     }
+    const denied: string[] = [];
     if (requestPermission) {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-      stream.getTracks().forEach((track) => track.stop());
+      // beta-review: ask for each kind separately — a combined
+      // {audio, video} request fails outright on a PC without a webcam,
+      // so microphone labels never appeared.
+      for (const [kind, constraints] of [
+        ['microphone', { audio: true }],
+        ['camera', { video: true }],
+      ] as const) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia(constraints);
+          stream.getTracks().forEach((track) => track.stop());
+        } catch {
+          denied.push(kind);
+        }
+      }
     }
     const devices = await navigator.mediaDevices.enumerateDevices();
     setInputs(uniqueDevices(devices, 'audioinput', 'Microphone'));
     setOutputs(uniqueDevices(devices, 'audiooutput', 'Speakers'));
     setCameras(uniqueDevices(devices, 'videoinput', 'Camera'));
-    setStatus(requestPermission ? 'Devices refreshed.' : 'Ready');
+    setStatus(
+      !requestPermission
+        ? 'Ready'
+        : denied.length
+          ? `Devices refreshed (no access to: ${denied.join(', ')}).`
+          : 'Devices refreshed.'
+    );
   }
 
   useEffect(() => {

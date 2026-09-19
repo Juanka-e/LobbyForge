@@ -8,11 +8,14 @@
  *
  * Topic shape: `lf:{env}:presence:{serverId}`.
  *
- * The payload is the user's new presence snapshot (userId, status,
- * channelId, lastSeen). Clients receiving the event update their local
- * member list — add the user if new, update status if existing, mark
- * offline if the TTL has expired (detected client-side via lastSeen
- * staleness check).
+ * beta-review (S5): the payload is a CONTENT-FREE "presence changed —
+ * re-fetch" signal: `{ type: 'presence-update' }`. It used to carry the
+ * raw snapshot (userId, status, voice channelId, activity incl.
+ * serverName) to EVERY member, bypassing the per-viewer privacy
+ * settings, block list and channel visibility that `GET /api/presence`
+ * applies. Clients now re-fetch the REST snapshot, so the realtime path
+ * can never reveal more than REST. (The gateway strips payloads too —
+ * defence in depth against an older publisher.)
  */
 import { redis as sharedRedis } from './redis';
 
@@ -26,22 +29,16 @@ function topicName(serverId: string): string {
 
 export interface PresenceChangeEvent {
   type: 'presence-update';
-  userId: string;
-  status: string;
-  channelId: string;
-  lastSeen: number;
-  activity?: { kind: string; label: string; pluginId?: string; serverName?: string };
 }
 
 /**
  * Publish a presence change to the server-wide topic. Fire-and-forget —
- * a Redis blip never fails the presence POST.
+ * a Redis blip never fails the presence POST. Only the server id is
+ * accepted: nothing about WHO changed or HOW reaches the bus.
  */
-export function publishPresenceChange(input: {
-  serverId: string;
-  event: PresenceChangeEvent;
-}): void {
-  const payload = JSON.stringify(input.event);
+export function publishPresenceChange(input: { serverId: string }): void {
+  const event: PresenceChangeEvent = { type: 'presence-update' };
+  const payload = JSON.stringify(event);
   sharedRedis
     .publish(topicName(input.serverId), payload)
     .catch((err) => {

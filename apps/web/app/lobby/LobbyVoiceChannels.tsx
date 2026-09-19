@@ -31,6 +31,8 @@ export interface LobbyVoiceChannelsProps {
   initialVoiceUsersByChannel?: Record<string, VoiceUser[]>;
   initialActiveChannelId?: string | null;
   currentUserId: string | null;
+  /** MUTE_MEMBERS: show the moderator server-mute control on participants. */
+  canMuteMembers?: boolean;
 }
 
 interface PresenceEntry {
@@ -48,8 +50,41 @@ export function LobbyVoiceChannels({
   initialVoiceUsersByChannel = {},
   initialActiveChannelId = null,
   currentUserId,
+  canMuteMembers = false,
 }: LobbyVoiceChannelsProps) {
   const voice = useLobbyVoice();
+  const [moderationError, setModerationError] = useState<string | null>(null);
+  const [pendingMute, setPendingMute] = useState<string | null>(null);
+
+  // beta-review: moderator server mute from the voice roster (the API
+  // existed but had no UI). The server persists it and enforces it in
+  // LiveKit; the roster icon updates from the participant's permissions.
+  const setServerMute = useCallback(
+    async (channelId: string, userId: string, muted: boolean) => {
+      setPendingMute(userId);
+      setModerationError(null);
+      try {
+        const res = await fetch(
+          `/api/servers/${voice.serverId}/channels/${channelId}/members/${userId}/voice/mute`,
+          {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ muted }),
+          }
+        );
+        if (!res.ok) {
+          const detail = (await res.json().catch(() => ({}))) as { error?: string };
+          setModerationError(detail.error ?? `Could not change server mute (${res.status}).`);
+        }
+      } catch {
+        setModerationError('Could not change server mute.');
+      } finally {
+        setPendingMute(null);
+      }
+    },
+    [voice.serverId]
+  );
   const connectedId = voice.activeChannelId;
   const voiceChannelIdsRef = useRef(new Set(channels.map((c) => c.id)));
   voiceChannelIdsRef.current = new Set(channels.map((c) => c.id));
@@ -252,10 +287,35 @@ export function LobbyVoiceChannels({
                       >
                         {u.name}
                       </span>
-                      {!u.micEnabled ? (
+                      {u.serverMuted ? (
+                        <span
+                          className="material-symbols-outlined text-[14px] text-danger"
+                          title="Server muted"
+                          aria-label="Server muted"
+                        >
+                          block
+                        </span>
+                      ) : !u.micEnabled ? (
                         <span className="material-symbols-outlined text-[14px] text-danger">
                           mic_off
                         </span>
+                      ) : null}
+                      {isConnected && canMuteMembers && !u.isLocal ? (
+                        <button
+                          type="button"
+                          disabled={pendingMute === u.identity}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void setServerMute(c.id, u.identity, !u.serverMuted);
+                          }}
+                          title={u.serverMuted ? `Remove server mute for ${u.name}` : `Server mute ${u.name}`}
+                          aria-label={u.serverMuted ? `Remove server mute for ${u.name}` : `Server mute ${u.name}`}
+                          className="grid size-5 place-items-center rounded text-text-muted opacity-0 transition-opacity hover:text-danger group-hover:opacity-100 focus-visible:opacity-100 disabled:opacity-40"
+                        >
+                          <span className="material-symbols-outlined text-[14px]" aria-hidden>
+                            {u.serverMuted ? 'mic' : 'mic_off'}
+                          </span>
+                        </button>
                       ) : null}
                       {u.cameraEnabled ? (
                         <span className="material-symbols-outlined text-[14px] text-primary" title="Camera on" aria-label="Camera on">videocam</span>
@@ -271,6 +331,11 @@ export function LobbyVoiceChannels({
           );
         })}
       </ul>
+      {moderationError ? (
+        <p className="px-2 pt-1 text-[11px] text-danger" role="alert">
+          {moderationError}
+        </p>
+      ) : null}
     </div>
   );
 }
