@@ -217,14 +217,12 @@ Tüm düzeltmeler `fix/beta-readiness` dalında. Kritik olanlar, ilk bulguları
 | I1–I11 | ✅ I10 (dev bağımlılık yükseltmesi) hariç hepsi |
 | coturn IPv6 CIDR (F-5) | ✅ **gerçek bulgu** (ilk değerlendirmem hatalıydı). IPv6 engelleri aralık biçiminde yazıldı, IPv4-mapped adresler de engellendi, CI'da coturn gerçekten başlatılıyor; prova stack'inde doğrulandı |
 
-### Açık kalanlar
-- **VPS provası** (`BETA_RELEASE.md`): temiz kurulum, gerçek `lfctl update apply`, zorlanmış hata, yedekten geri dönüş.
-- **Masaüstü:** Windows, macOS ve Linux'ta global PTT ile kısayolların elle denenmesi. Kod imzalama (ADR-005).
-- **Dev bağımlılıkları:** vitest 1.6 → 3.x ve happy-dom → ≥20.8.9 (yalnızca geliştirme ortamı; ayrı bir PR önerilir).
-- **Kapasite:** coturn relay port aralığı (41 port) ve prod compose'daki 10.001 UDP port yayını VPS'te ölçülmeli.
+### Açık kalanlar (rc.7 sonrası)
+- **Gerçek VPS'te temiz kurulum:** DNS, Let's Encrypt ve `install.sh` gerekiyor. Güncelleme, geri alma, yedekten geri yükleme ve zorlanmış hata adımları yerel bir üretim stack'inde gerçek imzalı rc.6 release'iyle provadan geçti (BETA_RELEASE.md "Update drill").
+- **Masaüstü:** macOS ve Linux'ta PTT ve kısayollar elle denenmeli (Windows doğrulandı). Kod imzalama (ADR-005).
+- **TURN:** coturn artık başlıyor ve CI'da kontrol ediliyor. Gerçek bir relay testinin UDP'nin engellendiği bir ağdan, VPS üzerinde yapılması gerekiyor.
+- **Kapasite:** coturn relay port aralığı (41 port) ve 10.001 UDP port yayını VPS'te ölçülmeli.
 - **Politika kararları:**
   - Engelleyen kişinin presence'ının engellenene gösterilmesi.
   - Yönetici olmayan adminlerin `administrator` içeren rolleri dağıtamaması (Discord'dan daha katı).
-- **Arayüz:** `/login` sayfası `?error=` kodlarını göstermiyor (ör. `registration_closed`).
-- **Operasyon:** release imzalama özel anahtarı (`infra/keys/`) repo klasöründe duruyor. Artık image'a girmiyor, ama klasör dışında (parola yöneticisi, donanım anahtarı) tutulması önerilir. Eski yerel image'lar Rust build çıktısı yüzünden 23–26 GB; `docker image prune` ile temizlenebilir.
-
+- **Operasyon:** release imzalama özel anahtarını (`infra/keys/`) repo klasörünün dışına taşı. Eski yerel image'lar (23–26 GB) `docker image prune` ile temizlenebilir.

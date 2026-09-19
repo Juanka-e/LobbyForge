@@ -1,11 +1,17 @@
 # Beta Release Checklist
 
-Status: Closed-beta release candidate — 2026-09-19. The beta-readiness
-review ([BETA_READINESS_REVIEW.md](BETA_READINESS_REVIEW.md)) found
-moderation, voice and release-pipeline defects that the earlier "ready"
-claim missed. All are fixed and verified live (§8 of the review). What
-remains before inviting testers: the VPS drill below, desktop PTT on real
-OSes, and cutting a new RC tag from the remediation branch.
+Status: Closed-beta release candidate — `v0.2.0-rc.7` (2026-09-19). The
+beta-readiness review ([BETA_READINESS_REVIEW.md](BETA_READINESS_REVIEW.md))
+found moderation, voice, desktop and release-pipeline defects that the
+earlier "ready" claim missed. All are fixed and verified live (§8 of the
+review). The updater chain was drilled end to end against the real signed
+rc.6 release on a local production stack (see "Update drill" below).
+
+Before inviting testers, three things still need your infrastructure or
+hardware:
+- one fresh install on a real VPS with DNS and Let's Encrypt;
+- desktop PTT on macOS and Linux;
+- a coturn relay test from a UDP-blocked network.
 
 ## Pre-beta verification
 
@@ -16,12 +22,22 @@ OSes, and cutting a new RC tag from the remediation branch.
       real-Postgres integration/ban tests in the pipeline
 - [x] CI: the published-image job asserts no baked localhost media URL
       and no pem/key/dump files in `/app`
-- [ ] Cut a new RC tag (e.g. `v0.2.0-rc.5`) from the remediation branch;
-      re-run the release drill (the rc.4 artifacts predate the fixes)
-- [ ] Desktop: verify global PTT (Ctrl+Space) and Ctrl+Shift+M/D on
-      Windows, macOS and Linux against an instance
-- [ ] Decide: dev-dependency upgrade (vitest 1.6 → 3.x, happy-dom) —
-      dev-only advisories, separate PR
+- [x] New RC tags from the remediated main:
+  - `v0.2.0-rc.6`: gate, candidate, exact-digest Trivy scan, promote,
+    GitHub release and three-platform desktop bundles all green.
+  - `v0.2.0-rc.7`: adds the coturn and desktop-connect fixes found while
+    drilling rc.6.
+- [x] Desktop on **Windows** (real Windows 11, WebView2 driven over CDP):
+  - the connect screen reaches an HTTPS instance;
+  - global Ctrl+Space press and release, Ctrl+Shift+M and Ctrl+Shift+D
+    arrive in the page;
+  - the instance page gets "not allowed by ACL" for every command.
+
+  rc.5 failed the same test: Connect was broken and the page received no
+  PTT events.
+- [ ] Desktop: the same check on **macOS** and **Linux**
+- [x] Dev-dependency upgrade: vitest 4.1, happy-dom 20 and a patched
+      vite/eslint chain; `pnpm audit` is clean (#23)
 
 - [x] Security audit findings remediated; further hardening now comes from release drills and runtime testing
 - [x] CI: Ubuntu + Windows verify, Docker build, production compose config
@@ -150,15 +166,38 @@ pnpm setup order + SBOM artifact in the download; rc.2 — Windows MSI
 semver limit; rc.3 — cancelled duplicate check runs tripping the gate;
 rc.4 — clean end-to-end.
 
-- [ ] Fresh tagged install (`git clone --branch v0.2.0-rc.4` + install.sh) on a clean VPS
-- [ ] Real old → RC update via `lfctl update apply` on a VPS (backup auto-created,
-      digest deployed, migrations ran, health green, version state persisted)
-- [ ] Forced failure drill on a real VPS: health fails after recreate →
-      old containers restored (covered by the CLI regression suite; do it live once)
-- [ ] `lfctl backup restore` round-trip on the VPS
+- [ ] Fresh tagged install (`git clone --branch v0.2.0-rc.7` + install.sh) on a clean VPS
+      (needs real DNS + Let's Encrypt — not reproducible locally)
+- [x] Real old → RC update via `lfctl update apply` (local production stack, see below)
+- [x] Forced failure drill: health fails after recreate → old containers restored (live, see below)
+- [x] `lfctl backup restore` round-trip (live, see below)
 
-The remaining unchecked items need a real VPS (they exercise the
-installer + updater against real infrastructure, not the CI sandbox).
+## Update drill — rc.5 → rc.6 (2026-09-19, local production stack)
+
+Setup:
+- The `v0.2.0-rc.5` checkout, running the production compose file with
+  rendered configs, a self-signed TLS certificate, and rc.5 pinned to its
+  signed GHCR digest.
+- Project, network and container names were prefixed and host ports
+  shifted so the stack could run next to other stacks.
+- It was seeded through the nginx TLS edge: owner setup plus 3 messages.
+- The old (rc.5) `lfctl` performed every step.
+
+| Step | Result |
+|---|---|
+| `update check` against the real rc.6 manifest | signature **valid** (committed key), rc.5 → rc.6 offered |
+| Published rc.6 image hygiene | no localhost media URL in the browser bundles; no pem/key/dump files |
+| `update apply --yes` | fresh backup created and verified (sha256); digest deployed; migration 0036 applied; health green; `.env.prod` and `deployment-state.json` updated with a `previous` pointer |
+| After the update | all app containers on the rc.6 digest and healthy; the 3 messages intact; the voice token returns the runtime `livekitUrl` |
+| `update rollback` | rc.5 runs healthy on the expanded schema (expand-only migration confirmed); login and data OK |
+| `backup restore` into an empty DB | 3 messages and 1 user restored with the pre-update schema |
+| Forced failure **before** recreate (image without node, signed with a throwaway key via `--public-key`) | stopped at `apply-migrations`; old containers untouched; `.env.prod` restored |
+| Forced failure **after** recreate (rc.6 without a Next build: migrations pass, web unhealthy) | "OLD CONTAINERS RESTORED AND HEALTHY"; `.env.prod` restored; data intact |
+
+Found by the drill and fixed in rc.7:
+- **coturn aborted on the IPv6 CIDR deny rules**, so TURN never ran on
+  any install.
+- **The desktop connect screen could not invoke** (`withGlobalTauri`).
 
 ## Reporting issues
 
