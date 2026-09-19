@@ -26,7 +26,12 @@ hardware:
   - `v0.2.0-rc.6`: gate, candidate, exact-digest Trivy scan, promote,
     GitHub release and three-platform desktop bundles all green.
   - `v0.2.0-rc.7`: adds the coturn and desktop-connect fixes found while
-    drilling rc.6.
+    drilling rc.6. Verified after release:
+    - `lfctl update apply` from rc.5 to the signed rc.7 manifest: healthy,
+      data intact, runtime `livekitUrl`;
+    - the published Windows installer (checksum verified) connects and
+      delivers global PTT and shortcuts to the page;
+    - coturn starts with the shipped template (14 deny ranges, healthy).
 - [x] Desktop on **Windows** (real Windows 11, WebView2 driven over CDP):
   - the connect screen reaches an HTTPS instance;
   - global Ctrl+Space press and release, Ctrl+Shift+M and Ctrl+Shift+D
