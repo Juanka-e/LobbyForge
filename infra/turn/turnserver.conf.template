@@ -16,9 +16,9 @@ tls-listening-port=5349
 # credentials instead of a static user table. The web app derives
 #   username   = `${unixExpiry}:${userId}`
 #   credential = base64(HMAC-SHA1(STATIC_SECRET, username))
-# and hands one to each voice client alongside its LiveKit token (1h,
-# matching the token TTL). coturn rejects expired usernames on new
-# allocations, so a leaked credential is useless after its hour and
+# and hands one to each voice client alongside its LiveKit token (12h —
+# ICE restarts reuse it for the whole session). coturn rejects expired
+# usernames on new allocations, so a leaked credential dies on its own and
 # `user-quota` counts allocations per USER again (suffix = user id).
 # STATIC_SECRET is substituted by scripts/render-configs.sh from
 # LOBBYFORGE_TURN_SECRET in .env.prod — the SAME secret the web app
@@ -31,8 +31,8 @@ realm=LOBBYFORGE_DOMAIN
 # TLS certificates (shared with nginx via the certbot volume).
 cert=/etc/letsencrypt/live/LOBBYFORGE_DOMAIN/fullchain.pem
 pkey=/etc/letsencrypt/live/LOBBYFORGE_DOMAIN/privkey.pem
-no-tlsv1
-no-tlsv1_1
+# (TLS 1.0/1.1 are unavailable in coturn 4.18 — the old no-tlsv1 /
+# no-tlsv1_1 switches are unknown options there and only logged warnings.)
 
 # Relay port range — keep in sync with the firewall checklist above.
 min-port=49160
@@ -61,11 +61,19 @@ denied-peer-ip=::1
 # 15th-audit: full IPv6 private/link-local/multicast coverage — the
 # old config only denied ::1; a relay credential holder on an IPv6
 # host could pivot to ULA, link-local or multicast space.
-denied-peer-ip=::/128
-denied-peer-ip=fc00::/7
-denied-peer-ip=fe80::/10
-denied-peer-ip=ff00::/8
-no-cli
+# beta-review: coturn accepts a single IP or an IP-IP RANGE only — the
+# CIDR form (fc00::/7 …) made 4.18.0 abort at startup ("CIDR is not
+# supported"), so TURN crash-looped on every install and the relay
+# fallback never existed. Same coverage, written as ranges:
+denied-peer-ip=::
+denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+denied-peer-ip=ff00::-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+# IPv4-mapped IPv6 (::ffff:a.b.c.d) must not reach the IPv4 private
+# space denied above.
+denied-peer-ip=::ffff:0.0.0.0-::ffff:255.255.255.255
+# The telnet CLI is OFF by default in coturn 4.18 (`no-cli` is deprecated
+# there and logged as an error); it is only enabled with an explicit --cli.
 
 # V5-003: behind 1:1 NAT (cloud VM with a private interface) the public
 # address must be set explicitly. install.sh prompts for it and stores

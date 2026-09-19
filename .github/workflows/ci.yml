@@ -127,6 +127,25 @@ jobs:
           export NEXT_PUBLIC_WS_URL=wss://ci.example.com/ws
           docker compose -f infra/docker/docker-compose.prod.yml config --quiet
 
+      # beta-review: coturn 4.18 ABORTS on config it cannot parse (the old
+      # IPv6 CIDR denied-peer-ip lines crash-looped TURN on every install
+      # and no job ever started it). Boot the pinned image with the config
+      # the installer renders and require it to stay up.
+      - name: coturn starts with the rendered production config
+        run: |
+          bash scripts/render-configs.sh ci.example.com "$(printf 'a%.0s' $(seq 1 64))" infra /tmp/lf-render
+          image=$(grep -o 'coturn/coturn:[^ ]*' infra/docker/docker-compose.prod.yml | head -1)
+          docker run -d --name lf-coturn-check \
+            -v /tmp/lf-render/turn/turnserver.conf:/etc/coturn/turnserver.conf:ro \
+            "$image" -c /etc/coturn/turnserver.conf
+          sleep 8
+          docker logs lf-coturn-check 2>&1 | tail -40
+          if docker logs lf-coturn-check 2>&1 | grep -qiE "Aborting|Wrong address format"; then
+            echo "::error::coturn rejected the rendered turnserver.conf"; exit 1
+          fi
+          test "$(docker inspect -f '{{.State.Running}}' lf-coturn-check)" = "true"
+          docker rm -f lf-coturn-check
+
   # TEST-001: production TLS e2e — the REAL prod stack (nginx + web +
   # ws-gateway + livekit + postgres + redis, rendered configs, boot
   # migrations) behind an nginx TLS edge with a self-signed cert. The

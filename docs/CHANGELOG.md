@@ -114,6 +114,16 @@ against the compose stack, and each fix ships with a regression test.
   same-origin `/livekit` and `/ws` proxies. Previously
   `lfctl update apply` broke voice and realtime.
 
+- **TURN relay never started.** coturn 4.18 accepts only a single IP or
+  an IP-IP range in `denied-peer-ip`. The IPv6 CIDR lines (`::/128`,
+  `fc00::/7`, …) made it abort at boot, so TURN crash-looped on every
+  install and users on UDP-blocking networks had no voice.
+  - The deny rules are now written as ranges with the same coverage,
+    plus a range for IPv4-mapped IPv6.
+  - The deprecated `no-tlsv1*` and `no-cli` switches are dropped.
+  - CI boots the pinned coturn image with the rendered config.
+  - Caught by the local rc.5 → rc.6 update drill.
+
 ### Dev / CI stack
 
 - `docker-compose.dev.yml`:

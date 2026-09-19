@@ -106,8 +106,8 @@ değişiklikler geri alındı.
 - Bitmiş aktivite oturumu yanlış alanı okuyor (`currentState.status`), bu yüzden bitmiş oyunlara aksiyon gönderilebiliyor.
 - Quiz cevapları deneme yoluyla bulunabiliyor.
 
-### Doğrulanmayan / yanlış pozitif
-- "coturn 4.18.0 IPv6 CIDR yüzünden açılmıyor" iddiası **tekrar üretilemedi**. Sabitlenmiş image, render edilmiş config ile sorunsuz ayağa kalkıyor. IPv6 engellerinin gerçekten uygulandığı ayrıca doğrulanmadı.
+### Düzeltme: coturn bulgusu gerçekmiş
+- İlk incelemede "coturn 4.18.0 IPv6 CIDR yüzünden açılmıyor" iddiasını "tekrar üretilemedi" diye yazmıştım. **Bu yanlıştı.** Git Bash, `docker run -v` yolunu dönüştürdüğü için config container'a hiç bağlanmamış, coturn varsayılan ayarlarla açılmıştı. Güncelleme provası (§8) bu durumu yakaladı: render edilmiş config ile coturn `Aborting: invalid denied-peer-ip value ::/128 … CIDR is not supported` hatası veriyor ve sürekli yeniden başlıyor. Yani **her kurulumda TURN yedeği hiç çalışmıyordu** ve UDP'nin engellendiği ağlardaki kullanıcılar sese bağlanamıyordu. Düzeltmesi rc.7'de (§8).
 
 ### Sağlam bulunan alanlar
 Cookie HMAC ve sabit zamanlı karşılaştırma, CSRF/Origin guard (tüm
@@ -214,7 +214,7 @@ Tüm düzeltmeler `fix/beta-readiness` dalında. Kritik olanlar, ilk bulguları
 | V8 aktivite sayfasında ses | ✅ ses bağlanıyor |
 | V9–V14 | ✅ çıkış cihazı, ses seviyesi, autoplay, kopma sebebi, kendi mute göstergesi, TURN süresi 12 saat |
 | I1–I11 | ✅ I10 (dev bağımlılık yükseltmesi) hariç hepsi |
-| coturn CIDR | ⚪ yanlış pozitif (tekrar üretilemedi) |
+| coturn IPv6 CIDR (F-5) | ✅ **gerçek bulgu** (ilk değerlendirmem hatalıydı). IPv6 engelleri aralık biçiminde yazıldı, IPv4-mapped adresler de engellendi, CI'da coturn gerçekten başlatılıyor; prova stack'inde doğrulandı |
 
 ### Açık kalanlar
 - **VPS provası** (`BETA_RELEASE.md`): temiz kurulum, gerçek `lfctl update apply`, zorlanmış hata, yedekten geri dönüş.
