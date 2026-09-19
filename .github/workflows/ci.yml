@@ -74,13 +74,14 @@ jobs:
       # workflow publishes. It must not carry a baked-in localhost media
       # URL (that broke voice + realtime after `lfctl update apply`), and
       # no private key / cert / backup may ever be copied into /app.
+      # Checks the browser bundles and the lobby server-rendered livekitUrl
+      # prop. Server-side LIVEKIT_URL fallbacks for the RoomService API are
+      # fine (install.sh always sets LIVEKIT_URL). No single quotes inside
+      # the sh -c script below.
       - name: Image carries no baked endpoints or secrets
         run: |
           docker run --rm --entrypoint sh lobbyforge-web:ci -c '
             set -e
-            # Browser bundles + the lobby's server-rendered livekitUrl prop.
-            # (Server-side LIVEKIT_URL fallbacks for the RoomService API are
-            # fine — install.sh always sets LIVEKIT_URL.)
             if grep -rlE "localhost:(7880|3001)" /app/apps/web/.next/static 2>/dev/null | head -5 | grep . \
               || grep -rhoE "livekitUrl:\"[^\"]*localhost[^\"]*\"" /app/apps/web/.next/server | head -3 | grep .; then
               echo "::error::build-time localhost media URL baked into the image"; exit 1
