@@ -10,10 +10,24 @@ import LoginForm from './LoginForm';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * Human-readable text for the `?error=` codes the auth routes redirect
+ * with (Google OAuth callback, session recording). Only KNOWN codes are
+ * shown — the query value itself is never reflected into the page.
+ */
+const LOGIN_ERROR_MESSAGES: Record<string, string> = {
+  registration_closed: 'This community is not accepting new accounts right now. Ask an admin for an invite.',
+  oauth_failed: 'Google sign-in failed. Please try again.',
+  oauth_not_configured: 'Google sign-in is not configured on this community.',
+  state_mismatch: 'The sign-in link expired or was opened in another browser. Please try again.',
+  missing_params: 'The sign-in response was incomplete. Please try again.',
+  session_unavailable: 'Signing in is temporarily unavailable. Please try again in a moment.',
+};
+
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ invite?: string; mode?: string; desktopLoginState?: string }>;
+  searchParams: Promise<{ invite?: string; mode?: string; desktopLoginState?: string; error?: string }>;
 }) {
   if (isOfficialDeployment()) redirect('/landing');
   const setup = await getInstanceBootstrapStatus(getDb());
@@ -24,7 +38,11 @@ export default async function LoginPage({
   if (session?.uid) redirect('/lobby');
 
   const settings = await getEffectiveInstanceAccessSettings(getDb());
-  const { invite = '', desktopLoginState, mode } = await searchParams;
+  const { invite = '', desktopLoginState, mode, error: errorCode } = await searchParams;
+  // beta-review: the auth routes redirect here with ?error=… but the page
+  // never showed it (e.g. a closed-registration Google sign-in looked like
+  // a silent no-op).
+  const errorMessage = errorCode ? LOGIN_ERROR_MESSAGES[errorCode] ?? null : null;
   const instanceName =
     setup.instanceName || process.env.LOBBYFORGE_INSTANCE_NAME?.trim() || 'LobbyForge Community';
   const inviteOnly = settings.registrationMode === 'invite_only';
@@ -45,6 +63,12 @@ export default async function LoginPage({
         <p className="mb-6 text-pretty text-sm text-text-secondary">
           {inviteOnly ? 'Sign in locally, or use a valid invitation to join as a guest.' : 'Sign in with your local community account.'}
         </p>
+
+        {errorMessage ? (
+          <p role="alert" className="mb-4 rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-pretty text-sm text-danger">
+            {errorMessage}
+          </p>
+        ) : null}
 
         {/* Google OAuth button (only if configured — works on both official + self-host) */}
         {googleEnabled ? (
