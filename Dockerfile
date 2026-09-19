@@ -7,8 +7,14 @@ COPY . .
 # Fixed store dir so the runtime stage can reuse the cache offline.
 RUN pnpm install --frozen-lockfile --store-dir /pnpm-store
 
-ARG NEXT_PUBLIC_LIVEKIT_URL=http://localhost:7880
-ARG NEXT_PUBLIC_WS_URL=ws://localhost:3001
+# beta-review: NO default. NEXT_PUBLIC_* is inlined into the bundles at
+# build time, and the release workflow publishes ONE image for every
+# instance — a localhost default broke voice + realtime after
+# `lfctl update apply`. Left empty, the app resolves the endpoints at
+# request time (token response / same-origin /livekit + /ws proxy, see
+# apps/web/lib/public-endpoints.ts). Local builds may still pass them.
+ARG NEXT_PUBLIC_LIVEKIT_URL=
+ARG NEXT_PUBLIC_WS_URL=
 ENV NEXT_PUBLIC_LIVEKIT_URL=$NEXT_PUBLIC_LIVEKIT_URL
 ENV NEXT_PUBLIC_WS_URL=$NEXT_PUBLIC_WS_URL
 ENV NODE_ENV=production

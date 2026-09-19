@@ -70,6 +70,26 @@ jobs:
       - name: Build Docker image
         run: docker build -t lobbyforge-web:ci .
 
+      # beta-review: the image built WITHOUT build-args is what the release
+      # workflow publishes. It must not carry a baked-in localhost media
+      # URL (that broke voice + realtime after `lfctl update apply`), and
+      # no private key / cert / backup may ever be copied into /app.
+      - name: Image carries no baked endpoints or secrets
+        run: |
+          docker run --rm --entrypoint sh lobbyforge-web:ci -c '
+            set -e
+            # Browser bundles + the lobby's server-rendered livekitUrl prop.
+            # (Server-side LIVEKIT_URL fallbacks for the RoomService API are
+            # fine — install.sh always sets LIVEKIT_URL.)
+            if grep -rlE "localhost:(7880|3001)" /app/apps/web/.next/static 2>/dev/null | head -5 | grep . \
+              || grep -rhoE "livekitUrl:\"[^\"]*localhost[^\"]*\"" /app/apps/web/.next/server | head -3 | grep .; then
+              echo "::error::build-time localhost media URL baked into the image"; exit 1
+            fi
+            found=$(find /app -name node_modules -prune -o \( -name "*.pem" -o -name "*.key" -o -name "*.dump" \) -print | grep -v "^/app/infra/update/release-public.pem$" || true)
+            if [ -n "$found" ]; then echo "::error::secret-like files in image:"; echo "$found"; exit 1; fi
+            echo "image clean"
+          '
+
   # Production compose config gate (OPS-006 class regressions): parses
   # docker-compose.prod.yml with dummy-but-complete env and fails on
   # duplicate keys, invalid interpolation or unresolvable mounts —
@@ -317,6 +337,10 @@ jobs:
           # 19th-audit: real-Postgres ownership tests (plugin catalog
           # first-submit/race/NULL-publisher + registry concurrent/NULL-owner)
           TEST_DATABASE_URL="postgres://postgres:t@127.0.0.1:$PORT/d" pnpm vitest run src/__tests__/ownership.integration.test.ts
+          # beta-review: irreversible setup lock, atomic registration /
+          # invite consumption (now self-bootstrapping) and ban → membership
+          # revocation against real Postgres.
+          TEST_DATABASE_URL="postgres://postgres:t@127.0.0.1:$PORT/d" pnpm vitest run src/__tests__/integration.test.ts src/__tests__/bans.integration.test.ts
           docker rm -f lf-pg-test
 
   # LF-023: end-to-end against the REAL compose stack — Postgres, Redis,
@@ -372,6 +396,16 @@ jobs:
       - name: Two-client voice e2e
         run: |
           pnpm --filter @lobbyforge/web exec playwright test voice-two-clients.spec.ts
+
+      # beta-review: the REAL lobby UI (not a synthetic harness) — two
+      # users join from the voice channel button and the browsers' own
+      # WebRTC stats must show audio flowing; mute, deafen (incl. late
+      # joiners), moderator server-mute (cannot be self-undone), mic
+      # permission denied → listen-only, push-to-talk, reload/rejoin and
+      # realtime chat delivery through the ws-gateway.
+      - name: Voice + realtime through the real UI
+        run: |
+          pnpm --filter @lobbyforge/web exec playwright test voice-ui-audio.spec.ts --workers=1
 
       # V5-004: destructive backup drill against a disposable postgres —
       # prove backup -> destroy -> restore -> verify on every push.

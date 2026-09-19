@@ -3,6 +3,9 @@
 # compose:
 #
 #   export LOBBYFORGE_SETUP_TOKEN=e2e_setup_token_default_0123456789ab
+#   # Browser-facing URLs are inlined at BUILD time — point them at THIS
+#   # stack's LiveKit/gateway ports, or the UI talks to the dev stack:
+#   export NEXT_PUBLIC_LIVEKIT_URL=ws://localhost:7890 NEXT_PUBLIC_WS_URL=ws://localhost:3101
 #   docker compose -p lobbyforge-e2e \
 #     -f infra/docker/docker-compose.dev.yml \
 #     -f infra/docker/docker-compose.e2e-ports.yml \
@@ -58,10 +61,15 @@ services:
     # must be whitelisted explicitly.
     environment:
       LOBBYFORGE_APP_ORIGIN: http://localhost:3100
+      # Server-side LiveKit API: this stack's LiveKit listens on 7890.
+      LIVEKIT_URL: http://livekit:7890
     ports: !override
       - "3100:3000"
   ws-gateway:
     container_name: lobbyforge-e2e-ws-gateway
+    environment:
+      # The gateway's Origin allow-list must accept the e2e web origin.
+      LOBBYFORGE_APP_ORIGIN: http://localhost:3100
     ports: !override
       - "3101:3001"
 

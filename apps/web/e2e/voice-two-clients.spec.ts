@@ -196,17 +196,17 @@ test.describe('two-client voice over the real LiveKit', () => {
     );
 
     // ── 5. Both sides must eventually see the peer AND an audio track.
+    // beta-review: poll for the EVENTS we assert on. The old condition
+    // (`events.length > 0`) was already true from 'connected+mic', so the
+    // assertions raced the audio subscription (flaky ~1 in 3 locally,
+    // masked by CI retries).
+    const eventsOf = (page: typeof pageA) => page.evaluate(() => window.__voiceEvents as string[]);
     await expect
-      .poll(async () => pageA.evaluate(() => window.__voiceEvents.length), { timeout: 30_000 })
-      .toBeGreaterThan(0);
-    const eventsA = await pageA.evaluate(() => window.__voiceEvents);
-    const eventsB = await pageB.evaluate(() => window.__voiceEvents);
-    // Owner sees guest's mic; guest sees owner's mic (fake device tone).
-    expect(eventsA).toContain('subscribed:audio');
-    expect(eventsB).toContain('subscribed:audio');
-    // Data round-trip.
-    expect(eventsA).toContain('data:pong-from-guest');
-    expect(eventsB).toContain('data:ping-from-owner');
+      .poll(async () => eventsOf(pageA), { timeout: 30_000 })
+      .toEqual(expect.arrayContaining(['subscribed:audio', 'data:pong-from-guest']));
+    await expect
+      .poll(async () => eventsOf(pageB), { timeout: 30_000 })
+      .toEqual(expect.arrayContaining(['subscribed:audio', 'data:ping-from-owner']));
 
     await ctxA.close();
     await ctxB.close();

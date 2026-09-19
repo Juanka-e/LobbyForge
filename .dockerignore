@@ -16,3 +16,25 @@ design_stitch
 **/.env
 **/.env.*
 !**/.env.example
+
+# beta-review: secrets and host artifacts must never enter an image. The
+# release workflow builds from a clean CI checkout, but `install.sh` and
+# local compose builds use the operator's working tree — which holds the
+# TLS private key (certbot), `lfctl backup` dumps, and possibly the
+# release signing key. `/app` is readable by every in-container process,
+# including the plugin worker.
+infra/keys
+infra/certbot
+backups
+**/*.dump
+**/*.pem
+!infra/update/release-public.pem
+**/*.key
+# Build artifacts / caches that only bloat the context (src-tauri/target
+# alone is several GB of Rust output).
+apps/desktop/src-tauri/target
+.pnpm-store
+.test
+.rc*.log
+coverage
+**/coverage
