@@ -1,8 +1,27 @@
 # Beta Release Checklist
 
-Status: Ready for closed beta — 2026-09-16
+Status: Closed-beta release candidate — 2026-09-19. The beta-readiness
+review ([BETA_READINESS_REVIEW.md](BETA_READINESS_REVIEW.md)) found
+moderation, voice and release-pipeline defects that the earlier "ready"
+claim missed. All are fixed and verified live (§8 of the review). What
+remains before inviting testers: the VPS drill below, desktop PTT on real
+OSes, and cutting a new RC tag from the remediation branch.
 
-## Pre-beta verification (ALL COMPLETE)
+## Pre-beta verification
+
+- [x] Beta-readiness review remediated (2026-09-19): S1 role escalation,
+      S2 bans, S3 lobby leak, S4 voice moderation, S5–S11, V1–V14, I1–I9,
+      I11 — see CHANGELOG "[Unreleased] - beta readiness remediation"
+- [x] CI: real-UI voice + realtime E2E (`voice-ui-audio.spec.ts`) and
+      real-Postgres integration/ban tests in the pipeline
+- [x] CI: the published-image job asserts no baked localhost media URL
+      and no pem/key/dump files in `/app`
+- [ ] Cut a new RC tag (e.g. `v0.2.0-rc.5`) from the remediation branch;
+      re-run the release drill (the rc.4 artifacts predate the fixes)
+- [ ] Desktop: verify global PTT (Ctrl+Space) and Ctrl+Shift+M/D on
+      Windows, macOS and Linux against an instance
+- [ ] Decide: dev-dependency upgrade (vitest 1.6 → 3.x, happy-dom) —
+      dev-only advisories, separate PR
 
 - [x] Security audit findings remediated; further hardening now comes from release drills and runtime testing
 - [x] CI: Ubuntu + Windows verify, Docker build, production compose config

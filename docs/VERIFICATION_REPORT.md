@@ -1,6 +1,41 @@
 # Verification Report
 
-## Current production-readiness snapshot - 2026-07-21
+## Current snapshot - 2026-09-19 (beta-readiness remediation)
+
+Run on Windows 11, Node 22.16.0, pnpm 10.12.1, Docker 29.2 (compose stack
+`lobbyforge-e2e`, fresh volumes, image built from the working tree).
+
+- `pnpm verify` passes: 1252 tests across the workspace (web 978,
+  ws-gateway 70, core 35, hushle 28, db 26 + 24 PG-gated, plugin-worker 14,
+  i18n 14, poll 13, plugin-sdk 12, ui 11, registry 16, quiz 9, dice-bot 9,
+  bot-sdk 8, desktop 5, config 2, vampire-village 1, watch-party 1). Lint:
+  0 errors.
+- Real-Postgres integration: `integration`, `channel-visibility`,
+  `ownership` and `bans` integration tests pass (28/28) on a freshly
+  migrated database, including migration 0036.
+- Desktop shell: `cargo test --lib post_message` passes 2/2.
+- Compose stack from the REPO compose files (no local overrides): all
+  services healthy under `up --wait`, including the ws-gateway healthcheck
+  and the pinned LiveKit v1.13.7.
+- E2E against that stack:
+  - `compose-stack.spec.ts`: 3/3.
+  - `voice-two-clients.spec.ts`: 3/3 consecutive runs.
+  - `voice-ui-audio.spec.ts`: 10/10 with an empty defect list, in two
+    consecutive runs. This spec drives the real lobby UI and asserts
+    audio flow with WebRTC `inbound-rtp` bytes and `totalAudioEnergy`.
+    It covers mute, deafen with late joiners, moderator server mute
+    against toggle and rejoin, no remote unmute, listen-only on mic
+    denial, PTT, reload and rejoin, and realtime chat.
+- Live exploit re-run: every S1/S2/S3 reproduction from the review now
+  returns the secure outcome (10/10). WebSocket checks:
+  - a bogus chat topic is refused (`forbidden`);
+  - subscribes are rate limited;
+  - presence events carry only `{type:'presence-update'}`;
+  - Redis clients stay flat (a shared subscriber).
+- Image hygiene: build context 9.7 MB (was 1.7 GB+); no `*.pem`/`*.key`/
+  `*.dump` in `/app` except `infra/update/release-public.pem`.
+
+## Production-readiness snapshot - 2026-07-21
 
 - Full web Vitest suite passes: 56 files, 366 tests.
 - A live authenticated Chromium audit loaded all 18 user/community settings

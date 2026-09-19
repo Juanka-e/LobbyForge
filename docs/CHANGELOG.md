@@ -2,6 +2,141 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - beta readiness remediation - 2026-09-19
+
+Fixes for everything found by the 2026-09-19 beta-readiness review
+(`docs/BETA_READINESS_REVIEW.md`). Most items were first reproduced live
+against the compose stack, and each fix ships with a regression test.
+
+### Security: authorization and moderation
+
+- **S1: MANAGE_ROLES could escalate to ADMINISTRATOR.** Role create,
+  edit and assign now go through `lib/role-grant-policy.ts`. A non-owner
+  may only add permissions they hold themselves and may never add
+  `administrator`. Removing permissions is always allowed. Live repro:
+  a moderator gave `@everyone` administrator, and every member got
+  audit-log and ban access.
+- **S2: bans did not remove access.** `banUser` now deletes the
+  membership in the same transaction. `isServerMember`,
+  `getUserPermissions`, `ensureServerMembership` and `redeemInvite` all
+  reject active bans. Ban, kick, timeout and role assignment evict or
+  re-sync the user in LiveKit. Live repro: a banned user still posted
+  messages and minted voice tokens.
+- **S3: `/lobby` leaked role-gated channels.** The page applies the
+  REST rules (`lib/lobby-channel-access.ts`): only visible channels are
+  listed, and messages load only through `authorizeChannelMessageAccess`.
+- **S4: voice moderation now reaches LiveKit.**
+  - Server mute is persisted (`memberships.voice_muted`, migration 0036)
+    and the token route withholds the microphone grant while it is set.
+  - `lib/voice-moderation.ts` updates `canPublishSources` live and mutes
+    the MICROPHONE track. The old code matched `source === 1`, which is
+    the CAMERA.
+  - Users who lose access are removed from the room: kick, ban, timeout,
+    role edits and channel visibility changes.
+  - `enable_remote_unmute: false`: a moderator "unmute" can no longer
+    switch someone's microphone on.
+  - Moderators with MUTE_MEMBERS get a mute control in the voice roster.
+- **S7: password change left sessions alive.** Login, desktop handoff,
+  Google OAuth and setup now record their sessions, so
+  `revokeOtherSessions` sees them. Unrecordable sessions are refused in
+  production. Also fixed: the Google callback deleted the cookie it had
+  just set, so Google sign-in never logged anyone in.
+- **S8:** the voice display name is resolved server-side (nickname,
+  then profile name). The client-supplied `displayName` is ignored.
+- **Invites:** members list and revoke only their own invites; others'
+  require MANAGE_SERVER.
+- **Google OAuth** account creation respects the instance registration
+  mode.
+- **Timeouts** now also block message edits and pins.
+- **S5: realtime presence leaked private data.** The gateway received
+  raw status, activity, server name and voice channel, including for
+  users who hid them or blocked the viewer. Presence events now carry
+  only `{type:'presence-update'}`; the gateway sanitizes them even for
+  old publishers, and clients re-fetch REST. REST and the
+  server-rendered lobby share one projection (`lib/presence-view.ts`):
+  blocks, per-user privacy, role-gated channels hidden (F8), and a
+  hidden status no longer leaks through `lastSeen`.
+- **S6: any member could exhaust Redis connections through the
+  gateway.** The gateway now uses one shared subscriber connection with
+  per-topic refcounted SUBSCRIBE. Chat topics must name an existing
+  channel of that server. Subscriptions are capped at 64 per connection
+  and 256 per user. Also fixed:
+  - an IP-slot leak on aborted upgrades;
+  - a channel-policy invalidation miss for activity topics.
+- **S10:** directory change-domain requires the stored key and resets
+  `isVerified`/`isListed`, so the new domain needs admin re-review.
+- **S11: anonymous polls.** The projection replaces `ballotBox` with
+  `ballotCount` plus the viewer's own `hasVoted`.
+- **Hushle:** `usedCardIds` is projected to a count, so guessers can no
+  longer read the current card id.
+- **Ended activities are read-only.** The actions route checks the
+  session ROW status, and the CAS `WHERE` refuses terminal sessions, so
+  a concurrent end wins. `validateAction` now sees the server-injected
+  actor fields.
+- **Quiz:** one locked answer per player per question. Scores are
+  revealed only on the host's `reveal`.
+- **S9:** `.dockerignore` excludes `infra/keys` (the release signing
+  key was being copied into locally built images), `infra/certbot`,
+  `backups`, `*.pem`/`*.key`/`*.dump` (except the release public key)
+  and the multi-GB `src-tauri/target`. The CI docker job asserts that
+  the image holds no such files.
+
+### Voice
+
+- **PTT works.** The keybind listener no longer re-binds when the mic
+  state changes; that re-bind had released the key while it was still
+  held. A single-flight loop now makes the mic follow the key, and
+  `blur` or a hidden tab counts as a release.
+- **Desktop PTT and shortcuts work.** The Tauri shell posted
+  `{source: window}`, which is not structured-cloneable, so every
+  message threw `DataCloneError`. Payloads are now JSON-serialized, with
+  Rust tests, and the web app handles `lobbyforge:shortcut`.
+- **Deafen** covers publications that appear later (new joiners,
+  unmute, reconnect) and mutes your own mic. Undeafen restores it.
+- **Microphone failure no longer aborts the join.** The app retries the
+  default device, then continues listen-only with a readable message.
+- **Mic indicators** follow the real publication. A moderator mute shows
+  as "Muted by a moderator", and your own tile shows your mute.
+- **Activities page (`/room`) plays remote audio** (it never attached
+  any).
+- **Other voice fixes:**
+  - An autoplay block shows an "enable audio" button.
+  - Disconnect reasons are shown (another tab, removed, room closed).
+  - Stale `<audio>` elements are removed.
+  - Per-user volume is re-applied on rejoin.
+  - The output device preference applies to calls.
+  - Settings request mic and camera separately, so PCs without a webcam
+    work.
+  - TURN credentials last 12h.
+- **Release image no longer bakes `localhost` media URLs.** The
+  Dockerfile has no `NEXT_PUBLIC_*` defaults. The token route returns the
+  LiveKit URL at request time, and the browser falls back to the
+  same-origin `/livekit` and `/ws` proxies. Previously
+  `lfctl update apply` broke voice and realtime.
+
+### Dev / CI stack
+
+- `docker-compose.dev.yml`:
+  - `ws-gateway` gets `working_dir: /app`. It was crash-looping with
+    `MODULE_NOT_FOUND`.
+  - `ws-gateway` gets `LF_DB_URL`. Every subscription was being rejected
+    with `unknown_topic`.
+  - `ws-gateway` gets a healthcheck, so `--wait` catches a crash loop.
+  - `web` gets `LIVEKIT_URL`. Server mute returned 500.
+  - LiveKit is pinned to the production version (was `:latest`).
+- `docker-compose.e2e-ports.yml` passes the gateway origin and LiveKit
+  URL, and documents the build-time URL args. `.env.example` documents
+  `LF_DB_URL`.
+- The realtime client sends one wire subscription per topic. It used to
+  send each topic twice after every connect.
+- CI changes:
+  - The real-UI voice + realtime E2E runs in CI
+    (`voice-ui-audio.spec.ts`). It asserts WebRTC `inbound-rtp` bytes and
+    audio energy.
+  - `voice-two-clients.spec.ts` no longer races its own assertions.
+  - `integration.test.ts` and `bans.integration.test.ts` run against
+    real Postgres; the integration test is now self-bootstrapping.
+
 ## [Unreleased] - plugin action hardening (31st audit) - 2026-09-17
 
 ### Security / correctness

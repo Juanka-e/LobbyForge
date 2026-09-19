@@ -12,6 +12,64 @@ This document covers:
 - The relationship to M9 (`/api/livekit/token`)
 - The out-of-scope list (server-side mute, screenshare, recording)
 
+> Sections below the "Current behavior" block describe the original M14
+> design; where they disagree, the block below wins.
+
+## Current behavior (beta review, 2026-09-19)
+
+The primary voice UI is the lobby (`app/lobby/LobbyVoiceProvider.tsx`);
+`/room/[roomName]` is the activities page. Both were exercised end to
+end with `apps/web/e2e/voice-ui-audio.spec.ts`, which drives the real UI
+and asserts on the browsers' own WebRTC stats (inbound-rtp bytes +
+`totalAudioEnergy`), and now runs in CI.
+
+**Endpoint resolution.** `NEXT_PUBLIC_*` is inlined at build time, and
+the release image is built without it. The token response carries
+`livekitUrl`, resolved at REQUEST time (`LOBBYFORGE_PUBLIC_LIVEKIT_URL`,
+then `NEXT_PUBLIC_LIVEKIT_URL`, read through a computed key). Browsers
+use, in order: that value, the build-time value, then the same-origin
+`/livekit` proxy. The realtime client uses the build-time WS URL, then
+`wss://<host>/ws` on HTTPS pages, then `ws://<host>:3001` on plain-HTTP
+dev pages (`lib/public-endpoints.ts`).
+
+**Moderator server mute.**
+- `POST /api/servers/{id}/channels/{channelId}/members/{userId}/voice/mute`
+  persists `memberships.voice_muted` (migration 0036).
+- The token route leaves the microphone out of `canPublishSources` while
+  the flag is set, so rejoining does not lift it.
+- `syncMemberVoiceAccess` (`lib/voice-moderation.ts`) mutes a live
+  MICROPHONE track and updates `canPublishSources` through
+  `updateParticipant`.
+- Lifting the mute re-allows the mic. It never switches anyone's mic on
+  (`enable_remote_unmute: false`).
+- Kick, ban, timeout and role/visibility changes call the same sync:
+  users who may no longer be in the room are removed from it.
+- Moderators with MUTE_MEMBERS get a mute control in the connected
+  channel roster. The target's footer shows "Muted by a moderator".
+
+**Local controls.**
+- Mic state follows the real local publication (`TrackMuted`/`Unmuted`
+  and `ParticipantPermissionsChanged`), not UI state.
+- Deafen disables every remote audio publication, including ones that
+  appear later (new joiners, first unmute, reconnect), and mutes your
+  own mic. Undeafen restores the mic state you had before.
+- Push-to-talk listeners are bound once per connection, and the mic
+  follows the desired key state through a single-flight loop. `blur` and
+  hidden tabs count as a key release. The desktop shell's global
+  Ctrl+Space arrives as `postMessage({type:'lobbyforge:ptt'})`, and
+  Ctrl+Shift+M/D and Ctrl+, as `lobbyforge:shortcut`.
+- A microphone failure (denied, missing, busy, or a saved device that was
+  unplugged) no longer cancels the join. The app retries the default
+  device, then stays connected listen-only with a readable message.
+- Blocked autoplay (`AudioPlaybackStatusChanged`) shows "click to enable"
+  in the footer, which calls `room.startAudio()`.
+- Disconnect reasons are shown: another tab or device took over, removed
+  by a moderator, room closed, or server restart.
+- Per-user volume is re-applied on every attach.
+- The output device preference is applied to the call on Chromium.
+- TURN credentials live for 12h, because ICE restarts reuse the servers
+  passed at connect time.
+
 ## The `/room/[roomName]` page
 
 `apps/web/app/room/[roomName]/page.tsx` is a client component. On mount:

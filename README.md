@@ -2,11 +2,17 @@
 
 > Self-hostable, voice-first community platform with a built-in plugin SDK for live activities.
 
-**Status: Closed beta ready.** Core voice/chat/DM/plugin flows work end-to-end
-with 19 security audit rounds remediated, full CI/CD (CodeQL, Trivy, RustSec,
-dependency audits, production TLS E2E, two-client voice E2E), branch protection
-and digest-pinned deployment. See the [feature status table](#feature-status)
-for what's still alpha/experimental.
+**Status: Closed beta (release candidate).** Core voice/chat/DM/plugin flows
+work end-to-end. The 2026-09-19 beta-readiness review
+([report](docs/BETA_READINESS_REVIEW.md)) came after 31 earlier audit rounds.
+It found and fixed moderation, voice and release-pipeline defects, all
+reproduced live first. Full CI/CD covers CodeQL, Trivy, RustSec, dependency
+audits, production TLS E2E and a real-UI voice E2E that measures WebRTC audio.
+Branch protection and digest-pinned deployment are in place. The remaining
+pre-beta items are the VPS drill steps in
+[docs/BETA_RELEASE.md](docs/BETA_RELEASE.md). See the
+[feature status table](#feature-status) for what is still
+alpha/experimental.
 
 LobbyForge is an open-source community platform you run on your own server. It
 takes the "server → channel → voice room" structure you know, and lets voice
@@ -31,7 +37,7 @@ Honest assessment of what works today:
 | Feature | Status |
 |---------|--------|
 | Guest access (invite → one-click join) | ✅ Available |
-| Voice rooms (LiveKit audio/video/screen share) | ✅ Beta — production TLS E2E + two-client voice test in CI; TURN relay with ephemeral credentials |
+| Voice rooms (LiveKit audio/video/screen share) | ✅ Beta — production TLS E2E plus a real-UI voice E2E in CI (audio flow via WebRTC stats, mute/deafen, moderator server mute, PTT, listen-only fallback); TURN relay with ephemeral credentials |
 | Text channels + chat | ✅ Available |
 | Direct messages (instance-local) | ✅ Available — block enforcement, reply integrity |
 | Multi-server lobby switching | ✅ Available (official instance) |
@@ -43,7 +49,7 @@ Honest assessment of what works today:
 | Admin panel (settings, moderation, doctor) | ✅ Available |
 | Self-host updates (one-click upgrade) | ✅ Available — signed release manifests pin the immutable GHCR image digest; `lfctl update check/plan/apply` verifies the signature against the committed official public key, auto-creates + strictly verifies a backup, deploys exactly the signed digest, persists deployed-version state and records a rollback pointer (`lfctl update rollback`; app-level — DB migrations are forward-only) |
 | Backups (create/restore) | ✅ Available — streaming SHA-256, formatVersion:1 manifest, destructive restore drill in CI |
-| Desktop app (Tauri 2) | 🟡 Alpha — builds and runs; code signing deferred (see [ADR-005](docs/ARCHITECTURE_DECISIONS.md)) |
+| Desktop app (Tauri 2) | 🟡 Alpha — builds and runs; global PTT + shortcuts fixed in the beta review (verify on each OS); code signing deferred (see [ADR-005](docs/ARCHITECTURE_DECISIONS.md)) |
 | Google OAuth login | ✅ Available (opt-in via env vars) |
 | TURN relay | ✅ Available — coturn 4.18.0, ephemeral REST-auth credentials, IPv6 private-range denied |
 
