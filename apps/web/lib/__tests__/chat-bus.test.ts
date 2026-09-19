@@ -23,7 +23,7 @@ interface MockRedis {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyMock = ReturnType<typeof vi.fn<any[], any>>;
+type AnyMock = ReturnType<typeof vi.fn<(...args: any[]) => any>>;
 
 const subscribers: Array<{ instance: MockSubscriber; handlers: Handler[] }> = [];
 let publishImpl: ((channel: string, raw: string) => Promise<unknown>) | null = null;

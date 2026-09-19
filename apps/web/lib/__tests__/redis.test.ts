@@ -47,9 +47,15 @@ const redisMock = {
   scan: scanImpl,
 };
 
+// vitest 4: `new` on a vi.fn requires a constructible implementation
+// (arrow functions are not) — the module does `new Redis(url)`.
 vi.mock('ioredis', () => ({
-  default: vi.fn(() => redisMock),
-  Redis: vi.fn(() => redisMock),
+  default: vi.fn(function RedisCtor() {
+    return redisMock;
+  }),
+  Redis: vi.fn(function RedisCtor() {
+    return redisMock;
+  }),
 }));
 
 beforeEach(() => {

@@ -148,7 +148,9 @@ afterAll(() => {
   for (const dir of sandboxes) rmSync(dir, { recursive: true, force: true });
 });
 
-describe('install.sh — V4-003 safe activation', () => {
+// Each scenario runs install.sh synchronously (spawnSync, up to 60s) — vitest 3
+// enforces the test timeout on synchronous tests too, so give them room.
+describe('install.sh — V4-003 safe activation', { timeout: 120_000 }, () => {
   it('scenario 1: first run (stack stopped, certbot OK) activates everything', () => {
     const sandbox = makeSandbox();
     sandboxes.push(sandbox);

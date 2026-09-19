@@ -27,6 +27,6 @@
     "@lobbyforge/config": "workspace:*",
     "@tauri-apps/cli": "^2.11.4",
     "typescript": "^5.4.5",
-    "vitest": "^1.6.0"
+    "vitest": "^4.1.11"
   }
 }
