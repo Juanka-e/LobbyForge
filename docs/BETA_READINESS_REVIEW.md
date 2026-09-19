@@ -209,7 +209,8 @@ Tüm düzeltmeler `fix/beta-readiness` dalında. Kritik olanlar, ilk bulguları
 | V3 sağırlaştırma sızıntısı | ✅ canlı doğrulandı |
 | V4 mikrofon yoksa katılamama | ✅ canlı doğrulandı (dinleyici modu) |
 | V5 hayalet ses elementleri | ✅ canlı doğrulandı |
-| V6 masaüstü PTT/kısayollar | ✅ Rust birim testleri; gerçek işletim sistemlerinde elle doğrulanmalı |
+| V6 masaüstü PTT/kısayollar | ✅ gerçek Windows'ta doğrulandı: rc.5'te global kısayollar sayfaya **ulaşmıyor**, düzeltilmiş build'de Ctrl+Space basma/bırakma ve Ctrl+Shift+M/D ulaşıyor. macOS ve Linux elle doğrulanmalı |
+| **Yeni:** masaüstü bağlanamıyor | ✅ `withGlobalTauri` kapalı olduğu için bağlanma ekranında `invoke is not a function` alınıyordu; hiçbir release build instance'a bağlanamıyordu. Düzeltildi, Windows'ta doğrulandı, instance sayfalarının IPC erişimi hâlâ ACL ile reddediliyor |
 | V7 release image'da localhost | ✅ runtime çözümleme + CI kontrolü |
 | V8 aktivite sayfasında ses | ✅ ses bağlanıyor |
 | V9–V14 | ✅ çıkış cihazı, ses seviyesi, autoplay, kopma sebebi, kendi mute göstergesi, TURN süresi 12 saat |

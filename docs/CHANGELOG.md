@@ -91,6 +91,14 @@ against the compose stack, and each fix ships with a regression test.
   `{source: window}`, which is not structured-cloneable, so every
   message threw `DataCloneError`. Payloads are now JSON-serialized, with
   Rust tests, and the web app handles `lobbyforge:shortcut`.
+- **Desktop could not connect at all.** The unbundled connect screen
+  uses `window.__TAURI__`, but `withGlobalTauri` was off, so `invoke`
+  was undefined and "Connect" failed with "invoke is not a function" in
+  every release build. It is now enabled.
+  - Verified on real Windows: the connect screen works, and global
+    Ctrl+Space / Ctrl+Shift+M / Ctrl+Shift+D reach the page.
+  - Instance pages still get "not allowed by ACL" for every command.
+  - A regression test pins the config.
 - **Deafen** covers publications that appear later (new joiners,
   unmute, reconnect) and mutes your own mic. Undeafen restores it.
 - **Microphone failure no longer aborts the join.** The app retries the

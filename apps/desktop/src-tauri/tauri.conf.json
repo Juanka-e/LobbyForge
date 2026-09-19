@@ -8,6 +8,7 @@
     "devUrl": null
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "label": "main",
@@ -45,7 +46,7 @@
     "publisher": "LobbyForge",
     "category": "SocialNetworking",
     "shortDescription": "Self-hostable voice-first community platform",
-    "longDescription": "LobbyForge desktop shell \u2014 connect to your self-hosted LobbyForge instance for voice-first community with live activities.",
+    "longDescription": "LobbyForge desktop shell — connect to your self-hosted LobbyForge instance for voice-first community with live activities.",
     "macOS": {
       "minimumSystemVersion": "10.15",
       "entitlements": "entitlements.plist",
