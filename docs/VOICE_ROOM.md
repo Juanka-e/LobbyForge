@@ -146,7 +146,7 @@ As of M15, the LiveKit participant identity is unified with the permanent `userI
 
 ### `NEXT_PUBLIC_LIVEKIT_URL`
 
-The browser-side WebSocket URL. Read from `process.env.NEXT_PUBLIC_LIVEKIT_URL` at build time, defaults to `ws://localhost:7880` (the dev stack). Documented in `infra/docker/.env.example`.
+The browser-side WebSocket URL. Read from `process.env.NEXT_PUBLIC_LIVEKIT_URL` at build time, defaults to `ws://localhost:19580` (the dev stack). Documented in `infra/docker/.env.example`.
 
 The dev stack is `ws://` because the LiveKit dev server is plaintext; production is `wss://` behind a TLS-terminating proxy.
 

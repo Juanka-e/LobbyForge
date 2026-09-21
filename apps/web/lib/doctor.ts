@@ -134,10 +134,10 @@ function envUrl(name: string, fallback: string): string {
  */
 export async function collectDoctorReport(): Promise<{ report: DoctorReport; stats: SystemStats }> {
   const stats = await collectSystemStats();
-  const livekitUrl = envUrl('LIVEKIT_URL', 'http://localhost:7880');
-  const postgresUrl = envUrl('POSTGRES_URL', 'postgres://lobbyforge:lobbyforge_dev@localhost:5432/lobbyforge');
-  const redisUrl = envUrl('REDIS_URL', 'redis://:lobbyforge_dev@localhost:6379');
-  const publicUrl = envUrl('NEXT_PUBLIC_BASE_URL', 'http://localhost:3000');
+  const livekitUrl = envUrl('LIVEKIT_URL', 'http://localhost:19580');
+  const postgresUrl = envUrl('POSTGRES_URL', 'postgres://lobbyforge:lobbyforge_dev@localhost:19532/lobbyforge');
+  const redisUrl = envUrl('REDIS_URL', 'redis://:lobbyforge_dev@localhost:19579');
+  const publicUrl = envUrl('NEXT_PUBLIC_BASE_URL', 'http://localhost:19520');
 
   const [livekitOk, postgresOk, redisOk, httpsOk] = await Promise.all([
     probeUrl(`${livekitUrl}/`).catch(() => false),

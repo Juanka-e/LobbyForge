@@ -23,9 +23,16 @@ export function middleware(request: NextRequest) {
       ? "'self' wss:"
       : "'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*");
 
-  // Also include configured LiveKit/WS URLs.
+  // Also include the configured LiveKit/WS URLs. beta-review: read with a
+  // computed key so the value comes from the RUNTIME environment — a
+  // published image is built without NEXT_PUBLIC_* and would otherwise
+  // hand out a CSP that blocks the instance's own media endpoints.
+  const publicEndpoint = (name: string) => process.env[name]?.trim() || undefined;
   const extraSources = new Set<string>();
-  for (const value of [process.env.NEXT_PUBLIC_LIVEKIT_URL, process.env.NEXT_PUBLIC_WS_URL]) {
+  for (const value of [
+    publicEndpoint('LOBBYFORGE_PUBLIC_LIVEKIT_URL') ?? publicEndpoint(['NEXT_PUBLIC', 'LIVEKIT_URL'].join('_')),
+    publicEndpoint('LOBBYFORGE_PUBLIC_WS_URL') ?? publicEndpoint(['NEXT_PUBLIC', 'WS_URL'].join('_')),
+  ]) {
     if (!value) continue;
     try {
       const url = new URL(value);

@@ -1,7 +1,7 @@
 /**
  * WebSocket gateway server.
  *
- * Listens on a configurable port (default 3001) for upgrade requests.
+ * Listens on a configurable port (default 19521) for upgrade requests.
  * Validates the guest cookie on upgrade, opens a connection-scoped
  * subscription manager, and serves `subscribe` / `unsubscribe`
  * messages routed through the Redis subscriber pool.
@@ -40,7 +40,7 @@ interface ConnectionState {
 
 function getEnvPort(): number {
   const raw = process.env.WS_PORT;
-  if (!raw) return 3001;
+  if (!raw) return 19521;
   const n = Number.parseInt(raw, 10);
   if (!Number.isFinite(n) || n < 0 || n > 65535) { // 0 = ephemeral (tests)
     throw new Error(`Invalid WS_PORT: ${raw}`);
@@ -64,8 +64,8 @@ function configuredOrigins(): Set<string> {
     if (origin) origins.add(origin);
   }
   if (process.env.NODE_ENV !== 'production') {
-    origins.add('http://localhost:3000');
-    origins.add('http://127.0.0.1:3000');
+    origins.add('http://localhost:19520');
+    origins.add('http://127.0.0.1:19520');
   }
   return origins;
 }

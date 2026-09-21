@@ -18,7 +18,7 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { Rate, Trend } from 'k6/metrics';
 
-const BASE = __ENV.BASE_URL || 'http://localhost:3000';
+const BASE = __ENV.BASE_URL || 'http://localhost:19520';
 
 // Custom metrics
 const guestCreationTime = new Trend('guest_creation_ms');

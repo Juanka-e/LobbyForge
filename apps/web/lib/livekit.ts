@@ -127,7 +127,7 @@ export function requireLiveKitCredentials(env: Record<string, string | undefined
  */
 export function getRoomServiceClient(): RoomServiceClient {
   const { apiKey, apiSecret } = requireLiveKitCredentials();
-  const host = process.env.LIVEKIT_URL || 'http://localhost:7880';
+  const host = process.env.LIVEKIT_URL || 'http://localhost:19580';
   // Standard singleton pattern using globalThis
   const global = globalThis as typeof globalThis & {
     __livekit_room_service_client__?: RoomServiceClient;

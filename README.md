@@ -123,7 +123,11 @@ pnpm dev        # all workspaces in parallel
 pnpm --filter @lobbyforge/web dev
 ```
 
-Open `http://localhost:3000` and walk through the first-run setup wizard.
+Open `http://localhost:19520` and walk through the first-run setup wizard.
+
+> Local ports sit in a quiet range so they do not collide with whatever
+> else you run: web `19520`, realtime gateway `19521`, LiveKit `19580`
+> (media `19582/udp`), Postgres `19532`, Redis `19579`.
 
 ### Verify everything
 

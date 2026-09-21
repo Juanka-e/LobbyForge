@@ -66,7 +66,7 @@ The installers land in `src-tauri/target/release/bundle/`.
 ## Notes
 
 - This shell cannot run standalone — it needs a LobbyForge instance to connect
-  to. For local development, point it at `http://localhost:3000` (loopback http
+  to. For local development, point it at `http://localhost:19520` (loopback http
   is permitted only in debug builds).
 - The `src/index.ts` TypeScript contracts (handoff validation, shortcut
   accelerators) are kept for the future web-side deep-link emitter and are

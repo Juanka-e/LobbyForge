@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const baseUrl = process.env.LF_E2E_BASE_URL ?? '';
-const LIVEKIT_WS = process.env.LF_E2E_LIVEKIT_URL ?? 'ws://localhost:7880';
+const LIVEKIT_WS = process.env.LF_E2E_LIVEKIT_URL ?? 'ws://localhost:19580';
 
 test.skip(!baseUrl, 'Runs only against the compose stack (set LF_E2E_BASE_URL).');
 

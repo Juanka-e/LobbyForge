@@ -231,7 +231,7 @@ jobs:
           docker inspect --format '{{json .State.Health}}' lobbyforge-livekit || true
           # What does :7880 actually answer? (busybox wget shows the
           # status line with -S)
-          docker exec lobbyforge-livekit busybox wget -S -O /dev/null http://localhost:7880/ || true
+          docker exec lobbyforge-livekit busybox wget -S -O /dev/null http://localhost:19580/ || true
 
       - name: Install Playwright chromium
         run: pnpm --filter @lobbyforge/web exec playwright install --with-deps chromium
@@ -372,7 +372,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
-      LF_E2E_BASE_URL: http://localhost:3000
+      LF_E2E_BASE_URL: http://localhost:19520
       LF_E2E_SETUP_TOKEN: ci_e2e_setup_token_0123456789abcdef
       LOBBYFORGE_SETUP_TOKEN: ci_e2e_setup_token_0123456789abcdef
     steps:

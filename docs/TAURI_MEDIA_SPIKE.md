@@ -25,7 +25,7 @@ WebView2 (Windows) / WKWebView (macOS) / WebKitGTK (Linux) window.
 
 ### A. Connection & Authentication
 - [ ] Tauri window opens to the connect screen
-- [ ] Entering the instance URL (e.g. `http://localhost:3000`) loads the lobby
+- [ ] Entering the instance URL (e.g. `http://localhost:19520`) loads the lobby
 - [ ] Guest session is created (visible as "Guest" in the members panel)
 - [ ] The instance URL persists after closing and reopening the app
 

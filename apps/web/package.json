@@ -18,7 +18,7 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "lint": "eslint \"src/**/*.{ts,tsx}\" \"app/**/*.{ts,tsx}\" \"components/**/*.{ts,tsx}\" \"lib/**/*.ts\"",
-    "dev": "next dev --port 3000",
+    "dev": "next dev --port 19520",
     "start": "next start --port 3000"
   },
   "dependencies": {

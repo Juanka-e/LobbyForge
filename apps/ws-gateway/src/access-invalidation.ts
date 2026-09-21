@@ -37,7 +37,7 @@ export function initAccessInvalidationListener(onEvent: InvalidationHandler): ()
       const RedisCtor = ('default' in RedisMod ? RedisMod.default : RedisMod) as unknown as new (
         url: string
       ) => Redis;
-      const sub = new RedisCtor(process.env.REDIS_URL || 'redis://:lobbyforge_dev@localhost:6379');
+      const sub = new RedisCtor(process.env.REDIS_URL || 'redis://:lobbyforge_dev@localhost:19579');
       sub.on('error', (err: Error) => {
         // ioredis reconnects on its own — never give up permanently
         // (LF-SEC-009 lesson: one blip must not disable a security path).

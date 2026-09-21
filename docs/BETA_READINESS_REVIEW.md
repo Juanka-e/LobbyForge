@@ -158,13 +158,13 @@ V9-V12, V14, S10, S11, düşük önemli bulgular, dev bağımlılık güncelleme
 ```sh
 # e2e stack (dev compose + e2e portları + I1–I3 düzeltmeleri)
 export LOBBYFORGE_SETUP_TOKEN=e2e_setup_token_default_0123456789ab \
-       NEXT_PUBLIC_LIVEKIT_URL=ws://localhost:7890 NEXT_PUBLIC_WS_URL=ws://localhost:3101 \
-       LOBBYFORGE_APP_ORIGIN=http://localhost:3100
+       NEXT_PUBLIC_LIVEKIT_URL=ws://localhost:19690 NEXT_PUBLIC_WS_URL=ws://localhost:19621 \
+       LOBBYFORGE_APP_ORIGIN=http://localhost:19620
 # Image bu NEXT_PUBLIC_* değerleriyle build edilmiş olmalı (build-arg).
 docker compose -p lobbyforge-e2e -f infra/docker/docker-compose.dev.yml \
   -f infra/docker/docker-compose.e2e-ports.yml up -d --wait
 cd apps/web
-LF_E2E_BASE_URL=http://localhost:3100 LF_E2E_SETUP_TOKEN=$LOBBYFORGE_SETUP_TOKEN \
+LF_E2E_BASE_URL=http://localhost:19620 LF_E2E_SETUP_TOKEN=$LOBBYFORGE_SETUP_TOKEN \
   npx playwright test voice-ui-audio.spec.ts --workers=1 --reporter=list
 ```
 

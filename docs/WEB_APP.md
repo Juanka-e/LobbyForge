@@ -424,7 +424,7 @@ The interaction contract is fixed:
 # From the repo root
 pnpm install
 pnpm -r build                       # rebuild dist-pointer packages (@lobbyforge/core, …)
-pnpm --filter @lobbyforge/web dev   # next dev on :3000
+pnpm --filter @lobbyforge/web dev   # next dev on :19520
 ```
 
 The web app reads from `infra/docker/docker-compose.dev.yml` for PostgreSQL / Redis / LiveKit. The Doctor HTTP probes target `localhost:<port>` by default; override with `LIVEKIT_URL`, `POSTGRES_URL`, `REDIS_URL`, `NEXT_PUBLIC_BASE_URL` in a `.env.local` if you point at another host.

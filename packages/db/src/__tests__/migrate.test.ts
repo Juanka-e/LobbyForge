@@ -12,7 +12,7 @@ describe('db:migrate', () => {
   it('the migrate.js bundle includes the migrator + the dev DSN fallback', () => {
     const file = readFileSync(join(__dirname, '..', '..', 'dist', 'migrate.js'), 'utf8');
     expect(file).toMatch(/drizzle-orm\/postgres-js\/migrator/);
-    expect(file).toMatch(/lobbyforge:lobbyforge_dev@localhost:5432\/lobbyforge/);
+    expect(file).toMatch(/lobbyforge:lobbyforge_dev@localhost:19532\/lobbyforge/);
   });
 
   it('tracks every SQL migration in journal order and has a current snapshot', () => {

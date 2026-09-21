@@ -4,7 +4,7 @@
  * Run with `pnpm -F @lobbyforge/ws-gateway dev` (watch) or
  * `pnpm -F @lobbyforge/ws-gateway start` (after `pnpm -F ... build`).
  *
- * Listens on `WS_HOST`:`WS_PORT` (defaults `127.0.0.1:3001`) and
+ * Listens on `WS_HOST`:`WS_PORT` (defaults `0.0.0.0:19521`) and
  * brokers browser-side subscriptions to the same Redis bus the
  * Next.js app publishes on. See `protocol.ts` for the wire format
  * and `docs/REALTIME.md` (M20-bis) for the architecture.

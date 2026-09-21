@@ -41,7 +41,7 @@ function makeRedis(): SubscriberConnection {
     if (process.env.NODE_ENV === 'production') {
       throw new Error('REDIS_URL is required for ws-gateway in production');
     }
-    return new Redis('redis://:lobbyforge_dev@localhost:6379');
+    return new Redis('redis://:lobbyforge_dev@localhost:19579');
   }
   return new Redis(url);
 }

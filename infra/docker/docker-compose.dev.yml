@@ -30,7 +30,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-lobbyforge}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lobbyforge_dev}
     ports:
-      - "5432:5432"
+      # Host ports live in a quiet range (see docs/MONOREPO.md).
+      - "19532:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -45,7 +46,7 @@ services:
     restart: unless-stopped
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-lobbyforge_dev}", "--appendonly", "yes"]
     ports:
-      - "6379:6379"
+      - "19579:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -63,15 +64,16 @@ services:
     # Browser runs on the host in local development. Advertising the Docker
     # bridge/public NAT address makes same-machine ICE fail; advertise the
     # host loopback ports mapped below instead.
-    command: ["--dev", "--bind", "0.0.0.0", "--node-ip", "127.0.0.1"]
+    # LiveKit must LISTEN on the ports it advertises to clients, so it moves
+    # inside the container too (unlike postgres/redis/web).
+    command: ["--dev", "--bind", "0.0.0.0", "--node-ip", "127.0.0.1", "--port", "19580", "--udp-port", "19582"]
     environment:
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-devsecret_please_change}"
     ports:
-      - "7880:7880"   # HTTP signaling
-      - "7881:7881"   # ICE/TLS
-      - "7882:7882/udp" # RTC media
+      - "19580:19580"     # HTTP signaling
+      - "19582:19582/udp" # RTC media (ICE/TCP is not published locally)
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:7880/"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:19580/"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -80,9 +82,9 @@ services:
     build:
       context: ../..
       dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_LIVEKIT_URL: ${NEXT_PUBLIC_LIVEKIT_URL:-http://localhost:7880}
-        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:3001}
+      # No NEXT_PUBLIC_* build args: the browser endpoints are resolved at
+      # REQUEST time (token response + a server-rendered meta), so ONE image
+      # serves this stack, the parallel e2e stack and a real deployment.
     image: lobbyforge-app:dev
     restart: "no"
     working_dir: /app/packages/db
@@ -111,11 +113,11 @@ services:
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecret_please_change}
       # beta-review: server-side LiveKit API (moderator mute, room caps,
       # voice eviction). Without it every RoomServiceClient call failed.
-      LIVEKIT_URL: http://livekit:7880
-      NEXT_PUBLIC_LIVEKIT_URL: ${NEXT_PUBLIC_LIVEKIT_URL:-http://localhost:7880}
-      NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:3001}
+      LIVEKIT_URL: http://livekit:19580
+      NEXT_PUBLIC_LIVEKIT_URL: ${NEXT_PUBLIC_LIVEKIT_URL:-http://localhost:19580}
+      NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:19521}
     ports:
-      - "3000:3000"
+      - "19520:3000"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -148,9 +150,9 @@ services:
       LOBBYFORGE_SESSION_SECRET: ${LOBBYFORGE_SESSION_SECRET:-dev_session_secret_change_before_public_use_1234}
       WS_HOST: 0.0.0.0
       WS_PORT: 3001
-      LOBBYFORGE_APP_ORIGIN: ${LOBBYFORGE_APP_ORIGIN:-http://localhost:3000}
+      LOBBYFORGE_APP_ORIGIN: ${LOBBYFORGE_APP_ORIGIN:-http://localhost:19520}
     ports:
-      - "3001:3001"
+      - "19521:3001"
     # A healthcheck makes `up --wait` (CI) fail on a crash-looping gateway
     # instead of passing on a momentary "running" snapshot.
     healthcheck:
@@ -165,17 +167,17 @@ services:
       redis:
         condition: service_healthy
 
-  # Optional: local SMTP catcher for testing email flows. UI at http://localhost:8025.
+  # Optional: local SMTP catcher for testing email flows. UI at http://localhost:19526.
   mailpit:
     image: axllent/mailpit:latest
     container_name: lobbyforge-mailpit
     restart: unless-stopped
     ports:
-      - "1025:1025"  # SMTP
-      - "8025:8025"  # Web UI
+      - "19525:1025"  # SMTP
+      - "19526:8025"  # Web UI
     profiles: ["full"]
 
-  # Optional: local S3-compatible object store. UI at http://localhost:9001.
+  # Optional: local S3-compatible object store. UI at http://localhost:19591.
   minio:
     image: minio/minio:latest
     container_name: lobbyforge-minio
@@ -185,8 +187,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-lobbyforge}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-lobbyforge_dev}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "19590:9000"
+      - "19591:9001"
     volumes:
       - minio-data:/data
     profiles: ["full"]

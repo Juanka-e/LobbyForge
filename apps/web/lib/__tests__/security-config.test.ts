@@ -35,8 +35,12 @@ describe('global web security policy', () => {
   });
 
   it('adds only parsed public realtime origins to connect-src in middleware', () => {
-    expect(middleware).toContain('NEXT_PUBLIC_LIVEKIT_URL');
-    expect(middleware).toContain('NEXT_PUBLIC_WS_URL');
+    // beta-review: the names are assembled at runtime (a computed key is not
+    // inlined at build time), so assert on the parts + the parsing guard.
+    expect(middleware).toContain('LIVEKIT_URL');
+    expect(middleware).toContain('WS_URL');
+    expect(middleware).toContain('LOBBYFORGE_PUBLIC_LIVEKIT_URL');
+    expect(middleware).toContain('LOBBYFORGE_PUBLIC_WS_URL');
     expect(middleware).toContain("url.protocol === 'https:'");
   });
 });

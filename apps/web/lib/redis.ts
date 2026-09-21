@@ -6,7 +6,7 @@ const globalForRedis = globalThis as unknown as {
 
 export const redis =
   globalForRedis.redis ??
-  new Redis(process.env.REDIS_URL || 'redis://:lobbyforge_dev@localhost:6379');
+  new Redis(process.env.REDIS_URL || 'redis://:lobbyforge_dev@localhost:19579');
 
 // V4-012: without an 'error' listener every connection blip (e.g. Redis
 // not running during `next build` page collection) surfaces as an

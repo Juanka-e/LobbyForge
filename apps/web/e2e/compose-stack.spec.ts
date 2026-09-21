@@ -139,10 +139,25 @@ test.describe('compose stack — real Postgres/Redis', () => {
     expect(installRes.status()).toBe(200);
 
     // ── 5. Start a Hushle activity in the voice channel.
-    const activityRes = await request.post(
+    // A channel may hold ONE open activity, and this spec leaves its game
+    // running — end a leftover one so a re-run against a warm stack works
+    // (CI always starts from a fresh volume).
+    let activityRes = await request.post(
       `/api/servers/${bootstrapServerId}/channels/${voice!.id}/activities`,
       { headers: ORIGIN, data: { pluginId: 'hushle' } }
     );
+    if (activityRes.status() === 409) {
+      const stale = (await activityRes.json()) as { activity: { id: string } };
+      const ended = await request.post(
+        `/api/servers/${bootstrapServerId}/activities/${stale.activity.id}/end`,
+        { headers: ORIGIN, data: {} }
+      );
+      expect(ended.status()).toBe(200);
+      activityRes = await request.post(
+        `/api/servers/${bootstrapServerId}/channels/${voice!.id}/activities`,
+        { headers: ORIGIN, data: { pluginId: 'hushle' } }
+      );
+    }
     expect(activityRes.status()).toBe(201);
     const { activity } = (await activityRes.json()) as { activity: { id: string } };
 

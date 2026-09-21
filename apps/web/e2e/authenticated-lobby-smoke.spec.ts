@@ -13,7 +13,7 @@ test.describe('authenticated lobby smoke without database reset', () => {
       sessionSecret!,
       { secure: false }
     );
-    await context.addCookies([{ name: 'lf_guest', value: cookie.raw, url: 'http://localhost:3000', httpOnly: true, sameSite: 'Lax' }]);
+    await context.addCookies([{ name: 'lf_guest', value: cookie.raw, url: 'http://localhost:19520', httpOnly: true, sameSite: 'Lax' }]);
   });
 
   test('self-host shell, profile card, and compact voice view are usable', async ({ page }, testInfo) => {

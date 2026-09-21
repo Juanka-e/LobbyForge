@@ -69,7 +69,7 @@ async function getRevokedClient() {
     const Redis = ('default' in RedisMod ? RedisMod.default : RedisMod) as unknown as new (
       url: string
     ) => { sismember: (key: string, member: string) => Promise<number>; on: (e: string, cb: () => void) => void };
-    const client = new Redis(process.env.REDIS_URL || 'redis://:lobbyforge_dev@localhost:6379');
+    const client = new Redis(process.env.REDIS_URL || 'redis://:lobbyforge_dev@localhost:19579');
     // Clear (do NOT latch) on error — ioredis keeps reconnecting and the
     // next successful command reuses the same client.
     client.on('error', () => { /* surfaced via the tri-state result */ });

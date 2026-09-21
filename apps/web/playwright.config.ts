@@ -19,7 +19,7 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: 'html',
   use: {
-    baseURL: externalBaseUrl ?? 'http://localhost:3000',
+    baseURL: externalBaseUrl ?? 'http://localhost:19520',
     ignoreHTTPSErrors: tlsMode,
     trace: 'on-first-retry',
   },
@@ -28,7 +28,7 @@ export default defineConfig({
     : {
         webServer: {
           command: 'pnpm --filter @lobbyforge/web dev',
-          url: 'http://localhost:3000',
+          url: 'http://localhost:19520',
           reuseExistingServer: !process.env.CI,
           stdout: 'ignore',
           stderr: 'pipe',

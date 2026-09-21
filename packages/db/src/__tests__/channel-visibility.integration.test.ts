@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import postgres from 'postgres';
 
 const DB_URL = process.env.TEST_DATABASE_URL;
-const dsn = DB_URL ?? 'postgres://postgres:lobbyforge_dev@127.0.0.1:5432/lobbyforge';
+const dsn = DB_URL ?? 'postgres://postgres:lobbyforge_dev@127.0.0.1:19532/lobbyforge';
 
 const sql = postgres(dsn, { max: 1 });
 const enabled = Boolean(DB_URL);

@@ -23,7 +23,7 @@ is in [`docs/ACTIVITIES.md`](./ACTIVITIES.md).
                          │                  │
               ┌──────────▼──────┐   ┌───────▼──────────────┐
               │  apps/ws-       │   │  Next.js             │
-              │  gateway (3001) │   │  apps/web            │
+              │  gateway (19521) │   │  apps/web            │
               │  ws + ioredis   │   │  /api/.../stream     │
               └──────────┬──────┘   └───────┬──────────────┘
                          │                  │
@@ -143,7 +143,7 @@ subscribes that arrive while disconnected, and replays them on the
 next `open`. A 60s heartbeat closes the socket if the server hasn't
 pinged in time, which triggers reconnect.
 
-The default URL is `ws://{window.location.hostname}:3001`. Override
+The default URL is `ws://{window.location.hostname}:19521` (HTTPS pages use the same-origin `/ws` proxy instead). Override
 via `NEXT_PUBLIC_WS_URL` (the env var the build reads).
 
 ## Transport selection
@@ -166,7 +166,7 @@ backup.
 ## Production layout
 
 - **Dev**: `pnpm -F @lobbyforge/ws-gateway dev` runs the gateway on
-  `:3001` with `node --watch`. The Next.js dev server runs on `:3000`.
+  `:19521` with `node --watch`. The Next.js dev server runs on `:19520`.
   Both talk to the same Redis instance via `REDIS_URL`.
 - **Prod**: The gateway runs as a separate container/pod behind a load
   balancer. Reverse-proxy rules forward WS upgrades (the `Upgrade:
@@ -180,7 +180,7 @@ Required env vars on the gateway container:
 - `LF_DB_URL` — Postgres URL for the membership checks
 - `WS_ALLOWED_ORIGINS` — optional comma-separated allowlist for browser WebSocket origins. `LOBBYFORGE_APP_ORIGIN` and `NEXT_PUBLIC_BASE_URL` are also accepted when set. Production rejects missing or unlisted origins.
 - `WS_HOST` (default `127.0.0.1`)
-- `WS_PORT` (default `3001`)
+- `WS_PORT` (default `19521`)
 
 ## Future
 

@@ -30,7 +30,7 @@ describe('isAllowedWsOrigin', () => {
   it('keeps localhost development ergonomic', () => {
     process.env.NODE_ENV = 'development';
     delete process.env.WS_ALLOWED_ORIGINS;
-    expect(isAllowedWsOrigin('http://localhost:3000')).toBe(true);
+    expect(isAllowedWsOrigin('http://localhost:19520')).toBe(true);
     expect(isAllowedWsOrigin(undefined)).toBe(true);
   });
 });

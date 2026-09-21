@@ -5,6 +5,56 @@ PostgreSQL volume throughout testing. Do not run `docker compose down -v`, the
 test reset endpoints, `db push`, or destructive seed scripts against the
 development database.
 
+## Start the stack
+
+```sh
+docker compose -f infra/docker/docker-compose.dev.yml up -d --build --wait
+```
+
+| What | URL / port |
+|---|---|
+| App | http://localhost:19520 |
+| Realtime gateway | ws://localhost:19521 (`/health` over HTTP) |
+| LiveKit | http://localhost:19580, media `19582/udp` |
+| Postgres | localhost:19532 |
+| Redis | localhost:19579 |
+| Mailpit (`--profile full`) | http://localhost:19526 |
+| MinIO console (`--profile full`) | http://localhost:19591 |
+
+Ports live in a quiet range on purpose: 3000/3001/5432/6379 collide with
+almost everything else a developer runs. Container-internal ports are
+unchanged, and production still terminates on 80/443.
+
+A second, isolated stack (own volumes, container names and ports 19620/
+19621/19690) runs side by side for automated E2E — see
+`infra/docker/docker-compose.e2e-ports.yml`.
+
+## 15-minute end-to-end pass
+
+Two browser profiles (or one normal + one private window) = two users.
+
+1. **First run.** Open the app, complete the setup wizard (owner account).
+2. **Invite.** As owner create an invite link; open it in the second
+   profile and join as a guest.
+3. **Chat.** Send messages both ways in `#general`. They must appear
+   without a reload (realtime), and survive a refresh (persisted).
+4. **Voice.** Both users join the voice channel. Check: you hear each
+   other, the speaking ring reacts, mute silences you for the other side,
+   deafen silences everyone for you, and the roster icons match.
+5. **Moderation.** As owner, use the mute control next to the guest in the
+   voice roster: the guest's footer says "Muted by a moderator", they
+   cannot unmute themselves, and rejoining does not lift it. Lift it and
+   confirm the guest has to unmute themselves.
+6. **Push-to-talk.** In Voice & Video settings switch the guest to
+   push-to-talk, rejoin, hold Space and confirm the owner hears audio only
+   while the key is held.
+7. **Activity.** As owner start Hushle (or Poll) in the voice channel from
+   Activities and play a round with the guest.
+8. **Ban.** Ban the guest: they must lose the server, be dropped from
+   voice, and an invite link must not let them back in. Unban to restore.
+9. **Restart.** `docker compose -f infra/docker/docker-compose.dev.yml
+   restart web ws-gateway` — sign in again and confirm nothing was lost.
+
 ## P0 - Data persistence and bootstrap
 
 - [ ] Create a local account, sign in, and record its email/display name.

@@ -18,7 +18,7 @@ import postgres from 'postgres';
 
 const url =
   process.env.DATABASE_URL ||
-  'postgresql://lobbyforge:lobbyforge_dev@localhost:5432/lobbyforge';
+  'postgresql://lobbyforge:lobbyforge_dev@localhost:19532/lobbyforge';
 
 async function main() {
   // `max: 1` because drizzle-orm's migrator holds a long-lived transaction;

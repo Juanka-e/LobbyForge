@@ -57,7 +57,7 @@
     // ── Web app ──────────────────────────────────────────────────────
     {
       "label": "web: dev (Next.js)",
-      "detail": "pnpm --filter @lobbyforge/web dev  →  http://localhost:3000",
+      "detail": "pnpm --filter @lobbyforge/web dev  →  http://localhost:19520",
       "type": "shell",
       "command": "pnpm --filter @lobbyforge/web dev",
       "group": "build",

@@ -11,6 +11,7 @@ import './globals.css';
 import GlobalHeader from './GlobalHeader';
 import AppearanceRuntime from './AppearanceRuntime';
 import DesktopHandoffListener from '@/components/DesktopHandoffListener';
+import { REALTIME_URL_META, getRuntimeRealtimeUrl } from '@/lib/public-endpoints';
 
 const geist = Geist({ subsets: ['latin'], variable: '--font-geist' });
 
@@ -41,6 +42,7 @@ export default async function RootLayout({ children, modal }: { children: ReactN
     cookieStore.get(ADMIN_TOKEN_COOKIE)?.value
   );
   const maintenance = isAdmin ? null : await readMaintenanceSnapshot();
+  const realtimeUrl = getRuntimeRealtimeUrl();
   const content = maintenance?.maintenanceMode ? (
     <section className="max-w-[720px]">
       <h1 className="mt-0">Maintenance</h1>
@@ -59,6 +61,9 @@ export default async function RootLayout({ children, modal }: { children: ReactN
 
   return (
     <html lang="en" className={`${geist.variable} dark`}>
+      {/* Resolved at REQUEST time so one published image works for any
+          deployment (the browser client reads this before connecting). */}
+      {realtimeUrl ? <meta name={REALTIME_URL_META} content={realtimeUrl} /> : null}
       <body className="bg-background text-text-primary font-body-md antialiased min-h-screen flex flex-col">
         <AppearanceRuntime />
         <GlobalHeader />
