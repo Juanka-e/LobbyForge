@@ -2,6 +2,34 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+const REPO_ROOT = join(__dirname, '..', '..', '..', '..');
+
+describe('dev stack origin wiring', () => {
+  const compose = readFileSync(join(REPO_ROOT, 'infra', 'docker', 'docker-compose.dev.yml'), 'utf8');
+
+  // beta-review: the CSRF origin guard compares the browser Origin against
+  // the app's own origin, and the container always listens on 3000 — so a
+  // published host port MUST be declared, or every POST from the browser
+  // fails with "Invalid request origin" (hit when the ports moved).
+  const publishedWebPort = () => /- "(\d+):3000"/.exec(compose)?.[1];
+  // Every LOBBYFORGE_APP_ORIGIN default in the file (web + ws-gateway).
+  const declaredOrigins = () =>
+    [...compose.matchAll(/LOBBYFORGE_APP_ORIGIN:[^\n]*localhost:(\d+)/g)].map((m) => m[1]);
+
+  it('declares the published web origin for the origin guard', () => {
+    const port = publishedWebPort();
+    expect(port).toBeTruthy();
+    expect(declaredOrigins()).toContain(port);
+  });
+
+  it('points web and the realtime gateway at the same origin', () => {
+    const origins = declaredOrigins();
+    expect(origins.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(origins).size).toBe(1);
+    expect(origins[0]).toBe(publishedWebPort());
+  });
+});
+
 describe('global web security policy', () => {
   const config = readFileSync(join(__dirname, '..', '..', 'next.config.mjs'), 'utf8');
   const middleware = readFileSync(join(__dirname, '..', '..', 'middleware.ts'), 'utf8');

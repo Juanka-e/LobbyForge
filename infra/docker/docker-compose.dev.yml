@@ -109,6 +109,11 @@ services:
       LOBBYFORGE_SESSION_SECRET: ${LOBBYFORGE_SESSION_SECRET:-dev_session_secret_change_before_public_use_1234}
       LOBBYFORGE_SETUP_TOKEN: ${LOBBYFORGE_SETUP_TOKEN:-}
       LOBBYFORGE_DEPLOYMENT_MODE: selfhost
+      # The CSRF origin guard compares the browser's Origin against the
+      # app's own origin. The container listens on 3000 internally, so a
+      # published host port MUST be declared here (a real deploy uses
+      # NEXT_PUBLIC_BASE_URL from install.sh).
+      LOBBYFORGE_APP_ORIGIN: ${LOBBYFORGE_APP_ORIGIN:-http://localhost:19520}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecret_please_change}
       # beta-review: server-side LiveKit API (moderator mute, room caps,
