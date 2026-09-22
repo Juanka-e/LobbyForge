@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { getRealtimeClient } from '@/lib/realtime-client';
@@ -6,6 +6,12 @@ import { UserProfilePopover } from '@/components/modals/UserProfilePopover';
 import { MemberBlockButton } from './MemberBlockButton';
 import { useLobbyVoice } from './LobbyVoiceProvider';
 import { useBlockList } from './BlockListProvider';
+import {
+  PRESENCE_DOT_CLASS,
+  PRESENCE_LABELS,
+  toPresenceStatus,
+  type PresenceStatus,
+} from '@/lib/presence-status';
 
 /**
  * Real-time members panel. Subscribes to presence WS topic + polls as
@@ -17,6 +23,8 @@ interface Member {
   id: string;
   name: string;
   status: 'in-voice' | 'online' | 'offline';
+  /** The status the member chose (drives the dot color). */
+  presence?: PresenceStatus;
   muted?: boolean;
   grayscale?: boolean;
   roleName?: string | null;
@@ -52,9 +60,21 @@ function deriveStatus(
   // beta-review: honor "online status: nobody/friends" — the projection
   // returns status 'hidden' (and lastSeen 0) for those users.
   if (p.status === 'hidden') return 'offline';
+  // beta-review: a member who picked "Invisible" sends status 'offline'
+  // on every heartbeat; they must read as offline, not merely present.
+  if (p.status === 'offline') return 'offline';
   if (now - p.lastSeen > 90_000) return 'offline';
   if (p.channelId && voiceChannelIds.has(p.channelId)) return 'in-voice';
   return 'online';
+}
+
+/** The dot color: the chosen status, or offline once the row is stale. */
+function derivePresence(
+  p: { lastSeen: number; status?: string },
+  now: number = Date.now()
+): PresenceStatus {
+  if (p.status === 'hidden' || now - p.lastSeen > 90_000) return 'offline';
+  return toPresenceStatus(p.status);
 }
 
 export function LobbyMembersClient({
@@ -96,7 +116,8 @@ export function LobbyMembersClient({
           .map((m) => {
             const p = presenceByUser.get(m.id);
             const status = p ? deriveStatus(p, voiceChannelIdsRef.current, now) : 'offline';
-            return { ...m, status, grayscale: status === 'offline' || undefined };
+            const presence = p ? derivePresence(p, now) : 'offline';
+            return { ...m, status, presence, grayscale: status === 'offline' || undefined };
           })
           .sort((a, b) => {
             const order: Record<Member['status'], number> = { 'in-voice': 0, online: 1, offline: 2 };
@@ -322,7 +343,10 @@ function MemberRow({
               )}
             </div>
             {member.status !== 'offline' ? (
-              <span className="absolute -bottom-px -right-px size-3 rounded-full border-2 border-surface-dim bg-success" aria-label="Online" />
+              <span
+                className={`absolute -bottom-px -right-px size-3 rounded-full border-2 border-surface-dim ${PRESENCE_DOT_CLASS[member.presence ?? 'online']}`}
+                aria-label={PRESENCE_LABELS[member.presence ?? 'online']}
+              />
             ) : (
               <span className="absolute -bottom-px -right-px grid size-3 place-items-center rounded-full border-2 border-surface-dim bg-surface-container" aria-label="Offline"><span className="size-1 rounded-full bg-text-muted" /></span>
             )}

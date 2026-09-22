@@ -49,6 +49,8 @@ function makeVoice(overrides: Partial<LobbyVoiceContextValue> = {}): LobbyVoiceC
     leaveScreenShare: vi.fn(),
     setRemoteVolume: vi.fn(),
     getRemoteVolume: vi.fn(() => 1),
+    presenceStatus: 'online',
+    setPresenceStatus: vi.fn(),
     ...overrides,
   };
 }
