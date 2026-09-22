@@ -36,6 +36,7 @@ import {
 import { resolveBrowserLiveKitUrl } from '@/lib/public-endpoints';
 import { getPlugin } from '@/lib/plugin-registry';
 import { getRealtimeClient } from '@/lib/realtime-client';
+import { PluginSurface } from '../PluginSurface';
 
 type Guest = { gid: string; uid: string | null; name: string };
 type Token = {
@@ -656,27 +657,6 @@ type ActivityDetail = {
  *
  * The host or any admin with `START_ACTIVITY` can end the session.
  */
-/**
- * Isolates a plugin's client surface in its own component instance, so
- * any hooks it uses belong to IT and not to the panel that mounts it.
- */
-function PluginSurface({
-  render,
-  props,
-  fallback,
-}: {
-  render: (props: unknown) => React.ReactNode;
-  props: Record<string, unknown>;
-  /** Shown when the plugin ships no client UI (`renderClient` → null). */
-  fallback: React.ReactNode;
-}) {
-  const ui = render(props);
-  // `null` is the SDK's "no UI" signal; the decision has to happen here,
-  // because the caller only ever sees this element, never the plugin's
-  // return value.
-  return <>{ui ?? fallback}</>;
-}
-
 function ActivityPanel({
   serverId,
   sessionId,
