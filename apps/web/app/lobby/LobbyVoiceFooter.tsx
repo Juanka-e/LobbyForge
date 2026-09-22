@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import { useLobbyVoice, ConnectionState } from './LobbyVoiceProvider';
+import { LobbyPresenceMenu } from './LobbyPresenceMenu';
 import Link from 'next/link';
 
 /**
@@ -21,8 +22,6 @@ export interface LobbyVoiceFooterProps {
 }
 
 export function LobbyVoiceFooter({ serverName, hasUser, displayName }: LobbyVoiceFooterProps) {
-  // beta-review: the avatar showed a hard-coded "J" for every user.
-  const initial = hasUser ? (displayName?.trim().charAt(0).toUpperCase() || '?') : '?';
   const voice = useLobbyVoice();
   const connected = voice.connectionState === ConnectionState.Connected && !!voice.activeChannelId;
   const connecting = voice.connecting || voice.connectionState === ConnectionState.Connecting || voice.connectionState === ConnectionState.Reconnecting;
@@ -127,28 +126,21 @@ export function LobbyVoiceFooter({ serverName, hasUser, displayName }: LobbyVoic
       </div>
       <div className="p-3 bg-surface-raised">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="w-8 h-8 rounded-full bg-secondary-container relative flex-shrink-0">
-              <span className="absolute inset-0 flex items-center justify-center text-label-sm font-bold text-text-primary">
-                {initial}
-              </span>
-              <div
-                className={
-                  connected
-                    ? 'absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-success border-2 border-surface-raised'
-                    : 'absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-text-muted border-2 border-surface-raised'
-                }
-              />
-            </div>
-            <div className="flex flex-col min-w-0">
-              <span className="text-[13px] text-text-primary font-medium truncate">
-                {hasUser ? 'You' : 'Guest'}
-              </span>
-              <span className="text-[11px] text-text-secondary">
-                {connected ? (voice.serverMuted ? 'Server muted' : voice.micEnabled ? 'Unmuted' : 'Muted') : 'Online'}
-              </span>
-            </div>
-          </div>
+          <LobbyPresenceMenu
+            displayName={displayName ?? ''}
+            hasUser={hasUser}
+            status={voice.presenceStatus}
+            onChange={voice.setPresenceStatus}
+            voiceLabel={
+              connected
+                ? voice.serverMuted
+                  ? 'Server muted'
+                  : voice.micEnabled
+                    ? 'Unmuted'
+                    : 'Muted'
+                : null
+            }
+          />
           <div className="flex items-center gap-0.5">
             <button
               type="button"

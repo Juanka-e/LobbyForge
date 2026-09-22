@@ -21,12 +21,14 @@ import {
   listMessagesForChannel,
   getUserById,
   getBlockedUserIds,
+  listPluginInstallsForServer,
   type ChannelRow,
   type ChannelType,
   type MemberSummary,
   type MessageRow,
 } from '@lobbyforge/db';
 import { CorePermission, hasPermission } from '@lobbyforge/core';
+import { listPluginSummaries } from '@/lib/plugin-registry';
 import { getUserPresenceInChannel, getUserPresenceInServer, setUserPresence } from '@/lib/redis';
 import { LobbyVoiceProvider } from './LobbyVoiceProvider';
 import { LobbyVoiceChannels } from './LobbyVoiceChannels';
@@ -34,6 +36,8 @@ import { LobbyVoiceFooter } from './LobbyVoiceFooter';
 import { LobbyTextChannels } from './LobbyTextChannels';
 import { LobbyMainArea } from './LobbyMainArea';
 import { LobbyMembersClient } from './LobbyMembersClient';
+import { LobbyServerMenu } from './LobbyServerMenu';
+import { LobbyAppsSection } from './LobbyAppsSection';
 import DmLinkSection from './DmLinkSection';
 import MobileNav from './MobileNav';
 import { BlockListProvider } from './BlockListProvider';
@@ -41,6 +45,7 @@ import { isLobbyDemoAllowed } from '@/lib/lobby-mode';
 import { canReadLobbyChannelMessages, resolveLobbyChannelView } from '@/lib/lobby-channel-access';
 import { getRuntimeLiveKitUrl } from '@/lib/public-endpoints';
 import { projectServerPresenceForViewer } from '@/lib/presence-view';
+import { toPresenceStatus, type PresenceStatus } from '@/lib/presence-status';
 
 export const dynamic = 'force-dynamic';
 
@@ -67,6 +72,8 @@ interface Member {
   id: string;
   name: string;
   status: 'in-voice' | 'online' | 'offline';
+  /** The status the member chose (drives the dot color). */
+  presence?: PresenceStatus;
   muted?: boolean;
   grayscale?: boolean;
   roleName?: string | null;
@@ -118,6 +125,20 @@ interface LobbyData {
   canManageMessages: boolean;
   /** MUTE_MEMBERS: show the moderator server-mute control in the voice roster. */
   canMuteMembers: boolean;
+  /** MANAGE_SERVER: unlocks the community menu's admin entries. */
+  canManageServer: boolean;
+  /**
+   * Apps installed AND enabled for this server. Every member sees them —
+   * an activity is something members start together, so hiding the list
+   * behind the admin panel left members unable to see what is available.
+   */
+  installedApps: InstalledApp[];
+}
+
+export interface InstalledApp {
+  id: string;
+  name: string;
+  summary: string | null;
 }
 
 // ---- Demo fallback (preserves the M19 standalone lobby visual reference) ----
@@ -201,14 +222,18 @@ function buildMembers(
     .map((s) => {
       const p = presenceByUser.get(s.userId);
       let status: Member['status'] = 'offline';
-      if (p) {
+      // beta-review: "Invisible" (status 'offline') must read as offline
+      // in the SSR snapshot too, not just after the first client poll.
+      if (p && p.status !== 'offline' && p.status !== 'hidden') {
         status = p.channelId && voiceChannelIds.has(p.channelId) ? 'in-voice' : 'online';
       }
+      const presence: PresenceStatus = status === 'offline' ? 'offline' : toPresenceStatus(p?.status);
       const highestRole = s.roles.find((role) => role.name !== '@everyone');
       return {
         id: s.userId,
         name: s.displayName,
         status,
+        presence,
         grayscale: status === 'offline' || undefined,
         roleName: highestRole?.name ?? (s.roleName === '@everyone' ? null : s.roleName),
         roleColor: highestRole?.color ?? s.roleColor,
@@ -432,6 +457,22 @@ async function loadLiveData(
   const messages = buildMessages(messageRows, authorMap, currentUserId, blockedIds);
   const canManageMessages = hasPermission(view.permissions, CorePermission.MANAGE_MESSAGES);
   const canMuteMembers = hasPermission(view.permissions, CorePermission.MUTE_MEMBERS);
+  const canManageServer = hasPermission(view.permissions, CorePermission.MANAGE_SERVER);
+
+  // Apps the community has installed AND enabled. Members see the same
+  // list the activity picker uses, so "what can we play here?" is
+  // answerable without admin access.
+  const installedApps = await listPluginInstallsForServer(db, serverId)
+    .then((installs) => {
+      const summaries = new Map(listPluginSummaries().map((p) => [p.id, p]));
+      return installs.flatMap((install) => {
+        if (!install.enabled) return [];
+        const summary = summaries.get(install.pluginId);
+        if (!summary) return [];
+        return [{ id: summary.id, name: summary.name, summary: summary.catalog?.summary ?? null }];
+      });
+    })
+    .catch(() => [] as InstalledApp[]);
 
   // Resolve the local user's display name so the LiveKit voice provider
   // can send it as the participant `name` AND so the sidebar voice roster
@@ -462,6 +503,8 @@ async function loadLiveData(
     isLive: true,
     canManageMessages,
     canMuteMembers,
+    canManageServer,
+    installedApps,
   };
 }
 
@@ -585,6 +628,8 @@ export default async function LobbyPage({
     isLive: false,
     canManageMessages: false,
     canMuteMembers: false,
+    canManageServer: false,
+    installedApps: [],
   };
 
   return (
@@ -636,16 +681,28 @@ function LobbyShell({
   // URL, then the same-origin /livekit proxy.
   const livekitUrl = getRuntimeLiveKitUrl() ?? '';
   const canVoiceConnect = data.isLive && !!data.serverId && hasUser;
+  const showServerRail = shouldShowServerRail({
+    isOfficial,
+    joinedServerCount: data.joinedServers.length,
+  });
 
   const shell = (
     <>
       <MobileNav>
-        <ServerRail
-          serverName={serverName}
-          isOfficial={isOfficial}
-          activeServerId={data.serverId}
-          joinedServers={data.joinedServers}
-        />
+        {/* beta-review: the 72px community rail is a SWITCHER. A self-host
+            is single-server by design, so it had exactly one tile and no
+            purpose — it is rendered only on the official hub, or when the
+            account really did join more than one community. Its unique
+            destinations (user settings, discover) live in the community
+            menu, so nothing becomes unreachable. */}
+        {showServerRail ? (
+          <ServerRail
+            serverName={serverName}
+            isOfficial={isOfficial}
+            activeServerId={data.serverId}
+            joinedServers={data.joinedServers}
+          />
+        ) : null}
         <Sidebar
           serverName={serverName}
           isOfficial={isOfficial}
@@ -688,6 +745,24 @@ function LobbyShell({
       )}
     </div>
   );
+}
+
+/**
+ * Whether the community rail is worth the 72px it costs.
+ *
+ * The official hub always shows it (people join many communities there).
+ * A self-host is single-server by design, so the rail would render one
+ * tile that switches to itself — show it only if the account somehow
+ * belongs to more than one community on this instance.
+ */
+export function shouldShowServerRail({
+  isOfficial,
+  joinedServerCount,
+}: {
+  isOfficial: boolean;
+  joinedServerCount: number;
+}): boolean {
+  return isOfficial || joinedServerCount > 1;
 }
 
 /**
@@ -830,8 +905,11 @@ function Sidebar({
     <nav
       className="hidden md:flex w-[240px] lg:w-[260px] flex-shrink-0 bg-surface border-r border-border-subtle flex-col h-full z-20 animate-fade-in-right"
     >
-      {/* Server header — community name with optional host banner */}
-      <div className="relative border-b border-border-subtle group/server-menu overflow-hidden">
+      {/* Server header — community name with optional host banner.
+          beta-review: no `overflow-hidden` here. It used to clip the
+          dropdown (absolutely positioned below the 64px header), which
+          made the community menu unreachable. */}
+      <div className="relative border-b border-border-subtle">
         {data.serverBannerUrl ? (
           <div
             className="absolute inset-0 bg-cover bg-center opacity-40"
@@ -840,54 +918,13 @@ function Sidebar({
           />
         ) : null}
         <div className="relative">
-        <button className="h-16 px-4 flex items-center justify-between hover:bg-surface-container transition-colors duration-150 w-full text-left group">
-          <div className="flex items-center gap-3 min-w-0">
-            {data.instanceLogoUrl ? (
-              // Instance logo (self-host branding) — also the favicon source.
-              // eslint-disable-next-line @next/next/no-img-element -- data URL
-              <img
-                src={data.instanceLogoUrl}
-                alt=""
-                className="w-8 h-8 rounded-lg object-cover flex-shrink-0"
-              />
-            ) : (
-              <div className="w-8 h-8 rounded-lg bg-secondary-container flex items-center justify-center flex-shrink-0 font-bold text-text-primary">
-                {serverName.charAt(0).toUpperCase()}
-              </div>
-            )}
-            <span className="font-label-sm text-text-primary font-semibold whitespace-nowrap truncate">
-              {serverName}
-            </span>
-          </div>
-          <span className="material-symbols-outlined group-hover:text-text-primary transition-colors text-[20px] text-text-secondary">
-            expand_more
-          </span>
-        </button>
-        {data.isLive && data.serverId ? (
-          <div className="pointer-events-none absolute left-3 right-3 top-[58px] z-50 rounded-lg border border-border-subtle bg-surface-floating p-2 opacity-0 shadow-xl transition-all group-hover/server-menu:pointer-events-auto group-hover/server-menu:opacity-100 group-focus-within/server-menu:pointer-events-auto group-focus-within/server-menu:opacity-100">
-            <Link
-              href="/admin/settings"
-              className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary"
-            >
-              <span className="material-symbols-outlined text-[18px]">admin_panel_settings</span>
-              Admin panel
-            </Link>
-            <Link
-              href="/admin/settings/channels"
-              className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary"
-            >
-              <span className="material-symbols-outlined text-[18px]">forum</span>
-              Channels
-            </Link>
-            <Link
-              href="/admin/settings/invites"
-              className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary"
-            >
-              <span className="material-symbols-outlined text-[18px]">link</span>
-              Invites
-            </Link>
-          </div>
-        ) : null}
+        <LobbyServerMenu
+          serverName={serverName}
+          instanceLogoUrl={data.instanceLogoUrl}
+          serverId={data.isLive ? data.serverId : null}
+          canManageServer={data.canManageServer}
+          isOfficial={isOfficial}
+        />
         {isOfficial ? (
           <div className="px-4 pb-3 pt-1 border-t border-border-subtle/60">
             <a
@@ -940,6 +977,16 @@ function Sidebar({
             />
           )}
         </div>
+        {data.isLive ? (
+          <div className="animate-fade-in-up stagger-3">
+            <LobbyAppsSection
+              apps={data.installedApps}
+              serverId={data.serverId}
+              voiceChannelId={activeVoiceId ?? data.voiceChannels[0]?.id ?? null}
+              canManageServer={data.canManageServer}
+            />
+          </div>
+        ) : null}
       </div>
 
       {/* Direct Messages + Discover (authenticated users; DMs on all instances) */}

@@ -1,3 +1,4 @@
+import { createElement } from 'react';
 import type { GamePlugin } from '@lobbyforge/plugin-sdk';
 import { PluginPermission } from '@lobbyforge/plugin-sdk';
 import { hushleReducer } from './actions';
@@ -100,5 +101,14 @@ export const hushlePlugin: GamePlugin<HushleState, HushleAction> = {
   createInitialState: () => createHushleInitialState(),
   handleAction: (_ctx, state, action) => hushleReducer(state, action),
   migrateState: (raw: unknown) => migrateHushleState(raw),
-  renderClient: (props: unknown) => HushlePanel(props as HushlePanelClientProps),
+  // beta-review: this used to CALL HushlePanel as a plain function, so
+  // the panel's hooks (useState/useEffect/useMemo) were appended to the
+  // hook list of whatever component invoked renderClient. The host's
+  // panel is rendered conditionally, so the hook count changed between
+  // renders and React threw #310 ("rendered more hooks than during the
+  // previous render") — the whole voice room crashed to its error
+  // boundary the moment an activity loaded. Returning an ELEMENT gives
+  // the panel its own component instance and its own hooks.
+  renderClient: (props: unknown) =>
+    createElement(HushlePanel, props as HushlePanelClientProps),
 };

@@ -38,6 +38,11 @@ import {
   type KeybindPreferences,
 } from '@/lib/keybind-preferences';
 import { VOICE_TEST_STATE_EVENT, type VoiceTestKind } from '@/lib/voice-test-events';
+import {
+  readStoredPresenceStatus,
+  storePresenceStatus,
+  type PresenceStatus,
+} from '@/lib/presence-status';
 
 /**
  * M21.4a - LiveKit voice connection scoped to the standalone lobby.
@@ -112,6 +117,10 @@ export interface LobbyVoiceContextValue {
   setRemoteVolume: (identity: string, volume: number) => void;
   /** Get the current local playback volume for a remote participant. */
   getRemoteVolume: (identity: string) => number;
+  /** The status the local user picked (Online / Idle / DND / Invisible). */
+  presenceStatus: PresenceStatus;
+  /** Change it: persisted locally and sent with every presence heartbeat. */
+  setPresenceStatus: (status: PresenceStatus) => void;
   /** A moderator server-muted this user (the mic cannot be turned on). */
   serverMuted?: boolean;
   /** The browser blocked audio playback; `startAudio` must run from a click. */
@@ -350,6 +359,12 @@ export function LobbyVoiceProvider({
   const [screenSharePreference, setScreenSharePreferenceState] = useState<{ quality: ScreenQuality; fps: ScreenFps }>({ quality: 'auto', fps: '30' });
   const [joinedScreenShares, setJoinedScreenShares] = useState<Set<string>>(() => new Set());
   const [deafenEnabled, setDeafenEnabled] = useState(false);
+  // beta-review: both heartbeats used to hard-code `status: 'online'`, so
+  // the presence status the API has always accepted could never be set.
+  // The choice is restored from localStorage on mount (see the effect
+  // below) so a reload doesn't silently flip the user back to Online.
+  const [presenceStatus, setPresenceStatusState] = useState<PresenceStatus>('online');
+  const presenceStatusRef = useRef<PresenceStatus>('online');
   const [serverMuted, setServerMuted] = useState(false);
   const [audioBlocked, setAudioBlocked] = useState(false);
   const [participants, setParticipants] = useState<LobbyVoiceParticipant[]>([]);
@@ -520,7 +535,11 @@ export function LobbyVoiceProvider({
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ serverId, channelId: activeTextChannelId, status: 'online' }),
+          body: JSON.stringify({
+            serverId,
+            channelId: activeTextChannelId,
+            status: presenceStatusRef.current,
+          }),
         });
       } catch {
         // The next heartbeat retries; Redis TTL handles abandoned tabs.
@@ -617,7 +636,7 @@ export function LobbyVoiceProvider({
           const body: Record<string, unknown> = {
             serverId,
             channelId,
-            status: 'online',
+            status: presenceStatusRef.current,
           };
           // Piggyback the bandwidth delta on the heartbeat. The first
           // heartbeat after connect establishes the RTC stats baseline
@@ -1419,6 +1438,35 @@ export function LobbyVoiceProvider({
     applyRemoteAudio(r, !deafenEnabled);
   }, [deafenEnabled, applyRemoteAudio]);
 
+  // Restore the last chosen status before the first heartbeat goes out.
+  useEffect(() => {
+    const stored = readStoredPresenceStatus();
+    presenceStatusRef.current = stored;
+    setPresenceStatusState(stored);
+  }, []);
+
+  const setPresenceStatus = useCallback(
+    (status: PresenceStatus) => {
+      presenceStatusRef.current = status;
+      setPresenceStatusState(status);
+      storePresenceStatus(status);
+      // Push it immediately instead of waiting out the heartbeat interval,
+      // so other members see the change right away. The channel is whichever
+      // one currently anchors this user's presence row.
+      const channelId = activeChannelId ?? activeTextChannelId;
+      if (!channelId) return;
+      void fetch('/api/presence', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serverId, channelId, status }),
+      }).catch(() => {
+        // The next heartbeat carries the new status anyway.
+      });
+    },
+    [activeChannelId, activeTextChannelId, serverId]
+  );
+
   const value = useMemo<LobbyVoiceContextValue>(
     () => ({
       serverId,
@@ -1453,6 +1501,8 @@ export function LobbyVoiceProvider({
       leaveScreenShare,
       setRemoteVolume,
       getRemoteVolume,
+      presenceStatus,
+      setPresenceStatus,
       serverMuted,
       audioBlocked,
       startAudio,
@@ -1490,6 +1540,8 @@ export function LobbyVoiceProvider({
       leaveScreenShare,
       setRemoteVolume,
       getRemoteVolume,
+      presenceStatus,
+      setPresenceStatus,
       serverMuted,
       audioBlocked,
       startAudio,

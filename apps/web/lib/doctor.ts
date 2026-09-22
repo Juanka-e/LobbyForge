@@ -5,7 +5,6 @@
  * can be unit-tested without a real host. The collector (collectSystemStats)
  * uses Node's `os` module and is the only server-only side of this file.
  */
-import postgres from 'postgres';
 import {
   AlertLevel,
   buildDoctorReport,
@@ -135,15 +134,17 @@ function envUrl(name: string, fallback: string): string {
 export async function collectDoctorReport(): Promise<{ report: DoctorReport; stats: SystemStats }> {
   const stats = await collectSystemStats();
   const livekitUrl = envUrl('LIVEKIT_URL', 'http://localhost:19580');
-  const postgresUrl = envUrl('POSTGRES_URL', 'postgres://lobbyforge:lobbyforge_dev@localhost:19532/lobbyforge');
   const redisUrl = envUrl('REDIS_URL', 'redis://:lobbyforge_dev@localhost:19579');
-  const publicUrl = envUrl('NEXT_PUBLIC_BASE_URL', 'http://localhost:19520');
+  // The app itself is reachable only on its OWN listen port. A published
+  // host port (19520, 443, ...) is not routable from inside the container,
+  // so probing it would always fail — see `probePublicUrl`.
+  const publicUrl = publicBaseUrl();
 
   const [livekitOk, postgresOk, redisOk, httpsOk] = await Promise.all([
     probeUrl(`${livekitUrl}/`).catch(() => false),
-    probePostgres(postgresUrl).catch(() => false),
+    probePostgres().catch(() => false),
     probeRedis(redisUrl).catch(() => false),
-    probeUrl(publicUrl).catch(() => false),
+    publicUrl ? probeUrl(publicUrl).catch(() => false) : Promise.resolve(null),
   ]);
 
   stats.livekitReachable = livekitOk;
@@ -161,17 +162,40 @@ export async function collectDoctorReport(): Promise<{ report: DoctorReport; sta
   return { report, stats };
 }
 
-async function probePostgres(url: string): Promise<boolean> {
-  const sql = postgres(url, { max: 1, connect_timeout: 2 });
+/**
+ * Probe the app's configured Postgres — the SAME connection every request
+ * uses, exactly like `probeRedis` pings the shared client.
+ *
+ * beta-review: this used to open its own connection to `POSTGRES_URL`,
+ * falling back to a host-facing `localhost:<published port>` URL. Nothing
+ * sets `POSTGRES_URL` (the app reads `DATABASE_URL`), and inside the
+ * container `localhost` is the container itself — so Doctor reported
+ * "postgres is not reachable" (critical) on a perfectly healthy stack.
+ */
+async function probePostgres(): Promise<boolean> {
   try {
-    await sql`SELECT 1`;
+    const { getDb } = await import('@/lib/db');
+    const { sql } = await import('drizzle-orm');
+    await Promise.race([
+      getDb().execute(sql`SELECT 1`),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000)),
+    ]);
     return true;
   } catch (err) {
     console.error('[doctor] postgres probe failed:', err);
     return false;
-  } finally {
-    await sql.end();
   }
+}
+
+/**
+ * The externally reachable base URL, or null when the operator hasn't
+ * declared one. Only a declared URL is probed: a self-host on plain HTTP
+ * behind a LAN address has nothing to check, and guessing a published
+ * port would fail from inside the container.
+ */
+function publicBaseUrl(): string | null {
+  const raw = process.env.NEXT_PUBLIC_BASE_URL;
+  return raw && raw.trim() ? raw.trim() : null;
 }
 
 /**
@@ -263,17 +287,22 @@ export function buildChecksFromStats(stats: SystemStats): DoctorCheck[] {
   });
 
   // Network checks
+  // beta-review: a self-probe runs INSIDE the app container, where the
+  // published host port / public domain often isn't routable even on a
+  // perfectly healthy deployment. So an unreachable public URL is a
+  // WARNING with an actionable message, never a critical — and when no
+  // public URL is configured at all there is simply nothing to check.
   out.push({
     id: 'https',
     category: DoctorCategory.NETWORK,
     ok: stats.httpsReachable !== false,
-    level: stats.httpsReachable === false ? AlertLevel.CRITICAL : AlertLevel.INFO,
+    level: stats.httpsReachable === false ? AlertLevel.WARNING : AlertLevel.INFO,
     message:
       stats.httpsReachable === false
-        ? 'Public HTTPS URL is not reachable.'
+        ? 'NEXT_PUBLIC_BASE_URL did not answer from inside the app container. Verify it from outside — a reverse proxy that only accepts external traffic can cause this.'
         : stats.httpsReachable === true
           ? 'Public HTTPS URL is reachable.'
-          : 'Public HTTPS not yet probed.',
+          : 'No public base URL configured (NEXT_PUBLIC_BASE_URL) — nothing to probe.',
   });
 
   out.push({

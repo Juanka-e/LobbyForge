@@ -169,15 +169,11 @@ describe('collectSystemStats disk resolution', () => {
 describe('probeRedis (via collectDoctorReport integration)', () => {
   // probeRedis is not exported directly; we exercise it through the Redis
   // check by mocking the shared ioredis singleton it imports. We also
-  // mock postgres + fetch so the parallel probes return instantly
+  // mock the DB singleton + fetch so the parallel probes return instantly
   // instead of timing out against a real DB / HTTP server.
   beforeEach(() => {
     vi.resetModules();
-    vi.doMock('postgres', () => {
-      const sql = vi.fn(async () => [{ ok: 1 }]);
-      (sql as unknown as { end: () => Promise<void> }).end = async () => {};
-      return { default: vi.fn(() => sql) };
-    });
+    vi.doMock('@/lib/db', () => ({ getDb: () => ({ execute: vi.fn(async () => [{ ok: 1 }]) }) }));
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status: 200 }));
   });
 
@@ -200,5 +196,72 @@ describe('probeRedis (via collectDoctorReport integration)', () => {
     const redis = report.checks.find((c) => c.id === 'redis');
     expect(redis?.ok).toBe(false);
     expect(redis?.level).toBe(AlertLevel.CRITICAL);
+  }, 15000);
+});
+
+describe('service probes use the app\'s own configuration', () => {
+  // beta-review: Doctor reported "postgres is not reachable" (critical) on
+  // a healthy stack because it opened its OWN connection to a POSTGRES_URL
+  // nothing sets, defaulting to a host-facing localhost:<published port>
+  // that a container cannot route to. It must probe the same client every
+  // request uses — exactly like the Redis probe.
+  beforeEach(() => {
+    vi.resetModules();
+    vi.doMock('@/lib/redis', () => ({ redis: { ping: vi.fn().mockResolvedValue('PONG') } }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status: 200 }));
+    delete process.env.NEXT_PUBLIC_BASE_URL;
+  });
+
+  it('reports postgres reachable via the shared Drizzle client', async () => {
+    const execute = vi.fn(async () => [{ ok: 1 }]);
+    vi.doMock('@/lib/db', () => ({ getDb: () => ({ execute }) }));
+    const { collectDoctorReport } = await import('../doctor.js');
+    const { report } = await collectDoctorReport();
+    expect(execute).toHaveBeenCalled();
+    expect(report.checks.find((c) => c.id === 'postgres')?.ok).toBe(true);
+  }, 15000);
+
+  it('reports postgres unreachable when the shared client throws', async () => {
+    vi.doMock('@/lib/db', () => ({
+      getDb: () => ({ execute: vi.fn().mockRejectedValue(new Error('ECONNREFUSED')) }),
+    }));
+    const { collectDoctorReport } = await import('../doctor.js');
+    const { report } = await collectDoctorReport();
+    const pg = report.checks.find((c) => c.id === 'postgres');
+    expect(pg?.ok).toBe(false);
+    expect(pg?.level).toBe(AlertLevel.CRITICAL);
+  }, 15000);
+
+  it('skips the public-URL probe when no public base URL is configured', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ status: 200 });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.doMock('@/lib/db', () => ({ getDb: () => ({ execute: vi.fn(async () => [{ ok: 1 }]) }) }));
+    const { collectDoctorReport } = await import('../doctor.js');
+    const { report } = await collectDoctorReport();
+    const https = report.checks.find((c) => c.id === 'https');
+    expect(https?.ok).toBe(true);
+    expect(https?.level).toBe(AlertLevel.INFO);
+    // Only LiveKit was probed over HTTP — never a guessed public port.
+    for (const call of fetchMock.mock.calls) {
+      expect(String(call[0])).not.toContain('19520');
+    }
+  }, 15000);
+
+  it('degrades an unreachable public URL to a warning, not a critical', async () => {
+    process.env.NEXT_PUBLIC_BASE_URL = 'https://example.invalid';
+    vi.doMock('@/lib/db', () => ({ getDb: () => ({ execute: vi.fn(async () => [{ ok: 1 }]) }) }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: unknown) => {
+        if (String(url).includes('example.invalid')) throw new Error('ENOTFOUND');
+        return { status: 200 };
+      })
+    );
+    const { collectDoctorReport } = await import('../doctor.js');
+    const { report } = await collectDoctorReport();
+    const https = report.checks.find((c) => c.id === 'https');
+    expect(https?.ok).toBe(false);
+    expect(https?.level).toBe(AlertLevel.WARNING);
+    delete process.env.NEXT_PUBLIC_BASE_URL;
   }, 15000);
 });

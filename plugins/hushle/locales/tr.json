@@ -5,6 +5,7 @@
   "hushle.error.notHost": "Bu işlemi sadece host yapabilir.",
   "hushle.lobby.hostPrompt": "Bu sesli oda için yeni bir Hushle oyunu başlat.",
   "hushle.lobby.language": "Kart dili",
+  "hushle.lobby.packLabel": "Kelime paketi",
   "hushle.lobby.startButton": "Hushle'ı başlat",
   "hushle.lobby.turnDuration": "Tur süresi (saniye)",
   "hushle.lobby.waitingForHost": "Host oyunu başlatana kadar bekle…",

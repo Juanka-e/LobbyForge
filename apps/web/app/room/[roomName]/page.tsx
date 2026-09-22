@@ -10,7 +10,7 @@
  *      deafen disables the remote audio publications (server stops
  *      sending) and also covers publications that appear later.
  *   5. If `serverId` + `channelId` query params are present, post a
- *      presence heartbeat every 5s to /api/servers/{id}/channels/{channelId}/presence.
+ *      presence heartbeat every 5s to POST /api/presence.
  *
  * M14 scope is self-mute/deafen only. Server-side mute (M15) needs
  * `livekit-server-sdk` and a `RoomServiceClient.muteParticipant` call.
@@ -36,6 +36,7 @@ import {
 import { resolveBrowserLiveKitUrl } from '@/lib/public-endpoints';
 import { getPlugin } from '@/lib/plugin-registry';
 import { getRealtimeClient } from '@/lib/realtime-client';
+import { PluginSurface } from '../PluginSurface';
 
 type Guest = { gid: string; uid: string | null; name: string };
 type Token = {
@@ -239,6 +240,40 @@ function RoomView({ roomName }: { roomName: string }) {
     };
   }, [guest, serverId, channelId, buildTimeLivekitUrl, collectParticipants]);
 
+  // 2.5 Adopt an activity that is ALREADY running in this channel.
+  //
+  // beta-review: `activeSessionId` was only ever set by the local
+  // "Start activity" click, so anyone who opened the room while a game
+  // was in progress — including the host after a page reload — saw the
+  // picker instead of the game, and pressing Start answered 409 with a
+  // raw error blob. A channel holds at most one open activity, so the
+  // room simply joins it.
+  useEffect(() => {
+    if (!serverId || !channelId) return;
+    if (!guest?.uid) return;
+    if (activeSessionId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/servers/${serverId}/channels/${channelId}/activities`, {
+          credentials: 'same-origin',
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          activities?: Array<{ id: string; status: string }>;
+        };
+        const open = data.activities?.find((a) => a.status !== 'ended' && a.status !== 'cancelled');
+        if (open && !cancelled) setActiveSessionId(open.id);
+      } catch {
+        // Non-fatal: the picker stays available and a 409 there is
+        // reported to the user rather than silently swallowed.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [serverId, channelId, guest?.uid, activeSessionId]);
+
   // 3. Presence heartbeat — only if serverId + channelId are in the query string.
   useEffect(() => {
     if (!serverId || !channelId) return;
@@ -246,11 +281,15 @@ function RoomView({ roomName }: { roomName: string }) {
 
     const post = async () => {
       try {
-        await fetch(`/api/servers/${serverId}/channels/${channelId}/presence`, {
+        // beta-review: this used to POST to the channel presence route,
+        // which is READ-only (GET) and answered 405 on every beat — so
+        // nobody in a /room/ page was ever visible in the lobby roster.
+        // `POST /api/presence` is the one presence write path.
+        await fetch('/api/presence', {
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'online' }),
+          body: JSON.stringify({ serverId, channelId, status: 'online' }),
         });
       } catch {
         // Swallow — a single missed heartbeat is fine; the 90s TTL handles
@@ -520,6 +559,16 @@ function ActivityPicker({
           body: JSON.stringify({ pluginId: selected }),
         }
       );
+      if (res.status === 409) {
+        // A channel holds one open activity. Someone else started one
+        // between render and click — join it instead of showing the
+        // raw conflict payload.
+        const conflict = (await res.json().catch(() => ({}))) as { activity?: { id: string } };
+        if (conflict.activity?.id) {
+          onStart(conflict.activity.id);
+          return;
+        }
+      }
       if (!res.ok) {
         const detail = await res.json().catch(() => ({}));
         throw new Error(`${res.status} ${JSON.stringify(detail)}`);
@@ -696,6 +745,13 @@ function ActivityPanel({
       }
     };
 
+    // beta-review: ALWAYS fetch the current state once on mount. A
+    // subscription only delivers FUTURE events, so on the WebSocket path
+    // the panel used to sit on "…" until somebody dispatched an action —
+    // a host who had just started an activity saw a dead panel and no
+    // way to start the game.
+    void fetchOnce();
+
     try {
       const client = getRealtimeClient();
       client.connect();
@@ -703,23 +759,40 @@ function ActivityPanel({
         `activity-state:${serverId}:${sessionId}` as const,
         handleEvent
       );
-      // If the WS connection is CLOSED (initial connect failed), drop to polling.
-      if (client.readyState === WebSocket.CLOSED) {
-        pollFallback = true;
-      }
     } catch {
       pollFallback = true;
     }
 
-    if (pollFallback) {
+    // `connect()` is asynchronous, so the socket is still CONNECTING right
+    // here — checking readyState synchronously (the old behaviour) could
+    // never detect a failure. Re-check shortly after, and keep watching:
+    // if the socket is not OPEN we poll, and we stop polling once it is.
+    const ensureTransport = () => {
+      if (cancelled) return;
+      let open = false;
+      try {
+        open = !pollFallback && getRealtimeClient().readyState === WebSocket.OPEN;
+      } catch {
+        open = false;
+      }
+      if (open) {
+        if (pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+        return;
+      }
       // 5s polling cadence — recovery lane when WS isn't available.
-      void fetchOnce();
-      pollTimer = setInterval(fetchOnce, 5_000);
-    }
+      if (!pollTimer) pollTimer = setInterval(fetchOnce, 5_000);
+    };
+    const transportTimer = setInterval(ensureTransport, 5_000);
+    const transportDelay = setTimeout(ensureTransport, 1_500);
 
     return () => {
       cancelled = true;
       if (unsubscribe) unsubscribe();
+      clearTimeout(transportDelay);
+      clearInterval(transportTimer);
       if (pollTimer) {
         clearInterval(pollTimer);
       }
@@ -841,17 +914,63 @@ function ActivityPanel({
   );
 
   const pluginClient = detail ? getPlugin(detail.pluginId) : null;
-  const pluginUi =
-    pluginClient && detail
-      ? pluginClient.renderClient({
-          state: detail.state,
-          dispatch: (action: unknown) => dispatch(action as Record<string, unknown>),
-          actorUserId: actorUserId ?? '',
-          hostUserId: detail.createdBy,
-          players: detail.players.map((p) => ({ userId: p.userId, name: p.name ?? null })),
-          cardPacks,
-        })
-      : null;
+  // beta-review: render the plugin's surface through its OWN component
+  // (see PluginSurface). Inlining `renderClient(...)` here meant a plugin
+  // that uses hooks borrowed this component's hook list, and because the
+  // call is conditional the hook count changed between renders — React
+  // #310, which took the entire voice room down with it.
+  // The M16 generic surface: raw state + a free-form action form. Used
+  // for plugins that ship no client UI, and while the state loads.
+  const genericSurface = (
+    <>
+      <pre
+        style={{
+          background: '#07090d',
+          padding: 8,
+          borderRadius: 4,
+          fontSize: 12,
+          maxHeight: 180,
+          overflow: 'auto',
+          margin: '0 0 12px 0',
+        }}
+      >
+        {detail ? JSON.stringify(detail.state, null, 2) : '…'}
+      </pre>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <input
+          value={actionJson}
+          onChange={(e) => setActionJson(e.target.value)}
+          spellCheck={false}
+          style={{
+            flex: 1,
+            padding: '6px 8px',
+            background: '#11151b',
+            color: '#e6e8eb',
+            border: '1px solid #1f242c',
+            borderRadius: 4,
+            fontFamily: 'ui-monospace, monospace',
+            fontSize: 12,
+          }}
+        />
+        <button
+          onClick={() => {
+            try {
+              const parsed = JSON.parse(actionJson) as Record<string, unknown>;
+              void sendAction(parsed);
+            } catch (err) {
+              setError(`Invalid JSON: ${(err as Error).message}`);
+            }
+          }}
+          disabled={busy}
+        >
+          {busy ? '…' : 'Send action'}
+        </button>
+        <button onClick={end} disabled={busy}>
+          End
+        </button>
+      </div>
+    </>
+  );
 
   return (
     <div
@@ -870,58 +989,24 @@ function ActivityPanel({
           status: <code>{detail.status}</code> · players: {detail.players.length}
         </p>
       )}
-      {pluginUi ? (
-        <div style={{ marginTop: 12 }}>{pluginUi}</div>
-      ) : (
-        <>
-          <pre
-            style={{
-              background: '#07090d',
-              padding: 8,
-              borderRadius: 4,
-              fontSize: 12,
-              maxHeight: 180,
-              overflow: 'auto',
-              margin: '0 0 12px 0',
+      <div style={{ marginTop: 12 }}>
+        {pluginClient && detail ? (
+          <PluginSurface
+            render={pluginClient.renderClient}
+            props={{
+              state: detail.state,
+              dispatch: (action: unknown) => dispatch(action as Record<string, unknown>),
+              actorUserId: actorUserId ?? '',
+              hostUserId: detail.createdBy,
+              players: detail.players.map((p) => ({ userId: p.userId, name: p.name ?? null })),
+              cardPacks,
             }}
-          >
-            {detail ? JSON.stringify(detail.state, null, 2) : '…'}
-          </pre>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <input
-              value={actionJson}
-              onChange={(e) => setActionJson(e.target.value)}
-              spellCheck={false}
-              style={{
-                flex: 1,
-                padding: '6px 8px',
-                background: '#11151b',
-                color: '#e6e8eb',
-                border: '1px solid #1f242c',
-                borderRadius: 4,
-                fontFamily: 'ui-monospace, monospace',
-                fontSize: 12,
-              }}
-            />
-            <button
-              onClick={() => {
-                try {
-                  const parsed = JSON.parse(actionJson) as Record<string, unknown>;
-                  void sendAction(parsed);
-                } catch (err) {
-                  setError(`Invalid JSON: ${(err as Error).message}`);
-                }
-              }}
-              disabled={busy}
-            >
-              {busy ? '…' : 'Send action'}
-            </button>
-            <button onClick={end} disabled={busy}>
-              End
-            </button>
-          </div>
-        </>
-      )}
+            fallback={genericSurface}
+          />
+        ) : (
+          genericSurface
+        )}
+      </div>
       {error && <p style={{ color: '#e36049', marginTop: 8, fontSize: 13 }}>{error}</p>}
     </div>
   );
