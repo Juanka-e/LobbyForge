@@ -470,7 +470,11 @@ export function DicePanel(props: DicePanelProps): ReactNode {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             <button
               type="button"
-              onClick={() => void dispatch({ type: 'toggle', hostId: actorUserId })}
+              onClick={() =>
+                // `set-enabled`, not `toggle`: a flip computed from a
+                // snapshot that has already moved sets the wrong value.
+                void dispatch({ type: 'set-enabled', hostId: actorUserId, enabled: !state.enabled })
+              }
               aria-label={
                 state.enabled ? t('dice.host.disableAria') : t('dice.host.enableAria')
               }
@@ -485,6 +489,14 @@ export function DicePanel(props: DicePanelProps): ReactNode {
               style={dangerButtonStyle}
             >
               {t('dice.host.reset')}
+            </button>
+            <button
+              type="button"
+              onClick={() => void dispatch({ type: 'clear-history', hostId: actorUserId })}
+              aria-label={t('dice.host.clearHistoryAria')}
+              style={dangerButtonStyle}
+            >
+              {t('dice.host.clearHistory')}
             </button>
           </div>
           <p style={{ ...mutedStyle, margin: '8px 0 0 0', fontSize: 12 }}>

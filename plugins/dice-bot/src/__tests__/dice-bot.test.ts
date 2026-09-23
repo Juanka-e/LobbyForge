@@ -57,19 +57,65 @@ describe('dice bot — roll semantics', () => {
 });
 
 describe('dice bot — host moderation', () => {
-  it('reset-stats clears stats AND history; toggle disables rolls', () => {
+  // beta-review: `reset-stats` used to clear the roll log and the last
+  // roll as well, which its name does not say. Wiping the scoreboard is
+  // a different intent from erasing what was rolled, so they are two
+  // actions and this test pins the separation.
+  it('reset-stats clears the scores and leaves the roll log alone', () => {
     let state = initial();
     state = roll(state, 'p1');
     state = roll(state, 'p1');
+    const historyBefore = state.history;
+    const lastBefore = state.lastRoll;
+
     state = diceBotPlugin.handleAction(null as never, state, { type: 'reset-stats', hostId: 'h' });
     expect(state.stats).toEqual({});
+    expect(state.history).toEqual(historyBefore);
+    expect(state.lastRoll).toEqual(lastBefore);
+  });
+
+  it('clear-history clears the roll log and leaves the scores alone', () => {
+    let state = initial();
+    state = roll(state, 'p1');
+    state = roll(state, 'p1');
+    const statsBefore = state.stats;
+
+    state = diceBotPlugin.handleAction(null as never, state, { type: 'clear-history', hostId: 'h' });
     expect(state.history).toEqual([]);
     expect(state.lastRoll).toBeNull();
+    expect(state.stats).toEqual(statsBefore);
+  });
 
+  it('set-enabled lands on the value asked for, however often it is sent', () => {
+    // `toggle` flips whatever the reducer currently holds, so a host
+    // acting on a stale snapshot — or two hosts pressing at once —
+    // could end up with rolling on when they both asked for off.
+    let state = initial();
+    state = diceBotPlugin.handleAction(null as never, state, { type: 'set-enabled', hostId: 'h', enabled: false });
+    expect(state.enabled).toBe(false);
+    state = diceBotPlugin.handleAction(null as never, state, { type: 'set-enabled', hostId: 'h2', enabled: false });
+    expect(state.enabled).toBe(false);
+
+    state = roll(state, 'p1'); // rolling is off — ignored
+    expect(state.lastRoll).toBeNull();
+
+    state = diceBotPlugin.handleAction(null as never, state, { type: 'set-enabled', hostId: 'h', enabled: true });
+    expect(state.enabled).toBe(true);
+  });
+
+  it('rejects a set-enabled with no value rather than guessing one', () => {
+    const state = initial();
+    const next = diceBotPlugin.handleAction(null as never, state, {
+      type: 'set-enabled',
+      hostId: 'h',
+    } as never);
+    expect(next).toEqual(state);
+  });
+
+  it('still supports toggle for callers that have not migrated', () => {
+    let state = initial();
     state = diceBotPlugin.handleAction(null as never, state, { type: 'toggle', hostId: 'h' });
     expect(state.enabled).toBe(false);
-    state = roll(state, 'p1'); // bot disabled — ignored
-    expect(state.lastRoll).toBeNull();
     state = diceBotPlugin.handleAction(null as never, state, { type: 'toggle', hostId: 'h' });
     expect(state.enabled).toBe(true);
   });
@@ -97,6 +143,10 @@ describe('dice bot — helpers + manifest', () => {
     expect(diceBotPlugin.manifest.type).toBe('utility');
     expect(diceBotPlugin.actionPolicies?.roll).toEqual({ role: 'member', actorFields: ['playerId'] });
     expect(diceBotPlugin.actionPolicies?.['reset-stats']).toEqual({ role: 'host', actorFields: ['hostId'] });
+    // Every host-only action must be gated, or a member could clear the
+    // room's scoreboard.
+    expect(diceBotPlugin.actionPolicies?.['clear-history']).toEqual({ role: 'host', actorFields: ['hostId'] });
+    expect(diceBotPlugin.actionPolicies?.['set-enabled']).toEqual({ role: 'host', actorFields: ['hostId'] });
   });
 });
 
