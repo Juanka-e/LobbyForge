@@ -22,6 +22,7 @@ import {
   getUserById,
   getBlockedUserIds,
   listPluginInstallsForServer,
+  listDmChannelsForUser,
   type ChannelRow,
   type ChannelType,
   type MemberSummary,
@@ -139,6 +140,10 @@ export interface InstalledApp {
   id: string;
   name: string;
   summary: string | null;
+  /** Shown on the launch card so players can pick a game that fits. */
+  minPlayers: number | null;
+  maxPlayers: number | null;
+  trustLevel: string | null;
 }
 
 // ---- Demo fallback (preserves the M19 standalone lobby visual reference) ----
@@ -469,7 +474,16 @@ async function loadLiveData(
         if (!install.enabled) return [];
         const summary = summaries.get(install.pluginId);
         if (!summary) return [];
-        return [{ id: summary.id, name: summary.name, summary: summary.catalog?.summary ?? null }];
+        return [
+          {
+            id: summary.id,
+            name: summary.name,
+            summary: summary.catalog?.summary ?? null,
+            minPlayers: summary.catalog?.playerConfig?.minPlayers ?? null,
+            maxPlayers: summary.catalog?.playerConfig?.maxPlayers ?? null,
+            trustLevel: summary.catalog?.trustLevel ?? null,
+          },
+        ];
       });
     })
     .catch(() => [] as InstalledApp[]);
@@ -513,7 +527,7 @@ async function loadLiveData(
 export default async function LobbyPage({
   searchParams,
 }: {
-  searchParams: Promise<{ server?: string }>;
+  searchParams: Promise<{ server?: string; dm?: string }>;
 }) {
   // Force first-run visitors through the /setup wizard before the
   // lobby tries to read instance / server data. On the official host
@@ -632,12 +646,31 @@ export default async function LobbyPage({
     installedApps: [],
   };
 
+  // A /dm/<id> deep link redirects here; open that conversation in the
+  // centre column. Resolved server-side so the first paint already shows
+  // the right name and avatar (the route already verified participation).
+  const requestedDm = (await searchParams).dm;
+  let initialDm: { channelId: string; name: string; avatarUrl: string | null } | null = null;
+  if (requestedDm && userId) {
+    const conversation = await listDmChannelsForUser(getDb(), userId)
+      .then((list) => list.find((c) => c.id === requestedDm) ?? null)
+      .catch(() => null);
+    if (conversation) {
+      initialDm = {
+        channelId: conversation.id,
+        name: conversation.otherUserDisplayName,
+        avatarUrl: conversation.otherUserAvatarUrl,
+      };
+    }
+  }
+
   return (
     <LobbyShell
       serverName={data.serverName}
       isOfficial={isOfficial}
       hasUser={hasUser}
       data={data}
+      initialDm={initialDm}
     />
   );
 }
@@ -667,11 +700,14 @@ function LobbyShell({
   isOfficial,
   hasUser,
   data,
+  initialDm,
 }: {
   serverName: string;
   isOfficial: boolean;
   hasUser: boolean;
   data: LobbyData;
+  /** Conversation to open on first paint (from a /dm/<id> deep link). */
+  initialDm: { channelId: string; name: string; avatarUrl: string | null } | null;
 }) {
   // LiveKit is only wired in live mode - demo mode keeps the legacy
   // SSR-only ChannelGroup + VoiceControlFooter so the demo render path
@@ -736,6 +772,7 @@ function LobbyShell({
             localDisplayName={data.currentDisplayName}
             initialTextChannelId={data.activeTextChannel?.id ?? null}
             initialTextChannelName={data.activeTextChannel?.name ?? 'general'}
+            initialDm={initialDm}
           >
             {shell}
           </LobbyVoiceProvider>
@@ -901,6 +938,9 @@ function Sidebar({
   voiceProvider: boolean;
 }) {
   const activeVoiceId = data.activeVoiceChannel?.id;
+  // Activities belong to a voice channel: the active one, else the first.
+  const activityChannel =
+    data.voiceChannels.find((c) => c.id === activeVoiceId) ?? data.voiceChannels[0] ?? null;
   return (
     <nav
       className="hidden md:flex w-[240px] lg:w-[260px] flex-shrink-0 bg-surface border-r border-border-subtle flex-col h-full z-20 animate-fade-in-right"
@@ -977,20 +1017,23 @@ function Sidebar({
             />
           )}
         </div>
-        {data.isLive ? (
+        {voiceProvider ? (
           <div className="animate-fade-in-up stagger-3">
             <LobbyAppsSection
               apps={data.installedApps}
               serverId={data.serverId}
-              voiceChannelId={activeVoiceId ?? data.voiceChannels[0]?.id ?? null}
+              voiceChannelId={activityChannel?.id ?? null}
+              voiceChannelName={activityChannel?.name ?? 'this room'}
               canManageServer={data.canManageServer}
             />
           </div>
         ) : null}
       </div>
 
-      {/* Direct Messages + Discover (authenticated users; DMs on all instances) */}
-      {data.isLive && hasUser ? (
+      {/* Direct Messages + Discover (authenticated users; DMs on all instances).
+          Gated on the voice provider: the DM list opens conversations in
+          the centre column, so it needs the provider's view state. */}
+      {voiceProvider && hasUser ? (
         <div className="border-t border-border-subtle p-3 space-y-1">
           {isOfficial ? (
             <>

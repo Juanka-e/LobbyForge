@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useLobbyVoice } from './LobbyVoiceProvider';
 
 interface DmChannelSummary {
   id: string;
@@ -11,10 +12,15 @@ interface DmChannelSummary {
 }
 
 /**
- * Shows the user's DM channels in the lobby sidebar (official instance).
- * Fetches from GET /api/dm and renders clickable links to /dm/{id}.
+ * The user's conversations, in the lobby sidebar.
+ *
+ * design pass: these were links to /dm/<id>, a full-page view that
+ * replaced the whole app. They now open the conversation in the centre
+ * column, so the channel list, roster and voice controls stay put — and
+ * the row shows which conversation is open, like a channel does.
  */
 export default function DmLinkSection({ currentUserId }: { currentUserId: string | null }) {
+  const voice = useLobbyVoice();
   const [channels, setChannels] = useState<DmChannelSummary[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -49,22 +55,38 @@ export default function DmLinkSection({ currentUserId }: { currentUserId: string
         <p className="px-2 py-1 text-xs text-text-muted">No conversations yet</p>
       ) : (
         <div className="space-y-0.5">
-          {channels.slice(0, 8).map((ch) => (
-            <a
-              key={ch.id}
-              href={`/dm/${ch.id}`}
-              className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors group"
-            >
-              <div className="w-5 h-5 rounded-full bg-secondary-container flex items-center justify-center text-[10px] font-bold text-text-primary flex-shrink-0 overflow-hidden">
-                {ch.otherUserAvatarUrl ? (
-                  <img src={ch.otherUserAvatarUrl} alt="" className="w-full h-full object-cover" />
-                ) : (
-                  ch.otherUserDisplayName.charAt(0).toUpperCase()
-                )}
-              </div>
-              <span className="truncate">{ch.otherUserDisplayName}</span>
-            </a>
-          ))}
+          {channels.slice(0, 8).map((ch) => {
+            const active = voice.mainViewMode === 'dm' && voice.activeDm?.channelId === ch.id;
+            return (
+              <button
+                key={ch.id}
+                type="button"
+                aria-current={active ? 'page' : undefined}
+                onClick={() =>
+                  voice.openDm({
+                    channelId: ch.id,
+                    name: ch.otherUserDisplayName,
+                    avatarUrl: ch.otherUserAvatarUrl,
+                  })
+                }
+                className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
+                  active
+                    ? 'bg-surface-container text-text-primary'
+                    : 'text-text-secondary hover:bg-surface-container hover:text-text-primary'
+                }`}
+              >
+                <div className="w-5 h-5 rounded-full bg-secondary-container flex items-center justify-center text-[10px] font-bold text-text-primary flex-shrink-0 overflow-hidden">
+                  {ch.otherUserAvatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- user avatar, may be a data URL
+                    <img src={ch.otherUserAvatarUrl} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    ch.otherUserDisplayName.charAt(0).toUpperCase()
+                  )}
+                </div>
+                <span className="truncate">{ch.otherUserDisplayName}</span>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

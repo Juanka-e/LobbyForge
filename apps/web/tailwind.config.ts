@@ -15,6 +15,26 @@ import containerQueries from '@tailwindcss/container-queries';
  * uses `bg-primary-container` against a `#07101E` text token; the M3
  * primary container maps to "on-primary" text contrast in the M3 spec.
  */
+/**
+ * A colour token backed by a theme CSS variable.
+ *
+ * design pass: the palette below was written as literal hex, and
+ * `globals.css` re-pointed the SOLID utility classes at the theme
+ * variables with `!important`. Opacity variants compile to a different
+ * class (`bg-surface-dim/80` → `.bg-surface-dim\/80`), so they escaped
+ * that override and stayed on the dark-only hex — which is why the
+ * channel header rendered as a near-black strip with unreadable text on
+ * the light theme. Returning a function lets Tailwind build BOTH the
+ * solid and the alpha form from the variable, so every variant follows
+ * the active theme.
+ */
+const themed =
+  (variable: string, fallback: string) =>
+  ({ opacityValue }: { opacityValue?: string }) =>
+    opacityValue === undefined
+      ? `var(${variable}, ${fallback})`
+      : `color-mix(in srgb, var(${variable}, ${fallback}) calc(${opacityValue} * 100%), transparent)`;
+
 const config: Config = {
   darkMode: 'class',
   content: [
@@ -27,21 +47,21 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: '#101419',
+        background: themed('--lf-background', '#101419'),
         'bg-soft': '#0B1018',
         // "On-air" signal — the live-activities accent promoted to a named
         // token. Used sparingly: speaking states, live indicators.
         ember: '#E7B86A',
-        surface: '#111722',
-        'surface-raised': '#171E2B',
-        'surface-floating': '#1D2533',
-        'surface-container-lowest': '#0b0e13',
-        'surface-container-low': '#181c21',
-        'surface-container': '#1d2025',
-        'surface-container-high': '#272a30',
-        'surface-container-highest': '#32353b',
-        'surface-variant': '#32353b',
-        'surface-dim': '#101419',
+        surface: themed('--lf-surface', '#111722'),
+        'surface-raised': themed('--lf-surface-raised', '#171E2B'),
+        'surface-floating': themed('--lf-surface-raised', '#1D2533'),
+        'surface-container-lowest': themed('--lf-surface-container', '#0b0e13'),
+        'surface-container-low': themed('--lf-surface-container', '#181c21'),
+        'surface-container': themed('--lf-surface-container', '#1d2025'),
+        'surface-container-high': themed('--lf-surface-container-high', '#272a30'),
+        'surface-container-highest': themed('--lf-surface-container-high', '#32353b'),
+        'surface-variant': themed('--lf-surface-container-high', '#32353b'),
+        'surface-dim': themed('--lf-surface-dim', '#101419'),
         'surface-bright': '#36393f',
         'on-surface': '#e0e2ea',
         'on-surface-variant': '#c3c6d2',
@@ -51,8 +71,8 @@ const config: Config = {
         outline: '#8d919b',
         'outline-variant': '#434750',
         'surface-tint': '#a9c7ff',
-        primary: '#8FB8FF',
-        'primary-container': '#8FB8FF',
+        primary: themed('--lf-user-accent', '#8FB8FF'),
+        'primary-container': themed('--lf-user-accent', '#8FB8FF'),
         'on-primary': '#003063',
         'on-primary-container': '#144787',
         'inverse-primary': '#325e9f',
@@ -80,11 +100,11 @@ const config: Config = {
         'on-error': '#690005',
         'error-container': '#93000a',
         'on-error-container': '#ffdad6',
-        'border-subtle': '#263142',
+        'border-subtle': themed('--lf-border-subtle', '#263142'),
         'border-strong': '#334155',
-        'text-primary': '#F4F7FB',
-        'text-secondary': '#B7C0CC',
-        'text-muted': '#7F8A99',
+        'text-primary': themed('--lf-text-primary', '#F4F7FB'),
+        'text-secondary': themed('--lf-text-secondary', '#B7C0CC'),
+        'text-muted': themed('--lf-text-muted', '#7F8A99'),
         success: '#7CCFA6',
         danger: '#E98282',
       },

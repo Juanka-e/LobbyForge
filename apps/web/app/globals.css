@@ -117,48 +117,15 @@
     user-select: text;
   }
 
-  .bg-background {
-    background-color: var(--lf-background) !important;
-  }
-  .bg-surface {
-    background-color: var(--lf-surface) !important;
-  }
-  .bg-surface-dim {
-    background-color: var(--lf-surface-dim) !important;
-  }
-  .bg-surface-raised,
-  .bg-surface-floating {
-    background-color: var(--lf-surface-raised) !important;
-  }
-  .bg-surface-container,
-  .bg-surface-container-low,
-  .bg-surface-container-lowest {
-    background-color: var(--lf-surface-container) !important;
-  }
-  .bg-surface-container-high,
-  .bg-surface-container-highest,
-  .bg-surface-variant {
-    background-color: var(--lf-surface-container-high) !important;
-  }
-  .text-text-primary {
-    color: var(--lf-text-primary) !important;
-  }
-  .text-text-secondary {
-    color: var(--lf-text-secondary) !important;
-  }
-  .text-text-muted {
-    color: var(--lf-text-muted) !important;
-  }
-  .text-primary {
-    color: var(--lf-user-accent) !important;
-  }
-  .bg-primary,
-  .bg-primary-container {
-    background-color: var(--lf-user-accent) !important;
-  }
-  .border-border-subtle {
-    border-color: var(--lf-border-subtle) !important;
-  }
+  /* design pass: the per-class `!important` overrides that used to live
+     here re-pointed the SOLID utility classes at these variables,
+     because the Tailwind palette was literal hex. Opacity variants
+     (`bg-surface-dim/80`) compile to their own class and escaped the
+     override, so they stayed dark-only and the channel header rendered
+     as an unreadable strip on the light theme. The palette now reads
+     these variables directly (see `themed()` in tailwind.config.ts), so
+     both the solid and the alpha forms follow the theme and the
+     overrides are gone. */
 
   /* Custom premium scrollbar - referenced by the lobby and other dark UIs. */
   ::-webkit-scrollbar {

@@ -1,14 +1,23 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { isDmChannelParticipant, listDmMessages } from '@lobbyforge/db';
-import { requireMaterializedSession, getSessionSecret } from '@/lib/api-auth';
+import { isDmChannelParticipant } from '@lobbyforge/db';
+import { getSessionSecret } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
-import DmView from './DmView';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
+/**
+ * design pass: a direct message is no longer its own full-screen page —
+ * it opens in the lobby's centre column, so the channel list, the member
+ * roster and the voice controls survive reading a message. This route
+ * stays as a deep link (old bookmarks, notifications, shared URLs) and
+ * hands off to the lobby, which opens the conversation from `?dm=`.
+ *
+ * Participation is still checked HERE: the redirect must not confirm
+ * that a channel exists to someone who is not in it.
+ */
 export default async function DmPage({
   params,
 }: {
@@ -19,24 +28,8 @@ export default async function DmPage({
   const session = readGuestSession(cookieStore.toString(), getSessionSecret());
   if (!session?.uid) redirect('/login');
 
-  const db = getDb();
-  const isParticipant = await isDmChannelParticipant(db, channelId, session.uid);
+  const isParticipant = await isDmChannelParticipant(getDb(), channelId, session.uid);
   if (!isParticipant) redirect('/lobby');
 
-  const messages = await listDmMessages(db, channelId, { limit: 50 });
-  const reversed = [...messages].reverse(); // oldest first for display
-
-  return (
-    <DmView
-      channelId={channelId}
-      currentUserId={session.uid}
-      initialMessages={reversed.map((m) => ({
-        id: m.id,
-        authorId: m.authorId,
-        content: m.deletedAt ? '' : m.content,
-        deletedAt: m.deletedAt ? m.deletedAt.toISOString() : null,
-        createdAt: m.createdAt.toISOString(),
-      }))}
-    />
-  );
+  redirect(`/lobby?dm=${encodeURIComponent(channelId)}`);
 }

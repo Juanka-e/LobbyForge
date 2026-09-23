@@ -1,29 +1,44 @@
+'use client';
+
 import Link from 'next/link';
+import { useLobbyVoice } from './LobbyVoiceProvider';
 import type { InstalledApp } from './page';
 
 /**
- * Sidebar "Activities" section — the apps this community has installed.
+ * The community's activities, in the sidebar.
  *
- * beta-review: installed apps were visible only through the admin panel
- * and the activity picker buried inside `/room/[roomName]`, so a regular
- * member had no way to see what the community could play, and an owner
- * who never found the install screen saw "No enabled apps for this
- * server" with no hint about what to do. Every member sees the list; the
- * empty state points admins at the install screen and tells members who
- * to ask.
+ * design pass: this listed apps as flat text rows with a hover-only
+ * play glyph and linked out to /room, so it read as a second channel
+ * list and leaving the lobby was the only way to use it. It is now a
+ * single "Activities" entry in the same grammar as a channel row —
+ * opening the hub in the centre column — with the installed apps shown
+ * beneath it as small chips.
  */
 export function LobbyAppsSection({
   apps,
   voiceChannelId,
+  voiceChannelName,
   serverId,
   canManageServer,
 }: {
   apps: InstalledApp[];
-  /** Where an activity would start — the first voice channel. */
+  /** Where an activity would start — the active or first voice channel. */
   voiceChannelId: string | null;
+  voiceChannelName: string;
   serverId: string | null;
   canManageServer: boolean;
 }) {
+  const voice = useLobbyVoice();
+  const open = Boolean(serverId && voiceChannelId);
+  const active =
+    voice.mainViewMode === 'activity' &&
+    voice.activeActivityChannel?.channelId === voiceChannelId;
+
+  const openHub = () => {
+    if (!voiceChannelId) return;
+    voice.openActivities({ channelId: voiceChannelId, channelName: voiceChannelName });
+  };
+
   return (
     <div>
       <div className="flex items-center justify-between px-2 mb-2">
@@ -41,42 +56,66 @@ export function LobbyAppsSection({
           </Link>
         ) : null}
       </div>
+
+      <button
+        type="button"
+        onClick={openHub}
+        disabled={!open}
+        aria-current={active ? 'page' : undefined}
+        title={
+          open
+            ? `Open activities in ${voiceChannelName}`
+            : 'Activities need a voice channel'
+        }
+        className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors ${
+          active
+            ? 'bg-surface-container text-text-primary'
+            : 'text-text-secondary hover:bg-surface-container hover:text-text-primary'
+        } disabled:cursor-not-allowed disabled:opacity-40`}
+      >
+        <span
+          className={`material-symbols-outlined text-[18px] ${active ? 'text-primary' : ''}`}
+          style={active ? { fontVariationSettings: "'FILL' 1" } : undefined}
+        >
+          stadia_controller
+        </span>
+        <span className="font-label-sm truncate">
+          {apps.length > 0 ? 'Play together' : 'Activities'}
+        </span>
+        {apps.length > 0 ? (
+          <span className="ml-auto rounded-full bg-surface-container-high px-1.5 py-0.5 font-label-xs text-[10px] text-text-muted">
+            {apps.length}
+          </span>
+        ) : null}
+      </button>
+
       {apps.length === 0 ? (
-        <p className="px-2 text-[11px] leading-relaxed text-text-muted">
+        <p className="mt-1 px-2 text-[11px] leading-relaxed text-text-muted">
           {canManageServer ? (
             <>
-              No apps installed yet.{' '}
+              No apps yet —{' '}
               <Link href="/admin/apps" className="text-primary hover:underline">
-                Install one
-              </Link>{' '}
-              to start games in voice channels.
+                install one
+              </Link>
+              .
             </>
           ) : (
-            'No apps installed yet — ask a server admin to add one.'
+            'No apps yet — ask a server admin.'
           )}
         </p>
       ) : (
-        <ul className="space-y-0.5">
+        <ul className="mt-1.5 flex flex-wrap gap-1 px-2">
           {apps.map((app) => (
             <li key={app.id}>
-              {serverId && voiceChannelId ? (
-                <a
-                  href={`/room/${voiceChannelId}?serverId=${serverId}&channelId=${voiceChannelId}&app=${encodeURIComponent(app.id)}`}
-                  title={app.summary ?? `Start ${app.name} in a voice channel`}
-                  className="flex items-center gap-2 px-2 py-1.5 rounded-md text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors group"
-                >
-                  <span className="material-symbols-outlined text-[18px]">stadia_controller</span>
-                  <span className="font-label-sm truncate">{app.name}</span>
-                  <span className="material-symbols-outlined ml-auto text-[16px] opacity-0 group-hover:opacity-100 transition-opacity">
-                    play_arrow
-                  </span>
-                </a>
-              ) : (
-                <span className="flex items-center gap-2 px-2 py-1.5 text-text-muted">
-                  <span className="material-symbols-outlined text-[18px]">stadia_controller</span>
-                  <span className="font-label-sm truncate">{app.name}</span>
-                </span>
-              )}
+              <button
+                type="button"
+                onClick={openHub}
+                disabled={!open}
+                title={app.summary ?? `Start ${app.name}`}
+                className="rounded-full border border-border-subtle px-2 py-0.5 font-label-xs text-[11px] text-text-secondary transition-colors hover:border-primary/40 hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {app.name}
+              </button>
             </li>
           ))}
         </ul>
