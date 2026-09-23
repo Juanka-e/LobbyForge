@@ -55,7 +55,17 @@ export interface DiceState {
 
 export type DiceAction =
   | { type: 'roll'; playerId: string; sides?: number }
+  /** Scores only. The roll log is cleared by `clear-history`. */
   | { type: 'reset-stats'; hostId: string }
+  /** The roll log and the last roll. Scores survive. */
+  | { type: 'clear-history'; hostId: string }
+  /**
+   * Set whether rolling is allowed. Prefer this over `toggle`: a host
+   * acting on a snapshot that has already changed flips to the wrong
+   * value, and two hosts pressing at once cancel each other out.
+   */
+  | { type: 'set-enabled'; hostId: string; enabled: boolean }
+  /** @deprecated Flips the current value; use `set-enabled`. */
   | { type: 'toggle'; hostId: string };
 
 export function rollDie(sides: number): number {
@@ -86,7 +96,16 @@ export function diceValidateAction(action: unknown): string | null {
       }
       return null;
     }
+    case 'set-enabled':
+      if (typeof action.hostId !== 'string' || action.hostId.length === 0) {
+        return 'set-enabled requires a hostId string.';
+      }
+      if (typeof action.enabled !== 'boolean') {
+        return 'set-enabled requires a boolean enabled.';
+      }
+      return null;
     case 'reset-stats':
+    case 'clear-history':
     case 'toggle':
       if (typeof action.hostId !== 'string' || action.hostId.length === 0) {
         return `${String(action.type)} requires a hostId string.`;
@@ -137,6 +156,8 @@ export const diceBotPlugin: GamePlugin<DiceState, DiceAction> = {
   actionPolicies: {
     roll: { role: 'member', actorFields: ['playerId'] },
     'reset-stats': { role: 'host', actorFields: ['hostId'] },
+    'clear-history': { role: 'host', actorFields: ['hostId'] },
+    'set-enabled': { role: 'host', actorFields: ['hostId'] },
     toggle: { role: 'host', actorFields: ['hostId'] },
   },
   createInitialState: (): DiceState => ({
@@ -172,8 +193,15 @@ export const diceBotPlugin: GamePlugin<DiceState, DiceAction> = {
           },
         };
       }
+      // beta-review: this used to clear the roll log and the last roll
+      // too, which its name does not say and a host does not expect —
+      // wiping the scoreboard should not also erase what was rolled.
       case 'reset-stats':
-        return { ...state, stats: {}, history: [], lastRoll: null };
+        return { ...state, stats: {} };
+      case 'clear-history':
+        return { ...state, history: [], lastRoll: null };
+      case 'set-enabled':
+        return { ...state, enabled: action.enabled };
       case 'toggle':
         return { ...state, enabled: !state.enabled };
       default:
