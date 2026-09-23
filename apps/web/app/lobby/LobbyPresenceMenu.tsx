@@ -2,11 +2,12 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useT } from '@/lib/i18n/client';
 import {
-  PRESENCE_DESCRIPTIONS,
+  PRESENCE_DESCRIPTION_KEYS,
   PRESENCE_DOT_CLASS,
   PRESENCE_ICONS,
-  PRESENCE_LABELS,
+  PRESENCE_LABEL_KEYS,
   PRESENCE_STATUSES,
   type PresenceStatus,
 } from '@/lib/presence-status';
@@ -38,6 +39,7 @@ export function LobbyPresenceMenu({
   onChange,
   voiceLabel,
 }: LobbyPresenceMenuProps) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const close = useCallback(() => setOpen(false), []);
@@ -58,9 +60,11 @@ export function LobbyPresenceMenu({
     };
   }, [open, close]);
 
-  const name = hasUser ? displayName.trim() || 'You' : 'Guest';
+  const name = hasUser
+    ? displayName.trim() || t('lobby.presence.you')
+    : t('common.guest');
   const initial = name.charAt(0).toUpperCase() || '?';
-  const subLabel = voiceLabel ?? PRESENCE_LABELS[status];
+  const subLabel = voiceLabel ?? t(PRESENCE_LABEL_KEYS[status]);
 
   return (
     <div ref={rootRef} className="relative min-w-0">
@@ -70,7 +74,7 @@ export function LobbyPresenceMenu({
         disabled={!hasUser}
         aria-expanded={open}
         aria-haspopup="menu"
-        title={hasUser ? `${name} — set your status` : 'Guest session'}
+        title={hasUser ? t('lobby.presence.trigger', { name }) : t('lobby.presence.guestSession')}
         className="flex items-center gap-2 min-w-0 rounded-md p-1 -m-1 text-left hover:bg-surface-container transition-colors disabled:cursor-default disabled:hover:bg-transparent"
       >
         <div className="w-8 h-8 rounded-full bg-secondary-container relative flex-shrink-0">
@@ -78,7 +82,7 @@ export function LobbyPresenceMenu({
             {initial}
           </span>
           <div
-            aria-label={PRESENCE_LABELS[status]}
+            aria-label={t(PRESENCE_LABEL_KEYS[status])}
             className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-surface-raised ${PRESENCE_DOT_CLASS[status]}`}
           />
         </div>
@@ -90,7 +94,7 @@ export function LobbyPresenceMenu({
       {open ? (
         <div
           role="menu"
-          aria-label="Set your status"
+          aria-label={t('lobby.presence.menuLabel')}
           className="absolute bottom-[110%] left-0 z-50 w-64 rounded-lg border border-border-subtle bg-surface-floating p-2 shadow-xl"
         >
           {PRESENCE_STATUSES.map((option) => (
@@ -112,13 +116,13 @@ export function LobbyPresenceMenu({
               />
               <span className="min-w-0">
                 <span className="flex items-center gap-1.5 text-sm text-text-primary">
-                  {PRESENCE_LABELS[option]}
+                  {t(PRESENCE_LABEL_KEYS[option])}
                   {option === status ? (
                     <span className="material-symbols-outlined text-[14px] text-primary">check</span>
                   ) : null}
                 </span>
                 <span className="block text-[11px] leading-snug text-text-secondary">
-                  {PRESENCE_DESCRIPTIONS[option]}
+                  {t(PRESENCE_DESCRIPTION_KEYS[option])}
                 </span>
               </span>
               <span className="material-symbols-outlined ml-auto text-[16px] text-text-muted">
@@ -134,7 +138,7 @@ export function LobbyPresenceMenu({
             className="flex items-center gap-2 rounded-md px-2 py-2 text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary"
           >
             <span className="material-symbols-outlined text-[18px]">manage_accounts</span>
-            Profile &amp; account settings
+            {t('lobby.presence.accountSettings')}
           </Link>
         </div>
       ) : null}

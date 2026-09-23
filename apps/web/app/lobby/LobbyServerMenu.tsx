@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useT } from '@/lib/i18n/client';
 
 /**
  * The community header in the sidebar, and the dropdown it opens.
@@ -32,7 +33,11 @@ export interface LobbyServerMenuProps {
 type MenuItem = {
   href: string;
   icon: string;
-  label: string;
+  /**
+   * A message key, not text: this builder is a pure function with no
+   * access to a translator, so the label is resolved where it renders.
+   */
+  labelKey: string;
   /** Renders a divider above this entry. */
   separated?: boolean;
 };
@@ -47,24 +52,24 @@ export function buildServerMenuItems({
   const items: MenuItem[] = [];
   if (canManageServer) {
     items.push(
-      { href: '/admin/settings', icon: 'admin_panel_settings', label: 'Server settings' },
-      { href: '/admin/settings/members', icon: 'group', label: 'Members' },
-      { href: '/admin/settings/channels', icon: 'forum', label: 'Channels' },
-      { href: '/admin/settings/roles', icon: 'shield', label: 'Roles & permissions' },
-      { href: '/admin/settings/invites', icon: 'link', label: 'Invites' },
-      { href: '/admin/apps', icon: 'extension', label: 'Apps & activities' },
-      { href: '/admin/health', icon: 'health_and_safety', label: 'Doctor & health' }
+      { href: '/admin/settings', icon: 'admin_panel_settings', labelKey: 'lobby.server.settings' },
+      { href: '/admin/settings/members', icon: 'group', labelKey: 'lobby.server.members' },
+      { href: '/admin/settings/channels', icon: 'forum', labelKey: 'lobby.server.channels' },
+      { href: '/admin/settings/roles', icon: 'shield', labelKey: 'lobby.server.roles' },
+      { href: '/admin/settings/invites', icon: 'link', labelKey: 'lobby.server.invites' },
+      { href: '/admin/apps', icon: 'extension', labelKey: 'lobby.server.apps' },
+      { href: '/admin/health', icon: 'health_and_safety', labelKey: 'lobby.server.health' }
     );
   }
   items.push({
     href: '/settings',
     icon: 'manage_accounts',
-    label: 'User settings',
+    labelKey: 'lobby.server.userSettings',
     separated: canManageServer,
   });
   if (isOfficial) {
-    items.push({ href: '/discover', icon: 'explore', label: 'Discover communities' });
-    items.push({ href: '/instances/new', icon: 'add', label: 'Add a community' });
+    items.push({ href: '/discover', icon: 'explore', labelKey: 'lobby.server.discover' });
+    items.push({ href: '/instances/new', icon: 'add', labelKey: 'lobby.server.addCommunity' });
   }
   return items;
 }
@@ -76,6 +81,7 @@ export function LobbyServerMenu({
   canManageServer,
   isOfficial,
 }: LobbyServerMenuProps) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const close = useCallback(() => setOpen(false), []);
@@ -106,7 +112,11 @@ export function LobbyServerMenu({
         disabled={items.length === 0}
         aria-expanded={open}
         aria-haspopup="menu"
-        title={items.length === 0 ? serverName : `${serverName} — open the community menu`}
+        title={
+          items.length === 0
+            ? serverName
+            : t('lobby.server.openMenu', { name: serverName })
+        }
         className="h-16 px-4 flex items-center justify-between hover:bg-surface-container transition-colors duration-150 w-full text-left group disabled:cursor-default"
       >
         <div className="flex items-center gap-3 min-w-0">
@@ -140,7 +150,7 @@ export function LobbyServerMenu({
       {open && items.length > 0 ? (
         <div
           role="menu"
-          aria-label={`${serverName} menu`}
+          aria-label={t('lobby.server.menuLabel', { name: serverName })}
           className="absolute left-3 right-3 top-[60px] z-50 rounded-lg border border-border-subtle bg-surface-floating p-2 shadow-xl"
         >
           {items.map((item) => (
@@ -153,7 +163,7 @@ export function LobbyServerMenu({
                 className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary"
               >
                 <span className="material-symbols-outlined text-[18px]">{item.icon}</span>
-                {item.label}
+                {t(item.labelKey)}
               </Link>
             </div>
           ))}

@@ -55,7 +55,15 @@ export function interpolate(template: string, params?: Record<string, string | n
   );
 }
 
-export type Translator = (key: string, params?: Record<string, string | number>) => string;
+/**
+ * A translator also knows which language it is for. `Intl` formatting
+ * (dates, numbers) has to agree with the surrounding sentence, and
+ * threading the locale as a second argument everywhere a translator
+ * already travels would be noise.
+ */
+export type Translator = ((key: string, params?: Record<string, string | number>) => string) & {
+  readonly locale: AppLocale;
+};
 
 /**
  * Build a translator for one locale.
@@ -65,7 +73,10 @@ export type Translator = (key: string, params?: Record<string, string | number>)
  * instead of an empty space nobody can trace.
  */
 export function createTranslator(locale: string): Translator {
-  const messages = getMessages(locale);
+  const resolved: AppLocale = isAppLocale(locale) ? locale : DEFAULT_APP_LOCALE;
+  const messages = getMessages(resolved);
   const fallback = CATALOGUES[DEFAULT_APP_LOCALE];
-  return (key, params) => interpolate(messages[key] ?? fallback[key] ?? key, params);
+  const translate = (key: string, params?: Record<string, string | number>) =>
+    interpolate(messages[key] ?? fallback[key] ?? key, params);
+  return Object.assign(translate, { locale: resolved });
 }

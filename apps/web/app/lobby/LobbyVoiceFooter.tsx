@@ -2,6 +2,7 @@
 
 import { useLobbyVoice, ConnectionState } from './LobbyVoiceProvider';
 import { LobbyPresenceMenu } from './LobbyPresenceMenu';
+import { useT } from '@/lib/i18n/client';
 import Link from 'next/link';
 
 /**
@@ -22,16 +23,17 @@ export interface LobbyVoiceFooterProps {
 }
 
 export function LobbyVoiceFooter({ serverName, hasUser, displayName }: LobbyVoiceFooterProps) {
+  const t = useT();
   const voice = useLobbyVoice();
   const connected = voice.connectionState === ConnectionState.Connected && !!voice.activeChannelId;
   const connecting = voice.connecting || voice.connectionState === ConnectionState.Connecting || voice.connectionState === ConnectionState.Reconnecting;
   const stateLabel = connecting
     ? voice.connectionState === ConnectionState.Reconnecting
-      ? 'Reconnecting...'
-      : 'Connecting...'
+      ? t('lobby.voice.reconnecting')
+      : t('lobby.voice.connecting')
     : connected
-      ? 'Voice Connected'
-      : 'Voice Ready';
+      ? t('lobby.voice.connected')
+      : t('lobby.voice.ready');
 
   return (
     <div className="mt-auto border-t border-border-subtle bg-surface-raised flex flex-col">
@@ -69,8 +71,8 @@ export function LobbyVoiceFooter({ serverName, hasUser, displayName }: LobbyVoic
               type="button"
               disabled={!connected}
               onClick={() => void voice.toggleScreenShare()}
-              title={voice.screenShareEnabled ? 'Stop screen share' : 'Share your screen'}
-              aria-label={voice.screenShareEnabled ? 'Stop screen share' : 'Share your screen'}
+              title={voice.screenShareEnabled ? t('lobby.voice.screenShareStop') : t('lobby.voice.screenShareStart')}
+              aria-label={voice.screenShareEnabled ? t('lobby.voice.screenShareStop') : t('lobby.voice.screenShareStart')}
               className={
                 connected
                   ? voice.screenShareEnabled
@@ -85,8 +87,8 @@ export function LobbyVoiceFooter({ serverName, hasUser, displayName }: LobbyVoic
               type="button"
               disabled={!connected}
               onClick={() => void voice.toggleCamera()}
-              title={voice.cameraEnabled ? 'Turn off camera' : 'Turn on camera'}
-              aria-label={voice.cameraEnabled ? 'Turn off camera' : 'Turn on camera'}
+              title={voice.cameraEnabled ? t('lobby.voice.cameraOff') : t('lobby.voice.cameraOn')}
+              aria-label={voice.cameraEnabled ? t('lobby.voice.cameraOff') : t('lobby.voice.cameraOn')}
               className={
                 connected
                   ? voice.cameraEnabled
@@ -101,8 +103,8 @@ export function LobbyVoiceFooter({ serverName, hasUser, displayName }: LobbyVoic
               type="button"
               disabled={!connected}
               onClick={() => void voice.disconnect()}
-              title="Disconnect"
-              aria-label="Disconnect from voice"
+              title={t('lobby.voice.disconnect')}
+              aria-label={t('lobby.voice.disconnectAria')}
               className="p-1.5 rounded hover:bg-surface-container text-danger transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
             >
               <span className="material-symbols-outlined text-[18px]">call_end</span>
@@ -120,7 +122,7 @@ export function LobbyVoiceFooter({ serverName, hasUser, displayName }: LobbyVoic
             onClick={() => void voice.startAudio?.()}
             className="mt-2 w-full rounded bg-primary/20 px-2 py-1 text-[12px] font-medium text-primary hover:bg-primary/30 transition-colors"
           >
-            Your browser blocked audio — click to enable
+            {t('lobby.voice.audioBlocked')}
           </button>
         ) : null}
       </div>
@@ -134,10 +136,10 @@ export function LobbyVoiceFooter({ serverName, hasUser, displayName }: LobbyVoic
             voiceLabel={
               connected
                 ? voice.serverMuted
-                  ? 'Server muted'
+                  ? t('lobby.voice.serverMuted')
                   : voice.micEnabled
-                    ? 'Unmuted'
-                    : 'Muted'
+                    ? t('lobby.voice.unmuted')
+                    : t('lobby.voice.muted')
                 : null
             }
           />
@@ -146,8 +148,8 @@ export function LobbyVoiceFooter({ serverName, hasUser, displayName }: LobbyVoic
               type="button"
               disabled={!connected}
               onClick={() => void voice.toggleMic()}
-              title={voice.serverMuted ? 'Muted by a moderator' : voice.micEnabled ? 'Mute' : 'Unmute'}
-              aria-label={voice.serverMuted ? 'Muted by a moderator' : voice.micEnabled ? 'Mute microphone' : 'Unmute microphone'}
+              title={voice.serverMuted ? t('lobby.voice.micMutedByMod') : voice.micEnabled ? t('lobby.voice.micMute') : t('lobby.voice.micUnmute')}
+              aria-label={voice.serverMuted ? t('lobby.voice.micMutedByMod') : voice.micEnabled ? t('lobby.voice.micMuteAria') : t('lobby.voice.micUnmuteAria')}
               className={
                 connected
                   ? voice.micEnabled
@@ -164,8 +166,8 @@ export function LobbyVoiceFooter({ serverName, hasUser, displayName }: LobbyVoic
               type="button"
               disabled={!connected}
               onClick={() => voice.toggleDeafen()}
-              title={voice.deafenEnabled ? 'Undeafen' : 'Deafen'}
-              aria-label={voice.deafenEnabled ? 'Undeafen' : 'Deafen audio'}
+              title={voice.deafenEnabled ? t('lobby.voice.undeafen') : t('lobby.voice.deafen')}
+              aria-label={voice.deafenEnabled ? t('lobby.voice.undeafen') : t('lobby.voice.deafenAria')}
               className={
                 connected
                   ? voice.deafenEnabled
@@ -178,8 +180,8 @@ export function LobbyVoiceFooter({ serverName, hasUser, displayName }: LobbyVoic
             </button>
             <Link
               href="/settings/voice-video"
-              title="Voice & video settings"
-              aria-label="Voice and video settings"
+              title={t('lobby.voice.settings')}
+              aria-label={t('lobby.voice.settingsAria')}
               className="p-1.5 rounded hover:bg-surface-container text-text-secondary hover:text-text-primary transition-colors"
             >
               <span className="material-symbols-outlined text-[18px]">settings</span>

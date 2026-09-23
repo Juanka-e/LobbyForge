@@ -6,9 +6,10 @@ import { UserProfilePopover } from '@/components/modals/UserProfilePopover';
 import { MemberBlockButton } from './MemberBlockButton';
 import { useLobbyVoice } from './LobbyVoiceProvider';
 import { useBlockList } from './BlockListProvider';
+import { useT } from '@/lib/i18n/client';
 import {
   PRESENCE_DOT_CLASS,
-  PRESENCE_LABELS,
+  PRESENCE_LABEL_KEYS,
   toPresenceStatus,
   type PresenceStatus,
 } from '@/lib/presence-status';
@@ -88,6 +89,7 @@ export function LobbyMembersClient({
   voiceChannelIds: string[];
   currentUserId: string | null;
 }) {
+  const t = useT();
   const [members, setMembers] = useState<Member[]>(initialMembers);
   const voice = useLobbyVoice();
   const blockList = useBlockList();
@@ -186,13 +188,13 @@ export function LobbyMembersClient({
     <>
       <aside className="w-[200px] lg:w-[230px] flex-shrink-0 bg-surface-dim border-l border-border-subtle hidden lg:flex flex-col h-full z-20 overflow-y-auto p-4 animate-fade-in-left">
         {members.length === 0 ? (
-          <p className="font-label-xs text-text-muted italic">No members yet.</p>
+          <p className="font-label-xs text-text-muted italic">{t('lobby.roster.empty')}</p>
         ) : null}
         {roleGroups.map(({ role, members: roleMembers }) => (
           <MemberSection key={role.id} label={`${role.name} - ${roleMembers.length}`} members={roleMembers} roleColor={role.color} roleIcon={role.icon} currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} onClosePopover={() => setOpenUserId(null)} />
         ))}
-        <MemberSection label={`Online - ${ungroupedOnline.length}`} members={ungroupedOnline} currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} onClosePopover={() => setOpenUserId(null)} />
-        <MemberSection label={`Offline - ${offline.length}`} members={offline} dimmed currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} onClosePopover={() => setOpenUserId(null)} />
+        <MemberSection label={t('lobby.roster.onlineGroup', { count: ungroupedOnline.length })} members={ungroupedOnline} currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} onClosePopover={() => setOpenUserId(null)} />
+        <MemberSection label={t('lobby.roster.offlineGroup', { count: offline.length })} members={offline} dimmed currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} onClosePopover={() => setOpenUserId(null)} />
       </aside>
       {openMember ? (
         <UserProfilePopover
@@ -303,6 +305,7 @@ function MemberRow({
   onOpen: (rect: DOMRect) => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const roleColor = member.roleColor || undefined;
 
   function handleClick(e: React.MouseEvent<HTMLButtonElement>) {
@@ -345,10 +348,10 @@ function MemberRow({
             {member.status !== 'offline' ? (
               <span
                 className={`absolute -bottom-px -right-px size-3 rounded-full border-2 border-surface-dim ${PRESENCE_DOT_CLASS[member.presence ?? 'online']}`}
-                aria-label={PRESENCE_LABELS[member.presence ?? 'online']}
+                aria-label={t(PRESENCE_LABEL_KEYS[member.presence ?? 'online'])}
               />
             ) : (
-              <span className="absolute -bottom-px -right-px grid size-3 place-items-center rounded-full border-2 border-surface-dim bg-surface-container" aria-label="Offline"><span className="size-1 rounded-full bg-text-muted" /></span>
+              <span className="absolute -bottom-px -right-px grid size-3 place-items-center rounded-full border-2 border-surface-dim bg-surface-container" aria-label={t(PRESENCE_LABEL_KEYS.offline)}><span className="size-1 rounded-full bg-text-muted" /></span>
             )}
           </div>
           <div className="min-w-0 flex flex-col">
@@ -363,7 +366,7 @@ function MemberRow({
               {member.name}
             </span>
             {member.isGuest ? (
-              <span className="text-[10px] text-text-muted font-medium truncate">Guest</span>
+              <span className="text-[10px] text-text-muted font-medium truncate">{t('lobby.roster.guest')}</span>
             ) : null}
           </div>
         </button>

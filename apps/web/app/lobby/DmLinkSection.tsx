@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useT } from '@/lib/i18n/client';
 import { useLobbyVoice } from './LobbyVoiceProvider';
 
 interface DmChannelSummary {
@@ -20,6 +21,7 @@ interface DmChannelSummary {
  * the row shows which conversation is open, like a channel does.
  */
 export default function DmLinkSection({ currentUserId }: { currentUserId: string | null }) {
+  const t = useT();
   const voice = useLobbyVoice();
   const [channels, setChannels] = useState<DmChannelSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,10 +51,10 @@ export default function DmLinkSection({ currentUserId }: { currentUserId: string
     <div className="pt-2 mt-1 border-t border-border-subtle/50">
       <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] uppercase tracking-wider text-text-muted font-semibold">
         <span className="material-symbols-outlined text-[14px]">forum</span>
-        Direct Messages
+        {t('lobby.dm.title')}
       </div>
       {loading ? null : channels.length === 0 ? (
-        <p className="px-2 py-1 text-xs text-text-muted">No conversations yet</p>
+        <p className="px-2 py-1 text-xs text-text-muted">{t('lobby.dm.empty')}</p>
       ) : (
         <div className="space-y-0.5">
           {channels.slice(0, 8).map((ch) => {

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useT } from '@/lib/i18n/client';
 import { useLobbyVoice } from './LobbyVoiceProvider';
 
 /**
@@ -39,6 +40,7 @@ function markSeen(channelId: string) {
 }
 
 export function LobbyTextChannels({ channels }: LobbyTextChannelsProps) {
+  const t = useT();
   const voice = useLobbyVoice();
   const activeId = voice.activeTextChannelId;
   const [, forceUpdate] = useState(0);
@@ -68,7 +70,7 @@ export function LobbyTextChannels({ channels }: LobbyTextChannelsProps) {
     <div>
       <div className="flex items-center justify-between mb-2 group cursor-pointer">
         <h3 className="font-label-xs uppercase tracking-wider group-hover:text-text-secondary transition-colors text-text-secondary">
-          Text Channels
+          {t('lobbyMain.text.heading')}
         </h3>
         <span className="material-symbols-outlined text-[16px] opacity-0 group-hover:opacity-100 transition-opacity text-text-secondary">
           add
@@ -76,7 +78,7 @@ export function LobbyTextChannels({ channels }: LobbyTextChannelsProps) {
       </div>
       <ul className="space-y-[2px]">
         {channels.length === 0 ? (
-          <li className="px-2 py-1 text-label-xs text-text-muted italic">No text channels yet</li>
+          <li className="px-2 py-1 text-label-xs text-text-muted italic">{t('lobbyMain.text.empty')}</li>
         ) : null}
         {channels.map((c) => {
           const active = c.id === activeId;
