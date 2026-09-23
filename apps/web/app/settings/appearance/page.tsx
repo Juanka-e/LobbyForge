@@ -130,7 +130,10 @@ function applyAppearanceExtra(extra: AppearanceExtra): void {
   root.style.setProperty('--lf-user-accent', accent);
   root.style.setProperty('--lf-on-accent', onAccent);
   root.style.setProperty('--lf-on-accent-container', onAccent);
-  root.lang = resolveAppLocale(
+  // `data-lf-locale`, NOT `<html lang>`: the chrome around the plugin is
+  // English, and claiming the document is Turkish makes CSS uppercase
+  // apply Turkish casing to it ("ACTIVITIES" → "ACTİVİTİES").
+  root.dataset.lfLocale = resolveAppLocale(
     coerceLocaleChoice(extra.language),
     typeof navigator === 'undefined' ? [] : (navigator.languages ?? [navigator.language])
   );
