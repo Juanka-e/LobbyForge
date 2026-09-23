@@ -175,7 +175,7 @@ export default function LoginForm({
             (mode === 'register' && (accountDisplayName.trim().length < 2 || password.length < 12)) ||
             (mode === 'register' && inviteOnly && inviteCode.trim().length < 6)
           }
-          className="w-full rounded-lg bg-primary-container px-4 py-2.5 font-semibold text-[#07101e] disabled:cursor-not-allowed disabled:opacity-50"
+          className="w-full rounded-lg bg-primary-container px-4 py-2.5 font-semibold text-on-primary-container disabled:cursor-not-allowed disabled:opacity-50"
         >
           {busy ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'}
         </button>

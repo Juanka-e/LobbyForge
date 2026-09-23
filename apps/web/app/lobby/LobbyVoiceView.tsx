@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { useLobbyVoice, type LobbyVoiceParticipant } from './LobbyVoiceProvider';
 
-export function LobbyVoiceView({ channelName }: { channelId: string; channelName: string }) {
+export function LobbyVoiceView({ channelId, channelName }: { channelId: string; channelName: string }) {
   const voice = useLobbyVoice();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [portalReady, setPortalReady] = useState(false);
@@ -139,6 +139,14 @@ export function LobbyVoiceView({ channelName }: { channelId: string; channelName
               </button>
             </div>
           ) : null}
+          {/* design pass: the video grid had no way to start a game, so
+              being IN the room was the one place you could not open the
+              activities hub — you had to leave the call view first. */}
+          <IconButton
+            label="Activities in this room"
+            icon="stadia_controller"
+            onClick={() => voice.openActivities({ channelId, channelName })}
+          />
           <IconButton
             label={browserFullscreen ? 'Exit browser fullscreen' : 'Enter browser fullscreen'}
             icon={browserFullscreen ? 'fullscreen_exit' : 'fullscreen'}

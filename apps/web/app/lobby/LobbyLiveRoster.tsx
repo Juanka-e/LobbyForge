@@ -1,7 +1,13 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { Fragment, useEffect, useRef, useState, useCallback } from 'react';
 import { getRealtimeClient } from '@/lib/realtime-client';
+import {
+  formatDaySeparator,
+  formatFullTimestamp,
+  formatMessageTimestamp,
+  isSameDay,
+} from '@/lib/chat-time';
 
 /**
  * Client island for the live lobby's chat area. Renders the message
@@ -24,6 +30,8 @@ interface ChatMessage {
   author: string;
   authorColor?: 'primary' | 'default';
   timestamp: string;
+  /** Raw ISO instant — day separators and the exact-time tooltip need it. */
+  createdAt: string;
   body: string;
   attachment?: { name: string; size: string };
   blocked?: boolean;
@@ -63,17 +71,19 @@ export interface LobbyLiveRosterData {
 
 const PRESENCE_POLL_MS = 8_000;
 
-function formatTimestamp(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      hour: 'numeric',
-      minute: '2-digit',
-      month: 'short',
-      day: 'numeric',
-    });
-  } catch {
-    return iso;
-  }
+const formatTimestamp = formatMessageTimestamp;
+
+/** The rule between two days of conversation. */
+function DaySeparator({ at }: { at: string }) {
+  return (
+    <div className="flex items-center gap-3 py-1" aria-hidden>
+      <div className="h-px flex-1 bg-border-subtle/60" />
+      <span className="font-label-xs text-[11px] uppercase tracking-wider text-text-muted">
+        {formatDaySeparator(at)}
+      </span>
+      <div className="h-px flex-1 bg-border-subtle/60" />
+    </div>
+  );
 }
 
 export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: { data: LobbyLiveRosterData; searchQuery?: string; showPinned?: boolean }) {
@@ -131,6 +141,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
           author: message.blocked ? 'Blocked user' : message.userId ? (nameCacheRef.current.get(message.userId) ?? 'User') : 'Deleted User',
           authorColor: message.userId === data.currentUserId ? 'primary' : 'default',
           timestamp: formatTimestamp(message.createdAt),
+          createdAt: message.createdAt,
           body: message.content,
           blocked: message.blocked,
           pinned: typeof message.metadata?.$pinnedAt === 'string',
@@ -159,6 +170,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
           author,
           authorColor: m.userId === data.currentUserId ? 'primary' : 'default',
           timestamp: formatTimestamp(m.createdAt),
+          createdAt: m.createdAt,
           body: m.content,
         };
         // Newest first; UI uses flex-col-reverse so newest appears at bottom.
@@ -211,6 +223,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
           author,
           authorColor: m.userId === data.currentUserId ? 'primary' : 'default',
           timestamp: formatTimestamp(m.createdAt),
+          createdAt: m.createdAt,
           body: m.content,
         };
         return [next, ...prev];
@@ -285,9 +298,20 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
               : 'No messages yet. Be the first to say something.'}
         </p>
       ) : null}
-      {visibleMessages.map((m) => (
-        <LiveMessage key={m.id} message={m} currentUserId={data.currentUserId} serverId={data.serverId} channelId={data.channelId} canManageMessages={data.canManageMessages} onPinnedChange={(pinned) => setMessages((current) => current.map((item) => item.id === m.id ? { ...item, pinned } : item))} />
-      ))}
+      {visibleMessages.map((m, index) => {
+        // `visibleMessages` is newest-first and the column is reversed,
+        // so the message rendered ABOVE this one is the next entry. A
+        // separator belongs here when that one fell on an earlier day
+        // (or when this is the oldest message loaded).
+        const older = visibleMessages[index + 1];
+        const startsDay = !older || !isSameDay(older.createdAt, m.createdAt);
+        return (
+          <Fragment key={m.id}>
+            <LiveMessage message={m} currentUserId={data.currentUserId} serverId={data.serverId} channelId={data.channelId} canManageMessages={data.canManageMessages} onPinnedChange={(pinned) => setMessages((current) => current.map((item) => item.id === m.id ? { ...item, pinned } : item))} />
+            {startsDay ? <DaySeparator at={m.createdAt} /> : null}
+          </Fragment>
+        );
+      })}
       {typers.length > 0 ? (
         <div className="px-2 py-1 flex items-center gap-2 text-xs text-text-muted animate-fade-in-up">
           <div className="flex gap-0.5">
@@ -376,7 +400,12 @@ function LiveMessage({ message, currentUserId, serverId, channelId, canManageMes
       <div className="flex flex-col w-full">
         <div className="flex items-baseline gap-2">
           <span className={`font-label-sm font-medium ${authorColorClass}`}>{message.author}</span>
-          <span className="font-label-xs text-[11px] text-text-secondary">{message.timestamp}</span>
+          <span
+            className="font-label-xs text-[11px] text-text-secondary"
+            title={formatFullTimestamp(message.createdAt)}
+          >
+            {message.timestamp}
+          </span>
           {message.pinned ? <span className="material-symbols-outlined text-[13px] text-primary" title="Pinned">push_pin</span> : null}
         </div>
         {editing ? (
@@ -388,7 +417,7 @@ function LiveMessage({ message, currentUserId, serverId, channelId, canManageMes
               autoFocus
               className="flex-1 bg-surface-container border border-border-subtle rounded px-2 py-1 text-body-md text-text-primary outline-none focus:border-primary"
             />
-            <button onClick={saveEdit} className="text-xs px-2 py-1 bg-primary-container text-[#07101e] rounded font-medium">Save</button>
+            <button onClick={saveEdit} className="text-xs px-2 py-1 bg-primary-container text-on-primary-container rounded font-medium">Save</button>
             <button onClick={() => setEditing(false)} className="text-xs px-2 py-1 text-text-secondary hover:text-text-primary">Cancel</button>
           </div>
         ) : (

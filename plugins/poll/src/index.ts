@@ -1,5 +1,14 @@
+import { createElement } from 'react';
 import type { GamePlugin } from '@lobbyforge/plugin-sdk';
 import { PluginPermission } from '@lobbyforge/plugin-sdk';
+import {
+  POLL_PLUGIN_ID,
+  POLL_MAX_OPTIONS,
+  POLL_MIN_OPTIONS,
+  POLL_MAX_QUESTION_LENGTH,
+  POLL_MAX_OPTION_LENGTH,
+} from './constants';
+import { PollPanel, type PollPanelClientProps } from './renderClient';
 
 /**
  * Poll — an anonymous live poll for channels.
@@ -24,11 +33,16 @@ import { PluginPermission } from '@lobbyforge/plugin-sdk';
  *   reducer still guards defensively.
  */
 
-export const POLL_PLUGIN_ID = 'poll';
-export const POLL_MAX_OPTIONS = 6;
-export const POLL_MIN_OPTIONS = 2;
-export const POLL_MAX_QUESTION_LENGTH = 200;
-export const POLL_MAX_OPTION_LENGTH = 80;
+export {
+  POLL_PLUGIN_ID,
+  POLL_MAX_OPTIONS,
+  POLL_MIN_OPTIONS,
+  POLL_MAX_QUESTION_LENGTH,
+  POLL_MAX_OPTION_LENGTH,
+} from './constants';
+
+export { PollPanel } from './renderClient';
+export type { PollPanelClientProps, PollPanelProps } from './renderClient';
 
 export interface PollOption {
   id: string;
@@ -115,23 +129,7 @@ export function pollValidateAction(action: unknown): string | null {
   }
 }
 
-export function pollTally(state: PollState): { optionId: string; votes: number }[] {
-  return state.options.map((option) => ({ optionId: option.id, votes: option.votes }));
-}
-
-export function pollLeader(state: PollState): string | null {
-  let best: { id: string; votes: number } | null = null;
-  let tie = false;
-  for (const option of state.options) {
-    if (!best || option.votes > best.votes) {
-      best = { id: option.id, votes: option.votes };
-      tie = false;
-    } else if (option.votes === best.votes && option.votes > 0) {
-      tie = true;
-    }
-  }
-  return best && best.votes > 0 && !tie ? best.id : null;
-}
+export { pollTally, pollLeader } from './tally';
 
 function pristineState(): PollState {
   return {
@@ -154,7 +152,7 @@ export const pollPlugin: GamePlugin<PollState, PollAction> = {
     minAppVersion: '0.1.0',
     permissions: [PluginPermission.MANAGE_GAME_SESSION, PluginPermission.SEND_ROOM_MESSAGE],
     locales: ['en', 'tr'],
-    entryClient: './client.js',
+    entryClient: './renderClient.js',
     catalog: {
       category: 'utility',
       summary: 'Anonymous one-vote-per-player polls for channels.',
@@ -234,5 +232,18 @@ export const pollPlugin: GamePlugin<PollState, PollAction> = {
         return state;
     }
   },
-  renderClient: () => null,
+  /**
+   * Returns an ELEMENT — it must never CALL PollPanel. Invoking the
+   * component as a plain function appends its hooks (useState /
+   * useMemo) to whatever component called renderClient; the host
+   * mounts the panel conditionally, so the hook count changes between
+   * renders and React throws #310, dropping the entire voice room into
+   * its error boundary. See plugins/hushle/src/index.ts for the
+   * regression this mirrors.
+   *
+   * `props.state` is a PollViewState (ballotBox stripped, ballotCount
+   * + hasVoted added), which is why the panel types it that way.
+   */
+  renderClient: (props: unknown) =>
+    createElement(PollPanel, props as PollPanelClientProps),
 };

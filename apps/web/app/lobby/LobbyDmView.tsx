@@ -3,6 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { getRealtimeClient } from '@/lib/realtime-client';
 import { useLobbyVoice, type ActiveDm } from './LobbyVoiceProvider';
+import {
+  formatDaySeparator,
+  formatFullTimestamp,
+  formatMessageTimestamp,
+} from '@/lib/chat-time';
 
 /**
  * A direct message, rendered in the centre column.
@@ -26,28 +31,6 @@ interface DmMessage {
 const POLL_INTERVAL_MS = 10_000;
 /** Messages from the same author within this window share one header. */
 const GROUPING_WINDOW_MS = 5 * 60 * 1000;
-
-function formatTime(iso: string): string {
-  try {
-    return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-  } catch {
-    return '';
-  }
-}
-
-function formatDay(iso: string): string {
-  try {
-    const date = new Date(iso);
-    const today = new Date();
-    const sameDay = date.toDateString() === today.toDateString();
-    if (sameDay) return 'Today';
-    const yesterday = new Date(today.getTime() - 86_400_000);
-    if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
-    return date.toLocaleDateString(undefined, { month: 'long', day: 'numeric' });
-  } catch {
-    return '';
-  }
-}
 
 export function LobbyDmView({
   dm,
@@ -147,7 +130,7 @@ export function LobbyDmView({
     const out: Array<{ key: string; authorId: string; at: string; items: DmMessage[]; dayLabel: string | null }> = [];
     let lastDay = '';
     for (const message of messages) {
-      const day = formatDay(message.createdAt);
+      const day = formatDaySeparator(message.createdAt);
       const dayLabel = day !== lastDay ? day : null;
       lastDay = day;
       const previous = out[out.length - 1];
@@ -252,8 +235,11 @@ export function LobbyDmView({
                         >
                           {author}
                         </span>
-                        <span className="font-label-xs text-[11px] text-text-secondary">
-                          {formatTime(group.at)}
+                        <span
+                          className="font-label-xs text-[11px] text-text-secondary"
+                          title={formatFullTimestamp(group.at)}
+                        >
+                          {formatMessageTimestamp(group.at)}
                         </span>
                       </div>
                       {group.items.map((message) => (

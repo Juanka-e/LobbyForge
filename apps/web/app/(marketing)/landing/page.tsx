@@ -42,7 +42,7 @@ function Hero() {
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
             <a
               href="/discover"
-              className="bg-primary-container text-[#07101E] px-8 py-4 rounded-lg font-label-sm text-label-sm hover:brightness-110 transition-all text-center"
+              className="bg-primary-container text-on-primary-container px-8 py-4 rounded-lg font-label-sm text-label-sm hover:brightness-110 transition-all text-center"
             >
               Explore communities
             </a>
@@ -150,7 +150,7 @@ function HeroMockup() {
                 <div className="text-text-primary font-semibold text-label-sm">Hushle</div>
                 <div className="text-text-secondary text-xs">Word guessing game • 2 playing</div>
               </div>
-              <button className="bg-[#E7B86A] text-[#07101E] px-4 py-1.5 rounded font-bold text-label-xs hover:brightness-110 transition-all">
+              <button className="bg-[#E7B86A] text-on-primary-container px-4 py-1.5 rounded font-bold text-label-xs hover:brightness-110 transition-all">
                 Join Game
               </button>
             </div>
@@ -343,7 +343,7 @@ function FinalCta() {
       <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
         <a
           href="/discover"
-          className="w-full sm:w-auto bg-primary-container text-[#07101E] px-8 py-4 rounded-lg font-label-sm text-label-sm hover:brightness-110 transition-all"
+          className="w-full sm:w-auto bg-primary-container text-on-primary-container px-8 py-4 rounded-lg font-label-sm text-label-sm hover:brightness-110 transition-all"
         >
           Explore communities
         </a>

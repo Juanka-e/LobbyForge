@@ -50,7 +50,7 @@ export default function CreateInstanceForm() {
         <button
           type="submit"
           disabled={saving || name.trim().length < 2}
-          className="bg-primary-container text-[#07101e] rounded-lg px-4 py-2.5 font-semibold disabled:opacity-50"
+          className="bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 font-semibold disabled:opacity-50"
         >
           {saving ? 'Creating...' : 'Create instance'}
         </button>

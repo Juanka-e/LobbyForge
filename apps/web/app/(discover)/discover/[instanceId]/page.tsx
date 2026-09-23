@@ -108,7 +108,7 @@ export default async function InstanceDetailPage({
         <div className="flex flex-col sm:flex-row gap-4">
           <Link
             href={go}
-            className="bg-primary-container text-[#07101E] px-8 py-4 rounded-lg font-label-sm text-label-sm hover:brightness-110 transition-all text-center"
+            className="bg-primary-container text-on-primary-container px-8 py-4 rounded-lg font-label-sm text-label-sm hover:brightness-110 transition-all text-center"
           >
             Open in browser
           </Link>

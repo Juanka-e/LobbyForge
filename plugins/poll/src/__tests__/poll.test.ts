@@ -1,3 +1,4 @@
+import { isValidElement } from 'react';
 import { describe, expect, it } from 'vitest';
 import {
   pollPlugin,
@@ -167,6 +168,9 @@ describe('poll plugin — manifest + policies', () => {
     expect(pollPlugin.actionPolicies?.['open-poll']).toEqual({ role: 'host', actorFields: ['hostId'] });
     expect(pollPlugin.actionPolicies?.vote).toEqual({ role: 'member', actorFields: ['playerId'] });
     expect(typeof pollPlugin.validateAction).toBe('function');
-    expect(pollPlugin.renderClient?.(null as never)).toBeNull();
+    // M-poll-ui: the plugin now ships a player screen, so renderClient
+    // returns an ELEMENT (see render-client.test.tsx for why it must
+    // never CALL the panel).
+    expect(isValidElement(pollPlugin.renderClient(null as never))).toBe(true);
   });
 });

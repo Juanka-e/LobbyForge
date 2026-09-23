@@ -47,6 +47,7 @@ import { canReadLobbyChannelMessages, resolveLobbyChannelView } from '@/lib/lobb
 import { getRuntimeLiveKitUrl } from '@/lib/public-endpoints';
 import { projectServerPresenceForViewer } from '@/lib/presence-view';
 import { toPresenceStatus, type PresenceStatus } from '@/lib/presence-status';
+import { formatMessageTimestamp } from '@/lib/chat-time';
 
 export const dynamic = 'force-dynamic';
 
@@ -93,6 +94,8 @@ interface ChatMessage {
   author: string;
   authorColor?: 'primary' | 'default';
   timestamp: string;
+  /** Raw ISO instant — day separators and the exact-time tooltip need it. */
+  createdAt: string;
   body: string;
   attachment?: { name: string; size: string };
   blocked?: boolean;
@@ -177,6 +180,7 @@ const DEMO_MESSAGES: ChatMessage[] = [
     authorId: 'ozan',
     author: 'Ozan_TR',
     timestamp: 'Yesterday at 11:42 PM',
+    createdAt: new Date(Date.now() - 86_400_000).toISOString(),
     body: 'Thanks for setting up the new server instance. Audio quality seems much more stable on LobbyForge infrastructure compared to our old setup.',
   },
   {
@@ -185,6 +189,7 @@ const DEMO_MESSAGES: ChatMessage[] = [
     author: 'Lina',
     authorColor: 'primary',
     timestamp: 'Today at 8:15 AM',
+    createdAt: new Date().toISOString(),
     body: 'I pushed the latest server logs to the repo. Latency graphs are looking solid.',
     attachment: { name: 'server_latency_report_v2.pdf', size: '1.2 MB' },
   },
@@ -193,6 +198,7 @@ const DEMO_MESSAGES: ChatMessage[] = [
     authorId: 'juanka',
     author: 'juanka',
     timestamp: 'Today at 10:30 AM',
+    createdAt: new Date().toISOString(),
     body: "Anyone jumping into Voice soon? I'm hanging out in the Main Lounge testing mic levels.",
   },
 ];
@@ -203,18 +209,9 @@ function toCategory(type: ChannelType): ChannelCategory {
   return type === 'voice' || type === 'stage' ? 'voice' : 'text';
 }
 
-function formatTimestamp(d: Date): string {
-  try {
-    return d.toLocaleString(undefined, {
-      hour: 'numeric',
-      minute: '2-digit',
-      month: 'short',
-      day: 'numeric',
-    });
-  } catch {
-    return d.toISOString();
-  }
-}
+// Same stamp the client renders, so the SSR paint doesn't flip format
+// on hydration.
+const formatTimestamp = formatMessageTimestamp;
 
 function buildMembers(
   summaries: MemberSummary[],
@@ -305,6 +302,7 @@ function buildMessages(
         authorId: null,
         author: 'Blocked user',
         timestamp: formatTimestamp(m.createdAt),
+        createdAt: m.createdAt.toISOString(),
         body: '[blocked] This message is hidden because the sender is blocked.',
         blocked: true,
       } satisfies ChatMessage;
@@ -317,6 +315,7 @@ function buildMessages(
       author: displayName,
       authorColor: m.userId && m.userId === currentUserId ? 'primary' : 'default',
       timestamp: formatTimestamp(m.createdAt),
+      createdAt: m.createdAt.toISOString(),
       body: m.content,
       pinned: typeof m.metadata.$pinnedAt === 'string',
     } satisfies ChatMessage;

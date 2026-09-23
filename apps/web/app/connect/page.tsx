@@ -107,7 +107,7 @@ export default function ConnectPage() {
           />
           <button
             type="submit"
-            className="bg-primary-container text-[#07101E] px-8 py-2.5 rounded-lg font-label-sm text-label-sm hover:brightness-110 transition-all shrink-0"
+            className="bg-primary-container text-on-primary-container px-8 py-2.5 rounded-lg font-label-sm text-label-sm hover:brightness-110 transition-all shrink-0"
           >
             Continue
           </button>
