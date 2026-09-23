@@ -12,7 +12,7 @@ import GlobalHeader from './GlobalHeader';
 import AppearanceRuntime from './AppearanceRuntime';
 import DesktopHandoffListener from '@/components/DesktopHandoffListener';
 import { REALTIME_URL_META, getRuntimeRealtimeUrl } from '@/lib/public-endpoints';
-import { getRequestI18n } from '@/lib/i18n/server';
+import { getRequestI18n, getTranslator } from '@/lib/i18n/server';
 import { I18nProvider } from '@/lib/i18n/client';
 
 const geist = Geist({ subsets: ['latin'], variable: '--font-geist' });
@@ -27,7 +27,7 @@ export async function generateMetadata(): Promise<Metadata> {
     .catch(() => null);
   return {
     title: settings?.seoTitle || 'LobbyForge',
-    description: settings?.seoDescription || 'Self-hostable voice-first community platform.',
+    description: settings?.seoDescription || (await getTranslator())('common.meta.description'),
     robots: { index: indexing, follow: indexing },
     ...(logo
       ? { icons: { icon: [{ url: logo, type: 'image/gif' }] } }
@@ -50,15 +50,20 @@ export default async function RootLayout({ children, modal }: { children: ReactN
   // hydration — and so `<html lang>` describes what is actually on the
   // page, which is what CSS casing and screen readers go by.
   const i18n = await getRequestI18n();
+  const t = await getTranslator();
   const content = maintenance?.maintenanceMode ? (
     <section className="max-w-[720px]">
-      <h1 className="mt-0">Maintenance</h1>
+      <h1 className="mt-0">{t('common.maintenance.title')}</h1>
       <p className="text-text-secondary text-body-lg">
-        {maintenance.maintenanceMessage ?? 'LobbyForge is temporarily in maintenance mode.'}
+        {maintenance.maintenanceMessage ?? t('common.maintenance.body')}
       </p>
       {maintenance.maintenanceStartedAt ? (
         <p className="text-text-muted">
-          Started at {maintenance.maintenanceStartedAt.toISOString()}
+          {t('common.maintenance.startedAt', {
+            time: new Intl.DateTimeFormat(t.locale, { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(
+              maintenance.maintenanceStartedAt
+            ),
+          })}
         </p>
       ) : null}
     </section>
@@ -84,6 +89,7 @@ export default async function RootLayout({ children, modal }: { children: ReactN
           locale={i18n.locale}
           dir={i18n.info.dir}
           messages={i18n.messages}
+          englishPlurals={i18n.englishPlurals}
           locales={i18n.locales}
           choice={i18n.choice}
         >

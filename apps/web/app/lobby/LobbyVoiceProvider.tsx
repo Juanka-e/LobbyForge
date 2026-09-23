@@ -27,6 +27,8 @@ import {
   type ScreenShareCaptureOptions,
 } from 'livekit-client';
 import { resolveBrowserLiveKitUrl } from '@/lib/public-endpoints';
+import { useT } from '@/lib/i18n/client';
+import type { Params } from '@/lib/i18n/core';
 import {
   mergeVoiceVideoPreferences,
   type ScreenFps,
@@ -224,33 +226,58 @@ function localMicOn(room: Room): boolean {
   return !!pub?.track && !pub.isMuted;
 }
 
-function microphoneErrorMessage(error: unknown, joinedListenOnly: boolean): string {
-  const name = error instanceof DOMException ? error.name : (error as { name?: string } | null)?.name ?? '';
-  const suffix = joinedListenOnly ? ' You joined listen-only.' : '';
-  if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-    return `Microphone permission was denied. Allow microphone access in the browser to talk.${suffix}`;
+/**
+ * What the voice error line shows. The provider's helpers run outside
+ * React (event handlers, LiveKit callbacks) and cannot call `useT`, so
+ * they hand back a catalogue KEY; the provider resolves it with the
+ * viewer's translator when it renders. `text` is for messages that are
+ * not ours to translate — a server `error` body, a browser or LiveKit
+ * exception — and is shown as-is.
+ */
+type VoiceNotice = { key: string; params?: Params } | { text: string };
+
+/** Thrown for failures whose message is ours, so the catch keeps the key. */
+class VoiceNoticeError extends Error {
+  readonly notice: { key: string; params?: Params };
+  constructor(notice: { key: string; params?: Params }) {
+    super(notice.key);
+    this.notice = notice;
   }
-  if (name === 'NotFoundError' || name === 'OverconstrainedError') {
-    return `No usable microphone was found. Pick another input in Voice & Video settings.${suffix}`;
-  }
-  if (name === 'NotReadableError') {
-    return `The microphone is in use by another application.${suffix}`;
-  }
-  return `The microphone could not be started.${suffix}`;
 }
 
-const SERVER_MUTED_MESSAGE = 'You cannot speak here right now — a moderator muted you or your role lacks the Speak permission.';
+function noticeFromError(error: unknown): VoiceNotice {
+  if (error instanceof VoiceNoticeError) return error.notice;
+  return { text: error instanceof Error ? error.message : String(error) };
+}
 
-function disconnectReasonMessage(reason: DisconnectReason | undefined): string | null {
+function microphoneErrorNotice(error: unknown, joinedListenOnly: boolean): VoiceNotice {
+  const name = error instanceof DOMException ? error.name : (error as { name?: string } | null)?.name ?? '';
+  // Whole sentences, not a translated suffix glued on: "You joined
+  // listen-only" does not attach the same way in every language.
+  if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+    return { key: joinedListenOnly ? 'lobby.voice.error.micDeniedListenOnly' : 'lobby.voice.error.micDenied' };
+  }
+  if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+    return { key: joinedListenOnly ? 'lobby.voice.error.micNotFoundListenOnly' : 'lobby.voice.error.micNotFound' };
+  }
+  if (name === 'NotReadableError') {
+    return { key: joinedListenOnly ? 'lobby.voice.error.micBusyListenOnly' : 'lobby.voice.error.micBusy' };
+  }
+  return { key: joinedListenOnly ? 'lobby.voice.error.micFailedListenOnly' : 'lobby.voice.error.micFailed' };
+}
+
+const SERVER_MUTED_NOTICE: VoiceNotice = { key: 'lobby.voice.error.serverMuted' };
+
+function disconnectReasonNotice(reason: DisconnectReason | undefined): VoiceNotice | null {
   switch (reason) {
     case DisconnectReason.DUPLICATE_IDENTITY:
-      return 'You joined this voice channel from another tab or device, so this one was disconnected.';
+      return { key: 'lobby.voice.error.duplicateSession' };
     case DisconnectReason.PARTICIPANT_REMOVED:
-      return 'You were removed from the voice channel.';
+      return { key: 'lobby.voice.error.removed' };
     case DisconnectReason.ROOM_DELETED:
-      return 'The voice channel was closed.';
+      return { key: 'lobby.voice.error.roomClosed' };
     case DisconnectReason.SERVER_SHUTDOWN:
-      return 'The voice server restarted — rejoin the channel.';
+      return { key: 'lobby.voice.error.serverRestarted' };
     default:
       return null;
   }
@@ -274,24 +301,19 @@ function cameraCaptureOptions(prefs: VoiceVideoPreferences): VideoCaptureOptions
   };
 }
 
-function mediaErrorMessage(error: unknown, kind: 'camera' | 'screen'): string {
+function mediaErrorNotice(error: unknown, kind: 'camera' | 'screen'): VoiceNotice {
   const name = error instanceof DOMException ? error.name : '';
+  const camera = kind === 'camera';
   if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-    return kind === 'camera'
-      ? 'Camera permission was denied. Allow camera access in the browser and try again.'
-      : 'Screen sharing was cancelled or denied.';
+    return { key: camera ? 'lobby.voice.error.cameraDenied' : 'lobby.voice.error.screenDenied' };
   }
   if (name === 'NotFoundError' || name === 'OverconstrainedError') {
-    return kind === 'camera'
-      ? 'The selected camera is unavailable. Choose another camera in Voice & Video settings.'
-      : 'No shareable screen or window is available.';
+    return { key: camera ? 'lobby.voice.error.cameraNotFound' : 'lobby.voice.error.screenNotFound' };
   }
   if (name === 'NotReadableError') {
-    return kind === 'camera'
-      ? 'The camera is already in use by another application.'
-      : 'The selected screen could not be captured.';
+    return { key: camera ? 'lobby.voice.error.cameraBusy' : 'lobby.voice.error.screenBusy' };
   }
-  return kind === 'camera' ? 'Camera could not be started.' : 'Screen sharing could not be started.';
+  return { key: camera ? 'lobby.voice.error.cameraFailed' : 'lobby.voice.error.screenFailed' };
 }
 
 function screenShareOptions(
@@ -380,12 +402,19 @@ export function LobbyVoiceProvider({
   initialDm,
   children,
 }: LobbyVoiceProviderProps) {
+  const t = useT();
   const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>(
     ConnectionState.Disconnected
   );
   const [connecting, setConnecting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [errorNotice, setError] = useState<VoiceNotice | null>(null);
+  // Resolved on every render, so the message follows the viewer's language.
+  const error = errorNotice
+    ? 'key' in errorNotice
+      ? t(errorNotice.key, errorNotice.params)
+      : errorNotice.text
+    : null;
   const [micEnabled, setMicEnabled] = useState(false);
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [screenShareEnabled, setScreenShareEnabled] = useState(false);
@@ -557,11 +586,11 @@ export function LobbyVoiceProvider({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ displayName: localDisplayName || undefined }),
         });
-        if (!res.ok) throw new Error(`POST /api/auth/guest -> ${res.status}`);
+        if (!res.ok) throw new VoiceNoticeError({ key: 'lobby.voice.error.sessionFailed', params: { status: res.status } });
         const data = (await res.json()) as { guest: Guest };
         if (!cancelled) setGuest(data.guest);
       } catch (err) {
-        if (!cancelled) setError((err instanceof Error ? err.message : String(err)));
+        if (!cancelled) setError(noticeFromError(err));
       }
     })();
     return () => {
@@ -716,7 +745,7 @@ export function LobbyVoiceProvider({
     async (channelId: string) => {
       if (activeChannelId === channelId && roomRef.current) return;
       if (!guest?.uid) {
-        setError('Session not ready - try again in a moment.');
+        setError({ key: 'lobby.voice.error.sessionNotReady' });
         return;
       }
 
@@ -755,11 +784,13 @@ export function LobbyVoiceProvider({
         });
         if (connectTokenRef.current !== myToken) return; // superseded
         if (res.status === 401) {
-          throw new Error('Session expired - refresh the page.');
+          throw new VoiceNoticeError({ key: 'lobby.voice.error.sessionExpired' });
         }
         if (!res.ok) {
           const detail = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(detail.error ?? `Token endpoint returned ${res.status}`);
+          // The server's own `error` is shown as sent; ours is only the fallback.
+          if (detail.error) throw new Error(detail.error);
+          throw new VoiceNoticeError({ key: 'lobby.voice.error.tokenFailed', params: { status: res.status } });
         }
         const token = (await res.json()) as TokenResponse;
 
@@ -793,8 +824,8 @@ export function LobbyVoiceProvider({
           roomRef.current = null;
           // beta-review: say WHY (another tab took over, moderator removal…)
           // instead of silently flipping back to "Voice Ready".
-          const message = disconnectReasonMessage(reason);
-          if (message) setError(message);
+          const notice = disconnectReasonNotice(reason);
+          if (notice) setError(notice);
           setServerMuted(false);
           setAudioBlocked(false);
           detachRemoteAudio();
@@ -949,7 +980,7 @@ export function LobbyVoiceProvider({
                 /* fall through to listen-only */
               }
             }
-            if (!recovered) setError(microphoneErrorMessage(micErr, true));
+            if (!recovered) setError(microphoneErrorNotice(micErr, true));
           }
         }
         if (connectTokenRef.current !== myToken || roomRef.current !== room) return;
@@ -960,7 +991,7 @@ export function LobbyVoiceProvider({
         if (connectTokenRef.current !== myToken) return; // superseded
         const failedRoom = roomRef.current;
         if (failedRoom) void failedRoom.disconnect();
-        setError(err instanceof Error ? err.message : String(err));
+        setError(noticeFromError(err));
         setActiveChannelId(null);
         roomRef.current = null;
         stopHeartbeat();
@@ -1023,7 +1054,7 @@ export function LobbyVoiceProvider({
     const next = !localMicOn(r);
     if (next && isMicrophoneRevoked(r)) {
       setServerMuted(true);
-      setError(SERVER_MUTED_MESSAGE);
+      setError(SERVER_MUTED_NOTICE);
       return;
     }
     try {
@@ -1037,7 +1068,7 @@ export function LobbyVoiceProvider({
       }
       setError(null);
     } catch (err) {
-      setError(microphoneErrorMessage(err, false));
+      setError(microphoneErrorNotice(err, false));
     }
     setMicEnabled(localMicOn(r));
     collectParticipants(r);
@@ -1055,7 +1086,7 @@ export function LobbyVoiceProvider({
       if (next) setMainViewMode('voice');
       collectParticipants(r);
     } catch (err) {
-      setError(mediaErrorMessage(err, 'camera'));
+      setError(mediaErrorNotice(err, 'camera'));
     }
   }, [cameraEnabled, collectParticipants, loadVoicePreferences]);
 
@@ -1071,7 +1102,7 @@ export function LobbyVoiceProvider({
       if (next) setMainViewMode('voice');
       collectParticipants(r);
     } catch (err) {
-      setError(mediaErrorMessage(err, 'screen'));
+      setError(mediaErrorNotice(err, 'screen'));
     }
   }, [screenShareEnabled, collectParticipants, loadVoicePreferences]);
 
@@ -1112,7 +1143,7 @@ export function LobbyVoiceProvider({
     if (restore && !isMicrophoneRevoked(r) && effectiveInputModeRef.current === 'voice_activity') {
       void r.localParticipant.setMicrophoneEnabled(true, audioCaptureOptions(voicePrefsRef.current))
         .then(() => setMicEnabled(localMicOn(r)))
-        .catch((err) => setError(microphoneErrorMessage(err, false)));
+        .catch((err) => setError(microphoneErrorNotice(err, false)));
     }
   }, [applyRemoteAudio]);
 
@@ -1131,7 +1162,7 @@ export function LobbyVoiceProvider({
           void room.localParticipant.setMicrophoneEnabled(false).then(() => {
             setMicEnabled(false);
             collectParticipants(room);
-          }).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+          }).catch((err) => setError(noticeFromError(err)));
         }
         return;
       }
@@ -1148,7 +1179,7 @@ export function LobbyVoiceProvider({
         ).then(() => {
           setMicEnabled(restore.micEnabled);
           collectParticipants(room);
-        }).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+        }).catch((err) => setError(noticeFromError(err)));
       }
     };
 
@@ -1197,7 +1228,7 @@ export function LobbyVoiceProvider({
           collectParticipants(r);
         }
       } catch (err) {
-        setError(microphoneErrorMessage(err, false));
+        setError(microphoneErrorNotice(err, false));
       } finally {
         // Presses/releases that arrive while a call is in flight are picked
         // up by the loop's next iteration (it re-reads the desired state).

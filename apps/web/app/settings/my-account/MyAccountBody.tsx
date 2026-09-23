@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { UserRow } from '@lobbyforge/db';
 import { ChangePasswordModal } from '@/components/modals/ChangePasswordModal';
+import { useT } from '@/lib/i18n/client';
 
 export default function MyAccountBody({
   user,
@@ -12,6 +13,7 @@ export default function MyAccountBody({
   user: UserRow | null;
   signedIn: boolean;
 }) {
+  const t = useT();
   const router = useRouter();
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -25,7 +27,7 @@ export default function MyAccountBody({
       body: JSON.stringify(input),
     });
     const body = (await response.json().catch(() => ({}))) as { error?: string };
-    if (!response.ok) throw new Error(body.error ?? 'Password could not be changed.');
+    if (!response.ok) throw new Error(body.error ?? t('settings.account.security.changeFailed'));
   }
 
   async function signOut() {
@@ -37,7 +39,7 @@ export default function MyAccountBody({
     });
     if (!response.ok) {
       const body = (await response.json().catch(() => ({}))) as { error?: string };
-      setAccountError(body.error ?? 'Could not sign out.');
+      setAccountError(body.error ?? t('settings.account.session.signOutFailed'));
       setSigningOut(false);
       return;
     }
@@ -48,8 +50,8 @@ export default function MyAccountBody({
   if (!signedIn || !user) {
     return (
       <section className="max-w-3xl mx-auto">
-        <h1 className="text-2xl font-semibold text-text-primary">My Account</h1>
-        <p className="mt-2 text-sm text-text-muted">Sign in to view your account details.</p>
+        <h1 className="text-2xl font-semibold text-text-primary">{t('settings.nav.user.account')}</h1>
+        <p className="mt-2 text-sm text-text-muted">{t('settings.account.signedOut')}</p>
       </section>
     );
   }
@@ -57,55 +59,57 @@ export default function MyAccountBody({
   return (
     <section className="max-w-3xl mx-auto pb-32 space-y-8">
         <header>
-          <h1 className="text-2xl font-semibold text-text-primary">My Account</h1>
-          <p className="mt-1 text-sm text-text-secondary">
-            Manage your local account for this self-hosted community.
-          </p>
+          <h1 className="text-2xl font-semibold text-text-primary">{t('settings.nav.user.account')}</h1>
+          <p className="mt-1 text-sm text-text-secondary">{t('settings.account.description')}</p>
         </header>
 
-        <Section title="Account Identity">
-          <Row label="Display name" value={user.displayName} readOnly />
-          <Row label="Email" value={user.email ?? 'Not set'} readOnly />
+        <Section title={t('settings.account.identity.title')}>
+          <Row label={t('settings.account.identity.displayName')} value={user.displayName} readOnly />
           <Row
-            label="Account type"
-            value={user.isGuest ? 'Guest account' : 'Local account'}
+            label={t('settings.account.identity.email')}
+            value={user.email ?? t('settings.account.identity.emailNotSet')}
+            readOnly
+          />
+          <Row
+            label={t('settings.account.identity.type')}
+            value={t(user.isGuest ? 'settings.account.identity.guest' : 'settings.account.identity.local')}
             readOnly
           />
           <p className="text-xs text-text-muted italic pt-4 border-t border-border-subtle">
-            This account belongs to this community only.
+            {t('settings.account.identity.note')}
           </p>
         </Section>
 
-        <Section title="Login & Security">
+        <Section title={t('settings.account.security.title')}>
           <Row
-            label="Password"
-            value={user.isGuest ? 'Not set (guest)' : 'Set'}
-            action={user.isGuest ? undefined : 'Change'}
+            label={t('settings.account.security.password')}
+            value={t(user.isGuest ? 'settings.account.security.passwordGuest' : 'settings.account.security.passwordSet')}
+            action={user.isGuest ? undefined : t('settings.account.security.change')}
             onAction={user.isGuest ? undefined : () => setPasswordOpen(true)}
-            badge={user.isGuest ? 'Unavailable' : undefined}
+            badge={user.isGuest ? t('settings.account.security.unavailable') : undefined}
           />
         </Section>
 
-        <Section title="Session Security">
+        <Section title={t('settings.account.session.title')}>
           <div className="flex items-center gap-4">
             <div className="w-10 h-10 rounded-full bg-surface-raised flex items-center justify-center border border-border-subtle">
               <span className="material-symbols-outlined text-success">computer</span>
             </div>
             <div>
-              <h3 className="text-sm text-text-primary">Current device</h3>
-              <p className="text-xs text-text-muted">Active now</p>
+              <h3 className="text-sm text-text-primary">{t('settings.account.session.currentDevice')}</h3>
+              <p className="text-xs text-text-muted">{t('settings.account.session.activeNow')}</p>
             </div>
           </div>
           <Row
-            label="Other active sessions"
-            value="Manage signed-in devices"
+            label={t('settings.account.session.others')}
+            value={t('settings.account.session.othersHint')}
             href="/settings/active-sessions"
-            action="Open"
+            action={t('settings.account.session.open')}
           />
           <Row
-            label="Current session"
-            value={signingOut ? 'Signing out...' : 'Sign out on this device'}
-            action="Sign out"
+            label={t('settings.account.session.current')}
+            value={t(signingOut ? 'settings.account.session.signingOut' : 'settings.account.session.signOutHint')}
+            action={t('settings.account.session.signOut')}
             onAction={signingOut ? undefined : signOut}
             last
           />
@@ -159,6 +163,7 @@ function Row({
   badge?: string;
   last?: boolean;
 }) {
+  const t = useT();
   return (
     <div
       className={`flex justify-between items-center ${
@@ -171,7 +176,7 @@ function Row({
       </div>
       {readOnly ? (
         <span className="px-2 py-1 rounded bg-surface-container-high text-text-muted text-[10px] uppercase tracking-wide">
-          Read-only
+          {t('settings.account.readOnly')}
         </span>
       ) : badge ? (
         <span className="px-2 py-1 rounded bg-surface-container-high text-text-muted text-[10px] uppercase tracking-wide">

@@ -4,6 +4,7 @@ import {
   LOCALE_CODE_PATTERN,
   SOURCE_LOCALE,
   createTranslator,
+  englishPluralFallbacks,
   resolveMessages,
   type LocaleInfo,
   type Messages,
@@ -145,7 +146,7 @@ export function readCatalogue(code: string, root: string = MESSAGES_ROOT): Catal
 
 // Production reads each language once; development re-reads on every
 // request so a translator sees their edit on refresh, no restart needed.
-const cache = new Map<string, Messages>();
+const cache = new Map<string, Loaded>();
 const discoveryCache = new Map<string, Discovery>();
 const shouldCache = () => process.env.NODE_ENV === 'production';
 
@@ -162,12 +163,12 @@ export function getDiscovery(root: string = MESSAGES_ROOT): Discovery {
   return discovery;
 }
 
-/**
- * The messages a page in `code` should use: its translations over the
- * English catalogue, so every gap reads in English rather than as a raw
- * key. Unknown codes get English — the code usually comes from a cookie.
- */
-export function loadMessages(code: string, root: string = MESSAGES_ROOT): Messages {
+interface Loaded {
+  messages: Messages;
+  englishPlurals: string[];
+}
+
+function load(code: string, root: string): Loaded {
   const known = getDiscovery(root).locales.some((locale) => locale.code === code);
   const target = known ? code : SOURCE_LOCALE;
   const cacheKey = `${root}\u0000${target}`;
@@ -176,10 +177,27 @@ export function loadMessages(code: string, root: string = MESSAGES_ROOT): Messag
     if (hit) return hit;
   }
   const source = readCatalogue(SOURCE_LOCALE, root).messages;
-  const resolved =
-    target === SOURCE_LOCALE ? resolveMessages({}, source) : resolveMessages(source, readCatalogue(target, root).messages);
-  if (shouldCache()) cache.set(cacheKey, resolved);
-  return resolved;
+  const translation = target === SOURCE_LOCALE ? source : readCatalogue(target, root).messages;
+  const loaded = {
+    messages: target === SOURCE_LOCALE ? resolveMessages({}, source) : resolveMessages(source, translation),
+    englishPlurals: target === SOURCE_LOCALE ? [] : englishPluralFallbacks(source, translation),
+  };
+  if (shouldCache()) cache.set(cacheKey, loaded);
+  return loaded;
+}
+
+/**
+ * The messages a page in `code` should use: its translations over the
+ * English catalogue, so every gap reads in English rather than as a raw
+ * key. Unknown codes get English — the code usually comes from a cookie.
+ */
+export function loadMessages(code: string, root: string = MESSAGES_ROOT): Messages {
+  return load(code, root).messages;
+}
+
+/** The keys in `code` whose plural still reads in English — see `englishPluralFallbacks`. */
+export function loadEnglishPlurals(code: string, root: string = MESSAGES_ROOT): string[] {
+  return load(code, root).englishPlurals;
 }
 
 /**
@@ -190,7 +208,7 @@ export function loadMessages(code: string, root: string = MESSAGES_ROOT): Messag
  */
 export function translatorFor(code: string, root: string = MESSAGES_ROOT): Translator {
   const known = getDiscovery(root).locales.some((locale) => locale.code === code);
-  return createTranslator(known ? code : SOURCE_LOCALE, loadMessages(code, root));
+  return createTranslator(known ? code : SOURCE_LOCALE, loadMessages(code, root), loadEnglishPlurals(code, root));
 }
 
 /** Everything `I18nProvider` takes, for one fixed language. */
@@ -201,6 +219,7 @@ export function providerPropsFor(code: string, root: string = MESSAGES_ROOT) {
     locale: info?.code ?? SOURCE_LOCALE,
     dir: info?.dir ?? ('ltr' as const),
     messages: loadMessages(code, root),
+    englishPlurals: loadEnglishPlurals(code, root),
     locales,
     choice: code,
   };

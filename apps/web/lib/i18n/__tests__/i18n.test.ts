@@ -118,10 +118,21 @@ describe('adding a language', () => {
     writeFileSync(join(root, path), JSON.stringify(value));
   };
   write(`en/${LOCALE_META_FILE}`, { name: 'English', englishName: 'English', status: 'complete' });
-  write('en/area.json', { 'x.hello': 'Hello {name}', 'x.bye': 'Goodbye' });
+  write('en/area.json', {
+    'x.hello': 'Hello {name}',
+    'x.bye': 'Goodbye',
+    'x.members': '{count, plural, one {# member} other {# members}}',
+    'x.files': '{count, plural, one {# file} other {# files}}',
+  });
   // A community translation, half done: one string translated, one left blank.
   write(`xx/${LOCALE_META_FILE}`, { name: 'Xish', englishName: 'Example', dir: 'rtl', status: 'partial' });
   write('xx/area.json', { 'x.hello': 'Hallo {name}', 'x.bye': '' });
+  // A language with more plural forms than English, part translated.
+  write(`ru/${LOCALE_META_FILE}`, { name: 'Русский', englishName: 'Russian', status: 'partial' });
+  write('ru/area.json', {
+    'x.files': '{count, plural, one {# файл} few {# файла} many {# файлов} other {# файла}}',
+    'x.members': '',
+  });
   // Things that must be reported, not crash the instance.
   write('yy/area.json', {});
   write(`Bad_Code/${LOCALE_META_FILE}`, { name: 'Bad', englishName: 'Bad', status: 'partial' });
@@ -130,7 +141,7 @@ describe('adding a language', () => {
 
   it('discovers the new folder with no code change', () => {
     const found = discoverLocales(root).locales.map((l) => l.code);
-    expect(found).toEqual(['en', 'xx']);
+    expect(found).toEqual(['en', 'ru', 'xx']);
   });
 
   it('reads the direction and status from the folder itself', () => {
@@ -143,6 +154,20 @@ describe('adding a language', () => {
     expect(t('x.hello', { name: 'Ada' })).toBe('Hallo Ada');
     expect(t('x.bye')).toBe('Goodbye'); // blank → English, never an empty label
     expect(t.locale).toBe('xx');
+  });
+
+  it('lets a language write all of its own plural forms, with no code change', () => {
+    const t = translatorFor('ru', root);
+    expect(t('x.files', { count: 1 })).toBe('1 файл');
+    expect(t('x.files', { count: 3 })).toBe('3 файла');
+    expect(t('x.files', { count: 5 })).toBe('5 файлов');
+  });
+
+  it('keeps English plural rules for a plural that is still English', () => {
+    // 21 is Russian's "one" form; the English fallback must still say "members".
+    const t = translatorFor('ru', root);
+    expect(t('x.members', { count: 21 })).toBe('21 members');
+    expect(t('x.members', { count: 1 })).toBe('1 member');
   });
 
   it('reports broken folders instead of taking the site down', () => {
@@ -194,6 +219,17 @@ describe('createTranslator', () => {
     expect(interpolate('Message {name}', { name: 'Ada' })).toBe('Message Ada');
     expect(interpolate('{a} and {b}', { a: '1', b: '2' })).toBe('1 and 2');
     expect(interpolate('Message {name}', {})).toBe('Message {name}');
+  });
+
+  it('picks plural forms by the translator’s language', () => {
+    const plural = '{count, plural, one {# üye} other {# üye}}';
+    expect(createTranslator('tr', { k: plural })('k', { count: 1200 })).toBe('1.200 üye');
+    expect(createTranslator('en', { k: '{count, plural, one {# member} other {# members}}' })('k', { count: 1 })).toBe('1 member');
+  });
+
+  it('treats a plural and a plain count as the same placeholder', () => {
+    // A translator may add plural forms English does not need, and vice versa.
+    expect(placeholdersOf('{count, plural, one {# member} other {# members}}')).toEqual(placeholdersOf('{count} üye'));
   });
 
   it('translates the shipped catalogues end to end', () => {

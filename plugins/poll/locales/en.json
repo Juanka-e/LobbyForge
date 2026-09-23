@@ -1,4 +1,5 @@
 {
+  "catalog.summary": "Anonymous one-vote-per-player polls for channels.",
   "poll.closed.clearButton": "Clear poll",
   "poll.closed.reopenButton": "Reopen poll",
   "poll.closed.title": "Final results",

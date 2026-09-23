@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
+import { useT } from '@/lib/i18n/client';
 
 type RegistrationMode = 'open' | 'invite_only' | 'closed';
 
@@ -20,6 +21,7 @@ export default function LoginForm({
   /** Native shell's pending handoff state (?desktopLoginState=...). */
   desktopLoginState?: string;
 }) {
+  const t = useT();
   const router = useRouter();
   const canRegister = registrationMode !== 'closed';
   const inviteOnly = registrationMode === 'invite_only';
@@ -55,7 +57,7 @@ export default function LoginForm({
     });
     const body = (await response.json().catch(() => ({}))) as { error?: string };
     if (!response.ok) {
-      setError(body.error ?? (mode === 'login' ? 'Sign in failed.' : 'Account could not be created.'));
+      setError(body.error ?? (mode === 'login' ? t('auth.login.signInFailed') : t('auth.login.registerFailed')));
       setBusy(false);
       return;
     }
@@ -100,7 +102,7 @@ export default function LoginForm({
     });
     const body = (await response.json().catch(() => ({}))) as { error?: string };
     if (!response.ok) {
-      setError(body.error ?? 'Guest sign in failed.');
+      setError(body.error ?? t('auth.login.guestFailed'));
       setBusy(false);
       return;
     }
@@ -117,15 +119,15 @@ export default function LoginForm({
   return (
     <div className="grid gap-6">
       {canRegister ? (
-        <div className="grid grid-cols-2 rounded-md bg-surface-container p-1" role="tablist" aria-label="Account access">
-          <ModeButton active={mode === 'login'} onClick={() => switchMode('login')}>Sign in</ModeButton>
-          <ModeButton active={mode === 'register'} onClick={() => switchMode('register')}>Create account</ModeButton>
+        <div className="grid grid-cols-2 rounded-md bg-surface-container p-1" role="tablist" aria-label={t('auth.login.tabsLabel')}>
+          <ModeButton active={mode === 'login'} onClick={() => switchMode('login')}>{t('auth.login.signIn')}</ModeButton>
+          <ModeButton active={mode === 'register'} onClick={() => switchMode('register')}>{t('auth.login.createAccount')}</ModeButton>
         </div>
       ) : null}
 
       <form onSubmit={submitAccount} className="grid gap-4">
         {mode === 'register' ? (
-          <Field label="Display name">
+          <Field label={t('auth.login.displayName')}>
             <input
               value={accountDisplayName}
               onChange={(event) => setAccountDisplayName(event.target.value)}
@@ -134,11 +136,11 @@ export default function LoginForm({
               required
               autoComplete="nickname"
               className="auth-input"
-              placeholder="How people will see you"
+              placeholder={t('auth.login.displayNamePlaceholder')}
             />
           </Field>
         ) : null}
-        <Field label="Email">
+        <Field label={t('auth.login.email')}>
           <input
             type="email"
             value={email}
@@ -150,7 +152,7 @@ export default function LoginForm({
             placeholder="you@example.com"
           />
         </Field>
-        <Field label="Password">
+        <Field label={t('auth.login.password')}>
           <input
             type="password"
             value={password}
@@ -160,7 +162,7 @@ export default function LoginForm({
             maxLength={128}
             autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
             className="auth-input"
-            placeholder={mode === 'register' ? 'At least 12 characters' : 'Enter your password'}
+            placeholder={mode === 'register' ? t('auth.login.passwordPlaceholderNew') : t('auth.login.passwordPlaceholder')}
           />
         </Field>
         {mode === 'register' && (inviteOnly || initialInviteCode) ? (
@@ -177,7 +179,7 @@ export default function LoginForm({
           }
           className="w-full rounded-lg bg-primary-container px-4 py-2.5 font-semibold text-on-primary-container disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {busy ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'}
+          {busy ? t('auth.login.pleaseWait') : mode === 'login' ? t('auth.login.signIn') : t('auth.login.createAccount')}
         </button>
       </form>
 
@@ -185,11 +187,11 @@ export default function LoginForm({
         <>
           <div className="flex items-center gap-3 text-xs text-text-muted">
             <span className="h-px flex-1 bg-border-subtle" />
-            <span>or join as guest</span>
+            <span>{t('auth.login.orGuest')}</span>
             <span className="h-px flex-1 bg-border-subtle" />
           </div>
           <form onSubmit={submitGuest} className="grid gap-4">
-            <Field label="Guest display name">
+            <Field label={t('auth.login.guestDisplayName')}>
               <input
                 value={guestDisplayName}
                 onChange={(event) => setGuestDisplayName(event.target.value)}
@@ -198,7 +200,7 @@ export default function LoginForm({
                 required
                 autoComplete="nickname"
                 className="auth-input"
-                placeholder="How people will see you"
+                placeholder={t('auth.login.displayNamePlaceholder')}
               />
             </Field>
             {inviteOnly ? <InviteField value={inviteCode} onChange={setInviteCode} required /> : null}
@@ -207,7 +209,7 @@ export default function LoginForm({
               disabled={busy || guestDisplayName.trim().length < 2 || (inviteOnly && inviteCode.trim().length < 6)}
               className="w-full rounded-lg border border-border-strong bg-surface px-4 py-2.5 font-semibold text-text-primary hover:bg-surface-container disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {busy ? 'Please wait...' : 'Continue as guest'}
+              {busy ? t('auth.login.pleaseWait') : t('auth.login.continueAsGuest')}
             </button>
           </form>
         </>
@@ -238,8 +240,9 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function InviteField({ value, onChange, required }: { value: string; onChange: (value: string) => void; required: boolean }) {
+  const t = useT();
   return (
-    <Field label={required ? 'Invite code' : 'Invite code (optional)'}>
+    <Field label={required ? t('auth.login.inviteCode') : t('auth.login.inviteCodeOptional')}>
       <input
         value={value}
         onChange={(event) => onChange(event.target.value.toUpperCase())}
@@ -248,7 +251,7 @@ function InviteField({ value, onChange, required }: { value: string; onChange: (
         required={required}
         autoComplete="one-time-code"
         className="auth-input font-mono"
-        placeholder={required ? 'Required for this community' : 'Join a specific community'}
+        placeholder={required ? t('auth.login.invitePlaceholderRequired') : t('auth.login.invitePlaceholderOptional')}
       />
     </Field>
   );

@@ -1,6 +1,7 @@
 'use client';
 
 import { Modal, ModalCancelButton, ModalPrimaryButton } from '../Modal';
+import { useT } from '@/lib/i18n/client';
 
 export interface HushleHowToPlayModalProps {
   open: boolean;
@@ -12,23 +13,23 @@ export interface HushleHowToPlayModalProps {
   };
 }
 
-const DEFAULT_METADATA = {
-  players: '3–12 players',
-  duration: '10–30 min',
-};
+/** Hushle's usual table, used when the caller passes no metadata. */
+const DEFAULT_PLAYERS = { min: 3, max: 12 };
+const DEFAULT_MINUTES = { min: 10, max: 30 };
 
-const STEPS: { title: string; description: string }[] = [
+/** Message keys, resolved with `t()` where they render. */
+const STEPS: { titleKey: string; descriptionKey: string }[] = [
   {
-    title: 'Join a voice room',
-    description: 'Players join the same voice room before the activity begins.',
+    titleKey: 'shell.howToPlay.steps.join.title',
+    descriptionKey: 'shell.howToPlay.steps.join.description',
   },
   {
-    title: 'Describe the word',
-    description: 'One player describes the secret word without using the forbidden clues.',
+    titleKey: 'shell.howToPlay.steps.describe.title',
+    descriptionKey: 'shell.howToPlay.steps.describe.description',
   },
   {
-    title: 'Guess before time runs out',
-    description: 'Teammates score by finding the word before the timer ends.',
+    titleKey: 'shell.howToPlay.steps.guess.title',
+    descriptionKey: 'shell.howToPlay.steps.guess.description',
   },
 ];
 
@@ -36,8 +37,13 @@ export function HushleHowToPlayModal({
   open,
   onClose,
   onStart,
-  metadata = DEFAULT_METADATA,
+  metadata,
 }: HushleHowToPlayModalProps) {
+  const t = useT();
+  const { players, duration } = metadata ?? {
+    players: t('shell.howToPlay.players', DEFAULT_PLAYERS),
+    duration: t('shell.howToPlay.duration', DEFAULT_MINUTES),
+  };
   return (
     <Modal
       open={open}
@@ -45,9 +51,9 @@ export function HushleHowToPlayModal({
       size="lg"
       footer={
         <>
-          <ModalCancelButton onClick={onClose}>Close</ModalCancelButton>
+          <ModalCancelButton onClick={onClose}>{t('common.close')}</ModalCancelButton>
           <ModalPrimaryButton onClick={onStart} icon="play_arrow">
-            Start in Voice Room
+            {t('shell.howToPlay.start')}
           </ModalPrimaryButton>
         </>
       }
@@ -62,33 +68,33 @@ export function HushleHowToPlayModal({
           <div>
             <h2 className="text-2xl font-bold text-text-primary mb-1">Hushle</h2>
             <span className="text-xs text-text-secondary bg-surface px-2 py-1 rounded border border-border-subtle">
-              Party Game
+              {t('shell.howToPlay.genre')}
             </span>
           </div>
         </header>
 
         <p className="text-[15px] text-text-secondary">
-          Describe the secret word without using any of the forbidden clues.
+          {t('shell.howToPlay.summary')}
         </p>
 
         <div className="flex flex-wrap gap-3 text-xs text-text-secondary">
-          <MetadataChip icon="groups" label={metadata.players} />
-          <MetadataChip icon="timer" label={metadata.duration} />
-          <MetadataChip icon="mic" label="Voice required" />
-          <MetadataChip icon="check_circle" label="Community installed" tone="primary" />
+          <MetadataChip icon="groups" label={players} />
+          <MetadataChip icon="timer" label={duration} />
+          <MetadataChip icon="mic" label={t('shell.howToPlay.voiceRequired')} />
+          <MetadataChip icon="check_circle" label={t('shell.howToPlay.installed')} tone="primary" />
         </div>
 
         <div>
-          <h3 className="text-base font-semibold text-text-primary mb-3">How to Play</h3>
+          <h3 className="text-base font-semibold text-text-primary mb-3">{t('shell.howToPlay.heading')}</h3>
           <div className="space-y-4">
             {STEPS.map((step, index) => (
-              <div key={step.title} className="flex gap-4">
+              <div key={step.titleKey} className="flex gap-4">
                 <div className="flex-shrink-0 w-8 h-8 rounded-full bg-surface border border-border-subtle flex items-center justify-center text-sm font-medium text-primary">
                   {index + 1}
                 </div>
                 <div>
-                  <h4 className="text-sm font-medium text-text-primary mb-1">{step.title}</h4>
-                  <p className="text-sm text-text-secondary">{step.description}</p>
+                  <h4 className="text-sm font-medium text-text-primary mb-1">{t(step.titleKey)}</h4>
+                  <p className="text-sm text-text-secondary">{t(step.descriptionKey)}</p>
                 </div>
               </div>
             ))}
@@ -99,12 +105,12 @@ export function HushleHowToPlayModal({
           <div className="flex gap-3 text-text-secondary text-sm items-start">
             <span className="material-symbols-outlined text-primary mt-0.5 text-[18px]">info</span>
             <p>
-              LobbyForge keeps your voice connection active while Hushle opens its own game interface.
+              {t('shell.howToPlay.voiceStaysOn')}
             </p>
           </div>
           <div className="border-t border-border-subtle/50 pt-3 flex items-center gap-2 text-xs">
-            <span className="text-text-muted">Can start:</span>
-            <span className="text-text-primary font-medium">Members with the Start Activities permission</span>
+            <span className="text-text-muted">{t('shell.howToPlay.canStart')}</span>
+            <span className="text-text-primary font-medium">{t('shell.howToPlay.canStartWho')}</span>
           </div>
         </div>
       </div>

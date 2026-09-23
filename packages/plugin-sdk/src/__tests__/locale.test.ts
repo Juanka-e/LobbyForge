@@ -96,3 +96,21 @@ describe('@lobbyforge/plugin-sdk/locale', () => {
     expect(tFor('hushle', 'de', 'a')).toBe('Starten');
   });
 });
+describe('registration', () => {
+  it('ignores a second registration of the same table', () => {
+    __resetPluginLocaleRegistry();
+    const en = { 'x.a': 'A' };
+    loadPluginLocale('twice', { en });
+    loadPluginLocale('twice', { en });
+    expect(listPluginLocales('twice')).toEqual(['en']);
+    expect(tFor('twice', 'en', 'x.a')).toBe('A');
+  });
+
+  it('sees tables registered after the first lookup', () => {
+    __resetPluginLocaleRegistry();
+    loadPluginLocale('late', { en: { 'x.a': 'A' } });
+    expect(tFor('late', 'tr', 'x.a')).toBe('A');
+    loadPluginLocale('late', { tr: { 'x.a': 'Á' } });
+    expect(tFor('late', 'tr', 'x.a')).toBe('Á');
+  });
+});

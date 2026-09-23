@@ -26,6 +26,8 @@ interface I18nContextValue {
   locale: string;
   dir: TextDirection;
   messages: Messages;
+  /** Keys whose plural still reads in English — see `englishPluralFallbacks`. */
+  englishPlurals?: readonly string[];
   locales: LocaleInfo[];
   choice: string;
 }
@@ -42,13 +44,14 @@ export function I18nProvider({
   locale,
   dir,
   messages,
+  englishPlurals,
   locales,
   choice,
   children,
 }: I18nContextValue & { children: ReactNode }) {
   const value = useMemo(
-    () => ({ locale, dir, messages, locales, choice }),
-    [locale, dir, messages, locales, choice]
+    () => ({ locale, dir, messages, englishPlurals, locales, choice }),
+    [locale, dir, messages, englishPlurals, locales, choice]
   );
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
@@ -65,6 +68,6 @@ export function useLocaleOptions(): { locales: LocaleInfo[]; choice: string; loc
 
 /** `const t = useT()` — then `t('lobby.activities.title')`. */
 export function useT(): Translator {
-  const { locale, messages } = useContext(I18nContext);
-  return useMemo(() => createTranslator(locale, messages), [locale, messages]);
+  const { locale, messages, englishPlurals } = useContext(I18nContext);
+  return useMemo(() => createTranslator(locale, messages, englishPlurals), [locale, messages, englishPlurals]);
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useT } from '@/lib/i18n/client';
 
 export interface VoiceSettingsView {
   serverId: string;
@@ -30,6 +31,7 @@ export default function VoiceMediaClient({
   initial: VoiceSettingsView | null;
   loadError: string | null;
 }) {
+  const t = useT();
   const [settings, setSettings] = useState<VoiceSettingsView | null>(initial);
   const [draft, setDraft] = useState(() => initial ?? defaultDraft(serverId ?? ''));
   const [saving, setSaving] = useState(false);
@@ -58,10 +60,10 @@ export default function VoiceMediaClient({
         }),
       });
       const data = (await response.json().catch(() => ({}))) as ApiResponse;
-      if (!response.ok || !data.settings) throw new Error(data.error ?? 'Could not save voice settings');
+      if (!response.ok || !data.settings) throw new Error(data.error ?? t('adminSettings.voiceMedia.saveFailed'));
       setSettings(data.settings);
       setDraft(data.settings);
-      setMessage({ tone: 'success', text: 'Voice and media settings saved.' });
+      setMessage({ tone: 'success', text: t('adminSettings.voiceMedia.saved') });
     } catch (err) {
       setMessage({ tone: 'danger', text: (err as Error).message });
     } finally {
@@ -77,71 +79,71 @@ export default function VoiceMediaClient({
   return (
     <section className="max-w-3xl mx-auto pb-32">
       <header className="mb-6">
-        <h1 className="text-2xl font-semibold text-text-primary">Voice & Media</h1>
-        <p className="mt-1 text-sm text-text-secondary">
-          Default settings for voice rooms, camera, and screen share.
-        </p>
+        <h1 className="text-2xl font-semibold text-text-primary">{t('adminSettings.voiceMedia.title')}</h1>
+        <p className="mt-1 text-sm text-text-secondary">{t('adminSettings.voiceMedia.subtitle')}</p>
       </header>
 
-      {loadError ? <Alert tone="danger" text={`Could not load voice settings: ${loadError}`} /> : null}
-      {!serverId ? <Alert tone="danger" text="No server is available for this admin account." /> : null}
+      {loadError ? (
+        <Alert tone="danger" text={t('adminSettings.voiceMedia.loadError', { error: loadError })} />
+      ) : null}
+      {!serverId ? <Alert tone="danger" text={t('adminSettings.common.noServer')} /> : null}
       {message ? <Alert tone={message.tone} text={message.text} /> : null}
 
-      <Section title="Voice Room Defaults" icon="meeting_room">
+      <Section title={t('adminSettings.voiceMedia.defaults.title')} icon="meeting_room">
         <NumberRow
-          label="Default user limit"
-          description="Applies to newly created voice channels. Empty means no fixed limit."
+          label={t('adminSettings.voiceMedia.userLimit.label')}
+          description={t('adminSettings.voiceMedia.userLimit.description')}
           value={draft.defaultUserLimit}
           min={1}
           max={500}
           onChange={(value) => setDraft((current) => ({ ...current, defaultUserLimit: value }))}
         />
         <ToggleRow
-          label="Require Push-to-Talk"
-          description="Members must use hold-to-talk behavior in voice rooms. Enforced in the lobby client on every voice connection."
+          label={t('adminSettings.voiceMedia.pushToTalk.label')}
+          description={t('adminSettings.voiceMedia.pushToTalk.description')}
           checked={draft.requirePushToTalk}
           onChange={(value) => setDraft((current) => ({ ...current, requirePushToTalk: value }))}
         />
         <ToggleRow
-          label="Start muted"
-          description="Members enter voice rooms muted by default."
+          label={t('adminSettings.voiceMedia.startMuted.label')}
+          description={t('adminSettings.voiceMedia.startMuted.description')}
           checked={draft.startMuted}
           onChange={(value) => setDraft((current) => ({ ...current, startMuted: value }))}
         />
       </Section>
 
-      <Section title="Camera & Screen Sharing" icon="videocam">
+      <Section title={t('adminSettings.voiceMedia.camera.title')} icon="videocam">
         <ToggleRow
-          label="Allow camera"
-          description="When off, new LiveKit tokens cannot publish camera tracks."
+          label={t('adminSettings.voiceMedia.allowCamera.label')}
+          description={t('adminSettings.voiceMedia.allowCamera.description')}
           checked={draft.allowCamera}
           onChange={(value) => setDraft((current) => ({ ...current, allowCamera: value }))}
         />
         <ToggleRow
-          label="Allow screen share"
-          description="When off, new LiveKit tokens cannot publish screen-share tracks."
+          label={t('adminSettings.voiceMedia.allowScreenShare.label')}
+          description={t('adminSettings.voiceMedia.allowScreenShare.description')}
           checked={draft.allowScreenShare}
           onChange={(value) => setDraft((current) => ({ ...current, allowScreenShare: value }))}
         />
         <NumberRow
-          label="Max camera users per room"
-          description="Planning cap for room hosts. Empty keeps Doctor-recommended capacity."
+          label={t('adminSettings.voiceMedia.maxCameraUsers')}
+          description={t('adminSettings.voiceMedia.capDescription')}
           value={draft.maxCameraUsersPerRoom}
           min={1}
           max={100}
           onChange={(value) => setDraft((current) => ({ ...current, maxCameraUsersPerRoom: value }))}
         />
         <NumberRow
-          label="Max screen-share users per room"
-          description="Planning cap for room hosts. Empty keeps Doctor-recommended capacity."
+          label={t('adminSettings.voiceMedia.maxScreenShareUsers')}
+          description={t('adminSettings.voiceMedia.capDescription')}
           value={draft.maxScreenShareUsersPerRoom}
           min={1}
           max={100}
           onChange={(value) => setDraft((current) => ({ ...current, maxScreenShareUsersPerRoom: value }))}
         />
         <SelectRow
-          label="Maximum stream resolution"
-          description="Members may select this resolution or any lower option."
+          label={t('adminSettings.voiceMedia.resolution.label')}
+          description={t('adminSettings.voiceMedia.resolution.description')}
           value={String(draft.maxScreenShareHeight)}
           options={[
             { value: '480', label: '480p' },
@@ -153,8 +155,8 @@ export default function VoiceMediaClient({
           onChange={(value) => setDraft((current) => ({ ...current, maxScreenShareHeight: Number(value) }))}
         />
         <SelectRow
-          label="Maximum stream frame rate"
-          description="Members may select this frame rate or a lower option."
+          label={t('adminSettings.voiceMedia.frameRate.label')}
+          description={t('adminSettings.voiceMedia.frameRate.description')}
           value={String(draft.maxScreenShareFps)}
           options={[
             { value: '15', label: '15 FPS' },
@@ -167,9 +169,7 @@ export default function VoiceMediaClient({
 
       <div className="sticky bottom-0 mt-8 border-t border-border-subtle bg-background/95 py-4 backdrop-blur">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-xs text-text-muted">
-            Camera and screen-share toggles are enforced when new LiveKit tokens are issued.
-          </p>
+          <p className="text-xs text-text-muted">{t('adminSettings.voiceMedia.footer')}</p>
           <div className="flex gap-2">
             <button
               type="button"
@@ -177,7 +177,7 @@ export default function VoiceMediaClient({
               disabled={!dirty || saving}
               className="rounded-lg border border-border-subtle px-4 py-2 text-sm font-medium text-text-secondary disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Reset
+              {t('adminSettings.common.reset')}
             </button>
             <button
               type="button"
@@ -185,7 +185,7 @@ export default function VoiceMediaClient({
               disabled={!serverId || !dirty || saving}
               className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-on-primary disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {saving ? 'Saving...' : 'Save'}
+              {saving ? t('adminSettings.common.saving') : t('common.save')}
             </button>
           </div>
         </div>
@@ -282,6 +282,7 @@ function NumberRow({
   max: number;
   onChange: (value: number | null) => void;
 }) {
+  const t = useT();
   return (
     <div className="grid gap-4 px-5 py-4 md:grid-cols-[1fr_140px] md:items-center">
       <div>
@@ -293,7 +294,7 @@ function NumberRow({
         min={min}
         max={max}
         value={value ?? ''}
-        placeholder="No limit"
+        placeholder={t('adminSettings.voiceMedia.noLimit')}
         onChange={(event) => {
           if (event.target.value.trim() === '') {
             onChange(null);

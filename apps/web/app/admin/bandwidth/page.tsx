@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import SettingsShell from '@/app/SettingsShell';
+import { useT } from '@/lib/i18n/client';
 
 /**
  * M21.5-bandwidth — Admin bandwidth counter + alert.
@@ -53,6 +54,7 @@ const THRESHOLD_BYTES = process.env.NEXT_PUBLIC_LOBBYFORGE_BANDWIDTH_ALERT_BYTES
   : null;
 
 export default function BandwidthPage() {
+  const t = useT();
   const [totals, setTotals] = useState<ServerTotal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -62,7 +64,7 @@ export default function BandwidthPage() {
     try {
       const res = await fetch('/api/admin/bandwidth', { credentials: 'same-origin' });
       if (res.status === 403) {
-        setError('Admin token required.');
+        setError(t('common.adminRequired'));
         setLoading(false);
         return;
       }
@@ -75,7 +77,7 @@ export default function BandwidthPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -109,46 +111,41 @@ export default function BandwidthPage() {
     <SettingsShell scope="community">
       <section className="max-w-5xl mx-auto pb-32 space-y-8">
         <header>
-          <h1 className="text-2xl font-semibold text-text-primary">Bandwidth</h1>
-          <p className="mt-1 text-sm text-text-secondary">
-            Per-server bandwidth counter driven by LiveKit RTC stats. Updates every 30s.
-          </p>
+          <h1 className="text-2xl font-semibold text-text-primary">{t('admin.bandwidth.title')}</h1>
+          <p className="mt-1 text-sm text-text-secondary">{t('admin.bandwidth.intro')}</p>
         </header>
 
         {anyAlert ? (
           <div className="rounded-lg border border-danger/50 bg-danger/10 p-4 flex items-start gap-3">
             <span className="material-symbols-outlined text-danger flex-shrink-0">warning</span>
             <div className="flex-1">
-              <p className="text-sm text-danger font-semibold">Bandwidth threshold exceeded</p>
-              <p className="text-xs text-text-secondary mt-1">
-                One or more servers have crossed the configured alert threshold. Acknowledge the alert
-                once you&apos;ve investigated.
-              </p>
+              <p className="text-sm text-danger font-semibold">{t('admin.bandwidth.alertTitle')}</p>
+              <p className="text-xs text-text-secondary mt-1">{t('admin.bandwidth.alertBody')}</p>
             </div>
           </div>
         ) : null}
 
         <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <StatCard
-            label="Total bandwidth"
+            label={t('admin.bandwidth.totalLabel')}
             value={formatBytes(grandTotal)}
-            sub="All-time across every server"
+            sub={t('admin.bandwidth.totalSub')}
             icon="data_usage"
           />
           <StatCard
-            label="Today"
+            label={t('admin.bandwidth.todayLabel')}
             value={formatBytes(todayTotal)}
-            sub="Since 00:00 UTC"
+            sub={t('admin.bandwidth.todaySub')}
             icon="today"
           />
           <StatCard
-            label="Alert status"
-            value={anyAlert ? 'Over budget' : 'OK'}
+            label={t('admin.bandwidth.alertStatusLabel')}
+            value={anyAlert ? t('admin.bandwidth.overBudget') : t('admin.bandwidth.ok')}
             tone={anyAlert ? 'danger' : 'success'}
             sub={
               THRESHOLD_BYTES
-                ? `Threshold: ${formatBytes(THRESHOLD_BYTES)} per server`
-                : 'No threshold configured (LOBBYFORGE_BANDWIDTH_ALERT_BYTES unset)'
+                ? t('admin.bandwidth.thresholdPerServer', { amount: formatBytes(THRESHOLD_BYTES) })
+                : t('admin.bandwidth.noThreshold', { envVar: 'LOBBYFORGE_BANDWIDTH_ALERT_BYTES' })
             }
             icon={anyAlert ? 'warning' : 'check_circle'}
           />
@@ -156,15 +153,13 @@ export default function BandwidthPage() {
 
         <section className="space-y-4">
           <h2 className="text-xs uppercase tracking-wider text-text-secondary border-b border-border-subtle pb-2 font-bold">
-            Per-server breakdown
+            {t('admin.bandwidth.breakdown')}
           </h2>
           <div className="rounded-xl bg-surface border border-border-subtle divide-y divide-border-subtle/50">
             {loading ? (
-              <div className="p-6 text-sm text-text-muted">Loading…</div>
+              <div className="p-6 text-sm text-text-muted">{t('common.loading')}</div>
             ) : totals.length === 0 ? (
-              <div className="p-6 text-sm text-text-muted">
-                No servers yet. Create a community to start tracking bandwidth.
-              </div>
+              <div className="p-6 text-sm text-text-muted">{t('admin.bandwidth.empty')}</div>
             ) : (
               totals.map((s) => (
                 <ServerBandwidthRow
@@ -181,12 +176,10 @@ export default function BandwidthPage() {
         <div className="rounded-lg border border-border-subtle bg-surface-container-low p-4 flex gap-3">
           <span className="material-symbols-outlined text-text-muted text-[18px] shrink-0">info</span>
           <p className="text-xs text-text-muted leading-relaxed">
-            Bandwidth is measured at each connected client using LiveKit&apos;s RTC stats and
-            accumulated in Redis. The numbers are an estimate — actual server-side traffic at the
-            LiveKit SFU may be slightly higher because of packet overhead and retransmits.
+            {t('admin.bandwidth.footnote')}{' '}
             {THRESHOLD_BYTES
-              ? ` Alert threshold is configured at ${formatBytes(THRESHOLD_BYTES)} per server.`
-              : ' Set LOBBYFORGE_BANDWIDTH_ALERT_BYTES on the server to enable alerts.'}
+              ? t('admin.bandwidth.footnoteThreshold', { amount: formatBytes(THRESHOLD_BYTES) })
+              : t('admin.bandwidth.footnoteNoThreshold', { envVar: 'LOBBYFORGE_BANDWIDTH_ALERT_BYTES' })}
           </p>
         </div>
 
@@ -236,6 +229,7 @@ function ServerBandwidthRow({
   onAcknowledge: () => void;
   busy: boolean;
 }) {
+  const t = useT();
   const maxHour = Math.max(1, ...total.hourly.map((h) => h.bytes));
   return (
     <div className="p-5 space-y-4">
@@ -245,12 +239,15 @@ function ServerBandwidthRow({
             <p className="text-sm text-text-primary font-medium">{total.serverName}</p>
             {total.alertTriggered ? (
               <span className="px-2 py-0.5 rounded-full bg-danger/15 text-danger text-[10px] uppercase tracking-wider font-bold">
-                Alert
+                {t('admin.bandwidth.alertBadge')}
               </span>
             ) : null}
           </div>
           <p className="text-xs text-text-muted mt-0.5">
-            Total {formatBytes(total.totalBytes)} · Today {formatBytes(total.todayBytes)}
+            {t('admin.bandwidth.rowTotals', {
+              total: formatBytes(total.totalBytes),
+              today: formatBytes(total.todayBytes),
+            })}
           </p>
         </div>
         {total.alertTriggered ? (
@@ -260,16 +257,18 @@ function ServerBandwidthRow({
             disabled={busy}
             className="px-3 py-1.5 rounded-md border border-border-strong text-xs text-text-secondary hover:bg-surface-raised disabled:opacity-40"
           >
-            Acknowledge
+            {t('admin.bandwidth.acknowledge')}
           </button>
         ) : null}
       </div>
 
       <div>
-        <p className="text-[10px] uppercase tracking-wider text-text-muted mb-2">Last 24 hours (UTC)</p>
+        <p className="text-[10px] uppercase tracking-wider text-text-muted mb-2">
+          {t('admin.bandwidth.last24h')}
+        </p>
         <div className="flex items-end gap-1 h-16">
           {total.hourly.length === 0 ? (
-            <p className="text-xs text-text-muted italic">No data yet.</p>
+            <p className="text-xs text-text-muted italic">{t('admin.bandwidth.noData')}</p>
           ) : (
             total.hourly.map((h) => (
               <div

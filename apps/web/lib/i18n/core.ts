@@ -5,8 +5,10 @@
  * a language never means editing this file.
  */
 
+import { formatMessage, messageArguments, type MessageParams } from '@lobbyforge/plugin-sdk/locale';
+
 export type Messages = Record<string, string>;
-export type Params = Record<string, string | number>;
+export type Params = MessageParams;
 
 /** The language every string is written in first, and the fallback for gaps. */
 export const SOURCE_LOCALE = 'en';
@@ -44,16 +46,14 @@ export interface LocaleInfo {
 export const LOCALE_CODE_PATTERN = /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/;
 
 /**
- * Substitute `{name}` placeholders. Values are inserted verbatim: React
- * escapes them on render, and the catalogues are ours, not user input.
- * A placeholder with no value is left visible — better a stray `{name}`
- * than a word silently vanishing from a sentence.
+ * Fill a message's arguments — `{name}`, and plurals such as
+ * `{count, plural, one {# member} other {# members}}` — for `locale`.
+ * The format is shared with the plugins; see the plugin SDK's
+ * `message-format.ts`. Values are inserted verbatim: React escapes them
+ * on render, and the catalogues are ours, not user input.
  */
-export function interpolate(template: string, params?: Params): string {
-  if (!params) return template;
-  return template.replace(/\{(\w+)\}/g, (match, key: string) =>
-    key in params ? String(params[key]) : match
-  );
+export function interpolate(template: string, params?: Params, locale: string = SOURCE_LOCALE): string {
+  return formatMessage(template, params, locale);
 }
 
 /**
@@ -62,9 +62,26 @@ export function interpolate(template: string, params?: Params): string {
  * itself: visible in development, and honest in production, since it
  * names exactly which string was never added.
  */
-export function createTranslator(locale: string, messages: Messages): Translator {
-  const translate = (key: string, params?: Params) => interpolate(messages[key] ?? key, params);
+export function createTranslator(locale: string, messages: Messages, englishKeys: readonly string[] = []): Translator {
+  // A plural that fell back to English is English, and must pick its form
+  // by English rules — "21 members", not Russian's "one" form of it.
+  const english = new Set(englishKeys);
+  const translate = (key: string, params?: Params) =>
+    formatMessage(messages[key] ?? key, params, english.has(key) ? SOURCE_LOCALE : locale);
   return Object.assign(translate, { locale });
+}
+
+const isBlank = (value: unknown) => typeof value !== 'string' || value.trim() === '';
+const PLURAL = /\{\s*\w+\s*,\s*plural\s*,/;
+
+/**
+ * The keys whose plural falls back to English in `translation` — the only
+ * fallbacks whose formatting depends on the language (see
+ * `createTranslator`). Small by construction, so it can travel to the
+ * browser alongside the messages.
+ */
+export function englishPluralFallbacks(source: Messages, translation: Messages): string[] {
+  return Object.keys(source).filter((key) => PLURAL.test(source[key]!) && isBlank(translation[key]));
 }
 
 /**
@@ -75,7 +92,7 @@ export function createTranslator(locale: string, messages: Messages): Translator
 export function resolveMessages(source: Messages, translation: Messages): Messages {
   const resolved: Messages = { ...source };
   for (const [key, value] of Object.entries(translation)) {
-    if (typeof value === 'string' && value.trim() !== '') resolved[key] = value;
+    if (!isBlank(value)) resolved[key] = value;
   }
   return resolved;
 }
@@ -131,7 +148,12 @@ export function negotiateLocale(
   return fallback;
 }
 
-/** The `{placeholders}` a message uses, sorted — for comparing translations. */
+/**
+ * The argument names a message uses, sorted and de-duplicated — for
+ * comparing a translation with English. Plural and select cases count by
+ * their argument, so "{count} members" matches a Russian plural over
+ * `count`.
+ */
 export function placeholdersOf(message: string): string[] {
-  return (message.match(/\{(\w+)\}/g) ?? []).sort();
+  return messageArguments(message);
 }

@@ -1,12 +1,16 @@
 import { createElement } from 'react';
 import type { GamePlugin } from '@lobbyforge/plugin-sdk';
-import { PluginPermission } from '@lobbyforge/plugin-sdk';
+import { CATALOG_SUMMARY_KEY, PluginPermission, loadPluginLocale } from '@lobbyforge/plugin-sdk';
 import { hushleReducer } from './actions';
-import { SHIPPED_LOCALES } from './locales.generated';
+import { LOCALE_TABLES, SHIPPED_LOCALES } from './locales.generated';
 import { createHushleInitialState, migrateHushleState } from './state';
 import type { HushleAction, HushleState } from './state';
 import { HushlePanel, type HushlePanelClientProps } from './renderClient';
 import { HUSHLE_PLUGIN_ID } from './plugin-id';
+
+// Also registered by the panel, but that is a 'use client' module the
+// server never evaluates — the host reads `catalog.summary` server-side.
+loadPluginLocale(HUSHLE_PLUGIN_ID, LOCALE_TABLES);
 
 export type {
   HushleAction,
@@ -61,7 +65,8 @@ export const hushlePlugin: GamePlugin<HushleState, HushleAction> = {
     entryClient: './renderClient.js',
     catalog: {
       category: 'game',
-      summary: 'Taboo-style word guessing built for live voice rooms.',
+      // Translated in locales/*.json; the host shows the viewer's language.
+      summary: LOCALE_TABLES.en[CATALOG_SUMMARY_KEY],
       publisher: 'LobbyForge',
       trustLevel: 'official',
       playerConfig: {

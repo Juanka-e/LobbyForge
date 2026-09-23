@@ -46,8 +46,97 @@ function isDir(path) {
   return existsSync(path) && statSync(path).isDirectory();
 }
 
+// ---------------------------------------------------------------------------
+// Message syntax
+// ---------------------------------------------------------------------------
+//
+// The format is defined — and formatted at runtime — by the plugin SDK
+// (`packages/plugin-sdk/src/message-format.ts`): `{name}` arguments, and
+// `{count, plural, one {…} other {…}}` / `{x, select, a {…} other {…}}`.
+// This is the checking half, kept here so the tooling stays dependency
+// free; `apps/web/lib/i18n/__tests__/tooling.test.ts` holds the two to the
+// same answers over every message in the repo.
+
+const ARG = /^\s*([A-Za-z0-9_]+)\s*$/;
+const COMPLEX = /^\s*([A-Za-z0-9_]+)\s*,\s*(plural|select)\s*,([\s\S]*)$/;
+const PLURAL_CATEGORIES = new Set(['zero', 'one', 'two', 'few', 'many', 'other']);
+
+function closingBrace(text, open) {
+  let depth = 0;
+  for (let i = open; i < text.length; i += 1) {
+    if (text[i] === '{') depth += 1;
+    else if (text[i] === '}' && --depth === 0) return i;
+  }
+  return -1;
+}
+
+function parseCases(source) {
+  const cases = [];
+  let i = 0;
+  while (i < source.length) {
+    const rest = source.slice(i);
+    const lead = /^\s*/.exec(rest)[0].length;
+    if (i + lead >= source.length) break;
+    const selector = /^(=\d+|[A-Za-z0-9_]+)\s*\{/.exec(rest.slice(lead));
+    if (!selector) return null;
+    const open = i + lead + selector[0].length - 1;
+    const close = closingBrace(source, open);
+    if (close < 0) return null;
+    cases.push({ selector: selector[1], body: source.slice(open + 1, close) });
+    i = close + 1;
+  }
+  return cases;
+}
+
+/** Walk a message, collecting its argument names and any syntax problems. */
+function analyse(text, found = { args: new Set(), problems: [] }) {
+  let i = 0;
+  while (i < text.length) {
+    const open = text.indexOf('{', i);
+    if (open < 0) break;
+    const close = closingBrace(text, open);
+    if (close < 0) {
+      found.problems.push('has a "{" that is never closed');
+      return found;
+    }
+    const inner = text.slice(open + 1, close);
+    const simple = ARG.exec(inner);
+    const complex = simple ? null : COMPLEX.exec(inner);
+    const cases = complex ? parseCases(complex[3]) : null;
+    if (simple) {
+      found.args.add(simple[1]);
+    } else if (!cases) {
+      found.problems.push(`cannot read "{${inner}}" — write {name}, or {name, plural, one {…} other {…}}`);
+    } else {
+      const [, name, kind] = complex;
+      found.args.add(name);
+      if (!cases.some((c) => c.selector === 'other')) found.problems.push(`{${name}, ${kind}} needs an "other" case`);
+      if (kind === 'plural') {
+        for (const c of cases) {
+          if (!c.selector.startsWith('=') && !PLURAL_CATEGORIES.has(c.selector)) {
+            found.problems.push(`{${name}, plural} has "${c.selector}" — use zero, one, two, few, many, other or =N`);
+          }
+        }
+      }
+      for (const c of cases) analyse(c.body, found);
+    }
+    i = close + 1;
+  }
+  return found;
+}
+
+/** The argument names a message uses, sorted and de-duplicated. */
+export function messageArguments(text) {
+  return [...analyse(String(text)).args].sort();
+}
+
+/** What is wrong with a message's syntax — empty when nothing is. */
+export function messageProblems(text) {
+  return analyse(String(text)).problems;
+}
+
 export function placeholders(text) {
-  return (String(text).match(/\{(\w+)\}/g) ?? []).sort().join(',');
+  return messageArguments(text).join(',');
 }
 
 const isBlank = (value) => typeof value !== 'string' || value.trim() === '';
@@ -134,6 +223,7 @@ export function compare(source, target, { complete, label }) {
       continue;
     }
     translated += 1;
+    for (const problem of messageProblems(value)) problems.push(`${label}: "${key}" ${problem}`);
     if (placeholders(value) !== placeholders(source[key])) {
       problems.push(`${label}: "${key}" uses {${placeholders(value)}} but English uses {${placeholders(source[key])}}`);
     }
@@ -193,6 +283,9 @@ export function status(root = REPO_ROOT) {
     for (const locale of app.locales) {
       problems.push(...validateMeta(locale.code, locale.meta));
       if (locale.code === SOURCE) {
+        for (const [key, value] of Object.entries(source)) {
+          for (const problem of messageProblems(value)) problems.push(`app en: "${key}" ${problem}`);
+        }
         appRows.push({ ...rowMeta(locale), total: Object.keys(source).length, translated: Object.keys(source).length });
         continue;
       }
@@ -233,6 +326,7 @@ export function status(root = REPO_ROOT) {
       if (code === SOURCE) {
         for (const [key, value] of Object.entries(source)) {
           if (isBlank(value)) problems.push(`plugin ${plugin.id}: en "${key}" is empty`);
+          for (const problem of messageProblems(value)) problems.push(`plugin ${plugin.id}: en "${key}" ${problem}`);
         }
         row.languages.push({ code, total: Object.keys(source).length, translated: Object.keys(source).length });
         continue;

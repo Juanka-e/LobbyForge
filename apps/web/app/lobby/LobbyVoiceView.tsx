@@ -4,9 +4,11 @@ import { cn } from '@lobbyforge/ui';
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
+import { useT } from '@/lib/i18n/client';
 import { useLobbyVoice, type LobbyVoiceParticipant } from './LobbyVoiceProvider';
 
 export function LobbyVoiceView({ channelId, channelName }: { channelId: string; channelName: string }) {
+  const t = useT();
   const voice = useLobbyVoice();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [portalReady, setPortalReady] = useState(false);
@@ -89,7 +91,7 @@ export function LobbyVoiceView({ channelId, channelName }: { channelId: string; 
     >
       <header className="flex h-12 flex-none items-center justify-between gap-3 border-b border-white/10 bg-[#17191f] px-2.5 sm:px-4">
         <div className="flex min-w-0 items-center gap-2">
-          <IconButton label="Back to chat" icon="arrow_back" onClick={() => voice.setMainViewMode('chat')} />
+          <IconButton label={t('lobbyMain.voice.backToChat')} icon="arrow_back" onClick={() => voice.setMainViewMode('chat')} />
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
               <span className="material-symbols-outlined text-[17px] text-white/55" aria-hidden>volume_up</span>
@@ -98,7 +100,7 @@ export function LobbyVoiceView({ channelId, channelName }: { channelId: string; 
           </div>
           <span className="hidden h-5 items-center gap-1.5 rounded bg-white/7 px-2 text-[11px] text-white/60 sm:flex">
             <span className="size-1.5 rounded-full bg-emerald-400" aria-hidden />
-            {voice.participants.length} connected
+            {t('lobbyMain.voice.connectedCount', { count: voice.participants.length })}
           </span>
         </div>
 
@@ -109,11 +111,11 @@ export function LobbyVoiceView({ channelId, channelName }: { channelId: string; 
               value={participantSort}
               onChange={(event) => changeParticipantSort(event.target.value as 'default' | 'camera' | 'name')}
               className="h-8 rounded-md border border-white/10 bg-white/5 px-2 text-xs text-white/75 outline-none"
-              aria-label="Participant order"
+              aria-label={t('lobbyMain.voice.sort')}
             >
-              <option value="default">Default order</option>
-              <option value="camera">Camera first</option>
-              <option value="name">Name</option>
+              <option value="default">{t('lobbyMain.voice.sortDefault')}</option>
+              <option value="camera">{t('lobbyMain.voice.sortCamera')}</option>
+              <option value="name">{t('lobbyMain.voice.sortName')}</option>
             </select>
           </label>
           {screenSharer ? (
@@ -123,11 +125,11 @@ export function LobbyVoiceView({ channelId, channelName }: { channelId: string; 
                   value={screenSharer.identity}
                   onChange={(event) => setSelectedScreenIdentity(event.target.value)}
                   className="h-8 max-w-40 rounded-md border border-white/10 bg-white/5 px-2 text-xs text-white/75 outline-none"
-                  aria-label="Active stream"
+                  aria-label={t('lobbyMain.voice.activeStream')}
                 >
                   {screenSharers.map((participant) => <option key={participant.identity} value={participant.identity}>{participant.name}</option>)}
                 </select>
-              ) : <span className="max-w-44 truncate text-xs text-white/55">{screenSharer.name} is sharing</span>}
+              ) : <span className="max-w-44 truncate text-xs text-white/55">{t('lobbyMain.voice.sharing', { name: screenSharer.name })}</span>}
               <button
                 type="button"
                 onClick={() => void (screenShareJoined
@@ -135,7 +137,7 @@ export function LobbyVoiceView({ channelId, channelName }: { channelId: string; 
                   : voice.joinScreenShare(screenSharer.identity))}
                 className="rounded-md bg-white/10 px-2.5 py-1 text-xs font-medium text-white hover:bg-white/15"
               >
-                {screenShareJoined ? 'Leave stream' : 'Join stream'}
+                {screenShareJoined ? t('lobbyMain.voice.streamLeave') : t('lobbyMain.voice.streamJoin')}
               </button>
             </div>
           ) : null}
@@ -143,16 +145,16 @@ export function LobbyVoiceView({ channelId, channelName }: { channelId: string; 
               being IN the room was the one place you could not open the
               activities hub — you had to leave the call view first. */}
           <IconButton
-            label="Activities in this room"
+            label={t('lobbyMain.voice.activitiesInRoom')}
             icon="stadia_controller"
             onClick={() => voice.openActivities({ channelId, channelName })}
           />
           <IconButton
-            label={browserFullscreen ? 'Exit browser fullscreen' : 'Enter browser fullscreen'}
+            label={browserFullscreen ? t('lobbyMain.voice.fullscreenExit') : t('lobbyMain.voice.fullscreenEnter')}
             icon={browserFullscreen ? 'fullscreen_exit' : 'fullscreen'}
             onClick={() => void toggleBrowserFullscreen()}
           />
-          <IconButton label="Close voice view" icon="close" onClick={() => voice.setMainViewMode('chat')} />
+          <IconButton label={t('lobbyMain.voice.closeView')} icon="close" onClick={() => voice.setMainViewMode('chat')} />
         </div>
       </header>
 
@@ -165,7 +167,7 @@ export function LobbyVoiceView({ channelId, channelName }: { channelId: string; 
 
       <main className="relative flex min-h-0 flex-1 overflow-hidden p-2 pb-20 sm:p-3 sm:pb-20">
         {screenSharers.some((participant) => !voice.isScreenShareJoined(participant.identity)) ? (
-          <div className="absolute inset-x-3 top-3 z-10 flex justify-center gap-2 overflow-x-auto" aria-label="Available streams">
+          <div className="absolute inset-x-3 top-3 z-10 flex justify-center gap-2 overflow-x-auto" aria-label={t('lobbyMain.voice.availableStreams')}>
             {screenSharers.filter((participant) => !voice.isScreenShareJoined(participant.identity)).map((participant) => (
               <StreamPreviewCard
                 key={participant.identity}
@@ -209,7 +211,7 @@ export function LobbyVoiceView({ channelId, channelName }: { channelId: string; 
             {stripParticipants.length > 0 ? (
               <div
                 className="flex h-24 flex-none gap-2 overflow-x-auto lg:h-auto lg:w-52 lg:flex-col lg:overflow-x-hidden lg:overflow-y-auto"
-                aria-label="Call participants"
+                aria-label={t('lobbyMain.voice.callParticipants')}
               >
                 {stripParticipants.map((participant) => (
                   <CameraTile
@@ -235,7 +237,7 @@ export function LobbyVoiceView({ channelId, channelName }: { channelId: string; 
                 'grid w-full content-center gap-2 sm:gap-3',
                 gridClass
               )}
-              aria-label="Call participants"
+              aria-label={t('lobbyMain.voice.callParticipants')}
             >
               {sortedParticipants.map((participant) => (
                 <CameraTile
@@ -252,8 +254,8 @@ export function LobbyVoiceView({ channelId, channelName }: { channelId: string; 
           <div className="grid min-h-0 flex-1 place-items-center text-center">
             <div>
               <span className="material-symbols-outlined text-4xl text-white/35" aria-hidden>graphic_eq</span>
-              <p className="mt-2 text-sm font-medium">Connecting to voice</p>
-              <p className="mt-1 text-xs text-white/45">Participants will appear here.</p>
+              <p className="mt-2 text-sm font-medium">{t('lobbyMain.voice.connectingTitle')}</p>
+              <p className="mt-1 text-xs text-white/45">{t('lobbyMain.voice.connectingHint')}</p>
             </div>
           </div>
         )}
@@ -290,6 +292,7 @@ function sortParticipants(
 }
 
 function VoiceOnlyStage({ participants }: { participants: LobbyVoiceParticipant[] }) {
+  const t = useT();
   return (
     <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-y-auto">
       <div
@@ -297,7 +300,7 @@ function VoiceOnlyStage({ participants }: { participants: LobbyVoiceParticipant[
           'grid max-w-4xl gap-2 sm:gap-3',
           voiceOnlyGridClass(participants.length)
         )}
-        aria-label="Call participants"
+        aria-label={t('lobbyMain.voice.callParticipants')}
       >
         {participants.map((participant) => (
           <div
@@ -319,12 +322,12 @@ function VoiceOnlyStage({ participants }: { participants: LobbyVoiceParticipant[
             <div className="flex max-w-full items-center gap-1.5 text-xs text-white/80">
               <span className="truncate font-medium">{participant.name}</span>
               {!participant.micEnabled ? (
-                <span className="material-symbols-outlined flex-none text-[14px] text-red-300" aria-label="Muted">mic_off</span>
+                <span className="material-symbols-outlined flex-none text-[14px] text-red-300" aria-label={t('lobby.voice.muted')}>mic_off</span>
               ) : participant.isSpeaking ? (
-                <span className="material-symbols-outlined flex-none text-[14px] text-emerald-300" aria-label="Speaking">graphic_eq</span>
+                <span className="material-symbols-outlined flex-none text-[14px] text-emerald-300" aria-label={t('lobbyMain.voice.speaking')}>graphic_eq</span>
               ) : null}
-              {participant.cameraEnabled ? <span className="material-symbols-outlined flex-none text-[14px] text-sky-300" aria-label="Camera on">videocam</span> : null}
-              {participant.hasScreenShare ? <span className="material-symbols-outlined flex-none text-[14px] text-emerald-300" aria-label="Sharing screen">present_to_all</span> : null}
+              {participant.cameraEnabled ? <span className="material-symbols-outlined flex-none text-[14px] text-sky-300" aria-label={t('lobbyMain.voice.cameraOn')}>videocam</span> : null}
+              {participant.hasScreenShare ? <span className="material-symbols-outlined flex-none text-[14px] text-emerald-300" aria-label={t('lobbyMain.voice.sharingScreen')}>present_to_all</span> : null}
             </div>
           </div>
         ))}
@@ -341,6 +344,7 @@ function voiceOnlyGridClass(count: number): string {
 }
 
 function VoiceControls({ channelName }: { channelName: string }) {
+  const t = useT();
   const voice = useLobbyVoice();
   const [shareMenuOpen, setShareMenuOpen] = useState(false);
   const qualityOptions = [
@@ -368,19 +372,19 @@ function VoiceControls({ channelName }: { channelName: string }) {
           </span>
           <div className="min-w-0 leading-tight">
             <p className="max-w-28 truncate text-xs font-semibold text-white/90">{channelName}</p>
-            <p className="text-[10px] text-emerald-300/80">Voice connected</p>
+            <p className="text-[10px] text-emerald-300/80">{t('lobby.voice.connected')}</p>
           </div>
         </div>
 
         <CallControlButton
-          label={voice.micEnabled ? 'Mute microphone' : 'Unmute microphone'}
+          label={voice.micEnabled ? t('lobby.voice.micMuteAria') : t('lobby.voice.micUnmuteAria')}
           icon={voice.micEnabled ? 'mic' : 'mic_off'}
           pressed={!voice.micEnabled}
           danger={!voice.micEnabled}
           onClick={() => void voice.toggleMic()}
         />
         <CallControlButton
-          label={voice.deafenEnabled ? 'Undeafen' : 'Deafen'}
+          label={voice.deafenEnabled ? t('lobby.voice.undeafen') : t('lobby.voice.deafen')}
           icon={voice.deafenEnabled ? 'headphones_off' : 'headphones'}
           pressed={voice.deafenEnabled}
           danger={voice.deafenEnabled}
@@ -388,7 +392,7 @@ function VoiceControls({ channelName }: { channelName: string }) {
         />
         <span className="h-7 w-px bg-white/10" aria-hidden />
         <CallControlButton
-          label={voice.cameraEnabled ? 'Stop camera' : 'Start camera'}
+          label={voice.cameraEnabled ? t('lobbyMain.voice.cameraStop') : t('lobbyMain.voice.cameraStart')}
           icon={voice.cameraEnabled ? 'videocam' : 'videocam_off'}
           pressed={voice.cameraEnabled}
           onClick={() => void voice.toggleCamera()}
@@ -401,41 +405,41 @@ function VoiceControls({ channelName }: { channelName: string }) {
           <button
             type="button"
             onClick={() => void voice.toggleScreenShare()}
-            title={voice.screenShareEnabled ? 'Stop sharing' : 'Share screen'}
-            aria-label={voice.screenShareEnabled ? 'Stop sharing' : 'Share screen'}
+            title={voice.screenShareEnabled ? t('lobbyMain.voice.shareStop') : t('lobbyMain.voice.shareStart')}
+            aria-label={voice.screenShareEnabled ? t('lobbyMain.voice.shareStop') : t('lobbyMain.voice.shareStart')}
             aria-pressed={voice.screenShareEnabled}
             className="grid w-10 place-items-center rounded-l-full"
           >
             <span className="material-symbols-outlined text-[21px]" aria-hidden>{voice.screenShareEnabled ? 'stop_screen_share' : 'screen_share'}</span>
           </button>
           {!voice.screenShareEnabled ? (
-            <button type="button" onClick={() => setShareMenuOpen((open) => !open)} aria-label="Stream quality" aria-expanded={shareMenuOpen} className="grid w-6 place-items-center rounded-r-full border-l border-white/10 text-white/55 hover:text-white">
+            <button type="button" onClick={() => setShareMenuOpen((open) => !open)} aria-label={t('lobbyMain.voice.streamQuality')} aria-expanded={shareMenuOpen} className="grid w-6 place-items-center rounded-r-full border-l border-white/10 text-white/55 hover:text-white">
               <span className="material-symbols-outlined text-[16px]" aria-hidden>expand_less</span>
             </button>
           ) : null}
           {shareMenuOpen && !voice.screenShareEnabled ? (
             <div className="absolute bottom-14 right-0 z-30 w-60 rounded-md border border-white/10 bg-[#252830] p-2.5 text-white shadow-2xl">
-              <p className="px-1 pb-1.5 text-[10px] font-semibold uppercase text-white/45">Stream quality</p>
+              <p className="px-1 pb-1.5 text-[10px] font-semibold uppercase text-white/45">{t('lobbyMain.voice.streamQuality')}</p>
               <div className="grid grid-cols-2 gap-1">
                 {qualityOptions.map((option) => (
                   <button key={option.value} type="button" onClick={() => void voice.setScreenSharePreference(option.value as 'low' | 'standard' | 'high' | 'q1440' | 'q2160', voice.screenSharePreference.fps)} className={cn('rounded-md px-2 py-1.5 text-xs text-white/65 hover:bg-white/8', voice.screenSharePreference.quality === option.value && 'bg-primary/20 text-primary')}>{option.label}</button>
                 ))}
               </div>
-              <p className="mt-2 px-1 pb-1.5 text-[10px] font-semibold uppercase text-white/45">Frame rate</p>
+              <p className="mt-2 px-1 pb-1.5 text-[10px] font-semibold uppercase text-white/45">{t('lobbyMain.voice.frameRate')}</p>
               <div className="grid grid-cols-3 gap-1">
                 {fpsOptions.map((fps) => (
                   <button key={fps} type="button" onClick={() => void voice.setScreenSharePreference(voice.screenSharePreference.quality, fps as '15' | '30' | '60')} className={cn('rounded-md px-2 py-1.5 text-xs text-white/65 hover:bg-white/8', voice.screenSharePreference.fps === fps && 'bg-primary/20 text-primary')}>{fps}</button>
                 ))}
               </div>
-              <p className="mt-2 px-1 text-[10px] text-white/35">Server maximum: {voice.screenSharePolicy.maxHeight}p / {voice.screenSharePolicy.maxFps} FPS</p>
+              <p className="mt-2 px-1 text-[10px] text-white/35">{t('lobbyMain.voice.serverMaximum', { height: voice.screenSharePolicy.maxHeight, fps: voice.screenSharePolicy.maxFps })}</p>
             </div>
           ) : null}
         </div>
 
         <Link
           href="/settings/voice-video"
-          title="Voice & Video settings"
-          aria-label="Voice & Video settings"
+          title={t('lobby.voice.settings')}
+          aria-label={t('lobby.voice.settingsAria')}
           className="grid size-11 flex-none place-items-center rounded-full bg-white/10 text-white/80 transition-colors hover:bg-white/15 hover:text-white"
         >
           <span className="material-symbols-outlined text-[21px]" aria-hidden>settings</span>
@@ -444,8 +448,8 @@ function VoiceControls({ channelName }: { channelName: string }) {
         <button
           type="button"
           onClick={() => void voice.disconnect()}
-          title="Disconnect"
-          aria-label="Disconnect"
+          title={t('lobby.voice.disconnect')}
+          aria-label={t('lobby.voice.disconnectAria')}
           className="grid size-11 flex-none place-items-center rounded-full bg-red-500 text-white transition-colors hover:bg-red-400"
         >
           <span className="material-symbols-outlined text-[21px]" aria-hidden>call_end</span>
@@ -524,6 +528,7 @@ function StreamPreviewCard({
   track: MediaStreamTrack | null;
   onJoin: () => void;
 }) {
+  const t = useT();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   useVideoTrack(videoRef, track);
   return (
@@ -532,8 +537,8 @@ function StreamPreviewCard({
         {track ? <video ref={videoRef} autoPlay playsInline muted className="size-full object-contain" /> : <span className="material-symbols-outlined text-[20px] text-emerald-300" aria-hidden>present_to_all</span>}
       </div>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-xs font-medium text-white">{participant.isLocal ? 'Your stream' : participant.name}</p>
-        <button type="button" onClick={onJoin} className="mt-1 text-xs font-semibold text-primary hover:underline">Join stream</button>
+        <p className="truncate text-xs font-medium text-white">{participant.isLocal ? t('lobbyMain.voice.yourStream') : participant.name}</p>
+        <button type="button" onClick={onJoin} className="mt-1 text-xs font-semibold text-primary hover:underline">{t('lobbyMain.voice.streamJoin')}</button>
       </div>
     </div>
   );
@@ -554,6 +559,7 @@ function PinnedVideoTile({
   canMinimize: boolean;
   onMinimize: () => void;
 }) {
+  const t = useT();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const track = isScreenShare
     ? getScreenShareTrack(participant.identity)
@@ -578,14 +584,14 @@ function PinnedVideoTile({
       )}
       <div className="absolute left-2 top-2 flex max-w-[70%] items-center gap-1.5 rounded bg-black/75 px-2 py-1 text-xs text-white/85">
         {isScreenShare ? <span className="material-symbols-outlined text-[15px] text-emerald-300" aria-hidden>present_to_all</span> : null}
-        <span className="truncate font-medium">{isScreenShare ? `${participant.name}'s screen` : participant.name}</span>
+        <span className="truncate font-medium">{isScreenShare ? t('lobbyMain.voice.screenOf', { name: participant.name }) : participant.name}</span>
       </div>
       {canMinimize ? (
         <button
           type="button"
           onClick={onMinimize}
-          title="Return to grid"
-          aria-label="Return to grid"
+          title={t('lobbyMain.voice.returnToGrid')}
+          aria-label={t('lobbyMain.voice.returnToGrid')}
           className="absolute right-2 top-2 grid size-8 place-items-center rounded-md bg-black/75 text-white/70 hover:text-white"
         >
           <span className="material-symbols-outlined text-[18px]" aria-hidden>grid_view</span>
@@ -608,6 +614,7 @@ function CameraTile({
   isFocused: boolean;
   compact?: boolean;
 }) {
+  const t = useT();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const track = getCameraTrack(participant.identity);
   useVideoTrack(videoRef, track);
@@ -616,7 +623,7 @@ function CameraTile({
     <button
       type="button"
       onClick={onClick}
-      aria-label={`Focus ${participant.name}`}
+      aria-label={t('lobbyMain.voice.focusParticipant', { name: participant.name })}
       className={cn(
         'group relative min-w-0 overflow-hidden rounded-md border bg-[#1a1d23] text-left',
         compact ? 'h-full w-36 flex-none lg:h-28 lg:w-full' : 'aspect-video w-full min-h-28 max-h-[42vh]',
@@ -635,11 +642,11 @@ function CameraTile({
       <div className="absolute inset-x-0 bottom-0 flex h-8 items-center justify-between bg-black/70 px-2 text-xs text-white/85">
         <span className="truncate font-medium">{participant.name}</span>
         {!participant.micEnabled ? (
-          <span className="material-symbols-outlined text-[14px] text-red-300" aria-label="Muted">mic_off</span>
+          <span className="material-symbols-outlined text-[14px] text-red-300" aria-label={t('lobby.voice.muted')}>mic_off</span>
         ) : participant.isSpeaking ? (
-          <span className="material-symbols-outlined text-[14px] text-emerald-300" aria-label="Speaking">graphic_eq</span>
+          <span className="material-symbols-outlined text-[14px] text-emerald-300" aria-label={t('lobbyMain.voice.speaking')}>graphic_eq</span>
         ) : null}
-        {participant.hasScreenShare ? <span className="material-symbols-outlined text-[14px] text-emerald-300" aria-label="Sharing screen">present_to_all</span> : null}
+        {participant.hasScreenShare ? <span className="material-symbols-outlined text-[14px] text-emerald-300" aria-label={t('lobbyMain.voice.sharingScreen')}>present_to_all</span> : null}
       </div>
     </button>
   );

@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MentionInput, type MentionUser } from '../MentionInput';
+import { I18nProvider } from '@/lib/i18n/client';
+import { providerPropsFor } from '@/lib/i18n/catalogue';
 
 const MEMBERS: MentionUser[] = [
   { userId: 'u1', displayName: 'Alice' },
@@ -34,9 +36,16 @@ function MentionInputHarness({
   );
 }
 
-function renderInput(overrides: { members?: MentionUser[]; disabled?: boolean } = {}) {
+function renderInput(
+  overrides: { members?: MentionUser[]; disabled?: boolean } = {},
+  locale = 'en'
+) {
   const onMention = vi.fn();
-  render(<MentionInputHarness onMention={onMention} {...overrides} />);
+  render(
+    <I18nProvider {...providerPropsFor(locale)}>
+      <MentionInputHarness onMention={onMention} {...overrides} />
+    </I18nProvider>
+  );
   return { onMention };
 }
 
@@ -101,6 +110,13 @@ describe('MentionInput', () => {
   it('is disabled when the disabled prop is set', () => {
     renderInput({ disabled: true });
     expect((screen.getByRole('textbox') as HTMLInputElement).disabled).toBe(true);
+  });
+
+  it('labels the dropdown in the active language', async () => {
+    const user = userEvent.setup();
+    renderInput({}, 'tr');
+    await user.type(screen.getByRole('textbox'), '@a');
+    expect(screen.getByText('@a ile eşleşen üyeler')).toBeInTheDocument();
   });
 
   it('filters case-insensitively', async () => {

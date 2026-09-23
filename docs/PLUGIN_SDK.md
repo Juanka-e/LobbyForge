@@ -304,7 +304,17 @@ The whole pattern is:
 2. At module load, `loadPluginLocale(pluginId, { en, tr })` registers
    each table against the shared registry keyed by `pluginId`.
 3. `tFor(pluginId, locale, key, params?, fallback?)` resolves a
-   string for the active locale, with `{name}`-style interpolation.
+   string for the active locale and fills its arguments — `{name}`, and
+   plurals such as `{count, plural, one {# point} other {# points}}`.
+   It is the same message format as the app's own catalogues
+   (`formatMessage` in `src/message-format.ts`; see
+   `docs/TRANSLATING.md` → "Plurals"), so pass counts as numbers and let
+   each language write its own plural forms.
+   Put your catalogue description under the key `catalog.summary`
+   (`CATALOG_SUMMARY_KEY`): the host shows it in the activity picker and
+   the admin app list in the viewer's language, and the manifest can
+   read its English from the same file —
+   `summary: LOCALE_TABLES.en[CATALOG_SUMMARY_KEY]`.
 4. `listPluginLocales(pluginId)` returns the locales the plugin
    actually supports in registration order (so the first registered
    is the primary fallback when the user's preference isn't shipped).

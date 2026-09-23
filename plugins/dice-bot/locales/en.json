@@ -1,4 +1,5 @@
 {
+  "catalog.summary": "Dice rolls with per-player stats for voice rooms.",
   "dice.history.empty": "No rolls yet.",
   "dice.history.heading": "Recent rolls",
   "dice.history.more": "+{count} older",

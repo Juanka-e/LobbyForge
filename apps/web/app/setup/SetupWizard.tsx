@@ -1,15 +1,18 @@
 'use client';
 
 import { useMemo, useState, type FormEvent } from 'react';
+import { useT } from '@/lib/i18n/client';
+import { rich } from '@/lib/i18n/rich';
 
 type Step = 'name' | 'owner' | 'access' | 'seo' | 'review';
 
-const STEPS: { id: Step; label: string; description: string }[] = [
-  { id: 'name', label: 'Instance', description: 'Name your community.' },
-  { id: 'owner', label: 'Owner', description: 'Create the first admin account.' },
-  { id: 'access', label: 'Access', description: 'Choose who can join.' },
-  { id: 'seo', label: 'Discovery', description: 'Search engine visibility.' },
-  { id: 'review', label: 'Review', description: 'Confirm and finish.' },
+/** Labels are message keys, resolved with `t()` where they render. */
+const STEPS: { id: Step; labelKey: string; descriptionKey: string }[] = [
+  { id: 'name', labelKey: 'auth.setup.steps.name.label', descriptionKey: 'auth.setup.steps.name.description' },
+  { id: 'owner', labelKey: 'auth.setup.steps.owner.label', descriptionKey: 'auth.setup.steps.owner.description' },
+  { id: 'access', labelKey: 'auth.setup.steps.access.label', descriptionKey: 'auth.setup.steps.access.description' },
+  { id: 'seo', labelKey: 'auth.setup.steps.seo.label', descriptionKey: 'auth.setup.steps.seo.description' },
+  { id: 'review', labelKey: 'auth.setup.steps.review.label', descriptionKey: 'auth.setup.steps.review.description' },
 ];
 
 type RegistrationMode = 'open' | 'invite_only' | 'closed';
@@ -35,23 +38,23 @@ interface FormState {
 
 const ACCESS_OPTIONS: {
   value: RegistrationMode;
-  label: string;
-  description: string;
+  labelKey: string;
+  descriptionKey: string;
 }[] = [
   {
     value: 'open',
-    label: 'Open',
-    description: 'Anyone can create an account. Recommended for public communities.',
+    labelKey: 'auth.setup.access.open.label',
+    descriptionKey: 'auth.setup.access.open.description',
   },
   {
     value: 'invite_only',
-    label: 'Invite only',
-    description: 'New accounts need a working invite code from an existing member.',
+    labelKey: 'auth.setup.access.inviteOnly.label',
+    descriptionKey: 'auth.setup.access.inviteOnly.description',
   },
   {
     value: 'closed',
-    label: 'Closed',
-    description: 'No new accounts. Useful for private groups and migration windows.',
+    labelKey: 'auth.setup.access.closed.label',
+    descriptionKey: 'auth.setup.access.closed.description',
   },
 ];
 
@@ -68,6 +71,7 @@ export default function SetupWizard({
   instanceId: string;
   isOfficialHost: boolean;
 }) {
+  const t = useT();
   const [stepIndex, setStepIndex] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -89,6 +93,8 @@ export default function SetupWizard({
   });
 
   const currentStep = STEPS[stepIndex]!;
+  // The discovery sentence carries a link in the middle; split the whole
+  // phrase around it so each language can place the link where it reads.
 
   const canAdvance = useMemo(() => {
     if (currentStep.id === 'name') {
@@ -183,15 +189,15 @@ export default function SetupWizard({
             )}
             <div className="min-w-0">
               <p className="truncate text-xs uppercase tracking-wider text-text-muted">
-                First-run setup
+                {t('auth.setup.eyebrow')}
               </p>
               <h1 className="truncate text-balance text-lg font-semibold text-text-primary">
-                {form.instanceName || 'Welcome to LobbyForge'}
+                {form.instanceName || t('auth.setup.welcome')}
               </h1>
             </div>
           </div>
           <p className="hidden sm:block text-xs text-text-muted font-label-xs">
-            Instance&nbsp;<span className="font-mono text-text-secondary">{instanceId}</span>
+            {t('auth.setup.instanceIdLabel')}&nbsp;<span className="font-mono text-text-secondary">{instanceId}</span>
           </p>
         </div>
         <ProgressBar stepIndex={stepIndex} />
@@ -200,14 +206,18 @@ export default function SetupWizard({
       <form onSubmit={submit} className="px-6 py-6 flex flex-col gap-5">
         <header className="flex flex-col gap-1">
           <h2 className="text-base font-semibold text-text-primary">
-            Step {stepIndex + 1} of {STEPS.length} · {currentStep.label}
+            {t('auth.setup.stepHeading', {
+              current: stepIndex + 1,
+              total: STEPS.length,
+              label: t(currentStep.labelKey),
+            })}
           </h2>
-          <p className="text-sm text-text-secondary">{currentStep.description}</p>
+          <p className="text-sm text-text-secondary">{t(currentStep.descriptionKey)}</p>
         </header>
 
         {currentStep.id === 'name' && (
           <div className="grid gap-4">
-          <Field label="Instance name" hint="Shown to members and in the page title.">
+          <Field label={t('auth.setup.instanceName.label')} hint={t('auth.setup.instanceName.hint')}>
             <input
               type="text"
               required
@@ -217,12 +227,12 @@ export default function SetupWizard({
               value={form.instanceName}
               onChange={(e) => update('instanceName', e.target.value)}
               className="w-full rounded-md border border-border-subtle bg-background px-3 py-2 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
-              placeholder="Ankara Gaming Voice"
+              placeholder={t('auth.setup.instanceName.placeholder')}
             />
           </Field>
           <Field
-            label="Instance logo (optional)"
-            hint="PNG/JPEG/GIF/WebP, at least 64×64 (max 1024, 2 MB). Animated GIF works. Shown in the lobby header and as the browser tab icon."
+            label={t('auth.setup.logo.label')}
+            hint={t('auth.setup.logo.hint')}
           >
             <div className="flex items-center gap-3">
               <input
@@ -232,12 +242,12 @@ export default function SetupWizard({
                   const file = e.target.files?.[0];
                   if (!file) return;
                   if (file.size > 2 * 1024 * 1024) {
-                    setError('Logo must be at most 2 MB.');
+                    setError(t('auth.setup.logo.tooLarge'));
                     return;
                   }
                   const reader = new FileReader();
                   reader.onload = () => update('instanceLogoDataUrl', String(reader.result));
-                  reader.onerror = () => setError('Could not read the logo file.');
+                  reader.onerror = () => setError(t('auth.setup.logo.readFailed'));
                   reader.readAsDataURL(file);
                 }}
                 className="text-sm text-text-secondary file:mr-3 file:rounded-md file:border-0 file:bg-surface-container file:px-3 file:py-1.5 file:text-xs file:text-text-primary"
@@ -248,13 +258,13 @@ export default function SetupWizard({
                   onClick={() => update('instanceLogoDataUrl', null)}
                   className="text-xs text-text-muted underline"
                 >
-                  Remove
+                  {t('auth.setup.logo.remove')}
                 </button>
               ) : null}
             </div>
           </Field>
           {setupTokenRequired ? (
-            <Field label="Setup token" hint="Generated by the installer. It is never stored in the database.">
+            <Field label={t('auth.setup.token.label')} hint={t('auth.setup.token.hint')}>
               <input
                 type="password"
                 required
@@ -264,7 +274,7 @@ export default function SetupWizard({
                 value={form.setupToken}
                 onChange={(e) => update('setupToken', e.target.value)}
                 className="w-full rounded-md border border-border-subtle bg-background px-3 py-2 font-mono text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
-                placeholder="Paste installer setup token"
+                placeholder={t('auth.setup.token.placeholder')}
               />
             </Field>
           ) : null}
@@ -273,7 +283,7 @@ export default function SetupWizard({
 
         {currentStep.id === 'owner' && (
           <div className="grid gap-4">
-          <Field label="Owner display name" hint="Shown to members across this community.">
+          <Field label={t('auth.setup.ownerName.label')} hint={t('auth.setup.ownerName.hint')}>
             <input
               type="text"
               required
@@ -286,7 +296,7 @@ export default function SetupWizard({
               placeholder="juanka"
             />
           </Field>
-          <Field label="Owner email" hint="Used to sign in to this self-hosted instance.">
+          <Field label={t('auth.setup.ownerEmail.label')} hint={t('auth.setup.ownerEmail.hint')}>
             <input
               type="email"
               required
@@ -298,7 +308,7 @@ export default function SetupWizard({
               placeholder="owner@example.com"
             />
           </Field>
-          <Field label="Owner password" hint="At least 12 characters. Stored as a salted Scrypt hash.">
+          <Field label={t('auth.setup.ownerPassword.label')} hint={t('auth.setup.ownerPassword.hint')}>
             <input
               type="password"
               required
@@ -308,7 +318,7 @@ export default function SetupWizard({
               value={form.ownerPassword}
               onChange={(e) => update('ownerPassword', e.target.value)}
               className="w-full rounded-md border border-border-subtle bg-background px-3 py-2 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
-              placeholder="Create a secure password"
+              placeholder={t('auth.setup.ownerPassword.placeholder')}
             />
           </Field>
           </div>
@@ -316,7 +326,7 @@ export default function SetupWizard({
 
         {currentStep.id === 'access' && (
           <fieldset className="flex flex-col gap-3">
-            <legend className="text-sm font-medium text-text-primary">Registration mode</legend>
+            <legend className="text-sm font-medium text-text-primary">{t('auth.setup.access.legend')}</legend>
             <div className="grid gap-2">
               {ACCESS_OPTIONS.map((option) => {
                 const active = form.registrationMode === option.value;
@@ -338,9 +348,9 @@ export default function SetupWizard({
                         onChange={() => update('registrationMode', option.value)}
                         className="accent-primary"
                       />
-                      {option.label}
+                      {t(option.labelKey)}
                     </span>
-                    <span className="pl-6 text-xs text-text-secondary">{option.description}</span>
+                    <span className="pl-6 text-xs text-text-secondary">{t(option.descriptionKey)}</span>
                   </label>
                 );
               })}
@@ -353,7 +363,7 @@ export default function SetupWizard({
                 onChange={(e) => update('guestAccessEnabled', e.target.checked)}
                 className="accent-primary"
               />
-              Allow guest accounts (display name only, no password)
+              {t('auth.setup.access.allowGuests')}
             </label>
           </fieldset>
         )}
@@ -365,10 +375,9 @@ export default function SetupWizard({
               <div className="rounded-lg border border-success/30 bg-success/5 p-3 flex items-start gap-2">
                 <span className="material-symbols-outlined text-success text-[18px] mt-0.5">lock</span>
                 <div>
-                  <p className="text-sm font-medium text-success">Search engines are blocked (recommended)</p>
+                  <p className="text-sm font-medium text-success">{t('auth.setup.seo.blockedTitle')}</p>
                   <p className="text-xs text-text-secondary mt-0.5">
-                    Your instance is invisible to Google, Bing, and other crawlers. This protects member
-                    privacy and prevents your community from being discoverable by strangers.
+                    {t('auth.setup.seo.blockedBody')}
                   </p>
                 </div>
               </div>
@@ -376,12 +385,10 @@ export default function SetupWizard({
               <div className="rounded-lg border border-tertiary/40 bg-tertiary/5 p-3 flex items-start gap-2">
                 <span className="material-symbols-outlined text-tertiary text-[18px] mt-0.5">warning</span>
                 <div>
-                  <p className="text-sm font-medium text-tertiary">Search engine indexing is ON</p>
+                  <p className="text-sm font-medium text-tertiary">{t('auth.setup.seo.onTitle')}</p>
                   <p className="text-xs text-text-secondary mt-0.5">
-                    Your server name and public pages may appear in search results. <strong>Even after
-                    turning this off later, search engines may keep cached copies for weeks or months.</strong>
-                    Bot scrapers may also index your instance before the next crawl cycle removes it.
-                    Only enable this if you want your community to be publicly findable.
+                    {t('auth.setup.seo.onBody')} <strong>{t('auth.setup.seo.onCacheWarning')}</strong>{' '}
+                    {t('auth.setup.seo.onScrapers')}
                   </p>
                 </div>
               </div>
@@ -393,9 +400,9 @@ export default function SetupWizard({
                 onChange={(e) => update('seoIndexingEnabled', e.target.checked)}
                 className="accent-primary"
               />
-              Allow search engines to index this instance
+              {t('auth.setup.seo.allowIndexing')}
             </label>
-            <Field label="SEO title (optional)" hint="Shown in browser tabs and search results. Max 70 chars.">
+            <Field label={t('auth.setup.seo.titleLabel')} hint={t('auth.setup.seo.titleHint')}>
               <input
                 type="text"
                 maxLength={70}
@@ -407,8 +414,8 @@ export default function SetupWizard({
               />
             </Field>
             <Field
-              label="SEO description (optional)"
-              hint="Shown under the title in search results. Max 160 chars."
+              label={t('auth.setup.seo.descriptionLabel')}
+              hint={t('auth.setup.seo.descriptionHint')}
             >
               <textarea
                 maxLength={160}
@@ -417,7 +424,7 @@ export default function SetupWizard({
                 value={form.seoDescription}
                 onChange={(e) => update('seoDescription', e.target.value)}
                 className="w-full rounded-md border border-border-subtle bg-background px-3 py-2 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
-                placeholder="A self-hosted voice community for gamers and friends."
+                placeholder={t('auth.setup.seo.descriptionPlaceholder')}
               />
             </Field>
 
@@ -432,22 +439,21 @@ export default function SetupWizard({
                     className="accent-primary mt-0.5"
                   />
                   <div>
-                    <span className="text-sm font-medium text-text-primary">List in the Discovery directory</span>
+                    <span className="text-sm font-medium text-text-primary">{t('auth.setup.discovery.optIn')}</span>
                     <p className="text-xs text-text-secondary mt-0.5">
-                      Your community will appear in the official <a href="/discover" className="text-primary hover:underline">Discovery</a> page
-                      so others can find and join it. An admin reviews each listing before it goes public.
+                      {rich(t('auth.setup.discovery.body'), { link: <a href="/discover" className="text-primary hover:underline">{t('auth.setup.discovery.link')}</a> })}
                     </p>
                   </div>
                 </label>
                 {form.registerForDiscovery ? (
-                  <Field label="Community description" hint="A short pitch for your community. Shown on the discovery card.">
+                  <Field label={t('auth.setup.discovery.descriptionLabel')} hint={t('auth.setup.discovery.descriptionHint')}>
                     <textarea
                       maxLength={200}
                       rows={2}
                       value={form.discoveryDescription}
                       onChange={(e) => update('discoveryDescription', e.target.value)}
                       className="w-full rounded-md border border-border-subtle bg-background px-3 py-2 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
-                      placeholder="A friendly community for gamers, creators, and friends."
+                      placeholder={t('auth.setup.discovery.descriptionPlaceholder')}
                     />
                   </Field>
                 ) : null}
@@ -474,7 +480,7 @@ export default function SetupWizard({
             disabled={stepIndex === 0 || submitting}
             className="rounded-md px-3 py-2 text-sm text-text-secondary hover:bg-surface-variant/40 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            Back
+            {t('auth.setup.back')}
           </button>
           {stepIndex < STEPS.length - 1 ? (
             <button
@@ -483,7 +489,7 @@ export default function SetupWizard({
               disabled={!canAdvance}
               className="rounded-md bg-primary-container px-4 py-2 text-sm font-semibold text-on-primary-container hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Continue
+              {t('auth.setup.continue')}
             </button>
           ) : (
             <button
@@ -491,7 +497,7 @@ export default function SetupWizard({
               disabled={submitting}
               className="rounded-md bg-primary-container px-4 py-2 text-sm font-semibold text-on-primary-container hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {submitting ? 'Finishing…' : 'Complete setup'}
+              {submitting ? t('auth.setup.finishing') : t('auth.setup.finish')}
             </button>
           )}
         </footer>
@@ -519,8 +525,9 @@ function Field({
 }
 
 function ProgressBar({ stepIndex }: { stepIndex: number }) {
+  const t = useT();
   return (
-    <ol className="flex items-center gap-2" aria-label="Setup progress">
+    <ol className="flex items-center gap-2" aria-label={t('auth.setup.progressLabel')}>
       {STEPS.map((step, index) => {
         const state =
           index < stepIndex ? 'done' : index === stepIndex ? 'current' : 'pending';
@@ -543,7 +550,7 @@ function ProgressBar({ stepIndex }: { stepIndex: number }) {
                 state === 'pending' ? 'text-text-muted' : 'text-text-secondary'
               }`}
             >
-              {step.label}
+              {t(step.labelKey)}
             </span>
             {index < STEPS.length - 1 && (
               <span
@@ -561,24 +568,27 @@ function ProgressBar({ stepIndex }: { stepIndex: number }) {
 }
 
 function ReviewPanel({ form }: { form: FormState }) {
+  const t = useT();
+  const onOff = (on: boolean) => (on ? t('auth.setup.review.enabled') : t('auth.setup.review.disabled'));
+  const accessKey = ACCESS_OPTIONS.find((o) => o.value === form.registrationMode)?.labelKey;
   const rows: { label: string; value: string }[] = [
-    { label: 'Instance name', value: form.instanceName.trim() || '—' },
-    { label: 'Owner', value: form.ownerDisplayName.trim() || '—' },
-    { label: 'Owner email', value: form.ownerEmail.trim() || '—' },
+    { label: t('auth.setup.instanceName.label'), value: form.instanceName.trim() || '—' },
+    { label: t('auth.setup.review.owner'), value: form.ownerDisplayName.trim() || '—' },
+    { label: t('auth.setup.ownerEmail.label'), value: form.ownerEmail.trim() || '—' },
     {
-      label: 'Registration',
-      value: ACCESS_OPTIONS.find((o) => o.value === form.registrationMode)?.label ?? '—',
+      label: t('auth.setup.review.registration'),
+      value: accessKey ? t(accessKey) : '—',
     },
     {
-      label: 'Guest accounts',
-      value: form.guestAccessEnabled && form.registrationMode !== 'closed' ? 'Enabled' : 'Disabled',
+      label: t('auth.setup.review.guestAccounts'),
+      value: onOff(form.guestAccessEnabled && form.registrationMode !== 'closed'),
     },
     {
-      label: 'Search indexing',
-      value: form.seoIndexingEnabled ? 'Enabled' : 'Disabled',
+      label: t('auth.setup.review.searchIndexing'),
+      value: onOff(form.seoIndexingEnabled),
     },
-    { label: 'SEO title', value: form.seoTitle.trim() || '—' },
-    { label: 'SEO description', value: form.seoDescription.trim() || '—' },
+    { label: t('auth.setup.review.seoTitle'), value: form.seoTitle.trim() || '—' },
+    { label: t('auth.setup.review.seoDescription'), value: form.seoDescription.trim() || '—' },
   ];
 
   return (

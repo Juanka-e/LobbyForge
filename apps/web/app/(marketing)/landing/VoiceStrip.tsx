@@ -1,3 +1,5 @@
+import { getTranslator } from '@/lib/i18n/server';
+
 /**
  * The hub's signature element: a voice room reduced to its signal.
  *
@@ -20,10 +22,13 @@ const SPEAKERS: { id: string; name: string; onAir: boolean; bars: number[] }[] =
   { id: 'ember', name: 'Ember', onAir: false, bars: [14, 8, 20, 10, 6] },
 ];
 
-export default function VoiceStrip() {
+export default async function VoiceStrip() {
+  const t = await getTranslator();
+  const onAirName = SPEAKERS.find((s) => s.onAir)?.name ?? '';
+  const listening = SPEAKERS.length - 1;
   return (
     <figure
-      aria-label="A LobbyForge voice room: five members listening while Kaya speaks."
+      aria-label={t('hub.landing.strip.label', { speaker: onAirName, count: listening })}
       className="w-full rounded-2xl border border-border-subtle/40 bg-surface/70 backdrop-blur-sm overflow-hidden shadow-mockup"
     >
       {/* Room header — the vocabulary of the product itself */}
@@ -32,15 +37,19 @@ export default function VoiceStrip() {
           <span className="material-symbols-outlined text-base" aria-hidden>
             volume_up
           </span>
-          Main Lounge
+          {t('hub.landing.mockup.mainLounge')}
         </span>
         <span className="flex items-center gap-2 font-label-xs text-label-xs">
           <span className="relative flex size-2">
             <span className="absolute inline-flex h-full w-full rounded-full bg-ember opacity-60 animate-ping" />
             <span className="relative inline-flex rounded-full size-2 bg-ember" />
           </span>
-          <span className="text-ember font-semibold tracking-widest uppercase">On air</span>
-          <span className="text-text-muted">· 1 talking · 5 listening</span>
+          <span className="text-ember font-semibold tracking-widest uppercase">
+            {t('hub.landing.strip.onAir')}
+          </span>
+          <span className="text-text-muted">
+            {t('hub.landing.strip.counts', { talking: 1, listening })}
+          </span>
         </span>
       </figcaption>
 

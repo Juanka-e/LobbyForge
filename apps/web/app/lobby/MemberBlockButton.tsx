@@ -1,5 +1,6 @@
 'use client';
 
+import { useT } from '@/lib/i18n/client';
 import { useBlockList } from './BlockListProvider';
 
 /**
@@ -13,6 +14,7 @@ export function MemberBlockButton({
   isSelf: boolean;
   onBlockedChange?: (blocked: boolean) => void;
 }) {
+  const t = useT();
   const { isBlocked, toggleBlock } = useBlockList();
   const blocked = isBlocked(userId);
 
@@ -26,8 +28,8 @@ export function MemberBlockButton({
     <button
       type="button"
       onClick={handleToggle}
-      title={blocked ? 'Unblock' : 'Block'}
-      aria-label={blocked ? 'Unblock this user' : 'Block this user'}
+      title={blocked ? t('lobby.roster.unblock') : t('lobby.roster.block')}
+      aria-label={blocked ? t('lobby.roster.unblockAria') : t('lobby.roster.blockAria')}
       className={`p-1 rounded transition-all flex-shrink-0 ${
         blocked
           ? 'opacity-100 text-danger hover:bg-danger/10'

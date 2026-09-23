@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import { sql } from 'drizzle-orm';
 import {
@@ -9,14 +10,17 @@ import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
 import { getSessionSecret } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
+import type { Translator } from '@/lib/i18n/core';
+import { getTranslator } from '@/lib/i18n/server';
 import SettingsShell from '@/app/SettingsShell';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export const metadata = {
-  title: 'Storage - Community Settings',
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  return { title: t('adminSettings.storage.metaTitle') };
+}
 
 interface StorageBreakdownRow {
   bucket: string;
@@ -97,14 +101,15 @@ async function loadStorageSummary(): Promise<StorageSummary> {
  * page is informational only.
  */
 export default async function StorageSettingsPage() {
+  const t = await getTranslator();
   const cookieStore = await cookies();
   const token = cookieStore.get(ADMIN_TOKEN_COOKIE)?.value ?? null;
   if (!(await isInstanceAdminAllowed(cookieStore.toString(), token))) {
     return (
       <SettingsShell scope="community">
         <section>
-          <h1 className="text-2xl font-semibold text-text-primary">Storage</h1>
-          <p className="mt-2 text-sm text-danger">Admin token required.</p>
+          <h1 className="text-2xl font-semibold text-text-primary">{t('adminSettings.storage.title')}</h1>
+          <p className="mt-2 text-sm text-danger">{t('common.adminRequired')}</p>
         </section>
       </SettingsShell>
     );
@@ -130,18 +135,21 @@ export default async function StorageSettingsPage() {
 
   return (
     <SettingsShell scope="community">
-      <StorageBody summary={summary} loadError={loadError} />
+      <StorageBody t={t} summary={summary} loadError={loadError} />
     </SettingsShell>
   );
 }
 
 function StorageBody({
+  t,
   summary,
   loadError,
 }: {
+  t: Translator;
   summary: StorageSummary | null;
   loadError: string | null;
 }) {
+  const formatBytes = (bytes: number) => formatByteSize(bytes, t.locale);
   const used = summary?.totalBytes ?? 0;
   const usedCount = summary?.totalCount ?? 0;
   const reclaimable = summary?.reclaimableBytes ?? 0;
@@ -152,51 +160,49 @@ function StorageBody({
   return (
     <section className="max-w-4xl mx-auto pb-32">
       <header className="mb-6">
-        <h1 className="text-2xl font-semibold text-text-primary">Storage</h1>
-        <p className="mt-1 text-sm text-text-secondary">
-          Attachment usage, retention, and reclaimable space for this community.
-        </p>
+        <h1 className="text-2xl font-semibold text-text-primary">{t('adminSettings.storage.title')}</h1>
+        <p className="mt-1 text-sm text-text-secondary">{t('adminSettings.storage.subtitle')}</p>
       </header>
 
       {loadError ? (
         <div className="rounded-lg border border-danger/40 bg-danger/10 p-4 text-sm text-danger mb-4">
-          Could not load storage: {loadError}
+          {t('adminSettings.storage.loadError', { error: loadError })}
         </div>
       ) : null}
 
       <div className="grid gap-4 md:grid-cols-3 mb-6">
         <SummaryCard
-          label="Used"
+          label={t('adminSettings.storage.used')}
           value={formatBytes(used)}
-          sub={`${usedCount} attachments`}
+          sub={t('adminSettings.storage.usedSub', { count: usedCount })}
         />
         <SummaryCard
-          label="Quota"
-          value="Not enforced"
-          sub="no upload quota configured"
+          label={t('adminSettings.storage.quota')}
+          value={t('adminSettings.storage.quotaValue')}
+          sub={t('adminSettings.storage.quotaSub')}
         />
         <SummaryCard
-          label="Reclaimable"
+          label={t('adminSettings.storage.reclaimable')}
           value={formatBytes(reclaimable)}
-          sub="older than 90 days"
+          sub={t('adminSettings.storage.reclaimableSub')}
           tone="tertiary"
         />
       </div>
 
       <div className="bg-surface rounded-xl border border-border-subtle p-6 mb-6">
-        <h2 className="text-sm font-medium text-text-primary mb-3">Usage</h2>
+        <h2 className="text-sm font-medium text-text-primary mb-3">{t('adminSettings.storage.usage')}</h2>
         <div className="h-2 w-full bg-surface-container rounded-full overflow-hidden">
           <div className="h-full bg-primary rounded-full" style={{ width: `${pct}%` }} />
         </div>
         <div className="flex justify-between text-xs text-text-muted mt-2">
-          <span>{formatBytes(used)} used</span>
-          <span>No enforced quota</span>
+          <span>{t('adminSettings.storage.usedAmount', { size: formatBytes(used) })}</span>
+          <span>{t('adminSettings.storage.noQuota')}</span>
         </div>
       </div>
 
       <div className="bg-surface rounded-xl border border-border-subtle overflow-hidden">
         <div className="px-6 py-3 border-b border-border-subtle bg-surface-dim/40">
-          <h2 className="text-sm font-medium text-text-primary">By type</h2>
+          <h2 className="text-sm font-medium text-text-primary">{t('adminSettings.storage.byType')}</h2>
         </div>
         {summary && summary.byBucket.length > 0 ? (
           <ul className="divide-y divide-border-subtle">
@@ -216,10 +222,10 @@ function StorageBody({
                     <div className="min-w-0">
                       <div className="flex items-center gap-3">
                         <span className="text-sm text-text-primary font-medium">
-                          {labelForBucket(row.bucket)}
+                          {t(labelKeyForBucket(row.bucket))}
                         </span>
                         <span className="text-xs text-text-muted">
-                          {row.count} files - {pctRow}%
+                          {t('adminSettings.storage.bucketLine', { count: row.count, percent: pctRow })}
                         </span>
                       </div>
                       <div className="h-1.5 mt-2 w-full bg-surface-container rounded-full overflow-hidden">
@@ -235,16 +241,11 @@ function StorageBody({
               })}
           </ul>
         ) : (
-          <p className="p-6 text-sm text-text-muted text-center">
-            No attachments uploaded yet.
-          </p>
+          <p className="p-6 text-sm text-text-muted text-center">{t('adminSettings.storage.empty')}</p>
         )}
       </div>
 
-      <p className="mt-6 text-xs text-text-muted">
-        Storage tracking covers uploaded attachments only. Voice recordings, avatars, and backups
-        are tracked separately and are not in scope for this view.
-      </p>
+      <p className="mt-6 text-xs text-text-muted">{t('adminSettings.storage.footer')}</p>
     </section>
   );
 }
@@ -285,27 +286,33 @@ function iconForBucket(bucket: string): string {
   }
 }
 
-function labelForBucket(bucket: string): string {
+/** The message key naming a bucket, resolved with `t` where it renders. */
+function labelKeyForBucket(bucket: string): string {
   switch (bucket) {
     case 'image':
-      return 'Images';
+      return 'adminSettings.storage.bucket.image';
     case 'video':
-      return 'Videos';
+      return 'adminSettings.storage.bucket.video';
     case 'audio':
-      return 'Audio';
+      return 'adminSettings.storage.bucket.audio';
     case 'file':
-      return 'Files';
+      return 'adminSettings.storage.bucket.file';
     default:
-      return 'Other';
+      return 'adminSettings.storage.bucket.other';
   }
 }
 
-function formatBytes(bytes: number): string {
+/** Unit symbols stay as-is; the number follows the page language ("1,5 MB" in Turkish). */
+function formatByteSize(bytes: number, locale: string): string {
   if (!bytes || bytes <= 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   const value = bytes / Math.pow(1024, i);
   const decimals = value >= 100 || i === 0 ? 0 : value >= 10 ? 1 : 2;
-  return `${value.toFixed(decimals)} ${units[i]}`;
+  const number = new Intl.NumberFormat(locale, {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  }).format(value);
+  return `${number} ${units[i]}`;
 }
 

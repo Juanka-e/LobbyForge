@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 import { Bricolage_Grotesque } from 'next/font/google';
+import { getTranslator } from '@/lib/i18n/server';
+import type { Translator } from '@/lib/i18n/core';
 
 /**
  * Marketing shell — wraps public-facing routes (landing) in the Calm
@@ -22,23 +24,24 @@ const display = Bricolage_Grotesque({
 
 const REPO = 'https://github.com/Juanka-e/LobbyForge';
 
-export default function MarketingLayout({ children }: { children: ReactNode }) {
+export default async function MarketingLayout({ children }: { children: ReactNode }) {
+  const t = await getTranslator();
   return (
     <div className={`${display.variable} flex flex-col flex-1`}>
-      <MarketingNav />
+      <MarketingNav t={t} />
       <main className="flex-grow pt-32 pb-section-gap flex flex-col gap-section-gap">
         {children}
       </main>
-      <MarketingFooter />
+      <MarketingFooter t={t} />
     </div>
   );
 }
 
-function MarketingNav() {
+function MarketingNav({ t }: { t: Translator }) {
   const navLinks = [
-    { label: 'Communities', href: '/discover' },
-    { label: 'Connect', href: '/connect' },
-    { label: 'Self-host', href: '/landing#self-host' },
+    { label: t('hub.landing.nav.communities'), href: '/discover' },
+    { label: t('hub.landing.nav.connect'), href: '/connect' },
+    { label: t('hub.landing.nav.selfHost'), href: '/landing#self-host' },
     { label: 'GitHub', href: REPO },
   ];
   return (
@@ -50,7 +53,7 @@ function MarketingNav() {
         <div className="hidden md:flex gap-8">
           {navLinks.map((l) => (
             <a
-              key={l.label}
+              key={l.href}
               href={l.href}
               className="text-text-secondary hover:text-text-primary transition-colors hover:bg-surface-variant/30 rounded-lg px-3 py-2"
             >
@@ -63,13 +66,13 @@ function MarketingNav() {
             href="/download"
             className="hidden md:block text-text-secondary hover:text-text-primary font-label-sm text-label-sm"
           >
-            Download
+            {t('hub.landing.nav.download')}
           </a>
           <a
             href="/discover"
             className="bg-primary-container text-on-primary-container px-4 py-2 rounded-lg font-label-sm text-label-sm active:scale-95 duration-200 transition-all hover:brightness-110"
           >
-            Explore communities
+            {t('hub.landing.cta.explore')}
           </a>
         </div>
       </div>
@@ -77,12 +80,12 @@ function MarketingNav() {
   );
 }
 
-function MarketingFooter() {
+function MarketingFooter({ t }: { t: Translator }) {
   const footerLinks = [
     { label: 'GitHub', href: REPO },
-    { label: 'Docs', href: `${REPO}/tree/main/docs` },
-    { label: 'Communities', href: '/discover' },
-    { label: 'Cloudflare guide', href: `${REPO}/blob/main/docs/DEPLOY_CLOUDFLARE.md` },
+    { label: t('hub.landing.footer.docs'), href: `${REPO}/tree/main/docs` },
+    { label: t('hub.landing.nav.communities'), href: '/discover' },
+    { label: t('hub.landing.footer.cloudflare'), href: `${REPO}/blob/main/docs/DEPLOY_CLOUDFLARE.md` },
   ];
   return (
     <footer className="bg-surface-dim w-full pt-section-gap pb-12 border-t border-border-strong">
@@ -91,7 +94,7 @@ function MarketingFooter() {
         <div className="flex gap-6 flex-wrap justify-center font-label-sm text-label-sm">
           {footerLinks.map((l) => (
             <a
-              key={l.label}
+              key={l.href}
               href={l.href}
               className="text-text-muted hover:text-text-secondary transition-colors hover:underline decoration-primary/50 underline-offset-4"
             >
@@ -100,7 +103,7 @@ function MarketingFooter() {
           ))}
         </div>
         <div className="font-label-sm text-label-sm text-text-muted">
-          © {new Date().getFullYear()} LobbyForge — self-hosted power for modern communities.
+          {t('hub.landing.footer.tagline', { year: new Date().getFullYear() })}
         </div>
       </div>
     </footer>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import { useT } from '@/lib/i18n/client';
 
 /**
  * Instance logo management (Admin → Overview): upload / preview / remove.
@@ -8,6 +9,7 @@ import { useRef, useState } from 'react';
  * (GIF included) and dimensions (min 64×64, max 1024, 2 MB).
  */
 export default function InstanceLogoCard({ initialLogoUrl }: { initialLogoUrl: string | null }) {
+  const t = useT();
   const [logoUrl, setLogoUrl] = useState(initialLogoUrl);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -26,7 +28,7 @@ export default function InstanceLogoCard({ initialLogoUrl }: { initialLogoUrl: s
       const body = (await res.json().catch(() => ({}))) as { instanceLogoUrl?: string | null; error?: string };
       if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
       setLogoUrl(body.instanceLogoUrl ?? null);
-      setMessage(dataUrl ? 'Logo updated.' : 'Logo removed.');
+      setMessage(dataUrl ? t('adminSettings.overview.logo.updated') : t('adminSettings.overview.logo.removed'));
     } catch (err) {
       setMessage((err as Error).message);
     } finally {
@@ -36,15 +38,16 @@ export default function InstanceLogoCard({ initialLogoUrl }: { initialLogoUrl: s
 
   return (
     <section className="rounded-xl border border-border-subtle bg-surface/80 backdrop-blur-sm p-6">
-      <h2 className="text-base font-semibold text-text-primary">Instance logo</h2>
-      <p className="mt-1 text-sm text-text-secondary">
-        Shown in the lobby header and as the browser tab icon. PNG, JPEG, GIF (animated works) or
-        WebP — at least 64×64, at most 1024×1024 / 2 MB.
-      </p>
+      <h2 className="text-base font-semibold text-text-primary">{t('adminSettings.overview.logo.title')}</h2>
+      <p className="mt-1 text-sm text-text-secondary">{t('adminSettings.overview.logo.description')}</p>
       <div className="mt-4 flex items-center gap-4">
         {logoUrl ? (
           // eslint-disable-next-line @next/next/no-img-element -- data URL
-          <img src={logoUrl} alt="Instance logo" className="size-16 rounded-lg object-cover border border-border-subtle" />
+          <img
+            src={logoUrl}
+            alt={t('adminSettings.overview.logo.title')}
+            className="size-16 rounded-lg object-cover border border-border-subtle"
+          />
         ) : (
           <div className="size-16 rounded-lg bg-surface-raised border border-border-subtle flex items-center justify-center">
             <span className="material-symbols-outlined text-2xl text-text-muted">image</span>
@@ -57,7 +60,7 @@ export default function InstanceLogoCard({ initialLogoUrl }: { initialLogoUrl: s
             onClick={() => fileRef.current?.click()}
             className="rounded-lg bg-primary-container px-4 py-2 font-label-sm text-on-primary-container hover:brightness-110 transition-all disabled:opacity-40"
           >
-            {logoUrl ? 'Replace' : 'Upload logo'}
+            {logoUrl ? t('adminSettings.overview.logo.replace') : t('adminSettings.overview.logo.upload')}
           </button>
           {logoUrl ? (
             <button
@@ -66,7 +69,7 @@ export default function InstanceLogoCard({ initialLogoUrl }: { initialLogoUrl: s
               onClick={() => void save(null)}
               className="rounded-lg border border-danger/40 px-4 py-2 font-label-sm text-danger hover:bg-danger/10 transition-colors disabled:opacity-40"
             >
-              Remove
+              {t('adminSettings.overview.logo.remove')}
             </button>
           ) : null}
         </div>
@@ -80,12 +83,12 @@ export default function InstanceLogoCard({ initialLogoUrl }: { initialLogoUrl: s
             e.target.value = '';
             if (!file) return;
             if (file.size > 2 * 1024 * 1024) {
-              setMessage('Logo must be at most 2 MB.');
+              setMessage(t('adminSettings.overview.logo.tooLarge'));
               return;
             }
             const reader = new FileReader();
             reader.onload = () => void save(String(reader.result));
-            reader.onerror = () => setMessage('Could not read the file.');
+            reader.onerror = () => setMessage(t('adminSettings.overview.logo.readFailed'));
             reader.readAsDataURL(file);
           }}
         />

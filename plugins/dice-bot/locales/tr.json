@@ -1,4 +1,5 @@
 {
+  "catalog.summary": "Sesli odalar için oyuncu başına istatistik tutan zar atma.",
   "dice.history.empty": "Henüz zar atılmadı.",
   "dice.history.heading": "Son atışlar",
   "dice.history.more": "+{count} daha eski",

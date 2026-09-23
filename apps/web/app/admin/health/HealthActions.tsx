@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { DoctorReport } from '@lobbyforge/core';
+import { useT } from '@/lib/i18n/client';
 
 /**
  * Client island for the two Doctor sidebar actions:
@@ -14,6 +15,7 @@ import type { DoctorReport } from '@lobbyforge/core';
  * always rendered from a live server-side probe, not a client fetch.
  */
 export default function HealthActions({ report }: { report: DoctorReport }) {
+  const t = useT();
   const router = useRouter();
   const [checking, setChecking] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -26,6 +28,8 @@ export default function HealthActions({ report }: { report: DoctorReport }) {
   };
 
   const copySummary = async () => {
+    // Deliberately English: this is a diagnostic dump for bug reports and
+    // support threads, and the check messages in it are English anyway.
     const lines = [
       `LobbyForge Health Summary`,
       `Generated: ${new Date(report.generatedAt).toISOString()}`,
@@ -54,7 +58,7 @@ export default function HealthActions({ report }: { report: DoctorReport }) {
         className="w-full py-2.5 rounded-lg bg-primary text-on-primary font-label-sm hover:brightness-110 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
       >
         <span className="material-symbols-outlined text-[18px]">{checking ? 'progress_activity' : 'play_arrow'}</span>
-        {checking ? 'Checking…' : 'Run Full Check'}
+        {checking ? t('admin.health.checking') : t('admin.health.runCheck')}
       </button>
       <button
         type="button"
@@ -62,7 +66,7 @@ export default function HealthActions({ report }: { report: DoctorReport }) {
         className="w-full py-2.5 rounded-lg bg-surface-raised border border-border-strong text-text-secondary font-label-sm hover:bg-surface-variant transition-colors flex items-center justify-center gap-2"
       >
         <span className="material-symbols-outlined text-[18px]">{copied ? 'check' : 'content_copy'}</span>
-        {copied ? 'Copied!' : 'Copy Health Summary'}
+        {copied ? t('admin.health.copied') : t('admin.health.copySummary')}
       </button>
     </div>
   );

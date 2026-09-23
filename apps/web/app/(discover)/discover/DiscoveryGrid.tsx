@@ -2,6 +2,9 @@
 
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
+import { useT } from '@/lib/i18n/client';
+import type { Translator } from '@/lib/i18n/core';
+import { rich } from '@/lib/i18n/rich';
 
 interface DirectoryCard {
   instanceId: string;
@@ -21,23 +24,36 @@ interface DirectoryCard {
   lastHeartbeatAt: Date | null;
 }
 
-/** Pre-translated strings from the server (RSC props). */
-type Labels = Record<string, string>;
-
-const REGIONS = ['Europe', 'North America', 'Asia', 'South America', 'Oceania', 'Africa'];
+/**
+ * Directory regions. The English name is the value stored by the
+ * registry and sent in the URL; `label` is its message key.
+ */
+const REGIONS = [
+  { value: 'Europe', label: 'discovery.region.europe' },
+  { value: 'North America', label: 'discovery.region.northAmerica' },
+  { value: 'Asia', label: 'discovery.region.asia' },
+  { value: 'South America', label: 'discovery.region.southAmerica' },
+  { value: 'Oceania', label: 'discovery.region.oceania' },
+  { value: 'Africa', label: 'discovery.region.africa' },
+];
 const REPORT_REASONS = ['spam', 'nsfw', 'abuse', 'malware', 'other'] as const;
+
+/** A region as the reader says it; unknown regions are shown as listed. */
+function regionLabel(region: string, t: Translator): string {
+  const known = REGIONS.find((r) => r.value === region);
+  return known ? t(known.label) : region;
+}
 
 export default function DiscoveryGrid({
   instances,
   region,
   query,
-  labels,
 }: {
   instances: DirectoryCard[];
   region: string | null;
   query: string;
-  labels: Labels;
 }) {
+  const t = useT();
   const [reporting, setReporting] = useState<DirectoryCard | null>(null);
   // Client-side quick filters (the server already handles search + region).
   const [verifiedOnly, setVerifiedOnly] = useState(false);
@@ -69,17 +85,19 @@ export default function DiscoveryGrid({
             <Link
               href="/discover"
               className="rounded-md p-1.5 text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors"
-              aria-label="Back to the directory"
+              aria-label={t('discovery.backToDirectory')}
             >
-              <span className="material-symbols-outlined text-[20px]">arrow_back</span>
+              <span className="material-symbols-outlined text-[20px]" aria-hidden>
+                arrow_back
+              </span>
             </Link>
             <div>
-              <h1 className="text-lg font-semibold text-text-primary">{labels.title}</h1>
-              <p className="text-xs text-text-muted">{labels.subtitle}</p>
+              <h1 className="text-lg font-semibold text-text-primary">{t('discovery.title')}</h1>
+              <p className="text-xs text-text-muted">{t('discovery.subtitle')}</p>
             </div>
           </div>
           <Link href="/lobby" className="text-sm text-primary hover:underline">
-            {labels.backToLobby}
+            {t('discovery.backToLobby')}
           </Link>
         </div>
       </header>
@@ -96,7 +114,8 @@ export default function DiscoveryGrid({
                 type="text"
                 name="q"
                 defaultValue={query}
-                placeholder={labels.search}
+                placeholder={t('discovery.search')}
+                aria-label={t('discovery.search')}
                 className="w-full rounded-lg bg-surface-raised border border-border-subtle pl-10 pr-4 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary"
               />
             </div>
@@ -106,22 +125,22 @@ export default function DiscoveryGrid({
           <details className="relative">
             <summary className="cursor-pointer rounded-lg bg-surface-raised border border-border-subtle px-4 py-2.5 text-sm text-text-secondary hover:bg-surface-container list-none flex items-center gap-2">
               <span className="material-symbols-outlined text-[18px]">public</span>
-              {region ?? labels.allRegions}
+              {region ? regionLabel(region, t) : t('discovery.allRegions')}
             </summary>
             <div className="absolute right-0 mt-2 w-48 rounded-lg border border-border-subtle bg-surface-raised shadow-xl py-1 z-20">
               <Link
                 href="/discover"
                 className="block px-4 py-2 text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary"
               >
-                {labels.allRegions}
+                {t('discovery.allRegions')}
               </Link>
               {REGIONS.map((r) => (
                 <Link
-                  key={r}
-                  href={`/discover?region=${encodeURIComponent(r)}`}
+                  key={r.value}
+                  href={`/discover?region=${encodeURIComponent(r.value)}`}
                   className="block px-4 py-2 text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary"
                 >
-                  {r}
+                  {t(r.label)}
                 </Link>
               ))}
             </div>
@@ -140,8 +159,10 @@ export default function DiscoveryGrid({
                 : 'border-border-subtle bg-surface-raised text-text-secondary hover:text-text-primary'
             }`}
           >
-            <span className="material-symbols-outlined text-[13px] align-middle mr-1">verified</span>
-            Verified only
+            <span className="material-symbols-outlined text-[13px] align-middle mr-1" aria-hidden>
+              verified
+            </span>
+            {t('discovery.verifiedOnly')}
           </button>
           <button
             type="button"
@@ -154,7 +175,7 @@ export default function DiscoveryGrid({
             }`}
           >
             <span className="w-1.5 h-1.5 rounded-full bg-current inline-block mr-1.5" />
-            Online now
+            {t('discovery.onlineNow')}
           </button>
           {languages.length > 1 ? (
             <label className="flex items-center gap-2 rounded-full border border-border-subtle bg-surface-raised px-4 py-1.5 text-xs text-text-secondary">
@@ -163,9 +184,9 @@ export default function DiscoveryGrid({
                 value={language}
                 onChange={(e) => setLanguage(e.target.value)}
                 className="bg-transparent text-text-secondary outline-none cursor-pointer"
-                aria-label="Filter by language"
+                aria-label={t('discovery.filterLanguage')}
               >
-                <option value="">All languages</option>
+                <option value="">{t('discovery.allLanguages')}</option>
                 {languages.map((lang) => (
                   <option key={lang} value={lang}>
                     {lang}
@@ -178,27 +199,23 @@ export default function DiscoveryGrid({
 
         {/* Results count */}
         <p className="text-sm text-text-muted mb-4">
-          {visible.length === 1
-            ? labels.communityFound
-            : (labels.communitiesFound ?? '').replace('{{count}}', String(visible.length))}
+          {t('discovery.communitiesFound', { count: visible.length })}
         </p>
 
         {/* Grid */}
         {visible.length === 0 ? (
           <div className="rounded-2xl border border-border-subtle bg-surface p-12 text-center">
             <span className="material-symbols-outlined text-5xl text-text-muted mb-3 block">explore_off</span>
-            <h2 className="text-base font-semibold text-text-primary">{labels.noResults}</h2>
+            <h2 className="text-base font-semibold text-text-primary">{t('discovery.noResults')}</h2>
             <p className="mt-1 text-sm text-text-muted">
               {query
-                ? (labels.noResultsQuery ?? '').replace('{{query}}', query)
-                : labels.noListedYet}
+                ? t('discovery.noResultsQuery', { query })
+                : t('discovery.noListedYet')}
             </p>
             <p className="mt-3 text-sm text-text-muted">
-              Try clearing the filters above, or{' '}
-              <Link href="/connect" className="text-primary hover:underline underline-offset-4">
-                connect by address
-              </Link>
-              .
+              {rich(t('discovery.clearFiltersHint'), { link: <Link href="/connect" className="text-primary hover:underline underline-offset-4">
+                  {t('discovery.connectByAddress')}
+                </Link> })}
             </p>
           </div>
         ) : (
@@ -207,7 +224,6 @@ export default function DiscoveryGrid({
               <DirectoryCard
                 key={inst.instanceId}
                 instance={inst}
-                labels={labels}
                 onReport={() => setReporting(inst)}
               />
             ))}
@@ -216,7 +232,7 @@ export default function DiscoveryGrid({
       </main>
 
       {reporting ? (
-        <ReportDialog instance={reporting} labels={labels} onClose={() => setReporting(null)} />
+        <ReportDialog instance={reporting} onClose={() => setReporting(null)} />
       ) : null}
     </div>
   );
@@ -224,13 +240,12 @@ export default function DiscoveryGrid({
 
 function DirectoryCard({
   instance,
-  labels,
   onReport,
 }: {
   instance: DirectoryCard;
-  labels: Labels;
   onReport: () => void;
 }) {
+  const t = useT();
   const tags = (instance.tags as string[]).slice(0, 4);
   return (
     <div className="group relative rounded-2xl border border-border-subtle bg-surface hover:border-primary/40 transition-all">
@@ -248,11 +263,11 @@ function DirectoryCard({
                 {instance.name}
               </h3>
               {instance.isVerified ? (
-                <span className="material-symbols-outlined text-[14px] text-primary" title="Verified">
+                <span className="material-symbols-outlined text-[14px] text-primary" title={t('discovery.verified')}>
                   verified
                 </span>
               ) : (
-                <span className="material-symbols-outlined text-[14px] text-text-muted" title={labels.notVerified}>
+                <span className="material-symbols-outlined text-[14px] text-text-muted" title={t('discovery.notVerified')}>
                   help
                 </span>
               )}
@@ -260,7 +275,7 @@ function DirectoryCard({
             {instance.region ? (
               <p className="text-xs text-text-muted flex items-center gap-1">
                 <span className="material-symbols-outlined text-[12px]">location_on</span>
-                {instance.region}
+                {regionLabel(instance.region, t)}
               </p>
             ) : null}
           </div>
@@ -283,12 +298,12 @@ function DirectoryCard({
         <div className="flex items-center gap-4 text-xs text-text-muted pt-2 border-t border-border-subtle">
           <span className="flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-success" />
-            {instance.onlineUsers} {labels.online}
+            {instance.onlineUsers} {t('discovery.online')}
           </span>
           {instance.publicRoomsCount > 0 ? (
             <span className="flex items-center gap-1">
               <span className="material-symbols-outlined text-[12px]">forum</span>
-              {instance.publicRoomsCount} {labels.rooms}
+              {instance.publicRoomsCount} {t('discovery.rooms')}
             </span>
           ) : null}
           {instance.doctorScore != null ? (
@@ -306,7 +321,7 @@ function DirectoryCard({
           e.preventDefault();
           onReport();
         }}
-        title={labels.report}
+        title={t('discovery.report')}
         className="absolute top-3 right-3 rounded-md p-1.5 text-text-muted hover:text-warning hover:bg-warning/10 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
       >
         <span className="material-symbols-outlined text-[16px]">flag</span>
@@ -317,13 +332,12 @@ function DirectoryCard({
 
 function ReportDialog({
   instance,
-  labels,
   onClose,
 }: {
   instance: DirectoryCard;
-  labels: Labels;
   onClose: () => void;
 }) {
+  const t = useT();
   const [reason, setReason] = useState<(typeof REPORT_REASONS)[number]>('spam');
   const [detail, setDetail] = useState('');
   const [state, setState] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
@@ -354,23 +368,23 @@ function ReportDialog({
         {state === 'done' ? (
           <div className="text-center py-4">
             <span className="material-symbols-outlined text-success text-[32px] mb-2 block">check_circle</span>
-            <p className="text-sm text-text-primary">{labels.reportSubmitted}</p>
+            <p className="text-sm text-text-primary">{t('discovery.reportSubmitted')}</p>
             <button
               type="button"
               onClick={onClose}
               className="mt-4 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-on-primary"
             >
-              {labels.cancel}
+              {t('discovery.close')}
             </button>
           </div>
         ) : (
           <>
-            <h2 className="text-base font-semibold text-text-primary">{labels.reportTitle}</h2>
+            <h2 className="text-base font-semibold text-text-primary">{t('discovery.reportTitle')}</h2>
             <p className="mt-1 text-xs text-text-muted">
-              {labels.reportBody} — <span className="font-medium">{instance.name}</span>
+              {t('discovery.reportBody')} — <span className="font-medium">{instance.name}</span>
             </p>
             <label className="block mt-4 text-xs font-medium text-text-secondary">
-              {labels.reportReason}
+              {t('discovery.reportReason')}
               <select
                 value={reason}
                 onChange={(e) => setReason(e.target.value as (typeof REPORT_REASONS)[number])}
@@ -378,13 +392,13 @@ function ReportDialog({
               >
                 {REPORT_REASONS.map((r) => (
                   <option key={r} value={r}>
-                    {labels[`reportReason.${r}`] ?? r}
+                    {t(`discovery.reportReason.${r}`)}
                   </option>
                 ))}
               </select>
             </label>
             <label className="block mt-3 text-xs font-medium text-text-secondary">
-              {labels.reportDetail}
+              {t('discovery.reportDetail')}
               <textarea
                 value={detail}
                 onChange={(e) => setDetail(e.target.value)}
@@ -394,7 +408,7 @@ function ReportDialog({
               />
             </label>
             {state === 'error' ? (
-              <p className="mt-2 text-xs text-danger">{labels.reportFailed}</p>
+              <p className="mt-2 text-xs text-danger">{t('discovery.reportFailed')}</p>
             ) : null}
             <div className="mt-5 flex justify-end gap-2">
               <button
@@ -402,7 +416,7 @@ function ReportDialog({
                 onClick={onClose}
                 className="rounded-lg border border-border-subtle px-4 py-2 text-sm text-text-secondary hover:bg-surface-container"
               >
-                {labels.cancel}
+                {t('discovery.cancel')}
               </button>
               <button
                 type="button"
@@ -410,7 +424,7 @@ function ReportDialog({
                 disabled={state === 'sending'}
                 className="rounded-lg bg-warning/90 px-4 py-2 text-sm font-semibold text-black hover:bg-warning disabled:opacity-40"
               >
-                {state === 'sending' ? '…' : labels.reportSubmit}
+                {state === 'sending' ? '…' : t('discovery.reportSubmit')}
               </button>
             </div>
           </>

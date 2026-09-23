@@ -1,6 +1,9 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useT } from '@/lib/i18n/client';
+import type { Translator } from '@/lib/i18n/core';
+import { rich } from '@/lib/i18n/rich';
 
 export interface InviteView {
   id: string;
@@ -39,6 +42,7 @@ export default function InvitesClient({
   loadError: string | null;
   canMutate: boolean;
 }) {
+  const t = useT();
   const [invites, setInvites] = useState(initialInvites);
   const [maxUses, setMaxUses] = useState('25');
   const [expiresIn, setExpiresIn] = useState('7d');
@@ -63,6 +67,11 @@ export default function InvitesClient({
     return { active, expired, exhausted, totalUses };
   }, [invites]);
 
+  // The words shown for a missing creator / expiry are searchable too,
+  // in whichever language the page is in.
+  const systemLabel = t('adminSettings.invites.system');
+  const neverLabel = t('adminSettings.invites.never');
+
   const visibleInvites = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return invites.filter((invite) => {
@@ -71,16 +80,16 @@ export default function InvitesClient({
       if (!normalizedQuery) return true;
       return [
         invite.code,
-        invite.creatorName ?? 'system',
+        invite.creatorName ?? systemLabel,
         invite.createdBy ?? '',
         invite.createdAt,
-        invite.expiresAt ?? 'never',
+        invite.expiresAt ?? neverLabel,
       ]
         .join(' ')
         .toLowerCase()
         .includes(normalizedQuery);
     });
-  }, [invites, query, statusFilter]);
+  }, [invites, query, statusFilter, systemLabel, neverLabel]);
 
   async function createInvite() {
     if (!serverId) return;
@@ -103,8 +112,8 @@ export default function InvitesClient({
         throw new Error(detail.error ?? `HTTP ${res.status}`);
       }
       const data = (await res.json()) as { invite: Omit<InviteView, 'creatorName'> };
-      setInvites((current) => [{ ...data.invite, creatorName: 'You' }, ...current]);
-      setMessage('Invite created.');
+      setInvites((current) => [{ ...data.invite, creatorName: t('adminSettings.invites.you') }, ...current]);
+      setMessage(t('adminSettings.invites.created'));
     } catch (err) {
       setMessage((err as Error).message);
     } finally {
@@ -127,7 +136,7 @@ export default function InvitesClient({
       }
       setInvites((current) => current.filter((candidate) => candidate.id !== invite.id));
       setPendingRevoke(null);
-      setMessage('Invite revoked.');
+      setMessage(t('adminSettings.invites.revoked'));
     } catch (err) {
       setMessage((err as Error).message);
     } finally {
@@ -138,7 +147,7 @@ export default function InvitesClient({
   async function copyInvite(code: string) {
     try {
       await navigator.clipboard.writeText(joinUrl(code));
-      setMessage('Invite link copied.');
+      setMessage(t('adminSettings.invites.copied'));
     } catch {
       setMessage(joinUrl(code));
     }
@@ -147,7 +156,9 @@ export default function InvitesClient({
   async function copyActiveInvite(invite: InviteView) {
     const status = statusOf(invite);
     if (status !== 'active') {
-      setMessage(status === 'expired' ? 'This invite is expired.' : 'This invite has no uses left.');
+      setMessage(
+        status === 'expired' ? t('adminSettings.invites.expiredMessage') : t('adminSettings.invites.exhaustedMessage')
+      );
       return;
     }
     await copyInvite(invite.code);
@@ -156,57 +167,57 @@ export default function InvitesClient({
   return (
     <section className="mx-auto max-w-5xl pb-32">
       <header className="mb-6">
-        <h1 className="text-2xl font-semibold text-text-primary">Invites</h1>
-        <p className="mt-1 text-sm text-text-secondary">
-          Create, copy, and revoke links that bring new members into this community.
-        </p>
+        <h1 className="text-2xl font-semibold text-text-primary">{t('adminSettings.invites.title')}</h1>
+        <p className="mt-1 text-sm text-text-secondary">{t('adminSettings.invites.subtitle')}</p>
       </header>
 
       <div className="mb-6 flex flex-wrap gap-3">
-        <Chip dot="success" label={`${stats.active} active invites`} />
-        <Chip dot="danger" label={`${stats.expired} expired`} />
-        <Chip icon="analytics" label={`${stats.totalUses} total uses`} />
-        {stats.exhausted > 0 ? <Chip dot="muted" label={`${stats.exhausted} exhausted`} /> : null}
+        <Chip dot="success" label={t('adminSettings.invites.activeCount', { count: stats.active })} />
+        <Chip dot="danger" label={t('adminSettings.invites.expiredCount', { count: stats.expired })} />
+        <Chip icon="analytics" label={t('adminSettings.invites.totalUses', { count: stats.totalUses })} />
+        {stats.exhausted > 0 ? (
+          <Chip dot="muted" label={t('adminSettings.invites.exhaustedCount', { count: stats.exhausted })} />
+        ) : null}
       </div>
 
       {loadError ? (
         <div className="mb-4 rounded-lg border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
-          Could not load invites: {loadError}
+          {t('adminSettings.invites.loadError', { error: loadError })}
         </div>
       ) : null}
 
       <section className="mb-6 rounded-xl border border-border-subtle bg-surface p-5">
         <div className="mb-4 rounded-lg border border-border-subtle bg-surface-container/50 p-3 text-sm text-text-secondary">
-          Invite-only communities require a valid link before a new person can join. Revoking a link removes it immediately; already accepted memberships remain intact.
+          {t('adminSettings.invites.explainer')}
         </div>
         <div className="grid gap-4 md:grid-cols-[1fr_1fr_auto] md:items-end">
           <label className="block">
-            <span className="mb-1.5 block text-xs text-text-muted">Max uses</span>
+            <span className="mb-1.5 block text-xs text-text-muted">{t('adminSettings.invites.maxUses')}</span>
             <select
               value={maxUses}
               onChange={(event) => setMaxUses(event.target.value)}
               className="w-full rounded-lg border border-border-strong bg-surface-raised px-3 py-2 text-sm text-text-primary"
               disabled={!canMutate || !serverId || busy}
             >
-              <option value="1">1 use</option>
-              <option value="5">5 uses</option>
-              <option value="25">25 uses</option>
-              <option value="100">100 uses</option>
-              <option value="unlimited">Unlimited</option>
+              <option value="1">{t('adminSettings.invites.uses', { count: 1 })}</option>
+              <option value="5">{t('adminSettings.invites.uses', { count: 5 })}</option>
+              <option value="25">{t('adminSettings.invites.uses', { count: 25 })}</option>
+              <option value="100">{t('adminSettings.invites.uses', { count: 100 })}</option>
+              <option value="unlimited">{t('adminSettings.invites.unlimited')}</option>
             </select>
           </label>
           <label className="block">
-            <span className="mb-1.5 block text-xs text-text-muted">Expires</span>
+            <span className="mb-1.5 block text-xs text-text-muted">{t('adminSettings.invites.expiresLabel')}</span>
             <select
               value={expiresIn}
               onChange={(event) => setExpiresIn(event.target.value)}
               className="w-full rounded-lg border border-border-strong bg-surface-raised px-3 py-2 text-sm text-text-primary"
               disabled={!canMutate || !serverId || busy}
             >
-              <option value="1d">In 1 day</option>
-              <option value="7d">In 7 days</option>
-              <option value="30d">In 30 days</option>
-              <option value="never">Never</option>
+              <option value="1d">{t('adminSettings.invites.expiresIn', { count: 1 })}</option>
+              <option value="7d">{t('adminSettings.invites.expiresIn', { count: 7 })}</option>
+              <option value="30d">{t('adminSettings.invites.expiresIn', { count: 30 })}</option>
+              <option value="never">{neverLabel}</option>
             </select>
           </label>
           <button
@@ -215,13 +226,11 @@ export default function InvitesClient({
             disabled={!canMutate || !serverId || busy}
             className="rounded-lg bg-primary-container px-4 py-2 text-sm font-semibold text-on-primary-container transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {busy ? 'Working...' : 'Create invite'}
+            {busy ? t('adminSettings.invites.working') : t('adminSettings.invites.create')}
           </button>
         </div>
         {!canMutate ? (
-          <p className="mt-3 text-xs text-text-muted">
-            Sign in as an owner or a member with invite permission to create links from this page.
-          </p>
+          <p className="mt-3 text-xs text-text-muted">{t('adminSettings.invites.cannotMutate')}</p>
         ) : null}
         {message ? <p className="mt-3 text-xs text-text-secondary">{message}</p> : null}
       </section>
@@ -233,7 +242,7 @@ export default function InvitesClient({
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search code or creator"
+              placeholder={t('adminSettings.invites.searchPlaceholder')}
               className="min-w-0 flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-muted"
             />
           </label>
@@ -242,10 +251,10 @@ export default function InvitesClient({
             onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
             className="rounded-lg border border-border-subtle bg-surface-container px-3 py-2 text-sm text-text-primary outline-none"
           >
-            <option value="active">Active only</option>
-            <option value="all">All invites</option>
-            <option value="expired">Expired</option>
-            <option value="exhausted">Exhausted</option>
+            <option value="active">{t('adminSettings.invites.filter.active')}</option>
+            <option value="all">{t('adminSettings.invites.filter.all')}</option>
+            <option value="expired">{t('adminSettings.invites.status.expired')}</option>
+            <option value="exhausted">{t('adminSettings.invites.status.exhausted')}</option>
           </select>
         </div>
       </section>
@@ -254,19 +263,19 @@ export default function InvitesClient({
         <table className="w-full border-collapse text-left text-sm">
           <thead>
             <tr className="border-b border-border-subtle bg-surface-container/40 text-xs font-semibold uppercase tracking-wider text-text-secondary">
-              <th className="px-6 py-3">Invite</th>
-              <th className="px-6 py-3">Created by</th>
-              <th className="px-6 py-3">Uses</th>
-              <th className="px-6 py-3">Expires</th>
-              <th className="px-6 py-3">Status</th>
-              <th className="px-6 py-3 text-right">Actions</th>
+              <th className="px-6 py-3">{t('adminSettings.invites.col.invite')}</th>
+              <th className="px-6 py-3">{t('adminSettings.invites.col.createdBy')}</th>
+              <th className="px-6 py-3">{t('adminSettings.invites.col.uses')}</th>
+              <th className="px-6 py-3">{t('adminSettings.invites.col.expires')}</th>
+              <th className="px-6 py-3">{t('adminSettings.invites.col.status')}</th>
+              <th className="px-6 py-3 text-right">{t('adminSettings.invites.col.actions')}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border-subtle">
             {visibleInvites.length === 0 ? (
               <tr>
                 <td colSpan={6} className="px-6 py-6 text-center text-text-muted">
-                  {invites.length === 0 ? 'No invites yet.' : 'No invites match these filters.'}
+                  {invites.length === 0 ? t('adminSettings.invites.empty') : t('adminSettings.invites.emptyFiltered')}
                 </td>
               </tr>
             ) : (
@@ -285,18 +294,21 @@ export default function InvitesClient({
                       <div className="flex flex-col">
                         <span className="font-mono font-medium text-text-primary">{invite.code}</span>
                         <span className="text-xs text-text-muted">
-                          Created {new Date(invite.createdAt).toLocaleDateString()}
+                          {t('adminSettings.invites.createdOn', {
+                            date: new Date(invite.createdAt).toLocaleDateString(t.locale),
+                          })}
                         </span>
                       </div>
                     </td>
                     <td className="px-6 py-4 text-text-primary">
-                      {invite.creatorName ?? <span className="text-text-muted">system</span>}
+                      {invite.creatorName ?? <span className="text-text-muted">{systemLabel}</span>}
                     </td>
                     <td className="w-32 px-6 py-4">
                       <div className="flex flex-col gap-1">
                         <span className="text-xs text-text-primary">
-                          {invite.currentUses}
-                          {invite.maxUses !== null ? ` / ${invite.maxUses}` : ' / unlimited'}
+                          {invite.maxUses !== null
+                            ? `${invite.currentUses} / ${invite.maxUses}`
+                            : t('adminSettings.invites.usesUnlimited', { count: invite.currentUses })}
                         </span>
                         {usesPct !== null ? (
                           <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-container-high">
@@ -308,7 +320,7 @@ export default function InvitesClient({
                         ) : null}
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-text-secondary">{expiresLabelFor(invite.expiresAt)}</td>
+                    <td className="px-6 py-4 text-text-secondary">{expiresLabelFor(t, invite.expiresAt)}</td>
                     <td className="px-6 py-4">
                       <StatusPill status={status} />
                     </td>
@@ -319,7 +331,7 @@ export default function InvitesClient({
                           onClick={() => copyActiveInvite(invite)}
                           className="rounded-md border border-border-strong px-3 py-1.5 text-xs text-text-secondary transition-colors hover:bg-surface-raised hover:text-text-primary"
                         >
-                          Copy
+                          {t('adminSettings.invites.copy')}
                         </button>
                         <button
                           type="button"
@@ -327,7 +339,7 @@ export default function InvitesClient({
                           disabled={!canMutate || busy}
                           className="rounded-md border border-danger/40 px-3 py-1.5 text-xs text-danger transition-colors hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40"
                         >
-                          Revoke
+                          {t('adminSettings.invites.revoke')}
                         </button>
                       </div>
                     </td>
@@ -342,9 +354,9 @@ export default function InvitesClient({
       {pendingRevoke ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div className="w-full max-w-md rounded-xl border border-border-subtle bg-surface p-5 shadow-2xl">
-            <h2 className="text-lg font-semibold text-text-primary">Revoke invite?</h2>
+            <h2 className="text-lg font-semibold text-text-primary">{t('adminSettings.invites.revokeTitle')}</h2>
             <p className="mt-2 text-sm text-text-secondary">
-              The link <span className="font-mono text-text-primary">{pendingRevoke.code}</span> will stop working immediately.
+              {rich(t('adminSettings.invites.revokeBody'), { code: <span className="font-mono text-text-primary">{pendingRevoke.code}</span> })}
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <button
@@ -353,7 +365,7 @@ export default function InvitesClient({
                 disabled={busy}
                 className="rounded-lg border border-border-strong px-4 py-2 text-sm text-text-secondary hover:bg-surface-raised disabled:opacity-40"
               >
-                Cancel
+                {t('common.cancel')}
               </button>
               <button
                 type="button"
@@ -361,7 +373,7 @@ export default function InvitesClient({
                 disabled={busy}
                 className="rounded-lg border border-danger/50 bg-danger/10 px-4 py-2 text-sm font-semibold text-danger hover:bg-danger/20 disabled:opacity-40"
               >
-                {busy ? 'Revoking...' : 'Revoke'}
+                {busy ? t('adminSettings.invites.revoking') : t('adminSettings.invites.revoke')}
               </button>
             </div>
           </div>
@@ -377,25 +389,26 @@ function expiresAtFor(value: string): Date | null {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
 }
 
-function expiresLabelFor(expiresAt: string | null): string {
-  if (!expiresAt) return 'Never';
+function expiresLabelFor(t: Translator, expiresAt: string | null): string {
+  if (!expiresAt) return t('adminSettings.invites.never');
   const ms = new Date(expiresAt).getTime() - Date.now();
-  if (ms <= 0) return 'Expired';
+  if (ms <= 0) return t('adminSettings.invites.status.expired');
   const days = Math.floor(ms / (24 * 60 * 60 * 1000));
-  if (days >= 7) return `${Math.floor(days / 7)}w`;
-  if (days >= 1) return `${days}d`;
+  if (days >= 7) return t('adminSettings.invites.left.weeks', { count: Math.floor(days / 7) });
+  if (days >= 1) return t('adminSettings.invites.left.days', { count: days });
   const hours = Math.floor(ms / (60 * 60 * 1000));
-  if (hours >= 1) return `${hours}h`;
-  return '<1h';
+  if (hours >= 1) return t('adminSettings.invites.left.hours', { count: hours });
+  return t('adminSettings.invites.left.underHour');
 }
 
 function StatusPill({ status }: { status: InviteStatus }) {
+  const t = useT();
   const tone =
     status === 'active'
-      ? { dot: 'bg-success', text: 'text-text-primary', label: 'Active' }
+      ? { dot: 'bg-success', text: 'text-text-primary', label: t('adminSettings.invites.status.active') }
       : status === 'expired'
-        ? { dot: 'bg-danger', text: 'text-text-secondary', label: 'Expired' }
-        : { dot: 'bg-text-muted', text: 'text-text-secondary', label: 'Exhausted' };
+        ? { dot: 'bg-danger', text: 'text-text-secondary', label: t('adminSettings.invites.status.expired') }
+        : { dot: 'bg-text-muted', text: 'text-text-secondary', label: t('adminSettings.invites.status.exhausted') };
   return (
     <div className="flex items-center gap-1.5">
       <span className={`h-2 w-2 rounded-full ${tone.dot}`} />

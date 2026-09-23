@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import SettingsShell from '@/app/SettingsShell';
-import SettingsStickyFooter from '@/app/settings/SettingsStickyFooter';
+import SettingsStickyFooter, { type SettingsStatus } from '@/app/settings/SettingsStickyFooter';
+import { useT } from '@/lib/i18n/client';
 
 /**
  * User Settings -> Privacy & Activity.
@@ -58,35 +59,36 @@ function coerceScope(value: string): VisibilityScope {
   return 'server_members';
 }
 
-const SCOPE_OPTIONS: { value: VisibilityScope; label: string; description: string }[] = [
-  { value: 'everyone', label: 'Everyone', description: 'Public - visible in the registry and to non-members.' },
-  { value: 'server_members', label: 'Server members', description: 'Only people who belong to the same community.' },
-  { value: 'nobody', label: 'Nobody', description: 'Hide completely. You appear offline to everyone.' },
+// Labels are message keys, resolved where they render.
+const SCOPE_OPTIONS: { value: VisibilityScope; labelKey: string; descriptionKey: string }[] = [
+  { value: 'everyone', labelKey: 'settings.overview.scope.everyone', descriptionKey: 'settings.overview.scope.everyoneHint' },
+  { value: 'server_members', labelKey: 'settings.overview.scope.members', descriptionKey: 'settings.overview.scope.membersHint' },
+  { value: 'nobody', labelKey: 'settings.overview.scope.nobody', descriptionKey: 'settings.overview.scope.nobodyHint' },
 ];
 
-const TOGGLE_ROWS: { key: PrivacyToggleKey; label: string; description: string; icon: string }[] = [
+const TOGGLE_ROWS: { key: PrivacyToggleKey; labelKey: string; descriptionKey: string; icon: string }[] = [
   {
     key: 'showCurrentGame',
-    label: 'Current game',
-    description: 'Show active game sessions (Hushle, Quiz, Vampire Village).',
+    labelKey: 'settings.overview.details.game',
+    descriptionKey: 'settings.overview.details.gameHint',
     icon: 'stadia_controller',
   },
   {
     key: 'showMusicStatus',
-    label: 'Music status',
-    description: 'Show when a music bot or shared audio activity is playing.',
+    labelKey: 'settings.overview.details.music',
+    descriptionKey: 'settings.overview.details.musicHint',
     icon: 'music_note',
   },
   {
     key: 'showWatchPartyStatus',
-    label: 'Watch party',
-    description: 'Show watch-party participation in your activity text.',
+    labelKey: 'settings.overview.details.watchParty',
+    descriptionKey: 'settings.overview.details.watchPartyHint',
     icon: 'theaters',
   },
   {
     key: 'showServerNameInActivity',
-    label: 'Server name',
-    description: 'Include the community name in public activity text.',
+    labelKey: 'settings.overview.details.serverName',
+    descriptionKey: 'settings.overview.details.serverNameHint',
     icon: 'dns',
   },
 ];
@@ -100,9 +102,10 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export default function SettingsPage() {
+  const t = useT();
   const [privacy, setPrivacy] = useState<PrivacySettings | null>(null);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
-  const [status, setStatus] = useState<string>('Loading settings...');
+  const [status, setStatus] = useState<SettingsStatus>({ key: 'settings.footer.loading' });
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [blocks, setBlocks] = useState<BlockedUser[]>([]);
@@ -128,10 +131,10 @@ export default function SettingsPage() {
         if (!cancelled) {
           setPrivacy(data.settings.privacy);
           setUpdatedAt(data.settings.updatedAt);
-          setStatus('Ready');
+          setStatus({ key: 'settings.footer.ready' });
         }
       } catch {
-        if (!cancelled) setStatus('Failed to load settings.');
+        if (!cancelled) setStatus({ key: 'settings.footer.loadFailed' });
       }
       // Fetch blocked users in parallel.
       try {
@@ -155,7 +158,7 @@ export default function SettingsPage() {
   async function save() {
     if (!privacy) return;
     setBusy(true);
-    setStatus('Saving...');
+    setStatus({ key: 'settings.footer.saving' });
     try {
       const data = await jsonFetch<SettingsResponse>('/api/settings/me', {
         method: 'PATCH',
@@ -165,9 +168,9 @@ export default function SettingsPage() {
       setPrivacy(data.settings.privacy);
       setUpdatedAt(data.settings.updatedAt);
       setDirty(false);
-      setStatus('Saved');
+      setStatus({ key: 'settings.footer.saved' });
     } catch {
-      setStatus('Failed to save.');
+      setStatus({ key: 'settings.footer.saveFailed' });
     } finally {
       setBusy(false);
     }
@@ -192,32 +195,29 @@ export default function SettingsPage() {
     <SettingsShell scope="user">
       <section className="max-w-3xl mx-auto pb-32 space-y-8">
         <header>
-          <h1 className="text-2xl font-semibold text-text-primary">Privacy &amp; Activity</h1>
-          <p className="mt-1 text-sm text-text-secondary">
-            Control who can see your profile, online status, and activity. Changes apply across every
-            community on this instance.
-          </p>
+          <h1 className="text-2xl font-semibold text-text-primary">{t('settings.nav.user.privacy')}</h1>
+          <p className="mt-1 text-sm text-text-secondary">{t('settings.overview.description')}</p>
         </header>
 
         {/* Visibility scopes */}
-        <Section title="Visibility" icon="visibility">
+        <Section title={t('settings.overview.visibility.title')} icon="visibility">
           <ScopeRow
-            label="Profile visibility"
-            description="Who can view your display name, avatar, and profile page."
+            label={t('settings.overview.visibility.profile')}
+            description={t('settings.overview.visibility.profileHint')}
             value={privacy ? coerceScope(privacy.profileVisibility) : 'server_members'}
             disabled={!privacy}
             onChange={(value) => patchPrivacy({ profileVisibility: value })}
           />
           <ScopeRow
-            label="Online status"
-            description="Who can see when you are online or in a voice channel."
+            label={t('settings.overview.visibility.online')}
+            description={t('settings.overview.visibility.onlineHint')}
             value={privacy ? coerceScope(privacy.onlineStatusVisibility) : 'server_members'}
             disabled={!privacy}
             onChange={(value) => patchPrivacy({ onlineStatusVisibility: value })}
           />
           <ScopeRow
-            label="Activity status"
-            description="Who can see what game or activity you are currently doing."
+            label={t('settings.overview.visibility.activity')}
+            description={t('settings.overview.visibility.activityHint')}
             value={privacy ? coerceScope(privacy.activityVisibility) : 'server_members'}
             disabled={!privacy}
             onChange={(value) => patchPrivacy({ activityVisibility: value })}
@@ -226,13 +226,13 @@ export default function SettingsPage() {
         </Section>
 
         {/* Activity kind toggles */}
-        <Section title="Activity Details" icon="tune">
+        <Section title={t('settings.overview.details.title')} icon="tune">
           {TOGGLE_ROWS.map((row, idx) => (
             <ToggleRow
               key={row.key}
               icon={row.icon}
-              label={row.label}
-              description={row.description}
+              label={t(row.labelKey)}
+              description={t(row.descriptionKey)}
               checked={privacy?.[row.key] ?? false}
               disabled={!privacy}
               onChange={(value) => patchPrivacy({ [row.key]: value } as Pick<PrivacySettings, typeof row.key>)}
@@ -242,14 +242,11 @@ export default function SettingsPage() {
         </Section>
 
         {/* Blocked users */}
-        <Section title="Blocked Users" icon="block">
+        <Section title={t('settings.overview.blocked.title')} icon="block">
           {blocks.length === 0 ? (
             <div className="flex items-center gap-3 py-2">
               <span className="material-symbols-outlined text-success text-[18px]">check_circle</span>
-              <p className="text-sm text-text-secondary">
-                You haven&apos;t blocked anyone. Blocked users&apos; messages appear as
-                &ldquo;Blocked user&rdquo; in chat - the message stays but the content is hidden.
-              </p>
+              <p className="text-sm text-text-secondary">{t('settings.overview.blocked.empty')}</p>
             </div>
           ) : (
             <div className="space-y-2">
@@ -272,7 +269,9 @@ export default function SettingsPage() {
                     disabled={unblockBusy === b.blockedUserId}
                     className="px-3 py-1.5 rounded-md border border-border-strong text-xs text-text-secondary hover:bg-surface-raised hover:text-danger hover:border-danger/40 transition-colors disabled:opacity-40 flex-shrink-0"
                   >
-                    {unblockBusy === b.blockedUserId ? 'Unblocking...' : 'Unblock'}
+                    {unblockBusy === b.blockedUserId
+                      ? t('settings.overview.blocked.unblocking')
+                      : t('settings.overview.blocked.unblock')}
                   </button>
                 </div>
               ))}
@@ -283,10 +282,7 @@ export default function SettingsPage() {
         {/* Info note */}
         <div className="rounded-lg border border-border-subtle bg-surface-container-low p-4 flex gap-3">
           <span className="material-symbols-outlined text-text-muted text-[18px] shrink-0">info</span>
-          <p className="text-xs text-text-muted leading-relaxed">
-            These settings only affect this self-hosted instance. They are stored in the local
-            PostgreSQL database and apply across every community you belong to on this server.
-          </p>
+          <p className="text-xs text-text-muted leading-relaxed">{t('settings.overview.note')}</p>
         </div>
 
         <SettingsStickyFooter
@@ -337,6 +333,7 @@ function ScopeRow({
   onChange: (value: VisibilityScope) => void;
   last?: boolean;
 }) {
+  const t = useT();
   return (
     <div className={last ? '' : 'pb-4 border-b border-border-subtle'}>
       <div className="flex items-start justify-between gap-4">
@@ -351,14 +348,14 @@ function ScopeRow({
               type="button"
               disabled={disabled}
               onClick={() => onChange(option.value)}
-              title={option.description}
+              title={t(option.descriptionKey)}
               className={`px-3 py-1 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
                 value === option.value
                   ? 'bg-surface-raised text-text-primary shadow-sm'
                   : 'text-text-secondary hover:text-text-primary'
               }`}
             >
-              {option.label}
+              {t(option.labelKey)}
             </button>
           ))}
         </div>

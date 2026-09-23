@@ -1,20 +1,23 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { listApprovedPlugins } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
+import { getTranslator } from '@/lib/i18n/server';
 import MarketplaceGrid from './MarketplaceGrid';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export const metadata = {
-  title: 'Plugin Marketplace — LobbyForge',
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  return { title: t('hub.marketplace.meta.title') };
+}
 
 const CATEGORIES = [
-  { id: 'game', label: 'Games', icon: 'sports_esports' },
-  { id: 'bot', label: 'Bots', icon: 'smart_toy' },
-  { id: 'integration', label: 'Integrations', icon: 'extension' },
-  { id: 'utility', label: 'Utilities', icon: 'build' },
+  { id: 'game', labelKey: 'hub.marketplace.category.game', icon: 'sports_esports' },
+  { id: 'bot', labelKey: 'hub.marketplace.category.bot', icon: 'smart_toy' },
+  { id: 'integration', labelKey: 'hub.marketplace.category.integration', icon: 'extension' },
+  { id: 'utility', labelKey: 'hub.marketplace.category.utility', icon: 'build' },
 ];
 
 export default async function MarketplacePage({
@@ -37,6 +40,8 @@ export default async function MarketplacePage({
     console.error('[marketplace] catalog load failed:', (err as Error).message);
   }
 
+  const t = await getTranslator();
+
   return (
     <div className="min-h-dvh bg-background">
       <header className="border-b border-border-subtle bg-surface/80 backdrop-blur-md sticky top-0 z-10">
@@ -44,14 +49,17 @@ export default async function MarketplacePage({
           <div className="flex items-center gap-3">
             <Link
               href="/lobby"
+              aria-label={t('hub.marketplace.backToLobby')}
               className="rounded-md p-1.5 text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors"
             >
-              <span className="material-symbols-outlined text-[20px]">arrow_back</span>
+              <span className="material-symbols-outlined text-[20px]" aria-hidden>
+                arrow_back
+              </span>
             </Link>
-            <h1 className="text-lg font-semibold text-text-primary">Plugin Marketplace</h1>
+            <h1 className="text-lg font-semibold text-text-primary">{t('hub.marketplace.title')}</h1>
           </div>
           <Link href="/lobby" className="text-sm text-primary hover:underline">
-            Back to lobby
+            {t('hub.marketplace.backToLobby')}
           </Link>
         </div>
       </header>
@@ -68,7 +76,8 @@ export default async function MarketplacePage({
                 type="text"
                 name="q"
                 defaultValue={query}
-                placeholder="Search plugins..."
+                placeholder={t('hub.marketplace.search')}
+                aria-label={t('hub.marketplace.search')}
                 className="w-full rounded-lg bg-surface-raised border border-border-subtle pl-10 pr-4 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary"
               />
             </div>
@@ -83,7 +92,7 @@ export default async function MarketplacePage({
                   : 'bg-surface-raised text-text-secondary border border-border-subtle hover:bg-surface-container'
               }`}
             >
-              All
+              {t('hub.marketplace.category.all')}
             </Link>
             {CATEGORIES.map((c) => (
               <Link
@@ -96,14 +105,14 @@ export default async function MarketplacePage({
                 }`}
               >
                 <span className="material-symbols-outlined text-[16px]">{c.icon}</span>
-                {c.label}
+                {t(c.labelKey)}
               </Link>
             ))}
           </div>
         </div>
 
         <p className="text-sm text-text-muted mb-4">
-          {plugins.length} {plugins.length === 1 ? 'plugin' : 'plugins'} available
+          {t('hub.marketplace.count', { count: plugins.length })}
         </p>
 
         <MarketplaceGrid plugins={plugins} />

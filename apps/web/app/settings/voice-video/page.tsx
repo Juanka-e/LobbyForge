@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import SettingsShell from '@/app/SettingsShell';
-import SettingsStickyFooter from '@/app/settings/SettingsStickyFooter';
+import SettingsStickyFooter, { type SettingsStatus } from '@/app/settings/SettingsStickyFooter';
+import { useT } from '@/lib/i18n/client';
+import type { Translator } from '@/lib/i18n/core';
 import {
   DEFAULT_VOICE_VIDEO_PREFERENCES,
   mergeVoiceVideoPreferences,
@@ -35,13 +37,22 @@ function deviceLabel(device: MediaDeviceInfo, fallback: string): string {
   return device.label || fallback;
 }
 
-function uniqueDevices(devices: MediaDeviceInfo[], kind: MediaDeviceKind, fallback: string): DeviceOption[] {
+/**
+ * Device names come from the browser and are shown as they are; only the
+ * stand-ins for a device the browser has not named yet are ours to word.
+ */
+function uniqueDevices(
+  devices: MediaDeviceInfo[],
+  kind: MediaDeviceKind,
+  numbered: (n: number) => string,
+  defaultLabel: string
+): DeviceOption[] {
   const seen = new Set<string>();
   const rows = devices
     .filter((device) => device.kind === kind)
     .map((device, index) => ({
       deviceId: device.deviceId || 'default',
-      label: deviceLabel(device, `${fallback} ${index + 1}`),
+      label: deviceLabel(device, numbered(index + 1)),
     }))
     .filter((device) => {
       const key = `${device.deviceId}:${device.label}`;
@@ -49,8 +60,47 @@ function uniqueDevices(devices: MediaDeviceInfo[], kind: MediaDeviceKind, fallba
       seen.add(key);
       return true;
     });
-  return rows.length ? rows : [{ deviceId: 'default', label: `Default ${fallback.toLowerCase()}` }];
+  return rows.length ? rows : [{ deviceId: 'default', label: defaultLabel }];
 }
+
+/**
+ * The saved label is what the browser called the device — except the
+ * English placeholder every account starts with, which is ours to translate.
+ */
+function savedDeviceLabel(label: string, englishDefault: string, translatedDefault: string): string {
+  return label === englishDefault ? translatedDefault : label;
+}
+
+const SCREEN_QUALITIES: ScreenQuality[] = ['auto', 'low', 'standard', 'high', 'q1440', 'q2160'];
+
+function screenQualityLabel(quality: ScreenQuality, t: Translator): string {
+  switch (quality) {
+    case 'low':
+      return t('settings.voiceVideo.screen.low');
+    case 'standard':
+      return t('settings.voiceVideo.screen.standard');
+    case 'high':
+      return t('settings.voiceVideo.screen.high');
+    case 'q1440':
+      return '1440p';
+    case 'q2160':
+      return '2160p (4K)';
+    default:
+      return t('settings.voiceVideo.screen.auto');
+  }
+}
+
+const PERMISSION_LABEL_KEYS: Record<PermissionStateName, string> = {
+  granted: 'settings.voiceVideo.status.permission.granted',
+  denied: 'settings.voiceVideo.status.permission.denied',
+  prompt: 'settings.voiceVideo.status.permission.prompt',
+  unknown: 'settings.voiceVideo.status.permission.unknown',
+};
+
+const MEDIA_KIND_KEYS = {
+  microphone: 'settings.voiceVideo.msg.kind.microphone',
+  camera: 'settings.voiceVideo.msg.kind.camera',
+} as const;
 
 function constraintsForAudio(prefs: VoiceVideoPreferences): MediaTrackConstraints {
   return {
@@ -73,10 +123,11 @@ function constraintsForCamera(prefs: VoiceVideoPreferences): MediaTrackConstrain
 }
 
 export default function VoiceVideoSettingsPage() {
+  const t = useT();
   const [prefs, setPrefs] = useState<VoiceVideoPreferences>(DEFAULT_VOICE_VIDEO_PREFERENCES);
   const [savedSnapshot, setSavedSnapshot] = useState<VoiceVideoPreferences>(DEFAULT_VOICE_VIDEO_PREFERENCES);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
-  const [status, setStatus] = useState('Loading settings...');
+  const [status, setStatus] = useState<SettingsStatus>({ key: 'settings.footer.loading' });
   const [busy, setBusy] = useState(false);
   const [permission, setPermission] = useState<PermissionStateName>('unknown');
   const [inputs, setInputs] = useState<DeviceOption[]>([]);
@@ -96,10 +147,10 @@ export default function VoiceVideoSettingsPage() {
 
   async function refreshDevices(requestPermission = false) {
     if (!navigator.mediaDevices?.enumerateDevices) {
-      setStatus('This browser does not expose media devices.');
+      setStatus({ key: 'settings.voiceVideo.msg.noDevices' });
       return;
     }
-    const denied: string[] = [];
+    const denied: (keyof typeof MEDIA_KIND_KEYS)[] = [];
     if (requestPermission) {
       // beta-review: ask for each kind separately — a combined
       // {audio, video} request fails outright on a PC without a webcam,
@@ -117,15 +168,39 @@ export default function VoiceVideoSettingsPage() {
       }
     }
     const devices = await navigator.mediaDevices.enumerateDevices();
-    setInputs(uniqueDevices(devices, 'audioinput', 'Microphone'));
-    setOutputs(uniqueDevices(devices, 'audiooutput', 'Speakers'));
-    setCameras(uniqueDevices(devices, 'videoinput', 'Camera'));
+    setInputs(
+      uniqueDevices(
+        devices,
+        'audioinput',
+        (n) => t('settings.voiceVideo.devices.microphoneN', { n }),
+        t('settings.voiceVideo.devices.defaultMicrophone')
+      )
+    );
+    setOutputs(
+      uniqueDevices(
+        devices,
+        'audiooutput',
+        (n) => t('settings.voiceVideo.devices.speakersN', { n }),
+        t('settings.voiceVideo.devices.defaultSpeakers')
+      )
+    );
+    setCameras(
+      uniqueDevices(
+        devices,
+        'videoinput',
+        (n) => t('settings.voiceVideo.devices.cameraN', { n }),
+        t('settings.voiceVideo.devices.defaultCamera')
+      )
+    );
     setStatus(
       !requestPermission
-        ? 'Ready'
+        ? { key: 'settings.footer.ready' }
         : denied.length
-          ? `Devices refreshed (no access to: ${denied.join(', ')}).`
-          : 'Devices refreshed.'
+          ? {
+              key: 'settings.voiceVideo.msg.refreshedPartial',
+              params: { kinds: denied.map((kind) => t(MEDIA_KIND_KEYS[kind])).join(', ') },
+            }
+          : { key: 'settings.voiceVideo.msg.refreshed' }
     );
   }
 
@@ -150,9 +225,9 @@ export default function VoiceVideoSettingsPage() {
         setPrefs(merged);
         setSavedSnapshot(merged);
         setUpdatedAt(data.settings.updatedAt);
-        await refreshDevices(false).catch(() => setStatus('Ready - grant media permission to reveal device names.'));
+        await refreshDevices(false).catch(() => setStatus({ key: 'settings.voiceVideo.msg.needPermission' }));
       } catch (err) {
-        if (!cancelled) setStatus((err as Error).message);
+        if (!cancelled) setStatus({ text: (err as Error).message });
       }
     }
     void load();
@@ -187,18 +262,18 @@ export default function VoiceVideoSettingsPage() {
     const list = kind === 'input' ? inputs : kind === 'output' ? outputs : cameras;
     const selected = list.find((device) => device.deviceId === deviceId);
     if (kind === 'input') {
-      patch({ inputDeviceId: deviceId, inputDeviceLabel: selected?.label ?? 'Selected microphone' });
+      patch({ inputDeviceId: deviceId, inputDeviceLabel: selected?.label ?? t('settings.voiceVideo.devices.selectedMicrophone') });
     } else if (kind === 'output') {
-      patch({ outputDeviceId: deviceId, outputDeviceLabel: selected?.label ?? 'Selected speakers' });
+      patch({ outputDeviceId: deviceId, outputDeviceLabel: selected?.label ?? t('settings.voiceVideo.devices.selectedSpeakers') });
     } else {
-      patch({ cameraDeviceId: deviceId, cameraLabel: selected?.label ?? 'Selected camera' });
+      patch({ cameraDeviceId: deviceId, cameraLabel: selected?.label ?? t('settings.voiceVideo.devices.selectedCamera') });
       if (cameraOn) void startCamera({ ...prefs, cameraDeviceId: deviceId, cameraLabel: selected?.label ?? prefs.cameraLabel });
     }
   }
 
   async function save() {
     setBusy(true);
-    setStatus('Saving...');
+    setStatus({ key: 'settings.footer.saving' });
     try {
       const data = await jsonFetch<SettingsResponse>('/api/settings/me', {
         method: 'PATCH',
@@ -209,9 +284,9 @@ export default function VoiceVideoSettingsPage() {
       setPrefs(merged);
       setSavedSnapshot(merged);
       setUpdatedAt(data.settings.updatedAt);
-      setStatus('Saved');
+      setStatus({ key: 'settings.footer.saved' });
     } catch (err) {
-      setStatus((err as Error).message);
+      setStatus({ text: (err as Error).message });
     } finally {
       setBusy(false);
     }
@@ -237,20 +312,20 @@ export default function VoiceVideoSettingsPage() {
       await previewRef.current.play().catch(() => {});
     }
     setCameraOn(true);
-    setStatus('Camera preview running.');
+    setStatus({ key: 'settings.voiceVideo.msg.cameraRunning' });
   }
 
   async function toggleCameraPreview() {
     try {
       if (cameraOn) {
         stopCamera();
-        setStatus('Camera preview stopped.');
+        setStatus({ key: 'settings.voiceVideo.msg.cameraStopped' });
       } else {
         await startCamera();
         await refreshDevices(false);
       }
     } catch (err) {
-      setStatus(`Camera preview failed: ${(err as Error).message}`);
+      setStatus({ key: 'settings.voiceVideo.msg.cameraFailed', params: { error: (err as Error).message } });
     }
   }
 
@@ -273,7 +348,7 @@ export default function VoiceVideoSettingsPage() {
     try {
       if (micTesting) {
         stopMicTest();
-        setStatus('Microphone test stopped.');
+        setStatus({ key: 'settings.voiceVideo.msg.micStopped' });
         return;
       }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: constraintsForAudio(prefs), video: false });
@@ -308,9 +383,9 @@ export default function VoiceVideoSettingsPage() {
       };
       setMicTesting(true);
       await refreshDevices(false);
-      setStatus('Microphone test running. You should hear your mic at reduced volume.');
+      setStatus({ key: 'settings.voiceVideo.msg.micRunning' });
     } catch (err) {
-      setStatus(`Microphone test failed: ${(err as Error).message}`);
+      setStatus({ key: 'settings.voiceVideo.msg.micFailed', params: { error: (err as Error).message } });
       stopMicTest();
     }
   }
@@ -340,10 +415,12 @@ export default function VoiceVideoSettingsPage() {
         audio.srcObject = null;
         setVoiceTestState('output', false);
       }, 450);
-      setStatus(canPickOutput ? 'Output test played.' : 'Output test played on browser default output.');
+      setStatus({
+        key: canPickOutput ? 'settings.voiceVideo.msg.outputPlayed' : 'settings.voiceVideo.msg.outputPlayedDefault',
+      });
     } catch (err) {
       setVoiceTestState('output', false);
-      setStatus(`Output test failed: ${(err as Error).message}`);
+      setStatus({ key: 'settings.voiceVideo.msg.outputFailed', params: { error: (err as Error).message } });
     }
   }
 
@@ -352,94 +429,87 @@ export default function VoiceVideoSettingsPage() {
       <section className="max-w-5xl mx-auto pb-32 grid gap-8 lg:grid-cols-12">
         <div className="lg:col-span-8 space-y-8">
           <header>
-            <h1 className="text-2xl font-semibold text-text-primary">Voice &amp; Video</h1>
-            <p className="mt-1 text-sm text-text-secondary">
-              Choose devices, test your mic and camera, and save defaults used by voice rooms.
-            </p>
+            <h1 className="text-2xl font-semibold text-text-primary">{t('settings.nav.user.voiceVideo')}</h1>
+            <p className="mt-1 text-sm text-text-secondary">{t('settings.voiceVideo.description')}</p>
           </header>
 
-          <Section title="Devices">
+          <Section title={t('settings.voiceVideo.devices.title')}>
             <div className="flex flex-wrap gap-3">
               <button type="button" onClick={() => void refreshDevices(true)} className="btn-primary-sm">
-                Grant access &amp; refresh devices
+                {t('settings.voiceVideo.devices.grant')}
               </button>
               <button type="button" onClick={() => void refreshDevices(false)} className="btn-secondary-sm">
-                Refresh list
+                {t('settings.voiceVideo.devices.refresh')}
               </button>
             </div>
             <div className="grid sm:grid-cols-2 gap-4">
-              <SelectField label="Input device" value={prefs.inputDeviceId} options={inputs} onChange={(value) => patchDevice('input', value)} />
-              <SelectField label="Output device" value={prefs.outputDeviceId} options={outputs} onChange={(value) => patchDevice('output', value)} />
-              <SelectField label="Camera device" value={prefs.cameraDeviceId} options={cameras} onChange={(value) => patchDevice('camera', value)} />
+              <SelectField label={t('settings.voiceVideo.devices.input')} value={prefs.inputDeviceId} options={inputs} onChange={(value) => patchDevice('input', value)} />
+              <SelectField label={t('settings.voiceVideo.devices.output')} value={prefs.outputDeviceId} options={outputs} onChange={(value) => patchDevice('output', value)} />
+              <SelectField label={t('settings.voiceVideo.devices.camera')} value={prefs.cameraDeviceId} options={cameras} onChange={(value) => patchDevice('camera', value)} />
             </div>
           </Section>
 
-          <Section title="Audio Test">
+          <Section title={t('settings.voiceVideo.audio.title')}>
             <div className="space-y-4">
-              <VolumeRow label="Input volume" value={prefs.inputVolume} onChange={(value) => patch({ inputVolume: value })} />
-              <VolumeRow label="Output volume" value={prefs.outputVolume} onChange={(value) => patch({ outputVolume: value })} />
+              <VolumeRow label={t('settings.voiceVideo.audio.inputVolume')} value={prefs.inputVolume} onChange={(value) => patch({ inputVolume: value })} />
+              <VolumeRow label={t('settings.voiceVideo.audio.outputVolume')} value={prefs.outputVolume} onChange={(value) => patch({ outputVolume: value })} />
               <div className="flex flex-wrap gap-3">
                 <button type="button" onClick={() => void toggleMicTest()} className="btn-secondary-sm">
-                  {micTesting ? 'Stop microphone test' : 'Test microphone'}
+                  {t(micTesting ? 'settings.voiceVideo.audio.stopMicTest' : 'settings.voiceVideo.audio.testMic')}
                 </button>
                 <button type="button" onClick={() => void testOutput()} className="btn-secondary-sm">
-                  Test output
+                  {t('settings.voiceVideo.audio.testOutput')}
                 </button>
               </div>
               <MicLevel value={micTesting ? micLevel : prefs.inputVolume} />
             </div>
           </Section>
 
-          <Section title="Input Mode">
+          <Section title={t('settings.voiceVideo.mode.title')}>
             <div className="space-y-3">
-              <RadioCard label="Voice activity" description="Speak freely - your mic opens while you talk." checked={prefs.inputMode === 'voice_activity'} onSelect={() => patch({ inputMode: 'voice_activity' })} />
-              <RadioCard label="Push to talk" description="Hold Space while focused on the lobby to open your mic." checked={prefs.inputMode === 'push_to_talk'} onSelect={() => patch({ inputMode: 'push_to_talk' })} />
+              <RadioCard label={t('settings.voiceVideo.mode.voiceActivity')} description={t('settings.voiceVideo.mode.voiceActivityHint')} checked={prefs.inputMode === 'voice_activity'} onSelect={() => patch({ inputMode: 'voice_activity' })} />
+              <RadioCard label={t('settings.voiceVideo.mode.pushToTalk')} description={t('settings.voiceVideo.mode.pushToTalkHint')} checked={prefs.inputMode === 'push_to_talk'} onSelect={() => patch({ inputMode: 'push_to_talk' })} />
             </div>
-            <ToggleRow label="Automatically determine input sensitivity" checked={prefs.autoSensitivity} onChange={(value) => patch({ autoSensitivity: value })} />
+            <ToggleRow label={t('settings.voiceVideo.mode.autoSensitivity')} checked={prefs.autoSensitivity} onChange={(value) => patch({ autoSensitivity: value })} />
             <div className={prefs.autoSensitivity ? 'opacity-50 pointer-events-none' : ''}>
-              <VolumeRow label="Sensitivity" value={prefs.sensitivity} onChange={(value) => patch({ sensitivity: value })} />
+              <VolumeRow label={t('settings.voiceVideo.mode.sensitivity')} value={prefs.sensitivity} onChange={(value) => patch({ sensitivity: value })} />
             </div>
           </Section>
 
-          <Section title="Voice Processing">
-            <ToggleRow label="Noise suppression" checked={prefs.noiseSuppression} onChange={(value) => patch({ noiseSuppression: value })} />
-            <ToggleRow label="Echo cancellation" checked={prefs.echoCancellation} onChange={(value) => patch({ echoCancellation: value })} />
-            <ToggleRow label="Automatic gain control" checked={prefs.automaticGainControl} onChange={(value) => patch({ automaticGainControl: value })} />
-            <ToggleRow label="Voice isolation" description="Prioritize your voice over background sounds when supported." checked={prefs.voiceIsolation} onChange={(value) => patch({ voiceIsolation: value })} last />
+          <Section title={t('settings.voiceVideo.processing.title')}>
+            <ToggleRow label={t('settings.voiceVideo.processing.noise')} checked={prefs.noiseSuppression} onChange={(value) => patch({ noiseSuppression: value })} />
+            <ToggleRow label={t('settings.voiceVideo.processing.echo')} checked={prefs.echoCancellation} onChange={(value) => patch({ echoCancellation: value })} />
+            <ToggleRow label={t('settings.voiceVideo.processing.gain')} checked={prefs.automaticGainControl} onChange={(value) => patch({ automaticGainControl: value })} />
+            <ToggleRow label={t('settings.voiceVideo.processing.isolation')} description={t('settings.voiceVideo.processing.isolationHint')} checked={prefs.voiceIsolation} onChange={(value) => patch({ voiceIsolation: value })} last />
           </Section>
 
-          <Section title="Camera Preview">
+          <Section title={t('settings.voiceVideo.camera.title')}>
             <div className="aspect-video bg-black rounded-xl border border-border-strong overflow-hidden flex items-center justify-center">
               <video ref={previewRef} muted playsInline autoPlay className={cameraOn ? 'w-full h-full object-cover' : 'hidden'} />
               {!cameraOn ? (
                 <div className="flex flex-col items-center gap-3 text-text-muted">
                   <span className="material-symbols-outlined text-5xl">videocam_off</span>
-                  <span className="text-sm">Preview is off</span>
+                  <span className="text-sm">{t('settings.voiceVideo.camera.off')}</span>
                 </div>
               ) : null}
             </div>
             <button type="button" onClick={() => void toggleCameraPreview()} className="btn-secondary-sm">
-              {cameraOn ? 'Stop preview' : 'Start camera preview'}
+              {t(cameraOn ? 'settings.voiceVideo.camera.stop' : 'settings.voiceVideo.camera.start')}
             </button>
           </Section>
 
-          <Section title="Screen Sharing">
+          <Section title={t('settings.voiceVideo.screen.title')}>
             <div className="grid sm:grid-cols-2 gap-4">
-              <NativeSelect label="Preferred quality" value={prefs.screenQuality} onChange={(value) => patch({ screenQuality: value as ScreenQuality })} options={[
-                { value: 'auto', label: 'Auto' },
-                { value: 'low', label: 'Low (480p)' },
-                { value: 'standard', label: 'Standard (720p)' },
-                { value: 'high', label: 'High (1080p)' },
-                { value: 'q1440', label: '1440p' },
-                { value: 'q2160', label: '2160p (4K)' },
-              ]} />
-              <NativeSelect label="Preferred frame rate" value={prefs.screenFps} onChange={(value) => patch({ screenFps: value as ScreenFps })} options={[
+              <NativeSelect label={t('settings.voiceVideo.screen.quality')} value={prefs.screenQuality} onChange={(value) => patch({ screenQuality: value as ScreenQuality })} options={
+                SCREEN_QUALITIES.map((value) => ({ value, label: screenQualityLabel(value, t) }))
+              } />
+              <NativeSelect label={t('settings.voiceVideo.screen.fps')} value={prefs.screenFps} onChange={(value) => patch({ screenFps: value as ScreenFps })} options={[
                 { value: '15', label: '15 FPS' },
                 { value: '30', label: '30 FPS' },
                 { value: '60', label: '60 FPS' },
               ]} />
             </div>
-            <ToggleRow label="Share system audio when available" checked={prefs.shareSystemAudio} onChange={(value) => patch({ shareSystemAudio: value })} last />
+            <ToggleRow label={t('settings.voiceVideo.screen.systemAudio')} checked={prefs.shareSystemAudio} onChange={(value) => patch({ shareSystemAudio: value })} last />
           </Section>
 
           <SettingsStickyFooter
@@ -456,14 +526,30 @@ export default function VoiceVideoSettingsPage() {
         <aside className="lg:col-span-4">
           <div className="sticky top-8 space-y-4">
             <h3 className="text-xs uppercase tracking-wider font-bold text-text-secondary border-b border-border-subtle pb-2">
-              Connection &amp; Devices
+              {t('settings.voiceVideo.status.title')}
             </h3>
             <div className="rounded-2xl border border-border-strong bg-surface/80 backdrop-blur-md p-6 space-y-4 shadow-xl shadow-black/40">
-              <StatusRow label="Microphone permission" value={permission} tone={permission === 'denied' ? 'danger' : 'success'} />
-              <StatusRow label="Input device" value={prefs.inputDeviceLabel} tone="success" />
-              <StatusRow label="Output device" value={prefs.outputDeviceLabel} tone="success" />
-              <StatusRow label="Camera device" value={prefs.cameraLabel} tone="success" />
-              <StatusRow label="Screen-share quality" value={`${prefs.screenQuality} / ${prefs.screenFps} FPS`} tone="muted" />
+              <StatusRow label={t('settings.voiceVideo.status.micPermission')} value={t(PERMISSION_LABEL_KEYS[permission])} tone={permission === 'denied' ? 'danger' : 'success'} />
+              <StatusRow
+                label={t('settings.voiceVideo.devices.input')}
+                value={savedDeviceLabel(prefs.inputDeviceLabel, DEFAULT_VOICE_VIDEO_PREFERENCES.inputDeviceLabel, t('settings.voiceVideo.devices.defaultMicrophone'))}
+                tone="success"
+              />
+              <StatusRow
+                label={t('settings.voiceVideo.devices.output')}
+                value={savedDeviceLabel(prefs.outputDeviceLabel, DEFAULT_VOICE_VIDEO_PREFERENCES.outputDeviceLabel, t('settings.voiceVideo.devices.defaultSpeakers'))}
+                tone="success"
+              />
+              <StatusRow
+                label={t('settings.voiceVideo.devices.camera')}
+                value={savedDeviceLabel(prefs.cameraLabel, DEFAULT_VOICE_VIDEO_PREFERENCES.cameraLabel, t('settings.voiceVideo.devices.defaultCamera'))}
+                tone="success"
+              />
+              <StatusRow
+                label={t('settings.voiceVideo.status.screenShare')}
+                value={t('settings.voiceVideo.status.screenSummary', { quality: screenQualityLabel(prefs.screenQuality, t), fps: prefs.screenFps })}
+                tone="muted"
+              />
             </div>
           </div>
         </aside>
@@ -482,7 +568,8 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 function SelectField({ label, value, options, onChange }: { label: string; value: string; options: DeviceOption[]; onChange: (value: string) => void }) {
-  const rows = options.length ? options : [{ deviceId: value || 'default', label: 'Default device' }];
+  const t = useT();
+  const rows = options.length ? options : [{ deviceId: value || 'default', label: t('settings.voiceVideo.devices.default') }];
   return <NativeSelect label={label} value={value || rows[0]!.deviceId} onChange={onChange} options={rows.map((row) => ({ value: row.deviceId, label: row.label }))} />;
 }
 

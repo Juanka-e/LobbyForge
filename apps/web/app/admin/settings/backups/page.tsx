@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
 import {
@@ -5,14 +6,17 @@ import {
   verifyBackupManifest,
   type BackupVerification,
 } from '@/lib/backup-verifier';
+import type { Translator } from '@/lib/i18n/core';
+import { getTranslator } from '@/lib/i18n/server';
 import SettingsShell from '@/app/SettingsShell';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export const metadata = {
-  title: 'Backups - Community Settings',
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  return { title: t('adminSettings.backups.metaTitle') };
+}
 
 interface BackupState {
   source: string;
@@ -21,29 +25,30 @@ interface BackupState {
 }
 
 export default async function BackupsSettingsPage() {
+  const t = await getTranslator();
   const cookieStore = await cookies();
   const token = cookieStore.get(ADMIN_TOKEN_COOKIE)?.value ?? null;
   if (!(await isInstanceAdminAllowed(cookieStore.toString(), token))) {
     return (
       <SettingsShell scope="community">
         <section>
-          <h1 className="text-2xl font-semibold text-text-primary">Backups</h1>
-          <p className="mt-2 text-sm text-danger">Admin token required.</p>
+          <h1 className="text-2xl font-semibold text-text-primary">{t('adminSettings.backups.title')}</h1>
+          <p className="mt-2 text-sm text-danger">{t('common.adminRequired')}</p>
         </section>
       </SettingsShell>
     );
   }
 
-  const state = await loadBackupState();
+  const state = await loadBackupState(t);
 
   return (
     <SettingsShell scope="community">
-      <BackupsBody state={state} />
+      <BackupsBody t={t} state={state} />
     </SettingsShell>
   );
 }
 
-async function loadBackupState(): Promise<BackupState> {
+async function loadBackupState(t: Translator): Promise<BackupState> {
   const source = process.env.LOBBYFORGE_BACKUP_MANIFEST ?? 'infra/update/backup-manifest.example.json';
   try {
     const { manifest, baseDir } = await loadBackupManifest(source);
@@ -56,20 +61,20 @@ async function loadBackupState(): Promise<BackupState> {
     return {
       source,
       verification: null,
-      error: sanitizeBackupError(err),
+      error: sanitizeBackupError(t, err),
     };
   }
 }
 
-function sanitizeBackupError(err: unknown): string {
-  const message = err instanceof Error ? err.message : 'Backup manifest could not be loaded.';
+function sanitizeBackupError(t: Translator, err: unknown): string {
+  const message = err instanceof Error ? err.message : t('adminSettings.backups.loadFailed');
   if (/ENOENT|no such file|cannot find/i.test(message)) {
-    return 'No backup manifest was found. Configure LOBBYFORGE_BACKUP_MANIFEST after your backup worker writes a manifest.';
+    return t('adminSettings.backups.noManifest', { env: 'LOBBYFORGE_BACKUP_MANIFEST' });
   }
   return message.length > 240 ? `${message.slice(0, 237)}...` : message;
 }
 
-function BackupsBody({ state }: { state: BackupState }) {
+function BackupsBody({ t, state }: { t: Translator; state: BackupState }) {
   const verification = state.verification;
   const checks = verification?.checks ?? [];
   const failed = checks.filter((check) => !check.ok).length;
@@ -79,16 +84,20 @@ function BackupsBody({ state }: { state: BackupState }) {
   return (
     <section className="max-w-4xl mx-auto pb-32">
       <header className="mb-6">
-        <h1 className="text-2xl font-semibold text-text-primary">Backups</h1>
-        <p className="mt-1 text-sm text-text-secondary">
-          Verify the latest backup manifest before updates or restore work.
-        </p>
+        <h1 className="text-2xl font-semibold text-text-primary">{t('adminSettings.backups.title')}</h1>
+        <p className="mt-1 text-sm text-text-secondary">{t('adminSettings.backups.subtitle')}</p>
       </header>
 
       <div className="flex flex-wrap gap-2 mb-6">
-        <Chip label={isReady ? 'Backup verified' : 'Backup not verified'} tone={isReady ? 'success' : 'danger'} />
-        <Chip label={`${passed} checks passed`} />
-        <Chip label={`${failed} checks failed`} tone={failed > 0 ? 'danger' : 'muted'} />
+        <Chip
+          label={isReady ? t('adminSettings.backups.verified') : t('adminSettings.backups.notVerified')}
+          tone={isReady ? 'success' : 'danger'}
+        />
+        <Chip label={t('adminSettings.backups.passedCount', { count: passed })} />
+        <Chip
+          label={t('adminSettings.backups.failedCount', { count: failed })}
+          tone={failed > 0 ? 'danger' : 'muted'}
+        />
       </div>
 
       {state.error ? (
@@ -99,14 +108,21 @@ function BackupsBody({ state }: { state: BackupState }) {
 
       <div className="mb-6 rounded-xl bg-surface-raised border border-border-subtle p-6">
         <div className="grid gap-4 md:grid-cols-4">
-          <Stat label="Status" value={isReady ? 'Verified' : 'Needs attention'} tone={isReady ? 'success' : 'danger'} />
-          <Stat label="Backup id" value={verification?.backupId ?? 'none'} />
-          <Stat label="Created" value={formatDate(verification?.createdAt)} />
-          <Stat label="Age" value={formatAge(verification?.ageMs)} />
+          <Stat
+            label={t('adminSettings.backups.stat.status')}
+            value={isReady ? t('adminSettings.backups.stat.statusReady') : t('adminSettings.backups.stat.statusAttention')}
+            tone={isReady ? 'success' : 'danger'}
+          />
+          <Stat
+            label={t('adminSettings.backups.stat.backupId')}
+            value={verification?.backupId ?? t('adminSettings.backups.none')}
+          />
+          <Stat label={t('adminSettings.backups.stat.created')} value={formatDate(t, verification?.createdAt)} />
+          <Stat label={t('adminSettings.backups.stat.age')} value={formatAge(t, verification?.ageMs)} />
         </div>
       </div>
 
-      <Section title="Verification Checks" icon="fact_check">
+      <Section title={t('adminSettings.backups.checks.title')} icon="fact_check">
         {checks.length > 0 ? (
           <ul className="divide-y divide-border-subtle/50">
             {checks.map((check) => (
@@ -119,33 +135,37 @@ function BackupsBody({ state }: { state: BackupState }) {
                   <p className="mt-0.5 text-xs text-text-muted">{check.id}</p>
                 </div>
                 <span className={check.ok ? 'text-xs font-medium text-success' : 'text-xs font-medium text-danger'}>
-                  {check.ok ? 'Pass' : 'Fail'}
+                  {check.ok ? t('adminSettings.backups.checks.pass') : t('adminSettings.backups.checks.fail')}
                 </span>
               </li>
             ))}
           </ul>
         ) : (
-          <p className="p-5 text-sm text-text-muted">
-            No verification checks are available until a backup manifest is configured.
-          </p>
+          <p className="p-5 text-sm text-text-muted">{t('adminSettings.backups.checks.empty')}</p>
         )}
       </Section>
 
-      <Section title="Required Production Contract" icon="security">
+      <Section title={t('adminSettings.backups.contract.title')} icon="security">
         <ul className="divide-y divide-border-subtle/50">
-          <ContractRow label="Backup worker" value="Must write a manifest after every completed backup." />
-          <ContractRow label="Manifest path" value={state.source} />
-          <ContractRow label="Artifact check" value="Database dump and listed files must exist on disk." />
-          <ContractRow label="Update gate" value="Apply/rollback stays blocked unless backup verification passes." />
+          <ContractRow
+            label={t('adminSettings.backups.contract.workerLabel')}
+            value={t('adminSettings.backups.contract.workerValue')}
+          />
+          <ContractRow label={t('adminSettings.backups.contract.manifestPath')} value={state.source} />
+          <ContractRow
+            label={t('adminSettings.backups.contract.artifactLabel')}
+            value={t('adminSettings.backups.contract.artifactValue')}
+          />
+          <ContractRow
+            label={t('adminSettings.backups.contract.gateLabel')}
+            value={t('adminSettings.backups.contract.gateValue')}
+          />
         </ul>
       </Section>
 
       <div className="mt-6 rounded-lg border border-border-subtle bg-surface-container-low p-4 flex gap-3">
         <span className="material-symbols-outlined text-text-muted text-[18px] shrink-0">info</span>
-        <p className="text-xs text-text-muted leading-relaxed">
-          This page does not create or restore backups yet. It only verifies the manifest produced by
-          the self-host backup worker so admins do not rely on unverified restore points.
-        </p>
+        <p className="text-xs text-text-muted leading-relaxed">{t('adminSettings.backups.footer')}</p>
       </div>
     </section>
   );
@@ -212,18 +232,18 @@ function Chip({ label, tone = 'muted' }: { label: string; tone?: 'muted' | 'succ
   return <span className={className}>{label}</span>;
 }
 
-function formatDate(value: string | undefined): string {
-  if (!value) return 'none';
+function formatDate(t: Translator, value: string | undefined): string {
+  if (!value) return t('adminSettings.backups.none');
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'invalid date';
-  return date.toLocaleString();
+  if (Number.isNaN(date.getTime())) return t('adminSettings.backups.invalidDate');
+  return date.toLocaleString(t.locale);
 }
 
-function formatAge(ageMs: number | undefined): string {
-  if (ageMs === undefined || ageMs < 0) return 'unknown';
+function formatAge(t: Translator, ageMs: number | undefined): string {
+  if (ageMs === undefined || ageMs < 0) return t('adminSettings.backups.age.unknown');
   const minutes = Math.floor(ageMs / 60_000);
-  if (minutes < 60) return `${minutes} min`;
+  if (minutes < 60) return t('adminSettings.backups.age.minutes', { count: minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 48) return `${hours} h`;
-  return `${Math.floor(hours / 24)} d`;
+  if (hours < 48) return t('adminSettings.backups.age.hours', { count: hours });
+  return t('adminSettings.backups.age.days', { count: Math.floor(hours / 24) });
 }

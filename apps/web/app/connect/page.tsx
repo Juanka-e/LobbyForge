@@ -11,6 +11,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useT } from '@/lib/i18n/client';
+import { rich } from '@/lib/i18n/rich';
 
 const RECENT_KEY = 'lf-recent-instances';
 
@@ -30,6 +32,7 @@ function normalizeHost(input: string): string | null {
 }
 
 export default function ConnectPage() {
+  const t = useT();
   const [value, setValue] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [recent, setRecent] = useState<string[]>([]);
@@ -58,7 +61,7 @@ export default function ConnectPage() {
   function connect(rawInput: string) {
     const host = normalizeHost(rawInput);
     if (!host) {
-      setError('Enter a valid community address, e.g. community.example.com');
+      setError(t('auth.connect.invalidAddress'));
       return;
     }
     setError(null);
@@ -66,15 +69,18 @@ export default function ConnectPage() {
     window.open(`https://${host}/login`, '_blank', 'noopener');
   }
 
+  // Both sentences carry markup in the middle (a link, a code span); split
+  // each whole phrase around its placeholder so word order can differ.
+
   return (
     <section className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop w-full flex flex-col items-center pt-8">
       <div className="w-full max-w-xl flex flex-col gap-8">
         <div className="text-center flex flex-col gap-4">
           <h1 className="font-display font-bold text-[36px] sm:text-[44px] leading-tight tracking-tight text-text-primary text-balance">
-            Connect to a LobbyForge community
+            {t('auth.connect.title')}
           </h1>
           <p className="font-body-lg text-body-lg text-text-secondary text-pretty">
-            Enter the address of the community you want to join.
+            {t('auth.connect.subtitle')}
           </p>
         </div>
 
@@ -86,7 +92,7 @@ export default function ConnectPage() {
           }}
         >
           <label htmlFor="instance-url" className="sr-only">
-            Community address
+            {t('auth.connect.addressLabel')}
           </label>
           <input
             id="instance-url"
@@ -109,7 +115,7 @@ export default function ConnectPage() {
             type="submit"
             className="bg-primary-container text-on-primary-container px-8 py-2.5 rounded-lg font-label-sm text-label-sm hover:brightness-110 transition-all shrink-0"
           >
-            Continue
+            {t('auth.connect.continue')}
           </button>
         </form>
         {error ? (
@@ -119,13 +125,13 @@ export default function ConnectPage() {
         ) : null}
 
         <p className="text-sm text-text-muted leading-relaxed text-center">
-          You&apos;ll sign in on the community&apos;s own site — LobbyForge has no central account.
+          {t('auth.connect.signInElsewhere')}
         </p>
 
         {recent.length > 0 ? (
           <div className="flex flex-col gap-3">
             <h2 className="font-label-xs text-label-xs text-text-muted tracking-[0.15em] uppercase">
-              Recent communities
+              {t('auth.connect.recent')}
             </h2>
             <ul className="flex flex-col gap-2">
               {recent.map((host) => (
@@ -139,7 +145,7 @@ export default function ConnectPage() {
                   </button>
                   <button
                     type="button"
-                    aria-label={`Remove ${host} from recent communities`}
+                    aria-label={t('auth.connect.removeRecent', { host })}
                     onClick={() => {
                       setRecent((prev) => {
                         const next = prev.filter((h) => h !== host);
@@ -161,17 +167,18 @@ export default function ConnectPage() {
           </div>
         ) : (
           <p className="text-sm text-text-muted text-center">
-            No communities yet —{' '}
-            <a href="/discover" className="text-primary underline decoration-primary/40 underline-offset-4 hover:decoration-primary">
-              browse the directory
-            </a>{' '}
-            or connect by address above.
+            {rich(t('auth.connect.empty'), {
+              link: (
+                <a href="/discover" className="text-primary underline decoration-primary/40 underline-offset-4 hover:decoration-primary">
+                  {t('auth.connect.emptyLink')}
+                </a>
+              ),
+            })}
           </p>
         )}
 
         <p className="text-sm text-text-muted text-center">
-          Using the desktop app? It accepts <span className="font-mono">lobbyforge://</span> links
-          from any instance.
+          {rich(t('auth.connect.desktopHint'), { scheme: <span className="font-mono">lobbyforge://</span> })}
         </p>
       </div>
     </section>

@@ -1,6 +1,6 @@
 import { createElement } from 'react';
 import type { GamePlugin } from '@lobbyforge/plugin-sdk';
-import { PluginPermission } from '@lobbyforge/plugin-sdk';
+import { CATALOG_SUMMARY_KEY, PluginPermission, loadPluginLocale } from '@lobbyforge/plugin-sdk';
 import {
   DICE_HISTORY_LIMIT,
   DICE_MAX_SIDES,
@@ -8,7 +8,11 @@ import {
   DICE_PLUGIN_ID,
 } from './constants';
 import { DicePanel, type DicePanelClientProps } from './renderClient';
-import { SHIPPED_LOCALES } from './locales.generated';
+import { LOCALE_TABLES, SHIPPED_LOCALES } from './locales.generated';
+
+// Also registered by the panel, but that is a 'use client' module the
+// server never evaluates — the host reads `catalog.summary` server-side.
+loadPluginLocale(DICE_PLUGIN_ID, LOCALE_TABLES);
 
 /**
  * Dice Bot — a bot-style utility plugin.
@@ -139,7 +143,8 @@ export const diceBotPlugin: GamePlugin<DiceState, DiceAction> = {
     entryClient: './renderClient.js',
     catalog: {
       category: 'utility',
-      summary: 'Dice rolls with per-player stats for voice rooms.',
+      // Translated in locales/*.json; the host shows the viewer's language.
+      summary: LOCALE_TABLES.en[CATALOG_SUMMARY_KEY],
       publisher: 'LobbyForge',
       trustLevel: 'official',
       playerConfig: {

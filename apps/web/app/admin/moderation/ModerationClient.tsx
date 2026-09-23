@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useT } from '@/lib/i18n/client';
 
 interface PendingPlugin {
   pluginId: string;
@@ -33,6 +34,21 @@ interface InstanceReport {
   createdAt: string;
 }
 
+/** The reasons `/api/directory/{id}/report` accepts; anything else shows as-is. */
+const REASON_LABEL_KEYS: Record<string, string> = {
+  spam: 'admin.moderation.reason.spam',
+  nsfw: 'admin.moderation.reason.nsfw',
+  abuse: 'admin.moderation.reason.abuse',
+  malware: 'admin.moderation.reason.malware',
+  other: 'admin.moderation.reason.other',
+};
+
+const REPORT_STATUS_LABEL_KEYS: Record<string, string> = {
+  pending: 'admin.moderation.reportStatus.pending',
+  dismissed: 'admin.moderation.reportStatus.dismissed',
+  actioned: 'admin.moderation.reportStatus.actioned',
+};
+
 interface ModerationData {
   pendingPlugins: PendingPlugin[];
   registryInstances: RegistryInstance[];
@@ -40,6 +56,7 @@ interface ModerationData {
 }
 
 export default function ModerationClient() {
+  const t = useT();
   const [data, setData] = useState<ModerationData>({ pendingPlugins: [], registryInstances: [], reports: [] });
   const [loading, setLoading] = useState(true);
   const [actioning, setActioning] = useState<string | null>(null);
@@ -104,28 +121,26 @@ export default function ModerationClient() {
   }
 
   if (loading) {
-    return <p className="text-sm text-text-muted p-8">Loading moderation queue…</p>;
+    return <p className="text-sm text-text-muted p-8">{t('admin.moderation.loading')}</p>;
   }
 
   return (
     <section className="space-y-8 pb-32">
       <header>
-        <h1 className="text-2xl font-semibold text-text-primary">Moderation</h1>
-        <p className="mt-1 text-sm text-text-secondary">
-          Review marketplace submissions and moderate the community directory.
-        </p>
+        <h1 className="text-2xl font-semibold text-text-primary">{t('admin.moderation.title')}</h1>
+        <p className="mt-1 text-sm text-text-secondary">{t('admin.moderation.intro')}</p>
       </header>
 
       {/* Pending plugin submissions */}
       <section>
         <h2 className="text-lg font-semibold text-text-primary mb-3 flex items-center gap-2 border-b border-border-subtle pb-2">
           <span className="material-symbols-outlined text-primary text-[20px]">extension</span>
-          Plugin Review Queue ({data.pendingPlugins.length})
+          {t('admin.moderation.pluginQueue', { count: data.pendingPlugins.length })}
         </h2>
         {data.pendingPlugins.length === 0 ? (
           <div className="rounded-xl border border-border-subtle bg-surface p-6 flex items-center gap-3">
             <span className="material-symbols-outlined text-success text-[20px]">check_circle</span>
-            <p className="text-sm text-text-primary">No pending submissions.</p>
+            <p className="text-sm text-text-primary">{t('admin.moderation.noPending')}</p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -140,7 +155,12 @@ export default function ModerationClient() {
                         <span className="rounded-full bg-surface-container px-2 py-0.5 text-[10px] text-text-muted">{p.category}</span>
                       ) : null}
                     </div>
-                    <p className="text-xs text-text-muted">by {p.publisher} · {new Date(p.submittedAt).toLocaleDateString()}</p>
+                    <p className="text-xs text-text-muted">
+                      {t('admin.moderation.submittedBy', {
+                        publisher: p.publisher,
+                        date: new Date(p.submittedAt).toLocaleDateString(t.locale),
+                      })}
+                    </p>
                     {p.summary ? <p className="text-sm text-text-secondary mt-2">{p.summary}</p> : null}
                   </div>
                   <div className="flex gap-2 flex-shrink-0">
@@ -149,14 +169,14 @@ export default function ModerationClient() {
                       disabled={actioning === p.pluginId}
                       className="rounded-md bg-success/20 px-3 py-1.5 text-xs font-semibold text-success hover:bg-success/30 disabled:opacity-40"
                     >
-                      Approve
+                      {t('admin.moderation.approve')}
                     </button>
                     <button
                       onClick={() => reviewPlugin(p.pluginId, 'rejected')}
                       disabled={actioning === p.pluginId}
                       className="rounded-md bg-danger/20 px-3 py-1.5 text-xs font-semibold text-danger hover:bg-danger/30 disabled:opacity-40"
                     >
-                      Reject
+                      {t('admin.moderation.reject')}
                     </button>
                   </div>
                 </div>
@@ -170,10 +190,12 @@ export default function ModerationClient() {
       <section>
         <h2 className="text-lg font-semibold text-text-primary mb-3 flex items-center gap-2 border-b border-border-subtle pb-2">
           <span className="material-symbols-outlined text-warning text-[20px]">flag</span>
-          Instance Reports ({(data.reports ?? []).filter((r) => r.status === 'pending').length} pending)
+          {t('admin.moderation.reportsTitle', {
+            count: (data.reports ?? []).filter((r) => r.status === 'pending').length,
+          })}
         </h2>
         {(data.reports ?? []).length === 0 ? (
-          <p className="text-sm text-text-muted">No reports filed.</p>
+          <p className="text-sm text-text-muted">{t('admin.moderation.noReports')}</p>
         ) : (
           <div className="space-y-3">
             {(data.reports ?? []).map((r) => (
@@ -181,12 +203,20 @@ export default function ModerationClient() {
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="rounded-full bg-warning/10 px-2 py-0.5 text-[10px] font-semibold text-warning uppercase">{r.reason}</span>
+                      <span className="rounded-full bg-warning/10 px-2 py-0.5 text-[10px] font-semibold text-warning uppercase">
+                        {REASON_LABEL_KEYS[r.reason] ? t(REASON_LABEL_KEYS[r.reason]!) : r.reason}
+                      </span>
                       <span className="text-xs text-text-muted">
-                        {r.instanceId} · by {r.reporterName ?? 'unknown'} · {new Date(r.createdAt).toLocaleDateString()}
+                        {t('admin.moderation.reportMeta', {
+                          instance: r.instanceId,
+                          reporter: r.reporterName ?? t('admin.moderation.unknownReporter'),
+                          date: new Date(r.createdAt).toLocaleDateString(t.locale),
+                        })}
                       </span>
                       {r.status !== 'pending' ? (
-                        <span className="rounded-full bg-surface-container px-2 py-0.5 text-[10px] text-text-muted">{r.status}</span>
+                        <span className="rounded-full bg-surface-container px-2 py-0.5 text-[10px] text-text-muted">
+                          {REPORT_STATUS_LABEL_KEYS[r.status] ? t(REPORT_STATUS_LABEL_KEYS[r.status]!) : r.status}
+                        </span>
                       ) : null}
                     </div>
                     {r.detail ? <p className="text-sm text-text-secondary mt-1">{r.detail}</p> : null}
@@ -198,14 +228,14 @@ export default function ModerationClient() {
                         disabled={actioning === r.id}
                         className="rounded-md border border-border-subtle px-3 py-1.5 text-xs text-text-secondary hover:bg-surface-container disabled:opacity-40"
                       >
-                        Dismiss
+                        {t('admin.moderation.dismiss')}
                       </button>
                       <button
                         onClick={() => resolveReport(r.id, 'actioned')}
                         disabled={actioning === r.id}
                         className="rounded-md bg-primary/15 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/25 disabled:opacity-40"
                       >
-                        Actioned
+                        {t('admin.moderation.markActioned')}
                       </button>
                     </div>
                   ) : null}
@@ -220,10 +250,10 @@ export default function ModerationClient() {
       <section>
         <h2 className="text-lg font-semibold text-text-primary mb-3 flex items-center gap-2 border-b border-border-subtle pb-2">
           <span className="material-symbols-outlined text-tertiary text-[20px]">public</span>
-          Community Directory ({data.registryInstances.length})
+          {t('admin.moderation.directoryTitle', { count: data.registryInstances.length })}
         </h2>
         {data.registryInstances.length === 0 ? (
-          <p className="text-sm text-text-muted">No registered instances.</p>
+          <p className="text-sm text-text-muted">{t('admin.moderation.noInstances')}</p>
         ) : (
           <div className="rounded-xl border border-border-subtle bg-surface overflow-hidden divide-y divide-border-subtle">
             {data.registryInstances.map((inst) => (
@@ -232,9 +262,15 @@ export default function ModerationClient() {
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-text-primary truncate">{inst.name}</span>
                     {inst.isVerified ? <span className="material-symbols-outlined text-[14px] text-primary">verified</span> : null}
-                    {inst.isBlocked ? <span className="rounded-full bg-danger/10 px-2 py-0.5 text-[10px] text-danger">blocked</span> : null}
+                    {inst.isBlocked ? (
+                      <span className="rounded-full bg-danger/10 px-2 py-0.5 text-[10px] text-danger">
+                        {t('admin.moderation.blocked')}
+                      </span>
+                    ) : null}
                   </div>
-                  <p className="text-xs text-text-muted truncate">{inst.domain} · {inst.onlineUsers} online</p>
+                  <p className="text-xs text-text-muted truncate">
+                    {inst.domain} · {t('admin.moderation.onlineCount', { count: inst.onlineUsers })}
+                  </p>
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
                   <button
@@ -242,14 +278,14 @@ export default function ModerationClient() {
                     disabled={actioning === inst.instanceId}
                     className="rounded-md border border-border-subtle px-3 py-1.5 text-xs text-text-secondary hover:bg-surface-container disabled:opacity-40"
                   >
-                    {inst.isListed ? 'Unlist' : 'List'}
+                    {inst.isListed ? t('admin.moderation.unlist') : t('admin.moderation.list')}
                   </button>
                   <button
                     onClick={() => moderateInstance(inst.instanceId, 'block')}
                     disabled={actioning === inst.instanceId}
                     className="rounded-md border border-danger/40 px-3 py-1.5 text-xs text-danger hover:bg-danger/10 disabled:opacity-40"
                   >
-                    Block
+                    {t('admin.moderation.block')}
                   </button>
                 </div>
               </div>

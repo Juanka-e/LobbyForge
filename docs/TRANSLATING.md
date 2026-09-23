@@ -6,6 +6,7 @@ shows in English.
 
 - [Add a language](#add-a-language)
 - [Translate](#translate)
+- [Plurals](#plurals)
 - [Check your progress](#check-your-progress)
 - [Finish a language](#finish-a-language)
 - [Guidelines](#guidelines)
@@ -61,6 +62,37 @@ in the same order:
 
 In development, refresh the page to see your edit — no restart needed.
 
+## Plurals
+
+Where a number is counted, English writes both forms in one string:
+
+```json
+"adminSettings.members.count": "{count, plural, one {# member} other {# members}}"
+```
+
+`#` is the number. Write the forms **your** language needs — the categories
+are `zero`, `one`, `two`, `few`, `many` and `other`, plus `=0`, `=1`… for an
+exact number, and `other` is always required:
+
+```jsonc
+// Russian — four forms
+"{count, plural, one {# участник} few {# участника} many {# участников} other {# участника}}"
+// Turkish — the noun stays singular after a number, so one form is enough
+"{count} üye"
+```
+
+Which numbers fall into which category is built into every browser
+([CLDR plural rules](https://www.unicode.org/cldr/charts/latest/supplemental/language_plural_rules.html));
+you only write the words. You may use a plural even where English has a
+plain `{count}`, and a plain `{count}` where English has a plural — what
+must match is the argument name, not the shape.
+
+`{kind, select, voice {…} other {…}}` picks by a word instead of a number,
+where the code passes one.
+
+An apostrophe is just an apostrophe (`"Hushle'ı başlat"`): unlike some ICU
+tools, LobbyForge does not treat `'` as an escape character.
+
 ## Check your progress
 
 ```sh
@@ -70,9 +102,9 @@ pnpm i18n:status
 ```
 App — apps/web/messages
 
-  en    English              ████████████████████ 100%  207/207  complete
-  de    Deutsch (German)     ████████░░░░░░░░░░░░  41%   85/207  partial
-  tr    Türkçe (Turkish)     ████████████████████ 100%  207/207  complete
+  en    English              ████████████████████ 100%  1887/1887  complete
+  de    Deutsch (German)     ████████░░░░░░░░░░░░  41%   774/1887  partial
+  tr    Türkçe (Turkish)     ████████████████████ 100%  1887/1887  complete
 
 Plugins — plugins/*/locales
 
@@ -160,9 +192,26 @@ missing your string.
 - **Plugins** keep their own `locales/<code>.json` and translate with the
   plugin SDK's `tFor`. Keys start with the plugin id. A plugin with no
   `locales/` folder is English-only and declares `locales: ['en']`.
+- **Counts:** pass the number, and write the English with a plural —
+  `t('x.members', { count })` over `"{count, plural, one {# member} other
+  {# members}}"`. Never pick between two keys with `count === 1 ? … : …`:
+  that bakes English's two forms into the code, and a language with four
+  cannot fix it from its JSON.
+- **A link or element inside a sentence:** keep the whole sentence as one
+  string with a marker, and place the element with `rich()` from
+  `lib/i18n/rich.tsx` — each language then puts it where its word order
+  wants it:
+
+  ```tsx
+  // "discovery.clearFiltersHint": "Try clearing the filters above, or {link}."
+  rich(t('discovery.clearFiltersHint'), { link: <Link href="/connect">{t('discovery.connectByAddress')}</Link> })
+  ```
+
 - **Dates and numbers:** `t.locale` is the language the translator speaks —
   pass it to `Intl` so a month name matches the sentence around it (see
   `lib/chat-time.ts`).
+- **The format is shared with plugins:** `tFor` in the plugin SDK formats
+  the same syntax (`packages/plugin-sdk/src/message-format.ts`).
 
 ## How it works
 

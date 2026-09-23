@@ -24,6 +24,10 @@
  * `loadBotLocale` call. Community bots do the same.
  */
 
+import { formatMessage } from './message-format.js';
+
+export { formatMessage, messageArguments, type MessageParams } from './message-format.js';
+
 export type LocaleId = string;
 
 export type LocaleTable = Record<string, string>;
@@ -49,6 +53,8 @@ export function registerBotLocale(
     perLocale.set(locale, arr);
   }
   arr.push(loader);
+  // Materialized tables are cached; a later registration must be seen.
+  localeTables.delete(botId);
 }
 
 export function loadBotLocale(
@@ -103,15 +109,13 @@ export function tFor(
   const tables = materializeLocaleTables(botId);
   const tryLookup = (loc: LocaleId | null | undefined): string | undefined => {
     if (!loc) return undefined;
-    const table = tables.get(loc);
-    return table ? table[key] : undefined;
+    const value = tables.get(loc)?.[key];
+    // Blank = not translated yet: fall through rather than show nothing.
+    return typeof value === 'string' && value.trim() !== '' ? value : undefined;
   };
-  const template = tryLookup(locale) ?? tryLookup(fallbackLocale) ?? key;
-  if (!params) return template;
-  return template.replace(/\{([a-zA-Z0-9_]+)\}/g, (match, name) => {
-    const v = params[name];
-    return v === undefined ? match : String(v);
-  });
+  const own = tryLookup(locale);
+  const template = own ?? tryLookup(fallbackLocale) ?? key;
+  return formatMessage(template, params, own !== undefined && locale ? locale : fallbackLocale);
 }
 
 export function detectLocale(fallback: LocaleId = 'en'): LocaleId {

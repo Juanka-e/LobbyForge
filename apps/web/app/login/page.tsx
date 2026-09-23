@@ -6,22 +6,24 @@ import { getSessionSecret } from '@/lib/api-auth';
 import { readGuestSession } from '@/lib/guest-session';
 import { isOfficialDeployment } from '@/lib/deployment-mode';
 import { isGoogleOAuthConfigured } from '@/lib/oauth-google';
+import { getTranslator } from '@/lib/i18n/server';
 import LoginForm from './LoginForm';
+import { rich } from '@/lib/i18n/rich';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Human-readable text for the `?error=` codes the auth routes redirect
- * with (Google OAuth callback, session recording). Only KNOWN codes are
+ * Message keys for the `?error=` codes the auth routes redirect with
+ * (Google OAuth callback, session recording). Only KNOWN codes are
  * shown — the query value itself is never reflected into the page.
  */
-const LOGIN_ERROR_MESSAGES: Record<string, string> = {
-  registration_closed: 'This community is not accepting new accounts right now. Ask an admin for an invite.',
-  oauth_failed: 'Google sign-in failed. Please try again.',
-  oauth_not_configured: 'Google sign-in is not configured on this community.',
-  state_mismatch: 'The sign-in link expired or was opened in another browser. Please try again.',
-  missing_params: 'The sign-in response was incomplete. Please try again.',
-  session_unavailable: 'Signing in is temporarily unavailable. Please try again in a moment.',
+const LOGIN_ERROR_KEYS: Record<string, string> = {
+  registration_closed: 'auth.login.error.registrationClosed',
+  oauth_failed: 'auth.login.error.oauthFailed',
+  oauth_not_configured: 'auth.login.error.oauthNotConfigured',
+  state_mismatch: 'auth.login.error.stateMismatch',
+  missing_params: 'auth.login.error.missingParams',
+  session_unavailable: 'auth.login.error.sessionUnavailable',
 };
 
 export default async function LoginPage({
@@ -38,15 +40,21 @@ export default async function LoginPage({
   if (session?.uid) redirect('/lobby');
 
   const settings = await getEffectiveInstanceAccessSettings(getDb());
+  // The first screen a visitor sees, before they have picked a language:
+  // the translator follows their browser's Accept-Language.
+  const t = await getTranslator();
   const { invite = '', desktopLoginState, mode, error: errorCode } = await searchParams;
   // beta-review: the auth routes redirect here with ?error=… but the page
   // never showed it (e.g. a closed-registration Google sign-in looked like
   // a silent no-op).
-  const errorMessage = errorCode ? LOGIN_ERROR_MESSAGES[errorCode] ?? null : null;
+  const errorKey = errorCode && Object.hasOwn(LOGIN_ERROR_KEYS, errorCode) ? LOGIN_ERROR_KEYS[errorCode] : undefined;
+  const errorMessage = errorKey ? t(errorKey) : null;
   const instanceName =
     setup.instanceName || process.env.LOBBYFORGE_INSTANCE_NAME?.trim() || 'LobbyForge Community';
   const inviteOnly = settings.registrationMode === 'invite_only';
   const googleEnabled = isGoogleOAuthConfigured();
+  // "Powered by {brand}": the brand is a link, and word order differs
+  // between languages, so split the whole phrase around it.
 
   return (
     <div className="flex h-full w-full items-center justify-center bg-background px-5 py-10 safe-area-page">
@@ -56,12 +64,12 @@ export default async function LoginPage({
             {instanceName.charAt(0).toUpperCase()}
           </div>
           <div className="min-w-0">
-            <p className="truncate text-sm text-text-muted">LobbyForge community</p>
+            <p className="truncate text-sm text-text-muted">{t('auth.login.communityLabel')}</p>
             <h1 className="truncate text-balance text-xl font-semibold text-text-primary">{instanceName}</h1>
           </div>
         </div>
         <p className="mb-6 text-pretty text-sm text-text-secondary">
-          {inviteOnly ? 'Sign in locally, or use a valid invitation to join as a guest.' : 'Sign in with your local community account.'}
+          {inviteOnly ? t('auth.login.introInviteOnly') : t('auth.login.intro')}
         </p>
 
         {errorMessage ? (
@@ -83,11 +91,11 @@ export default async function LoginPage({
                 <path d="M4.59 10.63c-.16-.47-.25-.97-.25-1.5s.09-1.03.25-1.5V5.61H1.96C1.43 6.68 1.13 7.8 1.13 9.13s.3 2.45.83 3.52l2.63-2.02z" fill="#FBBC05"/>
                 <path d="M9 4.63c1.16 0 2.2.4 3.02 1.18l2.27-2.27C12.91 2.27 11.12 1.56 9 1.56 5.92 1.56 3.25 3.37 1.96 6.1l2.63 2.02C5.21 6.02 6.95 4.63 9 4.63z" fill="#EA4335"/>
               </svg>
-              Continue with Google
+              {t('auth.login.google')}
             </a>
             <div className="my-3 flex items-center gap-3">
               <div className="h-px flex-1 bg-border-subtle" />
-              <span className="text-xs text-text-muted">or</span>
+              <span className="text-xs text-text-muted">{t('auth.login.or')}</span>
               <div className="h-px flex-1 bg-border-subtle" />
             </div>
           </div>
@@ -101,15 +109,18 @@ export default async function LoginPage({
           desktopLoginState={desktopLoginState} />
 
         <p className="mt-7 text-center text-xs text-text-muted">
-          Powered by{' '}
-          <a
-            href="https://github.com/Juanka-e/LobbyForge"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-text-muted underline decoration-border-strong underline-offset-2 hover:text-text-secondary"
-          >
-            LobbyForge
-          </a>
+          {rich(t('auth.login.poweredBy'), {
+            brand: (
+              <a
+                href="https://github.com/Juanka-e/LobbyForge"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-text-muted underline decoration-border-strong underline-offset-2 hover:text-text-secondary"
+              >
+                LobbyForge
+              </a>
+            ),
+          })}
         </p>
       </section>
     </div>

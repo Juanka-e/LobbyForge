@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
+import { useT } from '@/lib/i18n/client';
 
 export interface AppView {
   id: string;
@@ -15,10 +16,11 @@ export interface AppView {
   enabled: boolean;
 }
 
-const TRUST_LABELS: Record<string, string> = {
-  official: 'Official',
-  'verified-community': 'Verified',
-  unverified: 'Unverified',
+/** Message keys for the catalogue trust levels; anything else shows as-is. */
+const TRUST_LABEL_KEYS: Record<string, string> = {
+  official: 'admin.apps.trustOfficial',
+  'verified-community': 'admin.apps.trustVerified',
+  unverified: 'admin.apps.trustUnverified',
 };
 
 export default function AppsClient({
@@ -30,6 +32,7 @@ export default function AppsClient({
   initialApps: AppView[];
   loadError: string | null;
 }) {
+  const t = useT();
   const [apps, setApps] = useState<AppView[]>(initialApps);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -57,7 +60,7 @@ export default function AppsClient({
             });
         if (!res.ok) {
           const detail = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(detail.error ?? `Request failed (${res.status})`);
+          throw new Error(detail.error ?? t('admin.apps.requestFailed', { status: res.status }));
         }
         setApps((current) =>
           current.map((entry) => (entry.id === app.id ? { ...entry, ...next } : entry))
@@ -65,9 +68,9 @@ export default function AppsClient({
         setMessage(
           next.installed
             ? next.enabled
-              ? `${app.name} is installed and enabled — members can start it from a voice channel.`
-              : `${app.name} is installed but disabled.`
-            : `${app.name} was removed from this community.`
+              ? t('admin.apps.installedEnabled', { name: app.name })
+              : t('admin.apps.installedDisabled', { name: app.name })
+            : t('admin.apps.removed', { name: app.name })
         );
       } catch (err) {
         setError((err as Error).message);
@@ -75,27 +78,24 @@ export default function AppsClient({
         setBusyId(null);
       }
     },
-    [serverId]
+    [serverId, t]
   );
 
   return (
     <section className="mx-auto max-w-4xl pb-32">
       <header className="mb-6">
-        <h1 className="text-2xl font-semibold text-text-primary">Apps &amp; Activities</h1>
-        <p className="mt-1 text-sm text-text-secondary">
-          Install the games and activities your community can start inside a voice channel. An app
-          must be installed <em>and</em> enabled before it appears in the activity picker.
-        </p>
+        <h1 className="text-2xl font-semibold text-text-primary">{t('admin.apps.title')}</h1>
+        <p className="mt-1 text-sm text-text-secondary">{t('admin.apps.intro')}</p>
       </header>
 
       {loadError ? (
         <div className="mb-4 rounded-lg border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
-          Could not load apps: {loadError}
+          {t('admin.apps.loadError', { error: loadError })}
         </div>
       ) : null}
       {!serverId && !loadError ? (
         <div className="mb-4 rounded-lg border border-border-subtle bg-surface p-4 text-sm text-text-secondary">
-          No community found for this account yet.
+          {t('admin.apps.noCommunity')}
         </div>
       ) : null}
       {error ? (
@@ -114,7 +114,10 @@ export default function AppsClient({
           const busy = busyId === app.id;
           const players =
             app.minPlayers || app.maxPlayers
-              ? `${app.minPlayers ?? 1}–${app.maxPlayers ?? 'any'} players`
+              ? t('admin.apps.playerRange', {
+                  min: app.minPlayers ?? 1,
+                  max: app.maxPlayers ?? t('admin.apps.playerRangeAny'),
+                })
               : null;
           return (
             <li
@@ -129,16 +132,16 @@ export default function AppsClient({
                   </span>
                   {app.trustLevel ? (
                     <span className="rounded border border-success/40 px-1.5 py-0.5 text-[11px] text-success">
-                      {TRUST_LABELS[app.trustLevel] ?? app.trustLevel}
+                      {TRUST_LABEL_KEYS[app.trustLevel] ? t(TRUST_LABEL_KEYS[app.trustLevel]!) : app.trustLevel}
                     </span>
                   ) : null}
                   {app.enabled ? (
                     <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[11px] font-medium text-primary">
-                      Enabled
+                      {t('admin.apps.enabled')}
                     </span>
                   ) : app.installed ? (
                     <span className="rounded bg-surface-container px-1.5 py-0.5 text-[11px] text-text-muted">
-                      Disabled
+                      {t('admin.apps.disabled')}
                     </span>
                   ) : null}
                 </div>
@@ -156,7 +159,7 @@ export default function AppsClient({
                       onClick={() => void mutate(app, { installed: true, enabled: !app.enabled })}
                       className="rounded-lg border border-border-strong px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-container disabled:cursor-not-allowed disabled:opacity-40"
                     >
-                      {busy ? 'Working…' : app.enabled ? 'Disable' : 'Enable'}
+                      {busy ? t('admin.apps.working') : app.enabled ? t('admin.apps.disable') : t('admin.apps.enable')}
                     </button>
                     <button
                       type="button"
@@ -164,7 +167,7 @@ export default function AppsClient({
                       onClick={() => void mutate(app, { installed: false, enabled: false })}
                       className="rounded-lg px-3 py-2 text-sm text-danger transition-colors hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40"
                     >
-                      Remove
+                      {t('admin.apps.remove')}
                     </button>
                   </>
                 ) : (
@@ -174,7 +177,7 @@ export default function AppsClient({
                     onClick={() => void mutate(app, { installed: true, enabled: true })}
                     className="rounded-lg bg-primary-container px-4 py-2 text-sm font-semibold text-on-primary-container transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    {busy ? 'Working…' : 'Install'}
+                    {busy ? t('admin.apps.working') : t('admin.apps.install')}
                   </button>
                 )}
               </div>

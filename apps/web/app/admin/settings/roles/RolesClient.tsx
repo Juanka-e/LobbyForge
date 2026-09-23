@@ -1,7 +1,8 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { ROLE_ICONS } from '@/lib/role-icons';
+import { useT } from '@/lib/i18n/client';
+import { ROLE_ICONS, type RoleIcon } from '@/lib/role-icons';
 
 export interface RoleView {
   id: string;
@@ -22,58 +23,79 @@ interface ApiRoleResponse {
   error?: string;
 }
 
+/**
+ * `key` is the stored permission flag (never translated); `labelKey` is
+ * the message key for what the admin reads, resolved with `t` where it
+ * renders.
+ */
 interface PermissionGroup {
-  label: string;
-  permissions: { key: string; label: string }[];
+  labelKey: string;
+  permissions: { key: string; labelKey: string }[];
 }
 
 const PERMISSION_GROUPS: PermissionGroup[] = [
   {
-    label: 'General',
+    labelKey: 'adminSettings.roles.group.general',
     permissions: [
-      { key: 'administrator', label: 'Administrator' },
-      { key: 'manage_server', label: 'Manage Community' },
-      { key: 'manage_roles', label: 'Manage Roles' },
-      { key: 'manage_channels', label: 'Manage Channels' },
-      { key: 'view_audit_log', label: 'View Audit Log' },
+      { key: 'administrator', labelKey: 'adminSettings.roles.perm.administrator' },
+      { key: 'manage_server', labelKey: 'adminSettings.roles.perm.manageServer' },
+      { key: 'manage_roles', labelKey: 'adminSettings.roles.perm.manageRoles' },
+      { key: 'manage_channels', labelKey: 'adminSettings.roles.perm.manageChannels' },
+      { key: 'view_audit_log', labelKey: 'adminSettings.roles.perm.viewAuditLog' },
     ],
   },
   {
-    label: 'Members',
+    labelKey: 'adminSettings.roles.group.members',
     permissions: [
-      { key: 'create_invite', label: 'Invite People' },
-      { key: 'kick_members', label: 'Kick Members' },
-      { key: 'ban_members', label: 'Ban Members' },
-      { key: 'moderate_members', label: 'Timeout Members' },
+      { key: 'create_invite', labelKey: 'adminSettings.roles.perm.createInvite' },
+      { key: 'kick_members', labelKey: 'adminSettings.roles.perm.kickMembers' },
+      { key: 'ban_members', labelKey: 'adminSettings.roles.perm.banMembers' },
+      { key: 'moderate_members', labelKey: 'adminSettings.roles.perm.moderateMembers' },
     ],
   },
   {
-    label: 'Text Channels',
+    labelKey: 'adminSettings.roles.group.text',
     permissions: [
-      { key: 'send_messages', label: 'Send Messages' },
-      { key: 'read_message_history', label: 'Read Message History' },
-      { key: 'mention_everyone', label: 'Mention @everyone' },
-      { key: 'manage_messages', label: 'Manage Messages' },
+      { key: 'send_messages', labelKey: 'adminSettings.roles.perm.sendMessages' },
+      { key: 'read_message_history', labelKey: 'adminSettings.roles.perm.readMessageHistory' },
+      { key: 'mention_everyone', labelKey: 'adminSettings.roles.perm.mentionEveryone' },
+      { key: 'manage_messages', labelKey: 'adminSettings.roles.perm.manageMessages' },
       // NOTE: 'add_reactions' intentionally hidden — the reactions
       // feature has no API yet; a visible no-op toggle misleads admins.
     ],
   },
   {
-    label: 'Voice Rooms',
+    labelKey: 'adminSettings.roles.group.voice',
     permissions: [
-      { key: 'connect_voice', label: 'Join Voice Rooms' },
-      { key: 'speak', label: 'Speak' },
-      { key: 'stream', label: 'Camera & Screen Share' },
-      { key: 'mute_members', label: 'Mute Members' },
+      { key: 'connect_voice', labelKey: 'adminSettings.roles.perm.connectVoice' },
+      { key: 'speak', labelKey: 'adminSettings.roles.perm.speak' },
+      { key: 'stream', labelKey: 'adminSettings.roles.perm.stream' },
+      { key: 'mute_members', labelKey: 'adminSettings.roles.perm.muteMembers' },
       // NOTE: 'deafen_members' hidden — no deafen-others endpoint exists
       // (self-deafen is a local client preference, permission-free).
     ],
   },
   {
-    label: 'Activities',
-    permissions: [{ key: 'start_activity', label: 'Start Activities' }],
+    labelKey: 'adminSettings.roles.group.activities',
+    permissions: [{ key: 'start_activity', labelKey: 'adminSettings.roles.perm.startActivity' }],
   },
 ];
+
+/**
+ * What each built-in role icon is called in the picker. The icon value
+ * itself is a Material Symbols ligature and is stored as-is; only the
+ * name the admin reads is translated.
+ */
+const ROLE_ICON_LABEL_KEYS: Record<RoleIcon, string> = {
+  shield: 'adminSettings.roles.icon.shield',
+  verified: 'adminSettings.roles.icon.verified',
+  star: 'adminSettings.roles.icon.star',
+  crown: 'adminSettings.roles.icon.crown',
+  sports_esports: 'adminSettings.roles.icon.sportsEsports',
+  music_note: 'adminSettings.roles.icon.musicNote',
+  groups: 'adminSettings.roles.icon.groups',
+  palette: 'adminSettings.roles.icon.palette',
+};
 
 const DEFAULT_COLOR = '#7c8cff';
 const EMPTY_FORM = { name: '', color: DEFAULT_COLOR, icon: null as string | null, displaySeparately: false, permissions: [] as string[] };
@@ -87,6 +109,7 @@ export default function RolesClient({
   initialRoles: RoleView[];
   loadError: string | null;
 }) {
+  const t = useT();
   const [roles, setRoles] = useState(initialRoles);
   const [form, setForm] = useState(EMPTY_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -108,7 +131,7 @@ export default function RolesClient({
       cache: 'no-store',
     });
     const data = (await response.json().catch(() => ({}))) as ApiRoleResponse;
-    if (!response.ok || !data.roles) throw new Error(data.error ?? 'Could not reload roles');
+    if (!response.ok || !data.roles) throw new Error(data.error ?? t('adminSettings.roles.reloadFailed'));
     setRoles((current) => mergeMemberCounts(data.roles ?? [], current));
   }
 
@@ -116,10 +139,10 @@ export default function RolesClient({
     if (!serverId || isCreating) return;
     const name = form.name.trim();
     if (name.length === 0) {
-      setMessage({ tone: 'danger', text: 'Role name is required.' });
+      setMessage({ tone: 'danger', text: t('adminSettings.roles.nameRequired') });
       return;
     }
-    if (form.permissions.includes('administrator') && !window.confirm('This role will have full administrator access. Continue?')) {
+    if (form.permissions.includes('administrator') && !window.confirm(t('adminSettings.roles.confirmAdminCreate'))) {
       return;
     }
     setIsCreating(true);
@@ -139,10 +162,10 @@ export default function RolesClient({
         }),
       });
       const data = (await response.json().catch(() => ({}))) as ApiRoleResponse;
-      if (!response.ok || !data.role) throw new Error(data.error ?? 'Could not create role');
+      if (!response.ok || !data.role) throw new Error(data.error ?? t('adminSettings.roles.createFailed'));
       setRoles((current) => [...current, { ...data.role!, memberCount: 0 }]);
       setForm(EMPTY_FORM);
-      setMessage({ tone: 'success', text: 'Role created.' });
+      setMessage({ tone: 'success', text: t('adminSettings.roles.created') });
     } catch (err) {
       setMessage({ tone: 'danger', text: (err as Error).message });
     } finally {
@@ -167,11 +190,11 @@ export default function RolesClient({
     if (!serverId || busyId) return;
     const name = draft.name.trim();
     if (name.length === 0) {
-      setMessage({ tone: 'danger', text: 'Role name is required.' });
+      setMessage({ tone: 'danger', text: t('adminSettings.roles.nameRequired') });
       return;
     }
     const adminWasAdded = !role.permissions.includes('administrator') && draft.permissions.includes('administrator');
-    if (adminWasAdded && !window.confirm('This grants full administrator access to this role. Continue?')) {
+    if (adminWasAdded && !window.confirm(t('adminSettings.roles.confirmAdminGrant'))) {
       return;
     }
     setBusyId(role.id);
@@ -194,12 +217,12 @@ export default function RolesClient({
         }
       );
       const data = (await response.json().catch(() => ({}))) as ApiRoleResponse;
-      if (!response.ok || !data.role) throw new Error(data.error ?? 'Could not update role');
+      if (!response.ok || !data.role) throw new Error(data.error ?? t('adminSettings.roles.updateFailed'));
       setRoles((current) =>
         current.map((item) => (item.id === role.id ? { ...data.role!, memberCount: item.memberCount } : item))
       );
       setEditingId(null);
-      setMessage({ tone: 'success', text: 'Role updated.' });
+      setMessage({ tone: 'success', text: t('adminSettings.roles.updated') });
     } catch (err) {
       setMessage({ tone: 'danger', text: (err as Error).message });
     } finally {
@@ -209,7 +232,7 @@ export default function RolesClient({
 
   async function deleteRole(role: RoleView) {
     if (!serverId || busyId || role.name === '@everyone') return;
-    if (!window.confirm(`Delete ${role.name}? Members with this role will lose it.`)) return;
+    if (!window.confirm(t('adminSettings.roles.confirmDelete', { name: role.name }))) return;
     setBusyId(role.id);
     setMessage(null);
     try {
@@ -218,9 +241,9 @@ export default function RolesClient({
         { method: 'DELETE' }
       );
       const data = (await response.json().catch(() => ({}))) as ApiRoleResponse;
-      if (!response.ok) throw new Error(data.error ?? 'Could not delete role');
+      if (!response.ok) throw new Error(data.error ?? t('adminSettings.roles.deleteFailed'));
       setRoles((current) => current.filter((item) => item.id !== role.id));
-      setMessage({ tone: 'success', text: 'Role deleted.' });
+      setMessage({ tone: 'success', text: t('adminSettings.roles.deleted') });
       await refreshRoles();
     } catch (err) {
       setMessage({ tone: 'danger', text: (err as Error).message });
@@ -240,37 +263,35 @@ export default function RolesClient({
   return (
     <section className="max-w-5xl mx-auto pb-32">
       <header className="mb-6">
-        <h1 className="text-2xl font-semibold text-text-primary">Roles & Permissions</h1>
-        <p className="mt-1 text-sm text-text-secondary">
-          Manage member roles and what each role can do in this community.
-        </p>
+        <h1 className="text-2xl font-semibold text-text-primary">{t('adminSettings.roles.title')}</h1>
+        <p className="mt-1 text-sm text-text-secondary">{t('adminSettings.roles.subtitle')}</p>
       </header>
 
       <div className="flex flex-wrap gap-2 mb-6">
-        <Chip label={`${sortedRoles.length} roles`} />
-        <Chip label={`${adminRoles} admin roles`} tone="primary" />
+        <Chip label={t('adminSettings.roles.count', { count: sortedRoles.length })} />
+        <Chip label={t('adminSettings.roles.adminCount', { count: adminRoles })} tone="primary" />
       </div>
 
-      {loadError ? <Alert tone="danger" text={`Could not load roles: ${loadError}`} /> : null}
-      {!serverId ? <Alert tone="danger" text="No server is available for this admin account." /> : null}
+      {loadError ? <Alert tone="danger" text={t('adminSettings.roles.loadError', { error: loadError })} /> : null}
+      {!serverId ? <Alert tone="danger" text={t('adminSettings.common.noServer')} /> : null}
       {message ? <Alert tone={message.tone} text={message.text} /> : null}
 
       <div className="mb-8 rounded-xl border border-border-subtle bg-surface p-4">
-        <h2 className="mb-4 text-sm font-semibold text-text-primary">Create Role</h2>
+        <h2 className="mb-4 text-sm font-semibold text-text-primary">{t('adminSettings.roles.createTitle')}</h2>
         <div className="grid gap-3 md:grid-cols-[1fr_140px_auto]">
           <label className="block">
-            <span className="sr-only">Role name</span>
+            <span className="sr-only">{t('adminSettings.roles.nameLabel')}</span>
             <input
               value={form.name}
               onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-              placeholder="Moderator"
+              placeholder={t('adminSettings.roles.namePlaceholder')}
               maxLength={64}
               disabled={!serverId || isCreating}
               className="w-full rounded-lg border border-border-subtle bg-surface-container px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-primary-container"
             />
           </label>
           <label className="flex items-center gap-2 rounded-lg border border-border-subtle bg-surface-container px-3 py-2">
-            <span className="sr-only">Role color</span>
+            <span className="sr-only">{t('adminSettings.roles.colorLabel')}</span>
             <input
               type="color"
               value={form.color}
@@ -287,7 +308,7 @@ export default function RolesClient({
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-on-primary disabled:cursor-not-allowed disabled:opacity-50"
           >
             <span className="material-symbols-outlined text-[18px]">add</span>
-            {isCreating ? 'Creating...' : 'Create'}
+            {isCreating ? t('adminSettings.common.creating') : t('adminSettings.common.create')}
           </button>
         </div>
         <RoleIconPicker value={form.icon} onChange={(icon) => setForm((current) => ({ ...current, icon }))} disabled={!serverId || isCreating} />
@@ -298,9 +319,7 @@ export default function RolesClient({
       <div className="bg-surface rounded-xl border border-border-subtle overflow-hidden">
         <ul className="divide-y divide-border-subtle">
           {sortedRoles.length === 0 ? (
-            <li className="p-6 text-sm text-text-muted text-center">
-              No roles configured. Default @everyone is created automatically.
-            </li>
+            <li className="p-6 text-sm text-text-muted text-center">{t('adminSettings.roles.empty')}</li>
           ) : (
             sortedRoles.map((role) => {
               const isEditing = editingId === role.id;
@@ -323,7 +342,7 @@ export default function RolesClient({
                             className="w-full rounded-lg border border-border-subtle bg-surface-container px-3 py-2 text-sm text-text-primary disabled:opacity-60"
                           />
                           <label className="flex items-center gap-2 rounded-lg border border-border-subtle bg-surface-container px-3 py-2">
-                            <span className="sr-only">Role color</span>
+                            <span className="sr-only">{t('adminSettings.roles.colorLabel')}</span>
                             <input
                               type="color"
                               value={draft.color}
@@ -337,11 +356,15 @@ export default function RolesClient({
                             value={draft.icon ?? ''}
                             disabled={isBusy}
                             onChange={(event) => setDraft((current) => ({ ...current, icon: event.target.value || null }))}
-                            aria-label="Role icon"
+                            aria-label={t('adminSettings.roles.iconLabel')}
                             className="w-full rounded-lg border border-border-subtle bg-surface-container px-3 py-2 text-sm text-text-primary"
                           >
-                            <option value="">No icon</option>
-                            {ROLE_ICONS.map((icon) => <option key={icon} value={icon}>{icon.replaceAll('_', ' ')}</option>)}
+                            <option value="">{t('adminSettings.roles.noIcon')}</option>
+                            {ROLE_ICONS.map((icon) => (
+                              <option key={icon} value={icon}>
+                                {t(ROLE_ICON_LABEL_KEYS[icon])}
+                              </option>
+                            ))}
                           </select>
                           <input
                             type="number"
@@ -353,7 +376,7 @@ export default function RolesClient({
                               setDraft((current) => ({ ...current, position: Number(event.target.value) || 0 }))
                             }
                             className="w-full rounded-lg border border-border-subtle bg-surface-container px-3 py-2 text-sm text-text-primary"
-                            aria-label="Role position"
+                            aria-label={t('adminSettings.roles.positionLabel')}
                           />
                         </div>
                       ) : (
@@ -361,12 +384,18 @@ export default function RolesClient({
                           <div className="flex flex-wrap items-center gap-2">
                             {role.icon ? <span className="material-symbols-outlined text-[17px]" style={{ color: role.color ?? undefined }} aria-hidden>{role.icon}</span> : null}
                             <h3 className="text-sm font-semibold text-text-primary truncate">{role.name}</h3>
-                            {role.permissions.includes('administrator') ? <RoleBadge label="Admin" tone="danger" /> : null}
-                            {role.name === '@everyone' ? <RoleBadge label="Default" tone="muted" /> : null}
-                            {role.displaySeparately ? <RoleBadge label="Member list" tone="muted" /> : null}
+                            {role.permissions.includes('administrator') ? (
+                              <RoleBadge label={t('adminSettings.roles.badge.admin')} tone="danger" />
+                            ) : null}
+                            {role.name === '@everyone' ? (
+                              <RoleBadge label={t('adminSettings.roles.badge.default')} tone="muted" />
+                            ) : null}
+                            {role.displaySeparately ? (
+                              <RoleBadge label={t('adminSettings.roles.badge.memberList')} tone="muted" />
+                            ) : null}
                           </div>
                           <p className="text-xs text-text-muted">
-                            {role.memberCount} {role.memberCount === 1 ? 'member' : 'members'} - position {role.position}
+                            {t('adminSettings.roles.memberLine', { count: role.memberCount, position: role.position })}
                           </p>
                         </>
                       )}
@@ -374,15 +403,30 @@ export default function RolesClient({
                     <div className="flex shrink-0 items-center gap-1">
                       {isEditing ? (
                         <>
-                          <IconButton icon="check" label="Save role" disabled={isBusy} onClick={() => saveRole(role)} />
-                          <IconButton icon="close" label="Cancel edit" disabled={isBusy} onClick={() => setEditingId(null)} />
+                          <IconButton
+                            icon="check"
+                            label={t('adminSettings.roles.save')}
+                            disabled={isBusy}
+                            onClick={() => saveRole(role)}
+                          />
+                          <IconButton
+                            icon="close"
+                            label={t('adminSettings.common.cancelEdit')}
+                            disabled={isBusy}
+                            onClick={() => setEditingId(null)}
+                          />
                         </>
                       ) : (
                         <>
-                          <IconButton icon="edit" label="Edit role" disabled={Boolean(editingId) || isBusy} onClick={() => beginEdit(role)} />
+                          <IconButton
+                            icon="edit"
+                            label={t('adminSettings.roles.edit')}
+                            disabled={Boolean(editingId) || isBusy}
+                            onClick={() => beginEdit(role)}
+                          />
                           <IconButton
                             icon="delete"
-                            label="Delete role"
+                            label={t('adminSettings.roles.delete')}
                             danger
                             disabled={Boolean(editingId) || isBusy || role.name === '@everyone'}
                             onClick={() => deleteRole(role)}
@@ -410,11 +454,12 @@ export default function RolesClient({
 }
 
 function SeparateMembersToggle({ checked, onChange, disabled }: { checked: boolean; onChange: (checked: boolean) => void; disabled: boolean }) {
+  const t = useT();
   return (
     <label className="mt-4 flex items-center justify-between gap-4 rounded-md border border-border-subtle bg-surface-container px-3 py-2.5">
       <span>
-        <span className="block text-sm font-medium text-text-primary">Display members separately</span>
-        <span className="block text-xs text-text-muted">Group online members under this role in the member list.</span>
+        <span className="block text-sm font-medium text-text-primary">{t('adminSettings.roles.separate.title')}</span>
+        <span className="block text-xs text-text-muted">{t('adminSettings.roles.separate.description')}</span>
       </span>
       <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className="size-4 accent-primary" />
     </label>
@@ -422,13 +467,14 @@ function SeparateMembersToggle({ checked, onChange, disabled }: { checked: boole
 }
 
 function RoleIconPicker({ value, onChange, disabled }: { value: string | null; onChange: (icon: string | null) => void; disabled: boolean }) {
+  const t = useT();
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-1.5" aria-label="Role icon">
-      <button type="button" disabled={disabled} onClick={() => onChange(null)} className={`grid size-8 place-items-center rounded-md border ${value === null ? 'border-primary bg-primary/10 text-primary' : 'border-border-subtle text-text-muted'}`} title="No icon">
+    <div className="mt-3 flex flex-wrap items-center gap-1.5" aria-label={t('adminSettings.roles.iconLabel')}>
+      <button type="button" disabled={disabled} onClick={() => onChange(null)} className={`grid size-8 place-items-center rounded-md border ${value === null ? 'border-primary bg-primary/10 text-primary' : 'border-border-subtle text-text-muted'}`} title={t('adminSettings.roles.noIcon')}>
         <span className="material-symbols-outlined text-[17px]" aria-hidden>block</span>
       </button>
       {ROLE_ICONS.map((icon) => (
-        <button key={icon} type="button" disabled={disabled} onClick={() => onChange(icon)} className={`grid size-8 place-items-center rounded-md border ${value === icon ? 'border-primary bg-primary/10 text-primary' : 'border-border-subtle text-text-secondary hover:bg-surface-container'}`} title={icon.replaceAll('_', ' ')}>
+        <button key={icon} type="button" disabled={disabled} onClick={() => onChange(icon)} className={`grid size-8 place-items-center rounded-md border ${value === icon ? 'border-primary bg-primary/10 text-primary' : 'border-border-subtle text-text-secondary hover:bg-surface-container'}`} title={t(ROLE_ICON_LABEL_KEYS[icon])}>
           <span className="material-symbols-outlined text-[17px]" aria-hidden>{icon}</span>
         </button>
       ))}
@@ -445,12 +491,13 @@ function PermissionMatrix({
   compact?: boolean;
   onToggle: (permission: string) => void;
 }) {
+  const t = useT();
   return (
     <div className={compact ? 'mt-4 grid gap-4 md:grid-cols-2' : 'grid gap-4 md:grid-cols-2'}>
       {PERMISSION_GROUPS.map((group) => (
-        <div key={group.label}>
+        <div key={group.labelKey}>
           <h4 className="mb-2 border-b border-border-subtle pb-1 text-[10px] uppercase tracking-wider text-text-muted">
-            {group.label}
+            {t(group.labelKey)}
           </h4>
           <ul className="space-y-1">
             {group.permissions.map((permission) => {
@@ -463,7 +510,7 @@ function PermissionMatrix({
                     className="flex w-full items-center justify-between rounded-lg p-2 text-left hover:bg-surface-container"
                   >
                     <span className={`text-xs ${granted ? 'text-text-primary' : 'text-text-muted'}`}>
-                      {permission.label}
+                      {t(permission.labelKey)}
                     </span>
                     <span
                       className={`flex h-5 w-9 items-center rounded-full px-0.5 transition-colors ${
@@ -484,12 +531,13 @@ function PermissionMatrix({
 }
 
 function PermissionSummary({ permissions }: { permissions: string[] }) {
+  const t = useT();
   return (
     <div className="grid gap-4 md:grid-cols-2">
       {PERMISSION_GROUPS.map((group) => (
-        <div key={group.label}>
+        <div key={group.labelKey}>
           <h4 className="mb-2 border-b border-border-subtle pb-1 text-[10px] uppercase tracking-wider text-text-muted">
-            {group.label}
+            {t(group.labelKey)}
           </h4>
           <ul className="space-y-1">
             {group.permissions.map((permission) => {
@@ -497,7 +545,7 @@ function PermissionSummary({ permissions }: { permissions: string[] }) {
               return (
                 <li key={permission.key} className="flex items-center justify-between rounded-lg p-2">
                   <span className={`text-xs ${granted ? 'text-text-primary' : 'text-text-muted'}`}>
-                    {permission.label}
+                    {t(permission.labelKey)}
                   </span>
                   <span
                     className={`flex h-5 w-9 items-center rounded-full px-0.5 transition-colors ${

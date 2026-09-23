@@ -2,7 +2,17 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { addLanguage, markComplete, status, sync } from '../../../../../scripts/i18n/lib.mjs';
+import { messageArguments as runtimeArguments } from '@lobbyforge/plugin-sdk';
+import {
+  addLanguage,
+  markComplete,
+  messageArguments,
+  messageProblems,
+  readAppLocales,
+  readPlugins,
+  status,
+  sync,
+} from '../../../../../scripts/i18n/lib.mjs';
 
 /**
  * The promise this project makes to translators: adding a language is
@@ -135,6 +145,62 @@ describe('pnpm i18n:sync', () => {
     expect(readJson('apps/web/messages/de/lobby.json')['lobby.old']).toBe('Alt');
     sync({ root, prune: true });
     expect(readJson('apps/web/messages/de/lobby.json')['lobby.old']).toBeUndefined();
+  });
+});
+
+describe('message syntax', () => {
+  it('reports a plural a translator got wrong, by key', () => {
+    scaffoldRepo();
+    addLanguage({ root, code: 'de', name: 'Deutsch', englishName: 'German' });
+    writeJson('apps/web/messages/de/lobby.json', {
+      'lobby.hello': '{name, plural, one {Hallo}}',
+      'lobby.bye': '{count, plural, eins {x} other {y}}',
+    });
+    const report = status(root).problems.join('\n');
+    expect(report).toMatch(/lobby\.hello.*"other"/);
+    expect(report).toMatch(/lobby\.bye.*"eins"/);
+  });
+
+  it('checks English too — it is what every language falls back to', () => {
+    scaffoldRepo();
+    writeJson('apps/web/messages/en/lobby.json', { 'lobby.hello': 'Hello {{name}}', 'lobby.bye': 'Goodbye' });
+    expect(status(root).problems.join('\n')).toMatch(/app en: "lobby\.hello" cannot read/);
+  });
+
+  it('agrees with the runtime about every message in the repo', () => {
+    // The tooling keeps its own small parser so translators need nothing
+    // built; this holds it to the SDK's, message by message.
+    const messages: string[] = [
+      'Plain',
+      '{a} and {b}',
+      '{count, plural, =0 {none} one {# {what}} other {# {what}s}}',
+      '{kind, select, voice {Voice} other {Text}}',
+      "{name}'ı başlat",
+      'Unclosed {name',
+    ];
+    for (const locale of readAppLocales().locales) {
+      for (const table of Object.values(locale.files)) messages.push(...Object.values(table as Record<string, string>));
+    }
+    for (const plugin of readPlugins().withTables) {
+      for (const table of Object.values(plugin.tables)) {
+        for (const [key, value] of Object.entries(table as Record<string, string>)) if (!key.startsWith('$')) messages.push(value);
+      }
+    }
+    const disagreements = messages.filter((m) => messageArguments(m).join() !== runtimeArguments(m).join());
+    expect(disagreements).toEqual([]);
+    expect(messages.length).toBeGreaterThan(1000);
+  });
+
+  it('finds nothing wrong with the messages that ship', () => {
+    const broken: string[] = [];
+    for (const locale of readAppLocales().locales) {
+      for (const table of Object.values(locale.files)) {
+        for (const [key, value] of Object.entries(table as Record<string, string>)) {
+          for (const problem of messageProblems(value)) broken.push(`${locale.code} ${key}: ${problem}`);
+        }
+      }
+    }
+    expect(broken).toEqual([]);
   });
 });
 

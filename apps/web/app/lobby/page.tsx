@@ -1,4 +1,5 @@
-﻿import { cookies } from 'next/headers';
+﻿import type { Metadata } from 'next';
+import { cookies } from 'next/headers';
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { getSessionSecret } from '@/lib/api-auth';
@@ -50,13 +51,17 @@ import { toPresenceStatus, type PresenceStatus } from '@/lib/presence-status';
 import { formatMessageTimestamp } from '@/lib/chat-time';
 import { getTranslator } from '@/lib/i18n/server';
 import type { Translator } from '@/lib/i18n/core';
+import { pluginSummary } from '@/lib/plugin-catalog-text';
 
 export const dynamic = 'force-dynamic';
 
-export const metadata = {
-  title: 'Standalone Lobby - LobbyForge',
-  description: 'Your self-hosted community in a single 1280px window.',
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  return {
+    title: t('lobby.meta.title'),
+    description: t('lobby.meta.description'),
+  };
+}
 
 // ---- Shared types ----
 
@@ -176,34 +181,43 @@ const DEMO_MEMBERS: Member[] = [
   { id: 'lina', name: 'Lina', status: 'online' },
   { id: 'ozan', name: 'Ozan_TR', status: 'offline', grayscale: true },
 ];
-const DEMO_MESSAGES: ChatMessage[] = [
-  {
-    id: 'm1',
-    authorId: 'ozan',
-    author: 'Ozan_TR',
-    timestamp: 'Yesterday at 11:42 PM',
-    createdAt: new Date(Date.now() - 86_400_000).toISOString(),
-    body: 'Thanks for setting up the new server instance. Audio quality seems much more stable on LobbyForge infrastructure compared to our old setup.',
-  },
-  {
-    id: 'm2',
-    authorId: 'lina',
-    author: 'Lina',
-    authorColor: 'primary',
-    timestamp: 'Today at 8:15 AM',
-    createdAt: new Date().toISOString(),
-    body: 'I pushed the latest server logs to the repo. Latency graphs are looking solid.',
-    attachment: { name: 'server_latency_report_v2.pdf', size: '1.2 MB' },
-  },
-  {
-    id: 'm3',
-    authorId: 'juanka',
-    author: 'juanka',
-    timestamp: 'Today at 10:30 AM',
-    createdAt: new Date().toISOString(),
-    body: "Anyone jumping into Voice soon? I'm hanging out in the Main Lounge testing mic levels.",
-  },
-];
+/**
+ * The sample conversation. It is what a visitor to the official hub sees
+ * before joining a community, so it speaks their language — the stamps
+ * too: "11:42 PM" in English is "23:42" in Turkish.
+ */
+function demoMessages(t: Translator): ChatMessage[] {
+  const clock = (hours: number, minutes: number) =>
+    new Date(2000, 0, 1, hours, minutes).toLocaleTimeString(t.locale, { hour: 'numeric', minute: '2-digit' });
+  return [
+    {
+      id: 'm1',
+      authorId: 'ozan',
+      author: 'Ozan_TR',
+      timestamp: t('lobbyMain.time.yesterdayAt', { time: clock(23, 42) }),
+      createdAt: new Date(Date.now() - 86_400_000).toISOString(),
+      body: t('lobbyMain.demo.message1'),
+    },
+    {
+      id: 'm2',
+      authorId: 'lina',
+      author: 'Lina',
+      authorColor: 'primary',
+      timestamp: t('lobbyMain.time.todayAt', { time: clock(8, 15) }),
+      createdAt: new Date().toISOString(),
+      body: t('lobbyMain.demo.message2'),
+      attachment: { name: 'server_latency_report_v2.pdf', size: '1.2 MB' },
+    },
+    {
+      id: 'm3',
+      authorId: 'juanka',
+      author: 'juanka',
+      timestamp: t('lobbyMain.time.todayAt', { time: clock(10, 30) }),
+      createdAt: new Date().toISOString(),
+      body: t('lobbyMain.demo.message3'),
+    },
+  ];
+}
 
 // ---- Helpers for building LobbyData from live rows ----
 
@@ -256,20 +270,22 @@ function buildMembers(
 
 function buildVoiceUsers(
   channelPresence: Array<{ userId: string; status?: string }>,
-  summaries: MemberSummary[]
+  summaries: MemberSummary[],
+  unknownName: string
 ): VoiceUser[] {
   const nameByUser = new Map<string, string>();
   for (const s of summaries) nameByUser.set(s.userId, s.displayName);
   return channelPresence.map((p) => ({
     id: p.userId,
-    name: nameByUser.get(p.userId) ?? 'User',
+    name: nameByUser.get(p.userId) ?? unknownName,
   }));
 }
 
 function buildVoiceUsersByChannel(
   serverPresence: Array<{ userId: string; channelId: string; status?: string }>,
   summaries: MemberSummary[],
-  voiceChannelIds: Set<string>
+  voiceChannelIds: Set<string>,
+  unknownName: string
 ): Record<string, VoiceUser[]> {
   const nameByUser = new Map<string, string>();
   for (const s of summaries) nameByUser.set(s.userId, s.displayName);
@@ -279,7 +295,7 @@ function buildVoiceUsersByChannel(
     const users = byChannel[presence.channelId] ?? [];
     users.push({
       id: presence.userId,
-      name: nameByUser.get(presence.userId) ?? 'User',
+      name: nameByUser.get(presence.userId) ?? unknownName,
     });
     byChannel[presence.channelId] = users;
   }
@@ -428,6 +444,7 @@ async function loadLiveData(
     void setUserPresence(currentUserId, serverId, activeTextChannel?.id ?? serverId, 'online', 90).catch(() => {});
   }
 
+  const t = await getTranslator();
   const voiceChannelIds = new Set(voiceChannels.map((c) => c.id));
   // beta-review: the SAME presence projection as GET /api/presence —
   // blocks, per-user privacy (online status / activity) and role-gated
@@ -452,9 +469,15 @@ async function loadLiveData(
   const members = buildMembers(memberSummaries, memberPresence, voiceChannelIds);
   const voiceUsers = buildVoiceUsers(
     projectedVoice.filter((entry) => !!entry.channelId).map((entry) => ({ userId: entry.userId, status: entry.status })),
-    memberSummaries
+    memberSummaries,
+    t('lobbyMain.chat.unknownUser')
   );
-  const voiceUsersByChannel = buildVoiceUsersByChannel(rosterPresence, memberSummaries, voiceChannelIds);
+  const voiceUsersByChannel = buildVoiceUsersByChannel(
+    rosterPresence,
+    memberSummaries,
+    voiceChannelIds,
+    t('lobbyMain.chat.unknownUser')
+  );
 
   // Resolve the caller's block list so blocked authors' messages are
   // masked at the server level - the content never reaches the client.
@@ -462,7 +485,7 @@ async function loadLiveData(
   // The SAME stamps and author labels the client renders, in the same
   // language — otherwise the first paint is English and flips on
   // hydration when the roster re-renders them.
-  const messages = buildMessages(messageRows, authorMap, currentUserId, blockedIds, await getTranslator());
+  const messages = buildMessages(messageRows, authorMap, currentUserId, blockedIds, t);
   const canManageMessages = hasPermission(view.permissions, CorePermission.MANAGE_MESSAGES);
   const canMuteMembers = hasPermission(view.permissions, CorePermission.MUTE_MEMBERS);
   const canManageServer = hasPermission(view.permissions, CorePermission.MANAGE_SERVER);
@@ -481,7 +504,7 @@ async function loadLiveData(
           {
             id: summary.id,
             name: summary.name,
-            summary: summary.catalog?.summary ?? null,
+            summary: pluginSummary(summary.id, t.locale, summary.catalog?.summary ?? null),
             minPlayers: summary.catalog?.playerConfig?.minPlayers ?? null,
             maxPlayers: summary.catalog?.playerConfig?.maxPlayers ?? null,
             trustLevel: summary.catalog?.trustLevel ?? null,
@@ -495,7 +518,7 @@ async function loadLiveData(
   // can send it as the participant `name` AND so the sidebar voice roster
   // shows the user's real name on the local tile instead of the raw
   // UUID identity (which the token endpoint sets to `session.uid`).
-  let currentDisplayName = 'Guest';
+  let currentDisplayName = t('common.guest');
   if (currentUserId) {
     const me = await getUserById(db, currentUserId).catch(() => null);
     if (me?.displayName) currentDisplayName = me.displayName;
@@ -624,6 +647,7 @@ export default async function LobbyPage({
     return <LobbyUnavailable reason={liveDataFailed ? 'data_unavailable' : 'server_missing'} />;
   }
 
+  const t = await getTranslator();
   const data: LobbyData = liveData ?? {
     serverName,
     serverBannerUrl: null,
@@ -639,9 +663,9 @@ export default async function LobbyPage({
       [DEMO_CHANNELS.find((c) => c.category === 'voice')?.id ?? 'main-lounge']: DEMO_VOICE_USERS,
     },
     members: DEMO_MEMBERS,
-    messages: DEMO_MESSAGES,
+    messages: demoMessages(t),
     currentUserId: userId,
-    currentDisplayName: 'Guest',
+    currentDisplayName: t('common.guest'),
     isLive: false,
     canManageMessages: false,
     canMuteMembers: false,
@@ -678,20 +702,21 @@ export default async function LobbyPage({
   );
 }
 
-function LobbyUnavailable({ reason }: { reason: 'data_unavailable' | 'server_missing' }) {
+async function LobbyUnavailable({ reason }: { reason: 'data_unavailable' | 'server_missing' }) {
+  const t = await getTranslator();
   return (
     <div className="grid h-dvh w-full place-items-center bg-background p-6">
       <section className="w-full max-w-md text-center">
         <span className="material-symbols-outlined text-4xl text-danger" aria-hidden>cloud_off</span>
-        <h1 className="mt-4 text-xl font-semibold text-text-primary">Community unavailable</h1>
+        <h1 className="mt-4 text-xl font-semibold text-text-primary">{t('lobby.unavailable.title')}</h1>
         <p className="mt-2 text-sm leading-relaxed text-text-secondary">
           {reason === 'data_unavailable'
-            ? 'LobbyForge could not load the community data. No demo members or messages were substituted.'
-            : 'This account has no accessible community. An authenticated administrator must repair the server assignment.'}
+            ? t('lobby.unavailable.dataUnavailable')
+            : t('lobby.unavailable.serverMissing')}
         </p>
         <Link href="/admin/health" className="mt-5 inline-flex items-center gap-2 rounded-md border border-border-strong px-4 py-2 text-sm text-text-secondary hover:bg-surface-container">
           <span className="material-symbols-outlined text-lg" aria-hidden>health_and_safety</span>
-          Open system health
+          {t('lobby.unavailable.openHealth')}
         </Link>
       </section>
     </div>
@@ -812,7 +837,7 @@ export function shouldShowServerRail({
  * "add community" affordance is shown only on the official deployment
  * (self-host is single-server by design).
  */
-function ServerRail({
+async function ServerRail({
   serverName,
   isOfficial,
   activeServerId,
@@ -823,13 +848,14 @@ function ServerRail({
   activeServerId: string | null;
   joinedServers: Array<{ id: string; name: string }>;
 }) {
+  const t = await getTranslator();
   return (
     <nav className="w-[72px] h-full bg-background border-r border-border-subtle flex flex-col items-center py-3 flex-shrink-0 z-50 animate-fade-in-right">
       <div className="mb-4">
         <a
           href="/"
           className="w-12 h-12 rounded-2xl bg-surface-container flex items-center justify-center font-bold text-primary hover:rounded-xl hover:scale-105 hover:shadow-[0_0_15px_rgba(143,184,255,0.3)] transition-all duration-300"
-          title="LobbyForge Home"
+          title={t('lobby.rail.home')}
         >
           LF
         </a>
@@ -885,12 +911,12 @@ function ServerRail({
             <a
               href="/instances/new"
               className="w-12 h-12 rounded-full flex items-center justify-center text-success border border-dashed border-border-subtle hover:bg-success/10 hover:border-success hover:scale-105 transition-all duration-300"
-              title="Add a community"
+              title={t('lobby.server.addCommunity')}
             >
               <span className="material-symbols-outlined">add</span>
             </a>
             <div className="absolute left-16 top-1/2 -translate-y-1/2 px-2 py-1 bg-surface-container-high text-xs rounded opacity-0 rail-tooltip whitespace-nowrap z-[60] border border-border-subtle">
-              Add a community
+              {t('lobby.server.addCommunity')}
             </div>
           </div>
         ) : null}
@@ -901,14 +927,14 @@ function ServerRail({
             <Link
               href="/discover"
               className="w-12 h-12 rounded-full flex items-center justify-center text-text-secondary hover:bg-surface-container hover:text-text-primary transition-all duration-300"
-              title="Discover communities"
+              title={t('lobby.server.discover')}
             >
               <span className="material-symbols-outlined">explore</span>
             </Link>
             <Link
               href="/marketplace"
               className="w-12 h-12 rounded-full flex items-center justify-center text-text-secondary hover:bg-surface-container hover:text-text-primary transition-all duration-300"
-              title="Plugin marketplace"
+              title={t('lobby.rail.marketplace')}
             >
               <span className="material-symbols-outlined">extension</span>
             </Link>
@@ -917,7 +943,7 @@ function ServerRail({
         <Link
           href="/settings"
           className="w-12 h-12 rounded-full flex items-center justify-center text-text-secondary hover:bg-surface-container hover:text-text-primary transition-all duration-300"
-          title="User settings"
+          title={t('lobby.server.userSettings')}
         >
           <span className="material-symbols-outlined">settings</span>
         </Link>
@@ -926,7 +952,7 @@ function ServerRail({
   );
 }
 
-function Sidebar({
+async function Sidebar({
   serverName,
   isOfficial,
   hasUser,
@@ -940,6 +966,7 @@ function Sidebar({
   /** True when the parent LobbyShell wrapped us in <LobbyVoiceProvider>. */
   voiceProvider: boolean;
 }) {
+  const t = await getTranslator();
   const activeVoiceId = data.activeVoiceChannel?.id;
   // Activities belong to a voice channel: the active one, else the first.
   const activityChannel =
@@ -980,7 +1007,7 @@ function Sidebar({
               >
                 add
               </span>
-              Add instance
+              {t('lobby.sidebar.addInstance')}
             </a>
           </div>
         ) : null}
@@ -994,7 +1021,7 @@ function Sidebar({
             <LobbyTextChannels channels={data.textChannels} />
           ) : (
             <ChannelGroup
-              title="Text Channels"
+              title={t('lobbyMain.text.heading')}
               channels={data.textChannels}
               iconName="tag"
             />
@@ -1012,7 +1039,7 @@ function Sidebar({
             />
           ) : (
             <ChannelGroup
-              title="Voice Channels"
+              title={t('lobbyMain.voice.heading')}
               channels={data.voiceChannels}
               iconName="volume_up"
               activeChannelId={activeVoiceId}
@@ -1026,7 +1053,7 @@ function Sidebar({
               apps={data.installedApps}
               serverId={data.serverId}
               voiceChannelId={activityChannel?.id ?? null}
-              voiceChannelName={activityChannel?.name ?? 'this room'}
+              voiceChannelName={activityChannel?.name ?? t('lobbyMain.channel.thisRoom')}
               canManageServer={data.canManageServer}
             />
           </div>
@@ -1045,14 +1072,14 @@ function Sidebar({
                 className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors"
               >
                 <span className="material-symbols-outlined text-[18px]">explore</span>
-                Discover
+                {t('lobby.sidebar.discover')}
               </a>
               <a
                 href="/marketplace"
                 className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors"
               >
                 <span className="material-symbols-outlined text-[18px]">extension</span>
-                Marketplace
+                {t('lobby.sidebar.marketplace')}
               </a>
             </>
           ) : null}
@@ -1088,7 +1115,7 @@ function buildKnownNames(data: LobbyData): Record<string, string> {
   return map;
 }
 
-function ChannelGroup({
+async function ChannelGroup({
   title,
   channels,
   iconName,
@@ -1102,6 +1129,7 @@ function ChannelGroup({
   voiceUsers?: VoiceUser[];
 }) {
   if (channels.length === 0) return null;
+  const t = await getTranslator();
   return (
     <div>
       <div className="flex items-center justify-between mb-2 group cursor-pointer">
@@ -1146,7 +1174,7 @@ function ChannelGroup({
                 <ul className="ml-6 mt-1 space-y-1 pb-2">
                   {voiceUsers.length === 0 ? (
                     <li className="px-2 py-1 text-label-xs text-text-muted italic">
-                      No one here yet
+                      {t('lobby.sidebar.voiceEmpty')}
                     </li>
                   ) : null}
                   {voiceUsers.map((u) => (
@@ -1191,7 +1219,8 @@ function ChannelGroup({
   );
 }
 
-function VoiceControlFooter({ serverName, hasUser }: { serverName: string; hasUser: boolean }) {
+async function VoiceControlFooter({ serverName, hasUser }: { serverName: string; hasUser: boolean }) {
+  const t = await getTranslator();
   return (
     <div className="mt-auto border-t border-border-subtle bg-surface-raised flex flex-col">
       <div className="bg-surface-container-lowest p-3 border-b border-border-subtle">
@@ -1200,7 +1229,7 @@ function VoiceControlFooter({ serverName, hasUser }: { serverName: string; hasUs
             <div className="flex items-center gap-1.5">
               <div className="w-2 h-2 rounded-full bg-success" />
               <span className="text-[11px] text-success font-bold uppercase tracking-tight">
-                Voice {hasUser ? 'Connected' : 'Ready'}
+                {hasUser ? t('lobby.voice.connected') : t('lobby.voice.ready')}
               </span>
             </div>
             <button className="text-[13px] text-text-secondary hover:text-text-primary transition-colors truncate text-left">
@@ -1231,9 +1260,9 @@ function VoiceControlFooter({ serverName, hasUser }: { serverName: string; hasUs
             </div>
             <div className="flex flex-col min-w-0">
               <span className="text-[13px] text-text-primary font-medium truncate">
-                {hasUser ? 'You' : 'Guest'}
+                {hasUser ? t('lobby.presence.you') : t('common.guest')}
               </span>
-              <span className="text-[11px] text-text-secondary">Online</span>
+              <span className="text-[11px] text-text-secondary">{t('lobby.presence.online.label')}</span>
             </div>
           </div>
           <div className="flex items-center gap-0.5">

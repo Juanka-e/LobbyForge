@@ -2,12 +2,22 @@
 
 import { useState } from 'react';
 import type { PluginCatalogRow } from '@lobbyforge/db';
+import { useT } from '@/lib/i18n/client';
 
 const TRUST_COLORS: Record<string, string> = {
   official: 'text-primary border-primary/30 bg-primary/5',
   'verified-community': 'text-success border-success/30 bg-success/5',
   unverified: 'text-text-muted border-border-subtle bg-surface',
 };
+
+/** Trust levels are catalogue codes; these are the words players see. */
+const TRUST_LABEL_KEYS: Record<string, string> = {
+  official: 'hub.trust.official',
+  'verified-community': 'hub.trust.verified',
+  unverified: 'hub.trust.unverified',
+};
+
+type InstallResult = { kind: 'installed' } | { kind: 'failed'; message: string };
 
 interface MarketplaceCard {
   pluginId: string;
@@ -31,16 +41,15 @@ export default function MarketplaceGrid({
 }: {
   plugins: PluginCatalogRow[];
 }) {
+  const t = useT();
   if (plugins.length === 0) {
     return (
       <div className="rounded-2xl border border-border-subtle bg-surface p-12 text-center">
         <span className="material-symbols-outlined text-5xl text-text-muted mb-3 block">
           extension_off
         </span>
-        <h2 className="text-base font-semibold text-text-primary">No plugins found</h2>
-        <p className="mt-1 text-sm text-text-muted">
-          No community plugins match your search yet. Check back soon!
-        </p>
+        <h2 className="text-base font-semibold text-text-primary">{t('hub.marketplace.empty.title')}</h2>
+        <p className="mt-1 text-sm text-text-muted">{t('hub.marketplace.empty.body')}</p>
       </div>
     );
   }
@@ -55,11 +64,14 @@ export default function MarketplaceGrid({
 }
 
 function PluginCard({ plugin }: { plugin: PluginCatalogRow }) {
+  const t = useT();
   const [installing, setInstalling] = useState(false);
-  const [installResult, setInstallResult] = useState<string | null>(null);
+  const [installResult, setInstallResult] = useState<InstallResult | null>(null);
   const tags = (plugin.tags as string[]).slice(0, 3);
   const trustClass = TRUST_COLORS[plugin.trustLevel] ?? TRUST_COLORS.unverified;
   const playerConfig = plugin.playerConfig as { minPlayers?: number; maxPlayers?: number } | null;
+  const trustKey = TRUST_LABEL_KEYS[plugin.trustLevel];
+  const installed = installResult?.kind === 'installed';
 
   return (
     <article className="rounded-2xl border border-border-subtle bg-surface p-5 hover:border-primary/30 transition-all">
@@ -77,7 +89,9 @@ function PluginCard({ plugin }: { plugin: PluginCatalogRow }) {
             <h3 className="text-sm font-semibold text-text-primary truncate">{plugin.name}</h3>
             <span className="text-xs text-text-muted">v{plugin.version}</span>
           </div>
-          <p className="text-xs text-text-muted truncate">by {plugin.publisher}</p>
+          <p className="text-xs text-text-muted truncate">
+            {t('hub.marketplace.by', { publisher: plugin.publisher })}
+          </p>
         </div>
       </div>
 
@@ -88,7 +102,7 @@ function PluginCard({ plugin }: { plugin: PluginCatalogRow }) {
         {plugin.trustLevel === 'official' ? (
           <span className="material-symbols-outlined text-[12px]">verified</span>
         ) : null}
-        {plugin.trustLevel}
+        {trustKey ? t(trustKey) : plugin.trustLevel}
       </span>
 
       {/* Summary */}
@@ -119,13 +133,16 @@ function PluginCard({ plugin }: { plugin: PluginCatalogRow }) {
         {playerConfig?.maxPlayers ? (
           <span className="flex items-center gap-1">
             <span className="material-symbols-outlined text-[12px]">groups</span>
-            {playerConfig.minPlayers ?? 1}-{playerConfig.maxPlayers}
+            {t('hub.marketplace.playerRange', {
+              min: playerConfig.minPlayers ?? 1,
+              max: playerConfig.maxPlayers,
+            })}
           </span>
         ) : null}
         {plugin.requiresVoiceRoom ? (
           <span className="flex items-center gap-1">
             <span className="material-symbols-outlined text-[12px]">mic</span>
-            Voice
+            {t('hub.marketplace.voice')}
           </span>
         ) : null}
       </div>
@@ -142,28 +159,37 @@ function PluginCard({ plugin }: { plugin: PluginCatalogRow }) {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ pluginId: plugin.pluginId }),
             });
-            const data = await res.json();
+            const data = (await res.json().catch(() => ({}))) as { error?: string };
             if (res.ok) {
-              setInstallResult('Installed ✓');
+              setInstallResult({ kind: 'installed' });
             } else {
-              setInstallResult(data.error ?? 'Install failed');
+              setInstallResult({
+                kind: 'failed',
+                message: data.error ?? t('hub.marketplace.install.failed'),
+              });
             }
           } catch {
-            setInstallResult('Network error');
+            setInstallResult({ kind: 'failed', message: t('hub.marketplace.install.networkError') });
           } finally {
             setInstalling(false);
           }
         }}
         disabled={installing}
         className={`mt-3 w-full rounded-lg px-3 py-2 text-xs font-semibold transition-all ${
-          installResult === 'Installed ✓'
+          installed
             ? 'bg-success/20 text-success border border-success/30'
             : installing
               ? 'bg-surface-container text-text-muted cursor-wait'
               : 'bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20'
         }`}
       >
-        {installing ? 'Installing…' : installResult ?? 'Install'}
+        {installing
+          ? t('hub.marketplace.install.installing')
+          : installed
+            ? t('hub.marketplace.install.installed')
+            : installResult?.kind === 'failed'
+              ? installResult.message
+              : t('hub.marketplace.install.install')}
       </button>
     </article>
   );

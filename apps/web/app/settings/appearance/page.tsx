@@ -5,7 +5,7 @@ import SettingsShell from '@/app/SettingsShell';
 import { deriveAccent } from '@/lib/accent';
 import { clearLocaleCookie, serializeLocaleCookie } from '@/lib/i18n/locale-cookie';
 import { useLocaleOptions, useT } from '@/lib/i18n/client';
-import SettingsStickyFooter from '@/app/settings/SettingsStickyFooter';
+import SettingsStickyFooter, { type SettingsStatus } from '@/app/settings/SettingsStickyFooter';
 
 type ThemeChoice = 'dark' | 'dim' | 'light' | 'system';
 type Density = 'comfortable' | 'compact';
@@ -29,19 +29,29 @@ type AppearanceExtra = {
   hideEmptyChannels: boolean;
 };
 
-const THEME_OPTIONS: { value: ThemeChoice; label: string; hint: string }[] = [
-  { value: 'dark', label: 'Dark', hint: 'Default - deep navy surface' },
-  { value: 'dim', label: 'Dim', hint: 'Soft slate with reduced contrast' },
-  { value: 'light', label: 'Light', hint: 'Daytime palette (preview only)' },
-  { value: 'system', label: 'System', hint: 'Match the OS preference' },
+// Labels are message keys, resolved where they render.
+type ThemeOption = { value: ThemeChoice; labelKey: string; hintKey: string };
+
+const THEME_OPTIONS: ThemeOption[] = [
+  { value: 'dark', labelKey: 'settings.appearance.theme.dark', hintKey: 'settings.appearance.theme.darkHint' },
+  { value: 'dim', labelKey: 'settings.appearance.theme.dim', hintKey: 'settings.appearance.theme.dimHint' },
+  { value: 'light', labelKey: 'settings.appearance.theme.light', hintKey: 'settings.appearance.theme.lightHint' },
+  { value: 'system', labelKey: 'settings.appearance.theme.system', hintKey: 'settings.appearance.theme.systemHint' },
 ];
 
-const ACCENT_PRESETS: { value: string; label: string }[] = [
-  { value: '#8FB8FF', label: 'Ice Blue' },
-  { value: '#bcc7da', label: 'Steel' },
-  { value: '#deb063', label: 'Soft Amber' },
-  { value: '#7CCFA6', label: 'Sage' },
-  { value: '#E98282', label: 'Coral' },
+const THEME_LABEL_KEYS: Record<ThemeChoice, string> = {
+  dark: 'settings.appearance.theme.dark',
+  dim: 'settings.appearance.theme.dim',
+  light: 'settings.appearance.theme.light',
+  system: 'settings.appearance.theme.system',
+};
+
+const ACCENT_PRESETS: { value: string; labelKey: string }[] = [
+  { value: '#8FB8FF', labelKey: 'settings.appearance.accent.iceBlue' },
+  { value: '#bcc7da', labelKey: 'settings.appearance.accent.steel' },
+  { value: '#deb063', labelKey: 'settings.appearance.accent.softAmber' },
+  { value: '#7CCFA6', labelKey: 'settings.appearance.accent.sage' },
+  { value: '#E98282', labelKey: 'settings.appearance.accent.coral' },
 ];
 
 const DEFAULT_EXTRA: AppearanceExtra = {
@@ -153,7 +163,7 @@ export default function AppearanceSettingsPage() {
   const [extra, setExtra] = useState<AppearanceExtra>(DEFAULT_EXTRA);
   const [accentDraft, setAccentDraft] = useState(DEFAULT_EXTRA.accent.slice(1));
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
-  const [status, setStatus] = useState<string>('Loading settings...');
+  const [status, setStatus] = useState<SettingsStatus>({ key: 'settings.footer.loading' });
   const [busy, setBusy] = useState(false);
   const [themeDirty, setThemeDirty] = useState(false);
   const [savedExtraSnapshot, setSavedExtraSnapshot] = useState<AppearanceExtra>(DEFAULT_EXTRA);
@@ -191,10 +201,10 @@ export default function AppearanceSettingsPage() {
           setTheme(nextTheme);
           applyAppearanceTheme(nextTheme);
           setUpdatedAt(data.settings.updatedAt);
-          setStatus('Ready');
+          setStatus({ key: 'settings.footer.ready' });
         }
       } catch (err) {
-        if (!cancelled) setStatus((err as Error).message);
+        if (!cancelled) setStatus({ text: (err as Error).message });
       }
     }
     void load();
@@ -241,7 +251,7 @@ export default function AppearanceSettingsPage() {
 
   async function save() {
     setBusy(true);
-    setStatus('Saving...');
+    setStatus({ key: 'settings.footer.saving' });
     try {
       let nextUpdatedAt = updatedAt;
       if (themeDirty) {
@@ -261,9 +271,9 @@ export default function AppearanceSettingsPage() {
       applyAppearanceExtra(extra);
       setSavedExtraSnapshot(extra);
       if (!themeDirty && nextUpdatedAt) setUpdatedAt(nextUpdatedAt);
-      setStatus('Saved');
+      setStatus({ key: 'settings.footer.saved' });
     } catch (err) {
-      setStatus((err as Error).message);
+      setStatus({ text: (err as Error).message });
     } finally {
       setBusy(false);
     }
@@ -281,13 +291,11 @@ export default function AppearanceSettingsPage() {
       <section className="max-w-5xl mx-auto pb-32 grid gap-8 lg:grid-cols-12">
         <div className="lg:col-span-8 space-y-8">
           <header>
-            <h1 className="text-2xl font-semibold text-text-primary">Appearance</h1>
-            <p className="mt-1 text-sm text-text-secondary">
-              Adjust how LobbyForge looks on this device. Theme is saved per account; the rest is local.
-            </p>
+            <h1 className="text-2xl font-semibold text-text-primary">{t('settings.nav.user.appearance')}</h1>
+            <p className="mt-1 text-sm text-text-secondary">{t('settings.appearance.description')}</p>
           </header>
 
-          <Section title="Theme">
+          <Section title={t('settings.appearance.theme.title')}>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {THEME_OPTIONS.map((option) => (
                 <ThemeTile
@@ -300,7 +308,7 @@ export default function AppearanceSettingsPage() {
             </div>
           </Section>
 
-          <Section title="Accent Color">
+          <Section title={t('settings.appearance.accent.title')}>
             <div className="flex flex-wrap items-center gap-4">
               <div className="flex flex-wrap gap-3">
                 {ACCENT_PRESETS.map((preset) => {
@@ -309,7 +317,7 @@ export default function AppearanceSettingsPage() {
                     <button
                       key={preset.value}
                       type="button"
-                      aria-label={preset.label}
+                      aria-label={t(preset.labelKey)}
                       aria-pressed={selected}
                       onClick={() => selectAccent(preset.value)}
                       className={`w-8 h-8 rounded-full transition-transform hover:scale-110 ${
@@ -349,7 +357,7 @@ export default function AppearanceSettingsPage() {
             </div>
             <p className="text-xs text-text-muted flex items-center gap-1">
               <span className="material-symbols-outlined text-[14px]">info</span>
-              LobbyForge keeps text contrast readable automatically.
+              {t('settings.appearance.accent.contrastNote')}
             </p>
           </Section>
 
@@ -411,7 +419,7 @@ export default function AppearanceSettingsPage() {
             ) : null}
           </Section>
 
-          <Section title="Interface Density">
+          <Section title={t('settings.appearance.density.title')}>
             <div className="flex bg-surface-container rounded-lg p-1 border border-border-subtle max-w-md">
               {(['comfortable', 'compact'] as Density[]).map((value) => (
                 <button
@@ -424,31 +432,31 @@ export default function AppearanceSettingsPage() {
                       : 'text-text-secondary hover:text-text-primary'
                   }`}
                 >
-                  {value === 'comfortable' ? 'Comfortable' : 'Compact'}
+                  {t(value === 'comfortable' ? 'settings.appearance.density.comfortable' : 'settings.appearance.density.compact')}
                 </button>
               ))}
             </div>
           </Section>
 
-          <Section title="Chat Appearance">
+          <Section title={t('settings.appearance.chat.title')}>
             <Toggle
-              label="Compact message spacing"
-              description="Reduces vertical space between chat messages."
+              label={t('settings.appearance.chat.compactSpacing')}
+              description={t('settings.appearance.chat.compactSpacingHint')}
               checked={extra.compactMessageSpacing}
               onChange={(value) => patchExtra({ compactMessageSpacing: value })}
             />
             <Toggle
-              label="Show avatars in chat"
-              description="Display user avatars next to their messages."
+              label={t('settings.appearance.chat.avatars')}
+              description={t('settings.appearance.chat.avatarsHint')}
               checked={extra.showAvatarsInChat}
               onChange={(value) => patchExtra({ showAvatarsInChat: value })}
             />
           </Section>
 
-          <Section title="Sidebar Display">
+          <Section title={t('settings.appearance.sidebar.title')}>
             <Toggle
-              label="Hide empty channels"
-              description="Automatically hide voice channels with no active users."
+              label={t('settings.appearance.sidebar.hideEmpty')}
+              description={t('settings.appearance.sidebar.hideEmptyHint')}
               checked={extra.hideEmptyChannels}
               onChange={(value) => patchExtra({ hideEmptyChannels: value })}
               last
@@ -469,12 +477,12 @@ export default function AppearanceSettingsPage() {
         <aside className="lg:col-span-4">
           <div className="sticky top-8 space-y-4">
             <h3 className="text-xs uppercase tracking-wider font-bold text-text-secondary border-b border-border-subtle pb-2">
-              Live Preview
+              {t('settings.appearance.preview.title')}
             </h3>
             <PreviewPanel theme={theme} accent={extra.accent} />
             <p className="text-xs text-text-muted flex items-start gap-2 pt-2">
               <span className="material-symbols-outlined text-[14px] shrink-0">info</span>
-              Accent, density and sidebar toggles are local-only on this device and sync in a later milestone.
+              {t('settings.appearance.preview.note')}
             </p>
           </div>
         </aside>
@@ -505,10 +513,11 @@ function ThemeTile({
   selected,
   onSelect,
 }: {
-  option: { value: ThemeChoice; label: string; hint: string };
+  option: ThemeOption;
   selected: boolean;
   onSelect: () => void;
 }) {
+  const t = useT();
   const previewClass =
     option.value === 'light'
       ? 'bg-gradient-to-br from-gray-100 to-[#f5f7fa]'
@@ -555,7 +564,7 @@ function ThemeTile({
           {selected ? <span className="w-2 h-2 rounded-full bg-primary" /> : null}
         </span>
         <span className={`font-medium ${selected ? 'text-text-primary' : 'text-text-secondary group-hover:text-text-primary'}`}>
-          {option.label}
+          {t(option.labelKey)}
         </span>
       </div>
       {selected ? (
@@ -609,14 +618,19 @@ function Toggle({
   );
 }
 
+/**
+ * A mock channel. Channel and member names are sample data and stay as
+ * they are; the chrome around them (timestamp, composer) is interface.
+ */
 function PreviewPanel({ theme, accent }: { theme: ThemeChoice; accent: string }) {
+  const t = useT();
   return (
     <div className="bg-surface rounded-xl border border-border-subtle shadow-lg overflow-hidden">
       <div className="h-8 border-b border-border-subtle flex items-center px-3 bg-surface-raised">
         <span className="material-symbols-outlined text-[14px] text-text-muted mr-2">tag</span>
         <span className="font-bold text-text-primary text-xs">general</span>
         <span className="ml-auto text-[10px] text-text-muted uppercase tracking-wider">
-          {theme}
+          {t(THEME_LABEL_KEYS[theme])}
         </span>
       </div>
       <div className="flex text-[10px] leading-tight">
@@ -648,13 +662,13 @@ function PreviewPanel({ theme, accent }: { theme: ThemeChoice; accent: string })
             <div>
               <div className="flex items-baseline gap-1">
                 <span className="font-bold text-text-primary">Ayse</span>
-                <span className="text-[8px] text-text-muted">Today at 4:20 PM</span>
+                <span className="text-[8px] text-text-muted">{t('settings.appearance.preview.time')}</span>
               </div>
-              <div className="text-text-secondary mt-0.5">Anyone up for a quick match?</div>
+              <div className="text-text-secondary mt-0.5">{t('settings.appearance.preview.message')}</div>
             </div>
           </div>
           <div className="w-full bg-surface-container rounded border border-border-subtle p-1 flex items-center text-text-muted">
-            Message #general...
+            {t('settings.appearance.preview.composer', { channel: 'general' })}
           </div>
         </div>
       </div>

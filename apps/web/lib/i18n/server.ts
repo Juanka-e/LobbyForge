@@ -1,6 +1,6 @@
 import { cache } from 'react';
 import { cookies, headers } from 'next/headers';
-import { getDiscovery, loadMessages } from './catalogue';
+import { getDiscovery, loadEnglishPlurals, loadMessages } from './catalogue';
 import {
   SOURCE_LOCALE,
   createTranslator,
@@ -24,6 +24,8 @@ export interface RequestI18n {
   choice: string;
   /** Resolved messages for `locale`, English filling every gap. */
   messages: Messages;
+  /** Keys whose plural still reads in English (a partial translation). */
+  englishPlurals: string[];
   /** Every language this instance offers, for the picker. */
   locales: LocaleInfo[];
 }
@@ -69,6 +71,7 @@ export const getRequestI18n = cache(async (): Promise<RequestI18n> => {
     info: locales.find((l) => l.code === locale) ?? FALLBACK_INFO,
     choice: saved ?? 'system',
     messages: loadMessages(locale),
+    englishPlurals: loadEnglishPlurals(locale),
     locales,
   };
 });
@@ -80,6 +83,6 @@ export async function getRequestLocale(): Promise<string> {
 
 /** A translator bound to this request's language. */
 export const getTranslator = cache(async (): Promise<Translator> => {
-  const { locale, messages } = await getRequestI18n();
-  return createTranslator(locale, messages);
+  const { locale, messages, englishPlurals } = await getRequestI18n();
+  return createTranslator(locale, messages, englishPlurals);
 });

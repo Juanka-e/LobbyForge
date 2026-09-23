@@ -2,8 +2,10 @@
 
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, type ReactNode } from 'react';
+import { useT } from '@/lib/i18n/client';
 
 export default function SettingsModalFrame({ children, label }: { children: ReactNode; label: string }) {
+  const t = useT();
   const router = useRouter();
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const close = useCallback(() => router.replace('/lobby'), [router]);
@@ -34,8 +36,8 @@ export default function SettingsModalFrame({ children, label }: { children: Reac
         type="button"
         onClick={close}
         className="absolute right-3 top-3 z-10 grid size-10 place-items-center rounded-md border border-border-subtle bg-surface text-text-secondary shadow-sm transition-colors hover:bg-surface-container hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary md:right-5"
-        aria-label="Close settings"
-        title="Close settings"
+        aria-label={t('settings.frame.close')}
+        title={t('settings.frame.close')}
       >
         <span className="material-symbols-outlined" aria-hidden>close</span>
       </button>

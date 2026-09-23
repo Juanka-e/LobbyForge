@@ -2,8 +2,10 @@
 
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
+import { useT } from '@/lib/i18n/client';
 
 export default function CreateInstanceForm() {
+  const t = useT();
   const router = useRouter();
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -24,7 +26,7 @@ export default function CreateInstanceForm() {
       server?: { id: string };
     };
     if (!response.ok || !body.server) {
-      setError(body.error ?? 'Instance could not be created.');
+      setError(body.error ?? t('hub.instances.new.failed'));
       setSaving(false);
       return;
     }
@@ -34,7 +36,7 @@ export default function CreateInstanceForm() {
   return (
     <form onSubmit={submit} className="grid gap-5 max-w-xl">
       <label className="grid gap-2 text-label-sm text-text-secondary">
-        Community name
+        {t('hub.instances.new.nameLabel')}
         <input
           value={name}
           onChange={(event) => setName(event.target.value)}
@@ -43,7 +45,7 @@ export default function CreateInstanceForm() {
           required
           autoFocus
           className="bg-surface border border-border-strong rounded-lg px-3 py-2.5 text-text-primary"
-          placeholder="My community"
+          placeholder={t('hub.instances.new.namePlaceholder')}
         />
       </label>
       <div className="flex items-center gap-3">
@@ -52,9 +54,11 @@ export default function CreateInstanceForm() {
           disabled={saving || name.trim().length < 2}
           className="bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 font-semibold disabled:opacity-50"
         >
-          {saving ? 'Creating...' : 'Create instance'}
+          {saving ? t('hub.instances.new.creating') : t('hub.instances.new.submit')}
         </button>
-        <a href="/lobby" className="text-text-secondary hover:text-text-primary">Cancel</a>
+        <a href="/lobby" className="text-text-secondary hover:text-text-primary">
+          {t('common.cancel')}
+        </a>
       </div>
       {error ? <p className="text-danger text-sm" role="alert">{error}</p> : null}
     </form>

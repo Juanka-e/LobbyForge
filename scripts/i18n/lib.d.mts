@@ -31,6 +31,8 @@ export interface StatusReport {
 
 export function paths(root?: string): { appMessages: string; plugins: string };
 export function placeholders(text: string): string;
+export function messageArguments(text: string): string[];
+export function messageProblems(text: string): string[];
 export function status(root?: string): StatusReport;
 export function sync(options?: { root?: string; prune?: boolean }): string[];
 export function addLanguage(options: {
@@ -42,3 +44,13 @@ export function addLanguage(options: {
 }): string[];
 export function markComplete(options: { root?: string; code: string }): void;
 export function pluginIndexSource(codes: string[]): string;
+
+export type Table = Record<string, string>;
+export function readAppLocales(root?: string): {
+  locales: Array<{ code: string; meta: Record<string, unknown>; files: Record<string, Table> }>;
+  problems: string[];
+};
+export function readPlugins(root?: string): {
+  withTables: Array<{ id: string; dir: string; localesDir: string; tables: Record<string, Table> }>;
+  englishOnly: string[];
+};

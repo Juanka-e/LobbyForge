@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { useT } from '@/lib/i18n/client';
 
 export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
 
@@ -48,6 +49,7 @@ export function Modal({
   disableEscape = false,
   disableBackdropClose = false,
 }: ModalProps) {
+  const t = useT();
   const panelRef = useRef<HTMLDivElement | null>(null);
   const previousActiveRef = useRef<HTMLElement | null>(null);
 
@@ -118,7 +120,7 @@ export function Modal({
             </div>
             <button
               type="button"
-              aria-label="Close dialog"
+              aria-label={t('shell.modal.close')}
               onClick={onClose}
               className="text-text-muted hover:text-text-primary p-1 rounded-full hover:bg-surface-variant transition-colors"
             >
@@ -140,13 +142,15 @@ export function Modal({
 
 export function ModalCancelButton({
   onClick,
-  children = 'Cancel',
+  children,
   disabled = false,
 }: {
   onClick: () => void;
+  /** Defaults to the translated "Cancel". */
   children?: ReactNode;
   disabled?: boolean;
 }) {
+  const t = useT();
   return (
     <button
       type="button"
@@ -154,7 +158,7 @@ export function ModalCancelButton({
       disabled={disabled}
       className="px-4 py-2 rounded-lg text-sm font-medium text-text-secondary border border-border-strong hover:bg-surface-variant hover:text-text-primary transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
     >
-      {children}
+      {children ?? t('common.cancel')}
     </button>
   );
 }
@@ -174,6 +178,7 @@ export function ModalPrimaryButton({
   tone?: 'primary' | 'danger';
   icon?: string;
 }) {
+  const t = useT();
   const className =
     tone === 'danger'
       ? 'px-5 py-2.5 rounded-lg bg-danger text-on-primary-container text-sm font-medium hover:brightness-110 transition-all disabled:opacity-40 disabled:cursor-not-allowed'
@@ -187,7 +192,7 @@ export function ModalPrimaryButton({
     >
       <span className="inline-flex items-center gap-2">
         {icon ? <span className="material-symbols-outlined text-[18px]">{icon}</span> : null}
-        {loading ? 'Working...' : children}
+        {loading ? t('shell.modal.working') : children}
       </span>
     </button>
   );

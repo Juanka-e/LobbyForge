@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import SettingsShell from '@/app/SettingsShell';
-import SettingsStickyFooter from '@/app/settings/SettingsStickyFooter';
+import SettingsStickyFooter, { type SettingsStatus } from '@/app/settings/SettingsStickyFooter';
+import { useT } from '@/lib/i18n/client';
 import {
   DEFAULT_KEYBIND_PREFERENCES,
   mergeKeybindPreferences,
@@ -17,12 +18,14 @@ type SettingsResponse = {
   };
 };
 
-const ACTIONS: { key: KeybindAction; label: string; description: string; icon: string }[] = [
-  { key: 'pushToTalk', label: 'Push to talk', description: 'Hold this key to open your mic in a voice room.', icon: 'keyboard_voice' },
-  { key: 'toggleMute', label: 'Toggle mute', description: 'Mute or unmute your microphone while LobbyForge is focused.', icon: 'mic_off' },
-  { key: 'toggleDeafen', label: 'Toggle deafen', description: 'Mute or restore incoming voice audio.', icon: 'headphones' },
-  { key: 'toggleCamera', label: 'Toggle camera', description: 'Turn your camera on or off in the current room.', icon: 'videocam' },
-  { key: 'toggleScreenShare', label: 'Toggle screen share', description: 'Start or stop sharing your screen.', icon: 'screen_share' },
+// Action names are message keys, resolved where they render. The key
+// captions themselves (Space, M, F13) are key names and stay as they are.
+const ACTIONS: { key: KeybindAction; labelKey: string; descriptionKey: string; icon: string }[] = [
+  { key: 'pushToTalk', labelKey: 'settings.keybinds.pushToTalk', descriptionKey: 'settings.keybinds.pushToTalkHint', icon: 'keyboard_voice' },
+  { key: 'toggleMute', labelKey: 'settings.keybinds.toggleMute', descriptionKey: 'settings.keybinds.toggleMuteHint', icon: 'mic_off' },
+  { key: 'toggleDeafen', labelKey: 'settings.keybinds.toggleDeafen', descriptionKey: 'settings.keybinds.toggleDeafenHint', icon: 'headphones' },
+  { key: 'toggleCamera', labelKey: 'settings.keybinds.toggleCamera', descriptionKey: 'settings.keybinds.toggleCameraHint', icon: 'videocam' },
+  { key: 'toggleScreenShare', labelKey: 'settings.keybinds.toggleScreenShare', descriptionKey: 'settings.keybinds.toggleScreenShareHint', icon: 'screen_share' },
 ];
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
@@ -38,10 +41,11 @@ function eventLabel(event: KeyboardEvent): string {
 }
 
 export default function KeybindSettingsPage() {
+  const t = useT();
   const [prefs, setPrefs] = useState<KeybindPreferences>(DEFAULT_KEYBIND_PREFERENCES);
   const [savedSnapshot, setSavedSnapshot] = useState<KeybindPreferences>(DEFAULT_KEYBIND_PREFERENCES);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
-  const [status, setStatus] = useState('Loading settings...');
+  const [status, setStatus] = useState<SettingsStatus>({ key: 'settings.footer.loading' });
   const [busy, setBusy] = useState(false);
   const [capturing, setCapturing] = useState<KeybindAction | null>(null);
 
@@ -57,9 +61,9 @@ export default function KeybindSettingsPage() {
         setPrefs(merged);
         setSavedSnapshot(merged);
         setUpdatedAt(data.settings.updatedAt);
-        setStatus('Ready');
+        setStatus({ key: 'settings.footer.ready' });
       } catch (err) {
-        if (!cancelled) setStatus((err as Error).message);
+        if (!cancelled) setStatus({ text: (err as Error).message });
       }
     }
     void load();
@@ -88,7 +92,7 @@ export default function KeybindSettingsPage() {
 
   async function save() {
     setBusy(true);
-    setStatus('Saving...');
+    setStatus({ key: 'settings.footer.saving' });
     try {
       const data = await jsonFetch<SettingsResponse>('/api/settings/me', {
         method: 'PATCH',
@@ -99,9 +103,9 @@ export default function KeybindSettingsPage() {
       setPrefs(merged);
       setSavedSnapshot(merged);
       setUpdatedAt(data.settings.updatedAt);
-      setStatus('Saved');
+      setStatus({ key: 'settings.footer.saved' });
     } catch (err) {
-      setStatus((err as Error).message);
+      setStatus({ text: (err as Error).message });
     } finally {
       setBusy(false);
     }
@@ -116,15 +120,13 @@ export default function KeybindSettingsPage() {
     <SettingsShell scope="user">
       <section className="mx-auto max-w-3xl space-y-8 pb-32">
         <header>
-          <h1 className="text-2xl font-semibold text-text-primary">Keybinds</h1>
-          <p className="mt-1 text-sm text-text-secondary">
-            Customize keyboard and mouse shortcuts used by voice controls.
-          </p>
+          <h1 className="text-2xl font-semibold text-text-primary">{t('settings.nav.user.keybinds')}</h1>
+          <p className="mt-1 text-sm text-text-secondary">{t('settings.keybinds.description')}</p>
         </header>
 
         <section className="space-y-4">
           <h2 className="border-b border-border-subtle pb-2 text-xs font-bold uppercase tracking-wider text-text-secondary">
-            Voice Controls
+            {t('settings.keybinds.voiceControls')}
           </h2>
           <div className="rounded-xl border border-border-subtle bg-surface p-6">
             {ACTIONS.map((action, index) => (
@@ -137,8 +139,8 @@ export default function KeybindSettingsPage() {
                     {action.icon}
                   </span>
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-text-primary">{action.label}</p>
-                    <p className="text-xs text-text-muted">{action.description}</p>
+                    <p className="text-sm font-medium text-text-primary">{t(action.labelKey)}</p>
+                    <p className="text-xs text-text-muted">{t(action.descriptionKey)}</p>
                   </div>
                 </div>
                 <button
@@ -146,7 +148,7 @@ export default function KeybindSettingsPage() {
                   onClick={() => setCapturing(action.key)}
                   className="min-w-28 rounded-md border border-border-strong bg-surface-raised px-3 py-2 text-sm font-medium text-text-primary hover:bg-surface-container"
                 >
-                  {capturing === action.key ? 'Press key...' : prefs[action.key].label}
+                  {capturing === action.key ? t('settings.keybinds.pressKey') : prefs[action.key].label}
                 </button>
               </div>
             ))}
