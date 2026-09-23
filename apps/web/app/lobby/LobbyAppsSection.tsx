@@ -12,7 +12,7 @@ import type { InstalledApp } from './page';
  * list and leaving the lobby was the only way to use it. It is now a
  * single "Activities" entry in the same grammar as a channel row —
  * opening the hub in the centre column — with the installed apps shown
- * beneath it as small chips, and a live badge when a game is running.
+ * beneath it as small chips.
  */
 export function LobbyAppsSection({
   apps,

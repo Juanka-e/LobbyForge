@@ -140,6 +140,10 @@ export interface InstalledApp {
   id: string;
   name: string;
   summary: string | null;
+  /** Shown on the launch card so players can pick a game that fits. */
+  minPlayers: number | null;
+  maxPlayers: number | null;
+  trustLevel: string | null;
 }
 
 // ---- Demo fallback (preserves the M19 standalone lobby visual reference) ----
@@ -470,7 +474,16 @@ async function loadLiveData(
         if (!install.enabled) return [];
         const summary = summaries.get(install.pluginId);
         if (!summary) return [];
-        return [{ id: summary.id, name: summary.name, summary: summary.catalog?.summary ?? null }];
+        return [
+          {
+            id: summary.id,
+            name: summary.name,
+            summary: summary.catalog?.summary ?? null,
+            minPlayers: summary.catalog?.playerConfig?.minPlayers ?? null,
+            maxPlayers: summary.catalog?.playerConfig?.maxPlayers ?? null,
+            trustLevel: summary.catalog?.trustLevel ?? null,
+          },
+        ];
       });
     })
     .catch(() => [] as InstalledApp[]);

@@ -44,7 +44,14 @@ interface LobbyData {
   isLive: boolean;
   canManageMessages: boolean;
   canManageServer: boolean;
-  installedApps: Array<{ id: string; name: string; summary: string | null }>;
+  installedApps: Array<{
+    id: string;
+    name: string;
+    summary: string | null;
+    minPlayers: number | null;
+    maxPlayers: number | null;
+    trustLevel: string | null;
+  }>;
   members?: Array<{
     id: string;
     name: string;

@@ -41,6 +41,18 @@ const APP_ACCENTS: Record<string, { spine: string; glyph: string; icon: string }
 };
 const DEFAULT_ACCENT = { spine: 'bg-secondary-container', glyph: 'text-text-secondary', icon: 'stadia_controller' };
 
+const TRUST_LABELS: Record<string, string> = {
+  official: 'Official',
+  'verified-community': 'Verified',
+  unverified: 'Unverified',
+};
+
+/** "4–12 players", or null when the app declares no range. */
+function playerRange(app: InstalledApp): string | null {
+  if (app.minPlayers == null && app.maxPlayers == null) return null;
+  return `${app.minPlayers ?? 1}–${app.maxPlayers ?? 'any'} players`;
+}
+
 function accentFor(pluginId: string) {
   return APP_ACCENTS[pluginId] ?? DEFAULT_ACCENT;
 }
@@ -197,10 +209,15 @@ export function LobbyActivityView({
             {/* Status rail — what is running, where it is, who is in. */}
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border-subtle bg-surface-dim/40 px-6 py-3">
               <span className="flex items-center gap-2 min-w-0">
+                <span
+                  className="h-2 w-2 flex-shrink-0 rounded-full bg-success animate-pulse-soft"
+                  aria-hidden
+                />
                 <span className={`material-symbols-outlined text-[20px] ${accentFor(detail.pluginId).glyph}`}>
                   {accentFor(detail.pluginId).icon}
                 </span>
                 <span className="font-label-sm font-semibold text-text-primary truncate">{appName}</span>
+                <span className="sr-only">Live</span>
               </span>
               {phase ? (
                 <span className="rounded-full border border-border-subtle bg-surface-container px-2.5 py-0.5 font-label-xs text-[11px] text-text-secondary">
@@ -313,6 +330,14 @@ export function LobbyActivityView({
                           {app.summary ? (
                             <span className="font-body-md text-text-secondary line-clamp-2">{app.summary}</span>
                           ) : null}
+                          <span className="flex flex-wrap items-center gap-2 font-label-xs text-[11px] text-text-muted">
+                            {app.trustLevel ? (
+                              <span className="rounded border border-border-subtle px-1.5 py-0.5">
+                                {TRUST_LABELS[app.trustLevel] ?? app.trustLevel}
+                              </span>
+                            ) : null}
+                            {playerRange(app) ? <span>{playerRange(app)}</span> : null}
+                          </span>
                           <span className="mt-auto flex items-center gap-2 pt-2 font-label-xs text-[11px] text-primary">
                             <span className="material-symbols-outlined text-[16px]">
                               {isLaunching ? 'progress_activity' : 'play_arrow'}
