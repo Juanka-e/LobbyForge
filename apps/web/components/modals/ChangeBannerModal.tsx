@@ -2,6 +2,8 @@
 
 import { useRef, useState } from 'react';
 import { Modal, ModalCancelButton, ModalPrimaryButton } from '../Modal';
+import { useT } from '@/lib/i18n/client';
+import type { Translator } from '@/lib/i18n/core';
 
 /**
  * Change Banner modal — the wide (3:1) sibling of `ChangeAvatarModal`.
@@ -43,6 +45,7 @@ export function ChangeBannerModal({
   communityName,
   onSave,
 }: ChangeBannerModalProps) {
+  const t = useT();
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [zoom, setZoom] = useState(100);
@@ -54,11 +57,11 @@ export function ChangeBannerModal({
   function pickFile(selected: File) {
     setError(null);
     if (!ACCEPTED.includes(selected.type)) {
-      setError('Please choose a PNG, JPG, WebP, or GIF image.');
+      setError(t('shell.imageEditor.wrongType'));
       return;
     }
     if (selected.size > MAX_FILE_BYTES) {
-      setError('Image is larger than 8 MB. Choose a smaller file.');
+      setError(t('shell.imageEditor.tooLarge', { max: MAX_FILE_BYTES / (1024 * 1024) }));
       return;
     }
     if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -89,7 +92,7 @@ export function ChangeBannerModal({
     setSaving(true);
     setError(null);
     try {
-      const dataUrl = await renderCroppedBanner(previewUrl, zoom, rotation);
+      const dataUrl = await renderCroppedBanner(previewUrl, zoom, rotation, t);
       await onSave({ file, croppedDataUrl: dataUrl });
       reset();
       onClose();
@@ -104,14 +107,14 @@ export function ChangeBannerModal({
     <Modal
       open={open}
       onClose={close}
-      title="Change Banner"
-      description="Upload and adjust your community's wide header image."
+      title={t('shell.banner.title')}
+      description={t('shell.banner.description')}
       size="xl"
       footer={
         <>
           <ModalCancelButton onClick={close} disabled={saving} />
           <ModalPrimaryButton onClick={save} disabled={!file} loading={saving}>
-            Save Banner
+            {t('shell.banner.save')}
           </ModalPrimaryButton>
         </>
       }
@@ -131,17 +134,17 @@ export function ChangeBannerModal({
                 transform: `rotate(${rotation}deg)`,
                 backgroundRepeat: 'no-repeat',
               }}
-              aria-label="Banner preview"
+              aria-label={t('shell.banner.preview')}
             />
           ) : currentBannerUrl ? (
             <div
               className="absolute inset-0 w-full h-full bg-cover bg-center"
               style={{ backgroundImage: `url(${currentBannerUrl})` }}
-              aria-label={`${communityName} banner`}
+              aria-label={t('shell.banner.current', { name: communityName })}
             />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center text-text-muted text-sm uppercase tracking-widest">
-              No banner set
+              {t('shell.banner.noneSet')}
             </div>
           )}
         </div>
@@ -151,7 +154,7 @@ export function ChangeBannerModal({
             <div className="flex items-center gap-3 flex-1 max-w-[280px]">
               <button
                 type="button"
-                aria-label="Zoom out"
+                aria-label={t('shell.imageEditor.zoomOut')}
                 onClick={() => setZoom((value) => Math.max(50, value - 10))}
                 className="text-text-muted hover:text-text-primary"
               >
@@ -164,11 +167,11 @@ export function ChangeBannerModal({
                 value={zoom}
                 onChange={(event) => setZoom(Number(event.target.value))}
                 className="flex-1 accent-primary"
-                aria-label="Zoom level"
+                aria-label={t('shell.imageEditor.zoomLevel')}
               />
               <button
                 type="button"
-                aria-label="Zoom in"
+                aria-label={t('shell.imageEditor.zoomIn')}
                 onClick={() => setZoom((value) => Math.min(200, value + 10))}
                 className="text-text-muted hover:text-text-primary"
               >
@@ -178,7 +181,7 @@ export function ChangeBannerModal({
             <div className="flex items-center gap-2 border-l border-border-subtle pl-4 ml-4">
               <button
                 type="button"
-                aria-label="Rotate left"
+                aria-label={t('shell.imageEditor.rotateLeft')}
                 onClick={() => setRotation((value) => value - 90)}
                 className="p-2 text-text-muted hover:text-text-primary hover:bg-surface-variant rounded-lg"
               >
@@ -186,7 +189,7 @@ export function ChangeBannerModal({
               </button>
               <button
                 type="button"
-                aria-label="Rotate right"
+                aria-label={t('shell.imageEditor.rotateRight')}
                 onClick={() => setRotation((value) => value + 90)}
                 className="p-2 text-text-muted hover:text-text-primary hover:bg-surface-variant rounded-lg"
               >
@@ -201,7 +204,7 @@ export function ChangeBannerModal({
                 }}
                 className="text-sm text-text-muted hover:text-text-primary px-2 py-1"
               >
-                Reset
+                {t('shell.imageEditor.reset')}
               </button>
             </div>
           </div>
@@ -226,10 +229,13 @@ export function ChangeBannerModal({
               className="flex items-center gap-2 px-4 py-2 bg-surface-variant border border-border-strong text-text-secondary hover:text-text-primary hover:border-text-muted rounded-lg transition-colors w-fit text-sm font-medium"
             >
               <span className="material-symbols-outlined text-[18px]">upload</span>
-              {previewUrl ? 'Choose Another Image' : 'Choose Image'}
+              {previewUrl ? t('shell.imageEditor.chooseAnother') : t('shell.imageEditor.choose')}
             </button>
             <p className="text-xs text-text-muted">
-              PNG, JPG or WebP · Maximum 8 MB · Recommended 1200×400
+              {t('shell.banner.formats', {
+                max: MAX_FILE_BYTES / (1024 * 1024),
+                size: `${BANNER_WIDTH}×${BANNER_HEIGHT}`,
+              })}
             </p>
           </div>
           <div className="flex flex-col items-center gap-2">
@@ -241,21 +247,21 @@ export function ChangeBannerModal({
                 <div
                   className="w-full h-full bg-cover bg-center"
                   style={{ backgroundImage: `url(${previewUrl})` }}
-                  aria-label="Banner preview"
+                  aria-label={t('shell.banner.preview')}
                 />
               ) : currentBannerUrl ? (
                 <img
                   src={currentBannerUrl}
-                  alt={`${communityName} banner`}
+                  alt={t('shell.banner.current', { name: communityName })}
                   className="w-full h-full object-cover"
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-text-muted text-[10px] uppercase tracking-widest">
-                  No banner
+                  {t('shell.banner.none')}
                 </div>
               )}
             </div>
-            <span className="text-[10px] text-text-muted uppercase tracking-wider">Preview</span>
+            <span className="text-[10px] text-text-muted uppercase tracking-wider">{t('shell.imageEditor.preview')}</span>
           </div>
         </div>
 
@@ -272,7 +278,8 @@ export function ChangeBannerModal({
 async function renderCroppedBanner(
   sourceUrl: string,
   zoom: number,
-  rotation: number
+  rotation: number,
+  t: Translator
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const image = new Image();
@@ -284,7 +291,7 @@ async function renderCroppedBanner(
         canvas.height = BANNER_HEIGHT;
         const ctx = canvas.getContext('2d');
         if (!ctx) {
-          reject(new Error('Canvas 2D context unavailable'));
+          reject(new Error(t('shell.imageEditor.canvasUnavailable')));
           return;
         }
         const baseScale = Math.max(
@@ -307,7 +314,7 @@ async function renderCroppedBanner(
         reject(err as Error);
       }
     };
-    image.onerror = () => reject(new Error('Failed to read image'));
+    image.onerror = () => reject(new Error(t('shell.imageEditor.readFailed')));
     image.src = sourceUrl;
   });
 }

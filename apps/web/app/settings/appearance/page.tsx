@@ -4,14 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import SettingsShell from '@/app/SettingsShell';
 import { deriveAccent } from '@/lib/accent';
 import { clearLocaleCookie, serializeLocaleCookie } from '@/lib/i18n/locale-cookie';
-import {
-  APP_LOCALES,
-  APP_LOCALE_LABELS,
-  coerceLocaleChoice,
-  resolveAppLocale,
-  type AppLocaleChoice,
-} from '@/lib/app-locale';
-import SettingsStickyFooter from '@/app/settings/SettingsStickyFooter';
+import { useLocaleOptions, useT } from '@/lib/i18n/client';
+import SettingsStickyFooter, { type SettingsStatus } from '@/app/settings/SettingsStickyFooter';
 
 type ThemeChoice = 'dark' | 'dim' | 'light' | 'system';
 type Density = 'comfortable' | 'compact';
@@ -29,31 +23,39 @@ type SettingsResponse = {
 
 type AppearanceExtra = {
   accent: string;
-  language: AppLocaleChoice;
   density: Density;
   compactMessageSpacing: boolean;
   showAvatarsInChat: boolean;
   hideEmptyChannels: boolean;
 };
 
-const THEME_OPTIONS: { value: ThemeChoice; label: string; hint: string }[] = [
-  { value: 'dark', label: 'Dark', hint: 'Default - deep navy surface' },
-  { value: 'dim', label: 'Dim', hint: 'Soft slate with reduced contrast' },
-  { value: 'light', label: 'Light', hint: 'Daytime palette (preview only)' },
-  { value: 'system', label: 'System', hint: 'Match the OS preference' },
+// Labels are message keys, resolved where they render.
+type ThemeOption = { value: ThemeChoice; labelKey: string; hintKey: string };
+
+const THEME_OPTIONS: ThemeOption[] = [
+  { value: 'dark', labelKey: 'settings.appearance.theme.dark', hintKey: 'settings.appearance.theme.darkHint' },
+  { value: 'dim', labelKey: 'settings.appearance.theme.dim', hintKey: 'settings.appearance.theme.dimHint' },
+  { value: 'light', labelKey: 'settings.appearance.theme.light', hintKey: 'settings.appearance.theme.lightHint' },
+  { value: 'system', labelKey: 'settings.appearance.theme.system', hintKey: 'settings.appearance.theme.systemHint' },
 ];
 
-const ACCENT_PRESETS: { value: string; label: string }[] = [
-  { value: '#8FB8FF', label: 'Ice Blue' },
-  { value: '#bcc7da', label: 'Steel' },
-  { value: '#deb063', label: 'Soft Amber' },
-  { value: '#7CCFA6', label: 'Sage' },
-  { value: '#E98282', label: 'Coral' },
+const THEME_LABEL_KEYS: Record<ThemeChoice, string> = {
+  dark: 'settings.appearance.theme.dark',
+  dim: 'settings.appearance.theme.dim',
+  light: 'settings.appearance.theme.light',
+  system: 'settings.appearance.theme.system',
+};
+
+const ACCENT_PRESETS: { value: string; labelKey: string }[] = [
+  { value: '#8FB8FF', labelKey: 'settings.appearance.accent.iceBlue' },
+  { value: '#bcc7da', labelKey: 'settings.appearance.accent.steel' },
+  { value: '#deb063', labelKey: 'settings.appearance.accent.softAmber' },
+  { value: '#7CCFA6', labelKey: 'settings.appearance.accent.sage' },
+  { value: '#E98282', labelKey: 'settings.appearance.accent.coral' },
 ];
 
 const DEFAULT_EXTRA: AppearanceExtra = {
   accent: '#8FB8FF',
-  language: 'system',
   density: 'comfortable',
   compactMessageSpacing: false,
   showAvatarsInChat: true,
@@ -89,7 +91,6 @@ function loadExtraFromStorage(): AppearanceExtra {
     const parsed = JSON.parse(raw) as Partial<AppearanceExtra>;
     return {
       accent: normalizeHex(parsed.accent ?? DEFAULT_EXTRA.accent),
-      language: coerceLocaleChoice(parsed.language),
       density: parsed.density === 'compact' ? 'compact' : 'comfortable',
       compactMessageSpacing:
         typeof parsed.compactMessageSpacing === 'boolean'
@@ -131,21 +132,6 @@ function applyAppearanceExtra(extra: AppearanceExtra): void {
   root.style.setProperty('--lf-user-accent', accent);
   root.style.setProperty('--lf-on-accent', onAccent);
   root.style.setProperty('--lf-on-accent-container', onAccent);
-  const locale = resolveAppLocale(
-    coerceLocaleChoice(extra.language),
-    typeof navigator === 'undefined' ? [] : (navigator.languages ?? [navigator.language])
-  );
-  root.dataset.lfLocale = locale;
-  try {
-    // "Follow my browser" stores NO cookie, so the server keeps
-    // negotiating from Accept-Language instead of freezing today's answer.
-    document.cookie =
-      coerceLocaleChoice(extra.language) === 'system'
-        ? clearLocaleCookie()
-        : serializeLocaleCookie(locale);
-  } catch {
-    // Cookies blocked — the server keeps its negotiated default.
-  }
   root.classList.toggle('lf-density-compact', extra.density === 'compact');
   root.classList.toggle('lf-chat-compact', extra.compactMessageSpacing);
   root.classList.toggle('lf-chat-hide-avatars', !extra.showAvatarsInChat);
@@ -171,11 +157,13 @@ function applyAppearanceTheme(theme: ThemeChoice): void {
 }
 
 export default function AppearanceSettingsPage() {
+  const t = useT();
+  const localeOptions = useLocaleOptions();
   const [theme, setTheme] = useState<ThemeChoice>('dark');
   const [extra, setExtra] = useState<AppearanceExtra>(DEFAULT_EXTRA);
   const [accentDraft, setAccentDraft] = useState(DEFAULT_EXTRA.accent.slice(1));
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
-  const [status, setStatus] = useState<string>('Loading settings...');
+  const [status, setStatus] = useState<SettingsStatus>({ key: 'settings.footer.loading' });
   const [busy, setBusy] = useState(false);
   const [themeDirty, setThemeDirty] = useState(false);
   const [savedExtraSnapshot, setSavedExtraSnapshot] = useState<AppearanceExtra>(DEFAULT_EXTRA);
@@ -213,10 +201,10 @@ export default function AppearanceSettingsPage() {
           setTheme(nextTheme);
           applyAppearanceTheme(nextTheme);
           setUpdatedAt(data.settings.updatedAt);
-          setStatus('Ready');
+          setStatus({ key: 'settings.footer.ready' });
         }
       } catch (err) {
-        if (!cancelled) setStatus((err as Error).message);
+        if (!cancelled) setStatus({ text: (err as Error).message });
       }
     }
     void load();
@@ -240,17 +228,18 @@ export default function AppearanceSettingsPage() {
   }
 
   /**
-   * Changing the language has to reload: the chrome is translated during
-   * the SERVER render, from the cookie written above. Re-rendering on the
-   * client alone would leave every server-rendered string in the old
-   * language until the next navigation.
+   * Changing the language has to reload: the page is translated during
+   * the SERVER render, from this cookie. Re-rendering on the client alone
+   * would leave every server-rendered string in the old language until
+   * the next navigation.
    */
-  function selectLanguage(language: AppLocaleChoice) {
-    if (language === extra.language) return;
-    const next = { ...extra, language };
-    setExtra(next);
-    applyAppearanceExtra(next);
-    saveExtraToStorage(next);
+  function selectLanguage(choice: string) {
+    if (choice === localeOptions.choice) return;
+    try {
+      document.cookie = choice === 'system' ? clearLocaleCookie() : serializeLocaleCookie(choice);
+    } catch {
+      return; // Cookies blocked: nothing we set would survive the reload.
+    }
     window.location.reload();
   }
 
@@ -262,7 +251,7 @@ export default function AppearanceSettingsPage() {
 
   async function save() {
     setBusy(true);
-    setStatus('Saving...');
+    setStatus({ key: 'settings.footer.saving' });
     try {
       let nextUpdatedAt = updatedAt;
       if (themeDirty) {
@@ -282,9 +271,9 @@ export default function AppearanceSettingsPage() {
       applyAppearanceExtra(extra);
       setSavedExtraSnapshot(extra);
       if (!themeDirty && nextUpdatedAt) setUpdatedAt(nextUpdatedAt);
-      setStatus('Saved');
+      setStatus({ key: 'settings.footer.saved' });
     } catch (err) {
-      setStatus((err as Error).message);
+      setStatus({ text: (err as Error).message });
     } finally {
       setBusy(false);
     }
@@ -302,13 +291,11 @@ export default function AppearanceSettingsPage() {
       <section className="max-w-5xl mx-auto pb-32 grid gap-8 lg:grid-cols-12">
         <div className="lg:col-span-8 space-y-8">
           <header>
-            <h1 className="text-2xl font-semibold text-text-primary">Appearance</h1>
-            <p className="mt-1 text-sm text-text-secondary">
-              Adjust how LobbyForge looks on this device. Theme is saved per account; the rest is local.
-            </p>
+            <h1 className="text-2xl font-semibold text-text-primary">{t('settings.nav.user.appearance')}</h1>
+            <p className="mt-1 text-sm text-text-secondary">{t('settings.appearance.description')}</p>
           </header>
 
-          <Section title="Theme">
+          <Section title={t('settings.appearance.theme.title')}>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {THEME_OPTIONS.map((option) => (
                 <ThemeTile
@@ -321,7 +308,7 @@ export default function AppearanceSettingsPage() {
             </div>
           </Section>
 
-          <Section title="Accent Color">
+          <Section title={t('settings.appearance.accent.title')}>
             <div className="flex flex-wrap items-center gap-4">
               <div className="flex flex-wrap gap-3">
                 {ACCENT_PRESETS.map((preset) => {
@@ -330,7 +317,7 @@ export default function AppearanceSettingsPage() {
                     <button
                       key={preset.value}
                       type="button"
-                      aria-label={preset.label}
+                      aria-label={t(preset.labelKey)}
                       aria-pressed={selected}
                       onClick={() => selectAccent(preset.value)}
                       className={`w-8 h-8 rounded-full transition-transform hover:scale-110 ${
@@ -370,34 +357,69 @@ export default function AppearanceSettingsPage() {
             </div>
             <p className="text-xs text-text-muted flex items-center gap-1">
               <span className="material-symbols-outlined text-[14px]">info</span>
-              LobbyForge keeps text contrast readable automatically.
+              {t('settings.appearance.accent.contrastNote')}
             </p>
           </Section>
 
-          <Section title="Language">
+          <Section title={t('settings.language.title')}>
             <p className="mb-3 max-w-xl text-sm text-text-secondary">
-              The language games and activities are played in. LobbyForge&apos;s own menus are
-              English for now.
+              {t('settings.language.description')}
             </p>
-            <div className="flex bg-surface-container rounded-lg p-1 border border-border-subtle max-w-md">
-              {(['system', ...APP_LOCALES] as AppLocaleChoice[]).map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => selectLanguage(value)}
-                  className={`flex-1 py-2 px-4 rounded-md font-medium text-center transition-colors ${
-                    extra.language === value
-                      ? 'bg-surface-raised text-text-primary shadow-sm border border-border-subtle'
-                      : 'text-text-secondary hover:text-text-primary'
-                  }`}
-                >
-                  {value === 'system' ? 'Match my browser' : APP_LOCALE_LABELS[value]}
-                </button>
-              ))}
+            {/* A list, not a segmented control: it has to hold however many
+                languages the instance ships, and the old one-row switch
+                would have overflowed at the fourth. */}
+            <div
+              role="radiogroup"
+              aria-label={t('settings.language.title')}
+              className="max-w-md overflow-hidden rounded-lg border border-border-subtle bg-surface-container"
+            >
+              {[{ code: 'system', name: t('settings.language.system'), englishName: '', status: 'complete' as const }, ...localeOptions.locales].map(
+                (option) => {
+                  const selected = localeOptions.choice === option.code;
+                  return (
+                    <button
+                      key={option.code}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => selectLanguage(option.code)}
+                      lang={option.code === 'system' ? undefined : option.code}
+                      className={`flex w-full items-center gap-3 border-b border-border-subtle px-4 py-2.5 text-left last:border-b-0 transition-colors ${
+                        selected ? 'bg-surface-raised text-text-primary' : 'text-text-secondary hover:bg-surface-raised/60 hover:text-text-primary'
+                      }`}
+                    >
+                      <span
+                        aria-hidden
+                        className={`grid size-4 flex-shrink-0 place-items-center rounded-full border ${
+                          selected ? 'border-primary' : 'border-border-subtle'
+                        }`}
+                      >
+                        {selected ? <span className="size-2 rounded-full bg-primary" /> : null}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-medium">{option.name}</span>
+                        {option.englishName && option.englishName !== option.name ? (
+                          <span className="block truncate text-xs text-text-muted" lang="en">
+                            {option.englishName}
+                          </span>
+                        ) : null}
+                      </span>
+                      {option.status === 'partial' ? (
+                        <span className="flex-shrink-0 rounded border border-border-subtle px-1.5 py-0.5 text-[11px] text-text-muted">
+                          {t('settings.language.partial')}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                }
+              )}
             </div>
+            {localeOptions.locales.some((l) => l.status === 'partial') ? (
+              <p className="mt-2 max-w-md text-xs text-text-muted">{t('settings.language.partialHint')}</p>
+            ) : null}
           </Section>
 
-          <Section title="Interface Density">
+          <Section title={t('settings.appearance.density.title')}>
             <div className="flex bg-surface-container rounded-lg p-1 border border-border-subtle max-w-md">
               {(['comfortable', 'compact'] as Density[]).map((value) => (
                 <button
@@ -410,31 +432,31 @@ export default function AppearanceSettingsPage() {
                       : 'text-text-secondary hover:text-text-primary'
                   }`}
                 >
-                  {value === 'comfortable' ? 'Comfortable' : 'Compact'}
+                  {t(value === 'comfortable' ? 'settings.appearance.density.comfortable' : 'settings.appearance.density.compact')}
                 </button>
               ))}
             </div>
           </Section>
 
-          <Section title="Chat Appearance">
+          <Section title={t('settings.appearance.chat.title')}>
             <Toggle
-              label="Compact message spacing"
-              description="Reduces vertical space between chat messages."
+              label={t('settings.appearance.chat.compactSpacing')}
+              description={t('settings.appearance.chat.compactSpacingHint')}
               checked={extra.compactMessageSpacing}
               onChange={(value) => patchExtra({ compactMessageSpacing: value })}
             />
             <Toggle
-              label="Show avatars in chat"
-              description="Display user avatars next to their messages."
+              label={t('settings.appearance.chat.avatars')}
+              description={t('settings.appearance.chat.avatarsHint')}
               checked={extra.showAvatarsInChat}
               onChange={(value) => patchExtra({ showAvatarsInChat: value })}
             />
           </Section>
 
-          <Section title="Sidebar Display">
+          <Section title={t('settings.appearance.sidebar.title')}>
             <Toggle
-              label="Hide empty channels"
-              description="Automatically hide voice channels with no active users."
+              label={t('settings.appearance.sidebar.hideEmpty')}
+              description={t('settings.appearance.sidebar.hideEmptyHint')}
               checked={extra.hideEmptyChannels}
               onChange={(value) => patchExtra({ hideEmptyChannels: value })}
               last
@@ -455,12 +477,12 @@ export default function AppearanceSettingsPage() {
         <aside className="lg:col-span-4">
           <div className="sticky top-8 space-y-4">
             <h3 className="text-xs uppercase tracking-wider font-bold text-text-secondary border-b border-border-subtle pb-2">
-              Live Preview
+              {t('settings.appearance.preview.title')}
             </h3>
             <PreviewPanel theme={theme} accent={extra.accent} />
             <p className="text-xs text-text-muted flex items-start gap-2 pt-2">
               <span className="material-symbols-outlined text-[14px] shrink-0">info</span>
-              Accent, density and sidebar toggles are local-only on this device and sync in a later milestone.
+              {t('settings.appearance.preview.note')}
             </p>
           </div>
         </aside>
@@ -491,10 +513,11 @@ function ThemeTile({
   selected,
   onSelect,
 }: {
-  option: { value: ThemeChoice; label: string; hint: string };
+  option: ThemeOption;
   selected: boolean;
   onSelect: () => void;
 }) {
+  const t = useT();
   const previewClass =
     option.value === 'light'
       ? 'bg-gradient-to-br from-gray-100 to-[#f5f7fa]'
@@ -541,7 +564,7 @@ function ThemeTile({
           {selected ? <span className="w-2 h-2 rounded-full bg-primary" /> : null}
         </span>
         <span className={`font-medium ${selected ? 'text-text-primary' : 'text-text-secondary group-hover:text-text-primary'}`}>
-          {option.label}
+          {t(option.labelKey)}
         </span>
       </div>
       {selected ? (
@@ -595,14 +618,19 @@ function Toggle({
   );
 }
 
+/**
+ * A mock channel. Channel and member names are sample data and stay as
+ * they are; the chrome around them (timestamp, composer) is interface.
+ */
 function PreviewPanel({ theme, accent }: { theme: ThemeChoice; accent: string }) {
+  const t = useT();
   return (
     <div className="bg-surface rounded-xl border border-border-subtle shadow-lg overflow-hidden">
       <div className="h-8 border-b border-border-subtle flex items-center px-3 bg-surface-raised">
         <span className="material-symbols-outlined text-[14px] text-text-muted mr-2">tag</span>
         <span className="font-bold text-text-primary text-xs">general</span>
         <span className="ml-auto text-[10px] text-text-muted uppercase tracking-wider">
-          {theme}
+          {t(THEME_LABEL_KEYS[theme])}
         </span>
       </div>
       <div className="flex text-[10px] leading-tight">
@@ -634,13 +662,13 @@ function PreviewPanel({ theme, accent }: { theme: ThemeChoice; accent: string })
             <div>
               <div className="flex items-baseline gap-1">
                 <span className="font-bold text-text-primary">Ayse</span>
-                <span className="text-[8px] text-text-muted">Today at 4:20 PM</span>
+                <span className="text-[8px] text-text-muted">{t('settings.appearance.preview.time')}</span>
               </div>
-              <div className="text-text-secondary mt-0.5">Anyone up for a quick match?</div>
+              <div className="text-text-secondary mt-0.5">{t('settings.appearance.preview.message')}</div>
             </div>
           </div>
           <div className="w-full bg-surface-container rounded border border-border-subtle p-1 flex items-center text-text-muted">
-            Message #general...
+            {t('settings.appearance.preview.composer', { channel: 'general' })}
           </div>
         </div>
       </div>

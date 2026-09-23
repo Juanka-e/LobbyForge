@@ -30,7 +30,9 @@ export const watchPartyPlugin: GamePlugin<WatchPartyState, WatchPartyAction> = {
       PluginPermission.SEND_DATA_CHANNEL_EVENT,
       PluginPermission.USE_VOICE_STATE,
     ],
-    locales: ['en', 'tr'],
+    // English only: this plugin ships no locales/ tables yet, so it
+    // must not advertise other languages in the catalogue.
+    locales: ['en'],
     entryClient: './client.js',
     catalog: {
       category: 'game',

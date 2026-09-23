@@ -1,6 +1,9 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useT } from '@/lib/i18n/client';
+import type { Translator } from '@/lib/i18n/core';
+import { auditActionLabelKey } from '@/lib/audit-action-labels';
 
 export interface AuditEntryView {
   id: string;
@@ -23,17 +26,22 @@ type Category =
   | 'system'
   | 'other';
 
-const CATEGORY_LABELS: Record<Category, string> = {
-  all: 'All events',
-  moderation: 'Moderation',
-  roles: 'Roles',
-  invites: 'Invites',
-  channels: 'Channels',
-  messages: 'Messages',
-  activities: 'Activities',
-  system: 'System',
-  other: 'Other',
+const CATEGORY_LABEL_KEYS: Record<Category, string> = {
+  all: 'admin.audit.category.all',
+  moderation: 'admin.audit.category.moderation',
+  roles: 'admin.audit.category.roles',
+  invites: 'admin.audit.category.invites',
+  channels: 'admin.audit.category.channels',
+  messages: 'admin.audit.category.messages',
+  activities: 'admin.audit.category.activities',
+  system: 'admin.audit.category.system',
+  other: 'admin.audit.category.other',
 };
+
+function actionLabel(t: Translator, action: string): string {
+  const key = auditActionLabelKey(action);
+  return key ? t(key) : describeAction(action).actionLabel;
+}
 
 const FILTERS: Category[] = [
   'all',
@@ -54,6 +62,8 @@ export default function AuditClient({
   entries: AuditEntryView[];
   loadError: string | null;
 }) {
+  const t = useT();
+  const systemActor = t('admin.audit.systemActor');
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<Category>('all');
   const [sort, setSort] = useState<'newest' | 'oldest'>('newest');
@@ -87,7 +97,8 @@ export default function AuditClient({
         if (!normalizedQuery) return true;
         const haystack = [
           entry.action,
-          entry.actorName ?? 'System',
+          actionLabel(t, entry.action),
+          entry.actorName ?? systemActor,
           entry.targetType ?? '',
           entry.targetId ?? '',
           entry.metadataText,
@@ -97,14 +108,14 @@ export default function AuditClient({
         return haystack.includes(normalizedQuery);
       })
       .sort((a, b) => (sort === 'newest' ? b.timestamp - a.timestamp : a.timestamp - b.timestamp));
-  }, [category, decorated, query, sort]);
+  }, [category, decorated, query, sort, systemActor, t]);
 
   function exportCsv() {
     const rows = visibleEntries.map((entry) => [
       entry.createdAt,
-      entry.actorName ?? 'System',
+      entry.actorName ?? systemActor,
       entry.action,
-      CATEGORY_LABELS[entry.category],
+      t(CATEGORY_LABEL_KEYS[entry.category]),
       entry.targetType ?? '',
       entry.targetId ?? '',
       entry.metadataText,
@@ -130,10 +141,8 @@ export default function AuditClient({
     <section className="mx-auto max-w-5xl pb-32">
       <header className="mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-text-primary">Audit Log</h1>
-          <p className="mt-1 text-sm text-text-secondary">
-            Review administrative and moderation actions in this community.
-          </p>
+          <h1 className="text-2xl font-semibold text-text-primary">{t('admin.audit.title')}</h1>
+          <p className="mt-1 text-sm text-text-secondary">{t('admin.audit.intro')}</p>
         </div>
         <button
           type="button"
@@ -141,36 +150,54 @@ export default function AuditClient({
           disabled={visibleEntries.length === 0}
           className="inline-flex items-center justify-center gap-2 rounded-lg border border-border-subtle bg-surface-raised px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-surface-container disabled:cursor-not-allowed disabled:opacity-50"
         >
-          <span className="material-symbols-outlined text-lg">download</span>
-          Export CSV
+          <span className="material-symbols-outlined text-lg" aria-hidden>
+            download
+          </span>
+          {t('admin.audit.exportCsv')}
         </button>
       </header>
 
       <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <SummaryCard label="Events loaded" value={entries.length} />
-        <SummaryCard label="Moderation" value={counts.get('moderation') ?? 0} tone="danger" />
-        <SummaryCard label="Role changes" value={counts.get('roles') ?? 0} tone="tertiary" />
-        <SummaryCard label="Invite changes" value={counts.get('invites') ?? 0} tone="muted" />
+        <SummaryCard label={t('admin.audit.summary.loaded')} value={entries.length} />
+        <SummaryCard
+          label={t('admin.audit.summary.moderation')}
+          value={counts.get('moderation') ?? 0}
+          tone="danger"
+        />
+        <SummaryCard
+          label={t('admin.audit.summary.roles')}
+          value={counts.get('roles') ?? 0}
+          tone="tertiary"
+        />
+        <SummaryCard
+          label={t('admin.audit.summary.invites')}
+          value={counts.get('invites') ?? 0}
+          tone="muted"
+        />
       </div>
 
       <div className="mb-5 rounded-xl border border-border-subtle bg-surface p-4">
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px]">
           <label className="flex min-w-0 items-center gap-3 rounded-lg border border-border-subtle bg-surface-container px-3 py-2">
-            <span className="material-symbols-outlined text-lg text-text-muted">search</span>
+            <span className="material-symbols-outlined text-lg text-text-muted" aria-hidden>
+              search
+            </span>
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search action, actor, target, or metadata"
+              aria-label={t('admin.audit.searchLabel')}
+              placeholder={t('admin.audit.searchPlaceholder')}
               className="min-w-0 flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-muted"
             />
           </label>
           <select
             value={sort}
             onChange={(event) => setSort(event.target.value === 'oldest' ? 'oldest' : 'newest')}
+            aria-label={t('admin.audit.sortLabel')}
             className="rounded-lg border border-border-subtle bg-surface-container px-3 py-2 text-sm text-text-primary outline-none"
           >
-            <option value="newest">Newest first</option>
-            <option value="oldest">Oldest first</option>
+            <option value="newest">{t('admin.audit.sortNewest')}</option>
+            <option value="oldest">{t('admin.audit.sortOldest')}</option>
           </select>
         </div>
 
@@ -188,7 +215,7 @@ export default function AuditClient({
                     : 'border-border-subtle bg-surface-container text-text-secondary hover:text-text-primary'
                 }`}
               >
-                {CATEGORY_LABELS[filter]} ({counts.get(filter) ?? 0})
+                {t(CATEGORY_LABEL_KEYS[filter])} ({counts.get(filter) ?? 0})
               </button>
             );
           })}
@@ -197,14 +224,14 @@ export default function AuditClient({
 
       {loadError ? (
         <div className="mb-4 rounded-lg border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
-          Could not load audit log: {loadError}
+          {t('admin.audit.loadError', { error: loadError })}
         </div>
       ) : null}
 
       <div className="flex flex-col gap-2">
         {visibleEntries.length === 0 ? (
           <div className="rounded-xl border border-border-subtle bg-surface p-6 text-center text-sm text-text-muted">
-            {entries.length === 0 ? 'No audit events recorded yet.' : 'No audit events match these filters.'}
+            {entries.length === 0 ? t('admin.audit.empty') : t('admin.audit.noMatch')}
           </div>
         ) : (
           visibleEntries.map((entry) => <AuditRow key={entry.id} entry={entry} />)
@@ -219,9 +246,11 @@ function AuditRow({
 }: {
   entry: AuditEntryView & { category: Category; metadataText: string; timestamp: number };
 }) {
-  const { icon, tone, actionLabel } = describeAction(entry.action);
-  const target = entry.targetType
-    ? `${entry.targetType}${entry.targetId ? `: ${truncate(entry.targetId, 24)}` : ''}`
+  const t = useT();
+  const { icon, tone } = describeAction(entry.action);
+  const targetKind = entry.targetType ? targetTypeLabel(t, entry.targetType) : null;
+  const target = targetKind
+    ? `${targetKind}${entry.targetId ? `: ${truncate(entry.targetId, 24)}` : ''}`
     : null;
 
   return (
@@ -234,20 +263,25 @@ function AuditRow({
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
-            <span className="font-medium text-text-primary">{entry.actorName ?? 'System'}</span>
-            <span className="text-text-secondary">{actionLabel}</span>
+            <span className="font-medium text-text-primary">
+              {entry.actorName ?? t('admin.audit.systemActor')}
+            </span>
+            <span className="text-text-secondary">{actionLabel(t, entry.action)}</span>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-muted">
             <span className="rounded bg-surface-container px-2 py-0.5 text-text-secondary">
-              {CATEGORY_LABELS[entry.category]}
+              {t(CATEGORY_LABEL_KEYS[entry.category])}
             </span>
-            {target ? <span>Target: {target}</span> : null}
-            <time dateTime={entry.createdAt}>{formatDateTime(entry.createdAt)}</time>
+            {target ? <span>{t('admin.audit.target', { target })}</span> : null}
+            {/* The server formats in its own time zone; the browser's wins without a hydration error. */}
+            <time dateTime={entry.createdAt} suppressHydrationWarning>
+              {formatDateTime(entry.createdAt, t.locale)}
+            </time>
           </div>
           {entry.metadataText !== '{}' ? (
             <details className="mt-3">
               <summary className="cursor-pointer text-xs font-medium text-text-secondary hover:text-text-primary">
-                Metadata
+                {t('admin.audit.metadata')}
               </summary>
               <pre className="mt-2 max-h-44 overflow-auto rounded-lg border border-border-subtle bg-surface-container p-3 text-xs text-text-secondary">
                 {entry.metadataText}
@@ -255,7 +289,9 @@ function AuditRow({
             </details>
           ) : null}
         </div>
-        <div className="shrink-0 text-right text-xs text-text-muted">{relativeTime(entry.timestamp)}</div>
+        <div className="shrink-0 text-right text-xs text-text-muted" suppressHydrationWarning>
+          {relativeTime(t, entry.timestamp)}
+        </div>
       </div>
     </article>
   );
@@ -366,24 +402,31 @@ function formatCsvCell(value: string): string {
   return `"${neutralized.replace(/"/g, '""')}"`;
 }
 
-function formatDateTime(value: string): string {
+function formatDateTime(value: string, locale: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
+  return date.toLocaleString(locale);
 }
 
-function relativeTime(timestamp: number): string {
+function relativeTime(t: Translator, timestamp: number): string {
   if (!Number.isFinite(timestamp)) return '';
   const ms = Date.now() - timestamp;
   const seconds = Math.max(0, Math.floor(ms / 1000));
-  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 60) return t('admin.audit.ago.seconds', { count: seconds });
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 60) return t('admin.audit.ago.minutes', { count: minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return t('admin.audit.ago.hours', { count: hours });
   const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  return new Date(timestamp).toLocaleDateString();
+  if (days < 7) return t('admin.audit.ago.days', { count: days });
+  return new Date(timestamp).toLocaleDateString(t.locale);
+}
+
+const TARGET_TYPES = ['card_pack', 'channel', 'invite', 'membership', 'message', 'plugin', 'role', 'server', 'session', 'user'];
+
+/** What an audit entry acted on, in words; an unknown type shows as written. */
+function targetTypeLabel(t: Translator, type: string): string {
+  return TARGET_TYPES.includes(type) ? t(`admin.audit.targetType.${type}`) : type;
 }
 
 function truncate(s: string, max: number): string {

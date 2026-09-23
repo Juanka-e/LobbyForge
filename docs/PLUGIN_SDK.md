@@ -304,7 +304,17 @@ The whole pattern is:
 2. At module load, `loadPluginLocale(pluginId, { en, tr })` registers
    each table against the shared registry keyed by `pluginId`.
 3. `tFor(pluginId, locale, key, params?, fallback?)` resolves a
-   string for the active locale, with `{name}`-style interpolation.
+   string for the active locale and fills its arguments — `{name}`, and
+   plurals such as `{count, plural, one {# point} other {# points}}`.
+   It is the same message format as the app's own catalogues
+   (`formatMessage` in `src/message-format.ts`; see
+   `docs/TRANSLATING.md` → "Plurals"), so pass counts as numbers and let
+   each language write its own plural forms.
+   Put your catalogue description under the key `catalog.summary`
+   (`CATALOG_SUMMARY_KEY`): the host shows it in the activity picker and
+   the admin app list in the viewer's language, and the manifest can
+   read its English from the same file —
+   `summary: LOCALE_TABLES.en[CATALOG_SUMMARY_KEY]`.
 4. `listPluginLocales(pluginId)` returns the locales the plugin
    actually supports in registration order (so the first registered
    is the primary fallback when the user's preference isn't shipped).
@@ -386,12 +396,14 @@ A few conventions plugins should follow:
    from a server component route.
 2. **Inline-style the UI.** The host doesn't ship a CSS framework to
    the plugin; the panel must look right with no external stylesheets.
-   Use the same dark `#0e1218` / `#1c2530` / `#e6e8eb` palette as the
-   rest of the voice room.
-3. **Bundle your own locales.** `plugins/{id}/locales/{en,tr}.json` is
-   the convention; a tiny `t(key, params)` helper inside the
-   renderClient file is enough. Don't depend on `@lobbyforge/i18n` —
-   the plugin should be self-contained.
+   Colour everything with the host's theme variables and a fallback —
+   `var(--lf-surface, #0e1218)`, `var(--lf-text-primary, #e6e8eb)` —
+   and set `color` on your root element, or the panel stays dark on
+   the light theme and its headings inherit the page's text colour.
+3. **Bundle your own locales.** One `locales/<code>.json` per language,
+   loaded with `loadPluginLocale` and read with `tFor`; the plugin stays
+   self-contained. `pnpm i18n:add` scaffolds a new language for every
+   plugin at once — see [TRANSLATING.md](TRANSLATING.md).
 4. **Gate every action through `dispatch`.** No `fetch`, no DB calls,
    no side effects in the panel. Every state transition is a reducer
    call that the host persists.

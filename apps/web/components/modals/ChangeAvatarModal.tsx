@@ -2,6 +2,8 @@
 
 import { useRef, useState } from 'react';
 import { Modal, ModalCancelButton, ModalPrimaryButton } from '../Modal';
+import { useT } from '@/lib/i18n/client';
+import type { Translator } from '@/lib/i18n/core';
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const ACCEPTED = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
@@ -22,6 +24,7 @@ export function ChangeAvatarModal({
   displayName,
   onSave,
 }: ChangeAvatarModalProps) {
+  const t = useT();
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [zoom, setZoom] = useState(100);
@@ -33,11 +36,11 @@ export function ChangeAvatarModal({
   function pickFile(selected: File) {
     setError(null);
     if (!ACCEPTED.includes(selected.type)) {
-      setError('Please choose a PNG, JPG, WebP, or GIF image.');
+      setError(t('shell.imageEditor.wrongType'));
       return;
     }
     if (selected.size > MAX_FILE_BYTES) {
-      setError('Image is larger than 5 MB. Choose a smaller file.');
+      setError(t('shell.imageEditor.tooLarge', { max: MAX_FILE_BYTES / (1024 * 1024) }));
       return;
     }
     if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -68,7 +71,7 @@ export function ChangeAvatarModal({
     setSaving(true);
     setError(null);
     try {
-      const dataUrl = await renderCroppedDataUrl(previewUrl, zoom, rotation);
+      const dataUrl = await renderCroppedDataUrl(previewUrl, zoom, rotation, t);
       await onSave({ file, croppedDataUrl: dataUrl });
       reset();
       onClose();
@@ -83,14 +86,14 @@ export function ChangeAvatarModal({
     <Modal
       open={open}
       onClose={close}
-      title="Change Avatar"
-      description="Upload and adjust your community profile image."
+      title={t('shell.avatar.title')}
+      description={t('shell.avatar.description')}
       size="lg"
       footer={
         <>
           <ModalCancelButton onClick={close} disabled={saving} />
           <ModalPrimaryButton onClick={save} disabled={!file} loading={saving}>
-            Save Avatar
+            {t('shell.avatar.save')}
           </ModalPrimaryButton>
         </>
       }
@@ -107,13 +110,13 @@ export function ChangeAvatarModal({
                 transform: `rotate(${rotation}deg)`,
                 backgroundRepeat: 'no-repeat',
               }}
-              aria-label="Avatar preview"
+              aria-label={t('shell.avatar.preview')}
             />
           ) : currentAvatarUrl ? (
             <div
               className="absolute inset-0 w-full h-full bg-cover bg-center"
               style={{ backgroundImage: `url(${currentAvatarUrl})` }}
-              aria-label={`${displayName} avatar`}
+              aria-label={t('shell.avatar.current', { name: displayName })}
             />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center text-text-muted text-6xl font-medium">
@@ -132,7 +135,7 @@ export function ChangeAvatarModal({
             <div className="flex items-center gap-3 flex-1 max-w-[240px]">
               <button
                 type="button"
-                aria-label="Zoom out"
+                aria-label={t('shell.imageEditor.zoomOut')}
                 onClick={() => setZoom((value) => Math.max(50, value - 10))}
                 className="text-text-muted hover:text-text-primary"
               >
@@ -145,11 +148,11 @@ export function ChangeAvatarModal({
                 value={zoom}
                 onChange={(event) => setZoom(Number(event.target.value))}
                 className="flex-1 accent-primary"
-                aria-label="Zoom level"
+                aria-label={t('shell.imageEditor.zoomLevel')}
               />
               <button
                 type="button"
-                aria-label="Zoom in"
+                aria-label={t('shell.imageEditor.zoomIn')}
                 onClick={() => setZoom((value) => Math.min(200, value + 10))}
                 className="text-text-muted hover:text-text-primary"
               >
@@ -159,7 +162,7 @@ export function ChangeAvatarModal({
             <div className="flex items-center gap-2 border-l border-border-subtle pl-4 ml-4">
               <button
                 type="button"
-                aria-label="Rotate left"
+                aria-label={t('shell.imageEditor.rotateLeft')}
                 onClick={() => setRotation((value) => value - 90)}
                 className="p-2 text-text-muted hover:text-text-primary hover:bg-surface-variant rounded-lg"
               >
@@ -167,7 +170,7 @@ export function ChangeAvatarModal({
               </button>
               <button
                 type="button"
-                aria-label="Rotate right"
+                aria-label={t('shell.imageEditor.rotateRight')}
                 onClick={() => setRotation((value) => value + 90)}
                 className="p-2 text-text-muted hover:text-text-primary hover:bg-surface-variant rounded-lg"
               >
@@ -182,7 +185,7 @@ export function ChangeAvatarModal({
                 }}
                 className="text-sm text-text-muted hover:text-text-primary px-2 py-1"
               >
-                Reset
+                {t('shell.imageEditor.reset')}
               </button>
             </div>
           </div>
@@ -207,9 +210,11 @@ export function ChangeAvatarModal({
               className="flex items-center gap-2 px-4 py-2 bg-surface-variant border border-border-strong text-text-secondary hover:text-text-primary hover:border-text-muted rounded-lg transition-colors w-fit text-sm font-medium"
             >
               <span className="material-symbols-outlined text-[18px]">upload</span>
-              {previewUrl ? 'Choose Another Image' : 'Choose Image'}
+              {previewUrl ? t('shell.imageEditor.chooseAnother') : t('shell.imageEditor.choose')}
             </button>
-            <p className="text-xs text-text-muted">PNG, JPG or WebP · Maximum 5 MB</p>
+            <p className="text-xs text-text-muted">
+              {t('shell.avatar.formats', { max: MAX_FILE_BYTES / (1024 * 1024) })}
+            </p>
           </div>
           <div className="flex flex-col items-center gap-2">
             <div className="w-16 h-16 rounded-full overflow-hidden border border-border-strong bg-surface">
@@ -217,7 +222,7 @@ export function ChangeAvatarModal({
                 <div
                   className="w-full h-full bg-cover bg-center"
                   style={{ backgroundImage: `url(${previewUrl})` }}
-                  aria-label="Avatar preview"
+                  aria-label={t('shell.avatar.preview')}
                 />
               ) : currentAvatarUrl ? (
                 <img
@@ -231,7 +236,7 @@ export function ChangeAvatarModal({
                 </div>
               )}
             </div>
-            <span className="text-[10px] text-text-muted uppercase tracking-wider">Preview</span>
+            <span className="text-[10px] text-text-muted uppercase tracking-wider">{t('shell.imageEditor.preview')}</span>
           </div>
         </div>
 
@@ -248,7 +253,8 @@ export function ChangeAvatarModal({
 async function renderCroppedDataUrl(
   sourceUrl: string,
   zoom: number,
-  rotation: number
+  rotation: number,
+  t: Translator
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const image = new Image();
@@ -261,7 +267,7 @@ async function renderCroppedDataUrl(
         canvas.height = size;
         const ctx = canvas.getContext('2d');
         if (!ctx) {
-          reject(new Error('Canvas 2D context unavailable'));
+          reject(new Error(t('shell.imageEditor.canvasUnavailable')));
           return;
         }
         const baseScale = Math.max(size / image.width, size / image.height);
@@ -281,7 +287,7 @@ async function renderCroppedDataUrl(
         reject(err as Error);
       }
     };
-    image.onerror = () => reject(new Error('Failed to read image'));
+    image.onerror = () => reject(new Error(t('shell.imageEditor.readFailed')));
     image.src = sourceUrl;
   });
 }

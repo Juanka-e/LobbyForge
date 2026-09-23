@@ -1,6 +1,8 @@
 import { ReactNode } from 'react';
+import { getTranslator } from '@/lib/i18n/server';
 
-export default function DashboardLayout({ children }: { children: ReactNode }) {
+export default async function DashboardLayout({ children }: { children: ReactNode }) {
+  const t = await getTranslator();
   return (
     <div className="flex h-screen bg-[#0f1115] text-[#e6e8eb]">
       {/* Server Dock */}
@@ -15,14 +17,14 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         <h2 className="font-bold mb-4">LobbyForge</h2>
         <div className="space-y-6">
           <div>
-            <h3 className="text-[#9aa3ad] text-xs font-semibold uppercase mb-2">Text Channels</h3>
+            <h3 className="text-[#9aa3ad] text-xs font-semibold uppercase mb-2">{t('lobbyMain.text.heading')}</h3>
             <ul className="space-y-1">
               <li className="px-2 py-1 bg-[#1f242c] rounded"># general</li>
               <li className="px-2 py-1 text-[#9aa3ad]"># announcements</li>
             </ul>
           </div>
           <div>
-            <h3 className="text-[#9aa3ad] text-xs font-semibold uppercase mb-2">Voice Channels</h3>
+            <h3 className="text-[#9aa3ad] text-xs font-semibold uppercase mb-2">{t('lobbyMain.voice.heading')}</h3>
             <ul className="space-y-1">
               <li className="px-2 py-1 text-[#9aa3ad]">🔊 Lounge</li>
             </ul>

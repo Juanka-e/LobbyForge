@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react';
 import type { UserRow } from '@lobbyforge/db';
 import { ChangeAvatarModal } from '@/components/modals/ChangeAvatarModal';
+import { useT } from '@/lib/i18n/client';
 
 export default function ProfileBody({
   user,
@@ -11,6 +12,7 @@ export default function ProfileBody({
   user: UserRow | null;
   serverProfile: { serverName: string; nickname: string | null } | null;
 }) {
+  const t = useT();
   const [avatarOpen, setAvatarOpen] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(user?.avatarUrl ?? null);
   const [bannerUrl, setBannerUrl] = useState<string | null>(user?.bannerUrl ?? null);
@@ -28,8 +30,8 @@ export default function ProfileBody({
   if (!user) {
     return (
       <section className="max-w-3xl mx-auto">
-        <h1 className="text-2xl font-semibold text-text-primary">Profile</h1>
-        <p className="mt-2 text-sm text-text-muted">Sign in to view your profile.</p>
+        <h1 className="text-2xl font-semibold text-text-primary">{t('settings.nav.user.profile')}</h1>
+        <p className="mt-2 text-sm text-text-muted">{t('settings.profile.signedOut')}</p>
       </section>
     );
   }
@@ -76,17 +78,17 @@ export default function ProfileBody({
   async function handleBannerFile(file: File | undefined) {
     if (!file) return;
     if (!/^image\/(png|jpe?g|webp)$/.test(file.type)) {
-      setError('Banner must be a PNG, JPEG, or WebP image.');
+      setError(t('settings.profile.banner.badType'));
       return;
     }
     if (file.size > 6 * 1024 * 1024) {
-      setError('Banner image is too large. Choose an image under 6 MB.');
+      setError(t('settings.profile.banner.tooLarge'));
       return;
     }
     const dataUrl = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(new Error('Could not read banner image.'));
+      reader.onerror = () => reject(new Error(t('settings.profile.banner.readFailed')));
       reader.readAsDataURL(file);
     });
     await saveBanner(dataUrl);
@@ -151,10 +153,8 @@ export default function ProfileBody({
     <>
       <section className="max-w-3xl mx-auto pb-32 space-y-8">
         <header>
-          <h1 className="text-2xl font-semibold text-text-primary">Profile</h1>
-          <p className="mt-1 text-sm text-text-secondary">
-            How you appear to other members in this community.
-          </p>
+          <h1 className="text-2xl font-semibold text-text-primary">{t('settings.nav.user.profile')}</h1>
+          <p className="mt-1 text-sm text-text-secondary">{t('settings.profile.description')}</p>
         </header>
 
         <div className="rounded-xl border border-border-subtle bg-surface overflow-hidden">
@@ -178,7 +178,7 @@ export default function ProfileBody({
                   onClick={() => void saveBanner(null)}
                   className="rounded-md border border-white/20 bg-black/45 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-sm transition-colors hover:bg-black/60 disabled:opacity-50"
                 >
-                  Remove banner
+                  {t('settings.profile.banner.remove')}
                 </button>
               ) : null}
               <button
@@ -187,7 +187,13 @@ export default function ProfileBody({
                 onClick={() => bannerInputRef.current?.click()}
                 className="rounded-md border border-white/20 bg-black/45 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-sm transition-colors hover:bg-black/60 disabled:opacity-50"
               >
-                {bannerBusy ? 'Saving...' : bannerUrl ? 'Change banner' : 'Add banner'}
+                {t(
+                  bannerBusy
+                    ? 'settings.footer.saving'
+                    : bannerUrl
+                      ? 'settings.profile.banner.change'
+                      : 'settings.profile.banner.add'
+                )}
               </button>
             </div>
           </div>
@@ -205,14 +211,14 @@ export default function ProfileBody({
               onClick={() => setAvatarOpen(true)}
               className="rounded-md border border-border-strong px-3 py-1.5 text-sm text-text-secondary hover:bg-surface-raised transition-colors"
             >
-              Change avatar
+              {t('settings.profile.changeAvatar')}
             </button>
           </div>
         </div>
 
-        <Section title="Profile">
+        <Section title={t('settings.nav.user.profile')}>
           <EditableRow
-            label="Display name"
+            label={t('settings.profile.displayName')}
             value={displayName}
             editing={editing === 'displayName'}
             draft={draft}
@@ -224,8 +230,8 @@ export default function ProfileBody({
             onCancel={() => setEditing(null)}
           />
           <EditableRow
-            label="Status"
-            value={statusText || 'No status set'}
+            label={t('settings.profile.status')}
+            value={statusText || t('settings.profile.statusEmpty')}
             editing={editing === 'statusText'}
             draft={draft}
             maxLength={128}
@@ -236,8 +242,8 @@ export default function ProfileBody({
             onCancel={() => setEditing(null)}
           />
           <EditableRow
-            label="About me"
-            value={bio || 'No bio set'}
+            label={t('settings.profile.bio')}
+            value={bio || t('settings.profile.bioEmpty')}
             editing={editing === 'bio'}
             draft={draft}
             maxLength={190}
@@ -249,11 +255,11 @@ export default function ProfileBody({
           />
         </Section>
 
-        <Section title="Server-specific">
+        <Section title={t('settings.profile.server.title')}>
           {serverProfile ? (
             <EditableRow
-              label={`Nickname in ${serverProfile.serverName}`}
-              value={serverNickname || `Default (${displayName})`}
+              label={t('settings.profile.server.nicknameIn', { server: serverProfile.serverName })}
+              value={serverNickname || t('settings.profile.server.nicknameDefault', { name: displayName })}
               editing={editing === 'serverNickname'}
               draft={draft}
               maxLength={64}
@@ -265,7 +271,7 @@ export default function ProfileBody({
               onCancel={() => setEditing(null)}
             />
           ) : (
-            <Row label="Nickname" value="No accessible community" last />
+            <Row label={t('settings.profile.server.nickname')} value={t('settings.profile.server.none')} last />
           )}
         </Section>
 
@@ -353,6 +359,7 @@ function EditableRow({
   onCancel: () => void;
   last?: boolean;
 }) {
+  const t = useT();
   return (
     <div className={`flex justify-between items-center gap-4 ${last ? '' : 'border-b border-border-subtle pb-6'}`}>
       <div className="min-w-0 flex-1">
@@ -372,15 +379,15 @@ function EditableRow({
       {editing ? (
         <div className="flex gap-2">
           <button type="button" disabled={busy} onClick={onCancel} className="btn-secondary-sm disabled:opacity-40">
-            Cancel
+            {t('common.cancel')}
           </button>
           <button type="button" disabled={busy} onClick={onSave} className="btn-primary-sm disabled:opacity-40">
-            {busy ? 'Saving...' : 'Save'}
+            {busy ? t('settings.footer.saving') : t('common.save')}
           </button>
         </div>
       ) : (
         <button type="button" onClick={onBegin} className="btn-secondary-sm">
-          Edit
+          {t('settings.profile.edit')}
         </button>
       )}
     </div>

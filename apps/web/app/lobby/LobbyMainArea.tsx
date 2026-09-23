@@ -85,7 +85,7 @@ function LobbyMainAreaLive({ data }: { data: LobbyData }) {
     ?? data.activeTextChannel;
   const channelName = activeTextChannel?.name ?? voice.activeTextChannelName ?? 'general';
   const activeChannelId = activeTextChannel?.id ?? voice.activeTextChannelId;
-  const voiceChannelName = data.voiceChannels.find((c) => c.id === voice.activeChannelId)?.name ?? 'Voice';
+  const voiceChannelName = data.voiceChannels.find((c) => c.id === voice.activeChannelId)?.name ?? t('lobbyMain.voice.fallbackName');
   const memberMentions = useMemo(
     () =>
       (data.members ?? []).map((m) => ({

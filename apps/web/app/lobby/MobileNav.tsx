@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, type ReactNode } from 'react';
+import { useT } from '@/lib/i18n/client';
 
 /**
  * Mobile navigation wrapper — provides a hamburger button on small screens
@@ -13,6 +14,7 @@ import { useState, type ReactNode } from 'react';
  * Usage: wrap the <Sidebar> + <ServerRail> in <MobileNav>.
  */
 export default function MobileNav({ children }: { children: ReactNode }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
 
   return (
@@ -22,7 +24,7 @@ export default function MobileNav({ children }: { children: ReactNode }) {
         type="button"
         onClick={() => setOpen(true)}
         className="md:hidden fixed top-3 left-3 z-50 w-10 h-10 rounded-lg bg-surface-raised border border-border-subtle flex items-center justify-center text-text-secondary hover:text-text-primary transition-colors"
-        aria-label="Open navigation menu"
+        aria-label={t('lobby.nav.open')}
         aria-expanded={open}
       >
         <span className="material-symbols-outlined text-[20px]">menu</span>

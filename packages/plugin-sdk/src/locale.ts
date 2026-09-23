@@ -36,7 +36,19 @@
  * wiring.
  */
 
+import { formatMessage } from './message-format.js';
+
+export { formatMessage, messageArguments, PLURAL_CATEGORIES, type MessageParams } from './message-format.js';
+
 export type LocaleId = string;
+
+/**
+ * The key a plugin's locale files use to translate its catalogue summary
+ * (the one-line description the host shows in activity pickers and admin
+ * lists). The host prefers it over `catalog.summary` in the manifest, so
+ * a plugin's description is translated the same way as its buttons.
+ */
+export const CATALOG_SUMMARY_KEY = 'catalog.summary';
 
 /** Minimal shape of a locale table — flat key→string map. */
 export type LocaleTable = Record<string, string>;
@@ -80,6 +92,9 @@ export function registerPluginLocale(
     perLocale.set(locale, arr);
   }
   arr.push(loader);
+  // Tables are materialized lazily and cached; a registration after the
+  // first lookup must be seen, not silently ignored.
+  localeTables.delete(pluginId);
 }
 
 /**
@@ -97,9 +112,19 @@ export function loadPluginLocale(
 ): void {
   for (const [locale, table] of Object.entries(tables)) {
     if (!table) continue;
+    // Idempotent per table: a plugin registers from its entry module
+    // (evaluated on the server) AND its client panel (a 'use client'
+    // module the server never runs), so the browser sees both calls.
+    const seen = loadedTables.get(table) ?? new Set<string>();
+    const slot = `${pluginId}\u0000${locale}`;
+    if (seen.has(slot)) continue;
+    seen.add(slot);
+    loadedTables.set(table, seen);
     registerPluginLocale(pluginId, locale, () => table);
   }
 }
+
+let loadedTables = new WeakMap<LocaleTable, Set<string>>();
 
 function materializeLocaleTables(pluginId: string): Map<LocaleId, LocaleTable> {
   const cached = localeTables.get(pluginId);
@@ -113,7 +138,12 @@ function materializeLocaleTables(pluginId: string): Map<LocaleId, LocaleTable> {
         try {
           const t = fn();
           if (t && typeof t === 'object') {
-            Object.assign(merged, t);
+            for (const [key, value] of Object.entries(t)) {
+              // `$`-prefixed entries are file metadata (`$status`), not
+              // strings anyone should ever be shown.
+              if (key.startsWith('$')) continue;
+              merged[key] = value;
+            }
           }
         } catch {
           // A failing loader shouldn't break the whole plugin — skip
@@ -153,8 +183,8 @@ export function listPluginLocales(pluginId: string): LocaleId[] {
  * `fallbackLocale` (defaults to 'en') and finally to `key` itself so
  * a missing translation surfaces as something the developer can grep.
  *
- * `params` is an optional `{name}` interpolation map. The tokens are
- * `{name}` style — `{score}`, `{seconds}`, etc.
+ * `params` fills the message's arguments — `{score}`, and plurals such as
+ * `{count, plural, one {# point} other {# points}}`. See `message-format.ts`.
  */
 export function tFor(
   pluginId: string,
@@ -166,27 +196,27 @@ export function tFor(
   const tables = materializeLocaleTables(pluginId);
   const tryLookup = (loc: LocaleId | null | undefined): string | undefined => {
     if (!loc) return undefined;
-    const table = tables.get(loc);
-    return table ? table[key] : undefined;
+    const value = tables.get(loc)?.[key];
+    // A blank value is a string nobody has translated yet — that is what
+    // `pnpm i18n:add` scaffolds — so it falls through to the fallback
+    // language instead of rendering an empty label.
+    return typeof value === 'string' && value.trim() !== '' ? value : undefined;
   };
-  const template =
-    tryLookup(locale) ?? tryLookup(fallbackLocale) ?? key;
-  if (!params) return template;
-  return template.replace(/\{([a-zA-Z0-9_]+)\}/g, (match, name) => {
-    const v = params[name];
-    return v === undefined ? match : String(v);
-  });
+  const own = tryLookup(locale);
+  const template = own ?? tryLookup(fallbackLocale) ?? key;
+  // Plural rules follow the language the string is actually written in:
+  // a gap that fell back to English is English.
+  return formatMessage(template, params, own !== undefined && locale ? locale : fallbackLocale);
 }
 
 /**
  * The attribute the host uses to publish the PLUGIN language.
  *
- * Deliberately not `<html lang>`. That attribute states the language of
- * the document, and the host's own chrome is English — setting it to
- * `tr` made CSS `text-transform: uppercase` apply Turkish casing to
- * English labels, so "ACTIVITIES" rendered as "ACTİVİTİES". The plugin
- * language is a separate fact, and the host tags the translated panel
- * itself with `lang` so casing and screen readers are right THERE.
+ * Separate from `<html lang>`, which states the language of the page.
+ * The two usually agree, but a plugin may not ship the user's language:
+ * then the page is (say) Turkish while the panel falls back to English,
+ * and the host tags the panel itself with `lang` so CSS casing and screen
+ * readers are right there.
  */
 export const HOST_LOCALE_ATTRIBUTE = 'lfLocale';
 
@@ -240,4 +270,5 @@ export function pickBestLocale(
 export function __resetPluginLocaleRegistry(): void {
   localeTables.clear();
   localeLoaders.clear();
+  loadedTables = new WeakMap();
 }

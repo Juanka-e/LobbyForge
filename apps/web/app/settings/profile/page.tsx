@@ -4,14 +4,16 @@ import { getSessionSecret } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import SettingsShell from '@/app/SettingsShell';
+import { getTranslator } from '@/lib/i18n/server';
 import ProfileBody from './ProfileBody';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export const metadata = {
-  title: 'Profile - User Settings',
-};
+export async function generateMetadata() {
+  const t = await getTranslator();
+  return { title: t('settings.profile.metaTitle') };
+}
 
 export default async function ProfileSettingsPage() {
   const cookieStore = await cookies();

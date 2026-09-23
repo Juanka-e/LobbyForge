@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import { useT } from '@/lib/i18n/client';
 
 /**
  * @mention autocomplete dropdown for the lobby message composer.
@@ -38,6 +39,7 @@ export function MentionInput({
   className,
   onMention,
 }: MentionInputProps) {
+  const t = useT();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
@@ -141,7 +143,7 @@ export function MentionInput({
       {mentionQuery !== null && filtered.length > 0 ? (
         <div className="absolute bottom-full left-0 mb-2 w-64 max-h-64 overflow-y-auto rounded-lg border border-border-subtle bg-surface-raised shadow-2xl z-50">
           <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-text-muted border-b border-border-subtle">
-            Members matching @{mentionQuery}
+            {t('lobbyMain.composer.mentionMatches', { query: mentionQuery })}
           </div>
           <ul>
             {filtered.map((user, idx) => (

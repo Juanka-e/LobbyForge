@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import SettingsShell from '@/app/SettingsShell';
 import SettingsStickyFooter from '@/app/settings/SettingsStickyFooter';
+import { useT } from '@/lib/i18n/client';
+import { rich } from '@/lib/i18n/rich';
 
 /**
  * User Settings -> Accessibility.
@@ -33,10 +35,11 @@ const DEFAULTS: AccessibilitySettings = {
   alwaysShowFocus: true,
 };
 
-const TRIPLE_OPTIONS: { value: 'auto' | 'on' | 'off'; label: string }[] = [
-  { value: 'auto', label: 'Auto' },
-  { value: 'on', label: 'On' },
-  { value: 'off', label: 'Off' },
+// Labels are message keys, resolved where they render.
+const TRIPLE_OPTIONS: { value: 'auto' | 'on' | 'off'; labelKey: string }[] = [
+  { value: 'auto', labelKey: 'settings.accessibility.option.auto' },
+  { value: 'on', labelKey: 'settings.accessibility.option.on' },
+  { value: 'off', labelKey: 'settings.accessibility.option.off' },
 ];
 
 function loadFromStorage(): AccessibilitySettings {
@@ -79,6 +82,7 @@ function applyAccessibilitySettings(
 }
 
 export default function AccessibilityPage() {
+  const t = useT();
   const [settings, setSettings] = useState<AccessibilitySettings>(DEFAULTS);
   const [systemMotion, setSystemMotion] = useState(false);
   const [systemContrast, setSystemContrast] = useState(false);
@@ -116,56 +120,52 @@ export default function AccessibilityPage() {
     applyAccessibilitySettings(DEFAULTS, systemMotion, systemContrast);
   }
 
+  // The standards link sits mid-sentence, and its position differs by
+  // language, so the sentence is split around its placeholder.
+
   return (
     <SettingsShell scope="user">
       <section className="max-w-3xl mx-auto pb-32 space-y-8">
         <header>
-          <h1 className="text-2xl font-semibold text-text-primary">Accessibility</h1>
-          <p className="mt-1 text-sm text-text-secondary">
-            Adapt the interface for motion sensitivity, contrast needs, or keyboard-only navigation.
-            These preferences are saved locally in this browser only.
-          </p>
+          <h1 className="text-2xl font-semibold text-text-primary">{t('settings.nav.user.accessibility')}</h1>
+          <p className="mt-1 text-sm text-text-secondary">{t('settings.accessibility.description')}</p>
         </header>
 
-        <Section title="Motion">
+        <Section title={t('settings.accessibility.motion.title')}>
           <TriField
-            label="Reduced motion"
-            description={
-              systemMotion
-                ? 'Your OS has prefers-reduced-motion enabled. Auto follows it.'
-                : 'Auto follows your OS setting. Override here to force.'
-            }
+            label={t('settings.accessibility.motion.reduced')}
+            description={t(
+              systemMotion ? 'settings.accessibility.motion.systemOn' : 'settings.accessibility.motion.systemOff'
+            )}
             value={settings.reducedMotion}
             onChange={(v) => patch('reducedMotion', v)}
           />
         </Section>
 
-        <Section title="Contrast &amp; Text">
+        <Section title={t('settings.accessibility.contrast.title')}>
           <TriField
-            label="High contrast"
-            description={
-              systemContrast
-                ? 'Your OS has prefers-contrast: more. Auto follows it.'
-                : 'Auto follows your OS setting.'
-            }
+            label={t('settings.accessibility.contrast.high')}
+            description={t(
+              systemContrast ? 'settings.accessibility.contrast.systemOn' : 'settings.accessibility.contrast.systemOff'
+            )}
             value={settings.highContrast}
             onChange={(v) => patch('highContrast', v)}
           />
           <ToggleRow
             icon="format_size"
-            label="Larger text"
-            description="Increase the base font size by ~15% across the app."
+            label={t('settings.accessibility.contrast.largeText')}
+            description={t('settings.accessibility.contrast.largeTextHint')}
             checked={settings.largeText}
             onChange={(v) => patch('largeText', v)}
             last
           />
         </Section>
 
-        <Section title="Keyboard Navigation">
+        <Section title={t('settings.accessibility.keyboard.title')}>
           <ToggleRow
             icon="keyboard"
-            label="Always show focus ring"
-            description="Render a visible focus outline on every interactive element, even on mouse use."
+            label={t('settings.accessibility.keyboard.focusRing')}
+            description={t('settings.accessibility.keyboard.focusRingHint')}
             checked={settings.alwaysShowFocus}
             onChange={(v) => patch('alwaysShowFocus', v)}
             last
@@ -175,21 +175,28 @@ export default function AccessibilityPage() {
         <div className="rounded-lg border border-border-subtle bg-surface-container-low p-4 flex gap-3">
           <span className="material-symbols-outlined text-text-muted text-[18px] shrink-0">devices</span>
           <p className="text-xs text-text-muted leading-relaxed">
-            These settings are stored in this browser&apos;s localStorage and apply only to this device.
-            LobbyForge follows{' '}
-            <a className="underline hover:text-text-secondary" href="https://www.w3.org/WAI/standards-guidelines/wcag/">
-              WCAG 2.2 AA
-            </a>
-            . If a screen doesn&apos;t work with your assistive technology, please open an issue.
+            {t('settings.accessibility.note.storage')} {rich(t('settings.accessibility.note.standard'), {
+              standard: (
+                <a className="underline hover:text-text-secondary" href="https://www.w3.org/WAI/standards-guidelines/wcag/">
+                  WCAG 2.2 AA
+                </a>
+              ),
+            })} {t('settings.accessibility.note.issue')}
           </p>
         </div>
 
         <SettingsStickyFooter
-          status={saved ? 'Saved to this browser.' : dirty ? 'Unsaved changes.' : 'All changes saved.'}
+          status={{
+            key: saved
+              ? 'settings.accessibility.status.saved'
+              : dirty
+                ? 'settings.accessibility.status.unsaved'
+                : 'settings.accessibility.status.clean',
+          }}
           dirty={dirty}
           onReset={reset}
           onSave={save}
-          saveLabel="Save to browser"
+          saveLabel={t('settings.accessibility.save')}
         />
       </section>
     </SettingsShell>
@@ -218,6 +225,7 @@ function TriField({
   value: 'auto' | 'on' | 'off';
   onChange: (value: 'auto' | 'on' | 'off') => void;
 }) {
+  const t = useT();
   return (
     <div className="flex items-center justify-between gap-4">
       <div className="min-w-0">
@@ -236,7 +244,7 @@ function TriField({
                 : 'text-text-secondary hover:text-text-primary'
             }`}
           >
-            {option.label}
+            {t(option.labelKey)}
           </button>
         ))}
       </div>

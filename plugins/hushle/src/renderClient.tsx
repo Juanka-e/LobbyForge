@@ -9,12 +9,10 @@
  * host application is responsible for re-rendering the panel with
  * the next state once the dispatch round-trip completes.
  *
- * Locale strategy: the plugin ships its own `locales/{en,tr}.json`
- * bundles and a tiny `t()` helper. We do not depend on
- * `@lobbyforge/i18n` so the plugin stays self-contained and the
- * host app does not have to register a namespace. A future
- * iteration can replace this with a call into `@lobbyforge/i18n`
- * if the host wants a single, app-wide translation table.
+ * Locale strategy: the plugin ships its own `locales/*.json` tables,
+ * registered through `@lobbyforge/plugin-sdk`, so it stays
+ * self-contained and works in any host. The host tells it which
+ * language to speak via `data-lf-locale`; see docs/TRANSLATING.md.
  */
 
 'use client';
@@ -26,8 +24,7 @@ import {
   pickBestLocale,
   detectLocale,
 } from '@lobbyforge/plugin-sdk';
-import en from '../locales/en.json';
-import tr from '../locales/tr.json';
+import { LOCALE_TABLES } from './locales.generated';
 import { HUSHLE_PLUGIN_ID } from './plugin-id';
 import type { HushleAction, HushleState, HushleTeam } from './state';
 
@@ -37,7 +34,7 @@ import type { HushleAction, HushleState, HushleTeam } from './state';
 // `locales/`, add it to the map below, and the panel + host
 // language switcher pick it up automatically.
 import { loadPluginLocale } from '@lobbyforge/plugin-sdk';
-loadPluginLocale(HUSHLE_PLUGIN_ID, { en, tr });
+loadPluginLocale(HUSHLE_PLUGIN_ID, LOCALE_TABLES);
 
 export interface HushlePanelCardPack {
   id: string;
@@ -59,14 +56,9 @@ export interface HushlePanelClientProps {
 
 export type HushlePanelProps = HushlePanelClientProps;
 
-const localeTables: Record<string, Record<string, string>> = { en, tr };
-
 function tFor(locale: string, key: string, params?: Record<string, string | number>): string {
-  // Delegate to the shared SDK helper so the rest of the file is the
-  // same as a community plugin would write. The `localeTables` map is
-  // kept around so a future iteration can swap it for a remote
-  // catalog without rewriting every call site.
-  void localeTables;
+  // Delegate to the shared SDK helper — the same call a community
+  // plugin makes.
   return tForShared(HUSHLE_PLUGIN_ID, locale, key, params);
 }
 

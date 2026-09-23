@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useT } from '@/lib/i18n/client';
 
 export interface MemberView {
   userId: string;
@@ -40,6 +41,7 @@ export default function MembersClient({
   roles: RoleOption[];
   loadError: string | null;
 }) {
+  const t = useT();
   const [memberList, setMemberList] = useState(members);
   const [query, setQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
@@ -49,17 +51,23 @@ export default function MembersClient({
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
 
+  // A member with no role shows as "Guest" or "Member" — interface words,
+  // so they follow the language; real role names are data and do not.
+  const guestLabel = t('common.guest');
+  const memberLabel = t('adminSettings.members.memberRole');
+  const roleNameOf = (member: MemberView) => member.roleName ?? (member.isGuest ? guestLabel : memberLabel);
+
   const roleOptions = useMemo(() => {
     const names = new Set<string>();
-    for (const member of memberList) names.add(member.roleName ?? (member.isGuest ? 'Guest' : 'Member'));
+    for (const member of memberList) names.add(member.roleName ?? (member.isGuest ? guestLabel : memberLabel));
     return ['all', ...Array.from(names).sort((a, b) => a.localeCompare(b))];
-  }, [memberList]);
+  }, [memberList, guestLabel, memberLabel]);
 
   const filtered = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return memberList
       .filter((member) => {
-        const roleName = member.roleName ?? (member.isGuest ? 'Guest' : 'Member');
+        const roleName = member.roleName ?? (member.isGuest ? guestLabel : memberLabel);
         if (roleFilter !== 'all' && roleName !== roleFilter) return false;
         if (!normalizedQuery) return true;
         return [
@@ -76,7 +84,12 @@ export default function MembersClient({
         const bTime = new Date(b.joinedAt).getTime();
         return sortMode === 'recent' ? bTime - aTime : aTime - bTime;
       });
-  }, [memberList, query, roleFilter, sortMode]);
+  }, [memberList, query, roleFilter, sortMode, guestLabel, memberLabel]);
+
+  const joinedFormat = useMemo(
+    () => new Intl.DateTimeFormat(t.locale, { month: 'short', year: 'numeric', timeZone: 'UTC' }),
+    [t.locale]
+  );
 
   const total = memberList.length;
   const guests = memberList.filter((m) => m.isGuest).length;
@@ -106,7 +119,7 @@ export default function MembersClient({
         }
       );
       const data = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) throw new Error(data.error ?? 'Could not update member roles');
+      if (!response.ok) throw new Error(data.error ?? t('adminSettings.members.rolesFailed'));
       const roleById = new Map(roles.map((role) => [role.id, role]));
       const primary = draftRoles.map((id) => roleById.get(id)).filter(Boolean)[0] ?? null;
       setMemberList((current) =>
@@ -116,7 +129,7 @@ export default function MembersClient({
             : item
         )
       );
-      setMessage({ tone: 'success', text: 'Member roles updated.' });
+      setMessage({ tone: 'success', text: t('adminSettings.members.rolesUpdated') });
     } catch (err) {
       setMessage({ tone: 'danger', text: (err as Error).message });
     } finally {
@@ -126,7 +139,7 @@ export default function MembersClient({
 
   async function kickMember(member: MemberView) {
     if (!serverId || busyUserId) return;
-    if (!window.confirm(`Kick ${member.displayName} from this community?`)) return;
+    if (!window.confirm(t('adminSettings.members.confirmKick', { name: member.displayName }))) return;
     setBusyUserId(member.userId);
     setMessage(null);
     try {
@@ -135,10 +148,10 @@ export default function MembersClient({
         { method: 'DELETE' }
       );
       const data = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) throw new Error(data.error ?? 'Could not kick member');
+      if (!response.ok) throw new Error(data.error ?? t('adminSettings.members.kickFailed'));
       setMemberList((current) => current.filter((item) => item.userId !== member.userId));
       setExpandedUserId(null);
-      setMessage({ tone: 'success', text: 'Member kicked.' });
+      setMessage({ tone: 'success', text: t('adminSettings.members.kicked') });
     } catch (err) {
       setMessage({ tone: 'danger', text: (err as Error).message });
     } finally {
@@ -148,7 +161,7 @@ export default function MembersClient({
 
   async function banMember(member: MemberView) {
     if (!serverId || busyUserId) return;
-    const reason = window.prompt(`Ban ${member.displayName}. Optional reason:`);
+    const reason = window.prompt(t('adminSettings.members.banPrompt', { name: member.displayName }));
     if (reason === null) return;
     setBusyUserId(member.userId);
     setMessage(null);
@@ -159,10 +172,10 @@ export default function MembersClient({
         body: JSON.stringify({ userId: member.userId, reason: reason.trim() || undefined }),
       });
       const data = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) throw new Error(data.error ?? 'Could not ban member');
+      if (!response.ok) throw new Error(data.error ?? t('adminSettings.members.banFailed'));
       setMemberList((current) => current.filter((item) => item.userId !== member.userId));
       setExpandedUserId(null);
-      setMessage({ tone: 'success', text: 'Member banned.' });
+      setMessage({ tone: 'success', text: t('adminSettings.members.banned') });
     } catch (err) {
       setMessage({ tone: 'danger', text: (err as Error).message });
     } finally {
@@ -179,10 +192,8 @@ export default function MembersClient({
   return (
     <section className="max-w-4xl mx-auto pb-32">
       <header className="mb-6">
-        <h1 className="text-2xl font-semibold text-text-primary">Members</h1>
-        <p className="mt-1 text-sm text-text-secondary">
-          Review members, nicknames, roles, and account status in this community.
-        </p>
+        <h1 className="text-2xl font-semibold text-text-primary">{t('adminSettings.members.title')}</h1>
+        <p className="mt-1 text-sm text-text-secondary">{t('adminSettings.members.subtitle')}</p>
       </header>
 
       <div className="flex flex-col md:flex-row gap-4 mb-6">
@@ -194,12 +205,12 @@ export default function MembersClient({
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search members..."
+            placeholder={t('adminSettings.members.searchPlaceholder')}
             className="w-full bg-surface border border-border-subtle rounded-lg py-2 pl-10 pr-4 text-text-primary placeholder-text-muted focus:outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-all"
           />
         </div>
         <div className="flex flex-wrap gap-3">
-          <label className="sr-only" htmlFor="member-role-filter">Role filter</label>
+          <label className="sr-only" htmlFor="member-role-filter">{t('adminSettings.members.roleFilter')}</label>
           <select
             id="member-role-filter"
             value={roleFilter}
@@ -208,39 +219,41 @@ export default function MembersClient({
           >
             {roleOptions.map((role) => (
               <option key={role} value={role}>
-                {role === 'all' ? 'All roles' : role}
+                {role === 'all' ? t('adminSettings.members.allRoles') : role}
               </option>
             ))}
           </select>
-          <label className="sr-only" htmlFor="member-sort">Sort members</label>
+          <label className="sr-only" htmlFor="member-sort">{t('adminSettings.members.sortLabel')}</label>
           <select
             id="member-sort"
             value={sortMode}
             onChange={(event) => setSortMode(event.target.value as SortMode)}
             className="rounded-lg border border-border-subtle bg-surface px-3 py-2 text-sm text-text-secondary focus:outline-none focus:ring-1 focus:ring-primary-container"
           >
-            <option value="recent">Recently joined</option>
-            <option value="oldest">Oldest first</option>
-            <option value="name">Name A-Z</option>
+            <option value="recent">{t('adminSettings.members.sort.recent')}</option>
+            <option value="oldest">{t('adminSettings.members.sort.oldest')}</option>
+            <option value="name">{t('adminSettings.members.sort.name')}</option>
           </select>
         </div>
       </div>
 
       <div className="flex flex-wrap gap-2 mb-6">
-        <Chip label={`${total} members`} />
-        <Chip label={`${moderators} moderators`} tone="primary" />
-        <Chip label={`${guests} guests`} tone="muted" />
-        {filtered.length !== total ? <Chip label={`${filtered.length} shown`} tone="primary" /> : null}
+        <Chip label={t('adminSettings.members.count', { count: total })} />
+        <Chip label={t('adminSettings.members.moderatorCount', { count: moderators })} tone="primary" />
+        <Chip label={t('adminSettings.members.guestCount', { count: guests })} tone="muted" />
+        {filtered.length !== total ? (
+          <Chip label={t('adminSettings.members.shownCount', { count: filtered.length })} tone="primary" />
+        ) : null}
       </div>
 
       {loadError ? (
         <div className="rounded-lg border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
-          Could not load members: {loadError}
+          {t('adminSettings.members.loadError', { error: loadError })}
         </div>
       ) : null}
       {!serverId ? (
         <div className="rounded-lg border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
-          No server is available for this admin account.
+          {t('adminSettings.common.noServer')}
         </div>
       ) : null}
       {message ? (
@@ -258,21 +271,21 @@ export default function MembersClient({
       <div className="bg-surface rounded-xl border border-border-subtle overflow-hidden">
         <div className="grid grid-cols-[auto_1fr_auto_auto] gap-4 px-6 py-3 border-b border-border-subtle bg-surface-dim/50">
           <div className="col-span-2 font-label-sm uppercase tracking-wider text-text-muted">
-            Member
+            {t('adminSettings.members.col.member')}
           </div>
           <div className="font-label-sm uppercase tracking-wider text-text-muted hidden sm:block">
-            Joined
+            {t('adminSettings.members.col.joined')}
           </div>
           <div className="font-label-sm uppercase tracking-wider text-text-muted text-right">
-            Role
+            {t('adminSettings.members.col.role')}
           </div>
         </div>
 
         {filtered.length === 0 ? (
           <p className="p-6 text-sm text-text-muted">
             {memberList.length === 0
-              ? 'No members yet. Share an invite link from the Invites page to bring people in.'
-              : 'No members match this filter.'}
+              ? t('adminSettings.members.emptyNone')
+              : t('adminSettings.members.emptyFiltered')}
           </p>
         ) : (
           <ul className="divide-y divide-border-subtle">
@@ -290,24 +303,24 @@ export default function MembersClient({
                         <span className="font-label-sm text-text-primary truncate font-medium">
                           {member.displayName}
                         </span>
-                        {member.nickname ? <RoleBadge label="Nickname" tone="primary" /> : null}
-                        {member.isGuest ? <RoleBadge label="Guest" tone="muted" /> : null}
-                        {protectedMember ? <RoleBadge label="Owner" tone="danger" /> : null}
+                        {member.nickname ? (
+                          <RoleBadge label={t('adminSettings.members.badge.nickname')} tone="primary" />
+                        ) : null}
+                        {member.isGuest ? <RoleBadge label={guestLabel} tone="muted" /> : null}
+                        {protectedMember ? (
+                          <RoleBadge label={t('adminSettings.members.badge.owner')} tone="danger" />
+                        ) : null}
                       </div>
                       <div className="text-text-muted text-[13px] truncate">
                         {member.nickname ? `${member.globalDisplayName} - ` : ''}ID {member.userId.slice(0, 8)}
                       </div>
                     </div>
                     <div className="text-text-secondary text-[13px] hidden sm:block whitespace-nowrap">
-                      {new Intl.DateTimeFormat('en-US', {
-                        month: 'short',
-                        year: 'numeric',
-                        timeZone: 'UTC',
-                      }).format(new Date(member.joinedAt))}
+                      {joinedFormat.format(new Date(member.joinedAt))}
                     </div>
                     <div className="text-right">
                       <RoleBadge
-                        label={member.roleName ?? (member.isGuest ? 'Guest' : 'Member')}
+                        label={roleNameOf(member)}
                         tone={member.roleName ? 'primary' : 'muted'}
                         color={member.roleColor}
                       />
@@ -316,7 +329,7 @@ export default function MembersClient({
                       type="button"
                       onClick={() => openMember(member)}
                       className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border-subtle text-text-secondary hover:bg-surface-container hover:text-text-primary"
-                      aria-label={`Manage ${member.displayName}`}
+                      aria-label={t('adminSettings.members.manage', { name: member.displayName })}
                     >
                       <span className="material-symbols-outlined text-[18px]">{expanded ? 'expand_less' : 'more_horiz'}</span>
                     </button>
@@ -325,7 +338,9 @@ export default function MembersClient({
                     <div className="border-t border-border-subtle bg-surface-container-low px-6 py-4">
                       <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
                         <div>
-                          <p className="mb-3 text-xs uppercase tracking-wider text-text-muted">Roles</p>
+                          <p className="mb-3 text-xs uppercase tracking-wider text-text-muted">
+                            {t('adminSettings.members.roles')}
+                          </p>
                           <div className="flex flex-wrap gap-2">
                             {roles.map((role) => {
                               const checked = draftRoles.includes(role.id);
@@ -347,9 +362,7 @@ export default function MembersClient({
                             })}
                           </div>
                           {roles.some((role) => draftRoles.includes(role.id) && role.permissions.includes('administrator')) ? (
-                            <p className="mt-3 text-xs text-danger">
-                              Selected roles include administrator access. Save only for trusted staff.
-                            </p>
+                            <p className="mt-3 text-xs text-danger">{t('adminSettings.members.adminWarning')}</p>
                           ) : null}
                         </div>
                         <div className="flex flex-wrap items-end gap-2 lg:justify-end">
@@ -359,7 +372,7 @@ export default function MembersClient({
                             disabled={busy}
                             className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-on-primary disabled:opacity-50"
                           >
-                            Save roles
+                            {t('adminSettings.members.saveRoles')}
                           </button>
                           <button
                             type="button"
@@ -367,7 +380,7 @@ export default function MembersClient({
                             disabled={busy || protectedMember}
                             className="rounded-lg border border-border-subtle px-3 py-2 text-xs font-semibold text-text-secondary disabled:opacity-50"
                           >
-                            {self ? 'Leave' : 'Kick'}
+                            {self ? t('adminSettings.members.leave') : t('adminSettings.members.kick')}
                           </button>
                           <button
                             type="button"
@@ -375,7 +388,7 @@ export default function MembersClient({
                             disabled={busy || protectedMember || self}
                             className="rounded-lg border border-danger/40 px-3 py-2 text-xs font-semibold text-danger disabled:opacity-50"
                           >
-                            Ban
+                            {t('adminSettings.members.ban')}
                           </button>
                         </div>
                       </div>
@@ -388,10 +401,7 @@ export default function MembersClient({
         )}
       </div>
 
-      <p className="mt-6 text-xs text-text-muted">
-        Member changes affect this self-hosted community only. Role, kick, and ban actions are
-        authorized again on the server before they are applied.
-      </p>
+      <p className="mt-6 text-xs text-text-muted">{t('adminSettings.members.footer')}</p>
     </section>
   );
 }

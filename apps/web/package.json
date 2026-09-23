@@ -26,7 +26,6 @@
     "@lobbyforge/db": "workspace:*",
     "@lobbyforge/dice-bot": "workspace:*",
     "@lobbyforge/hushle": "workspace:*",
-    "@lobbyforge/i18n": "workspace:*",
     "@lobbyforge/plugin-sdk": "workspace:*",
     "@lobbyforge/poll": "workspace:*",
     "@lobbyforge/quiz": "workspace:*",

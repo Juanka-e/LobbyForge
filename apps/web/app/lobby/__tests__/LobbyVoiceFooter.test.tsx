@@ -7,7 +7,7 @@ import {
   type LobbyVoiceContextValue,
 } from '../LobbyVoiceProvider';
 import { I18nProvider } from '@/lib/i18n/client';
-import type { AppLocale } from '@/lib/app-locale';
+import { providerPropsFor } from '@/lib/i18n/catalogue';
 import { ConnectionState } from 'livekit-client';
 
 // Stub next/link so it renders an <a> we can query in the DOM.
@@ -70,10 +70,11 @@ function makeVoice(overrides: Partial<LobbyVoiceContextValue> = {}): LobbyVoiceC
 function renderFooter(
   voice: LobbyVoiceContextValue,
   props = { serverName: 'Community', hasUser: true },
-  locale: AppLocale = 'en'
+  locale = 'en'
 ) {
   render(
-    <I18nProvider locale={locale}>
+    // The real catalogues from disk, exactly as the layout serves them.
+    <I18nProvider {...providerPropsFor(locale)}>
       <LobbyVoiceContext.Provider value={voice}>
         <LobbyVoiceFooter {...props} />
       </LobbyVoiceContext.Provider>

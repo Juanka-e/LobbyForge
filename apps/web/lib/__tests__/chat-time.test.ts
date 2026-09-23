@@ -5,7 +5,7 @@ import {
   formatMessageTimestamp,
   isSameDay,
 } from '../chat-time.js';
-import { createTranslator } from '../i18n/messages.js';
+import { translatorFor } from '../i18n/catalogue.js';
 
 /**
  * Relative dates are the kind of thing that silently drifts: an
@@ -22,8 +22,8 @@ const NOW = new Date(2026, 8, 23, 14, 30); // 23 Sep 2026, 14:30 local
 
 const at = (day: number, hour = 11, minute = 34) => new Date(2026, 8, day, hour, minute);
 
-const en = createTranslator('en');
-const tr = createTranslator('tr');
+const en = translatorFor('en');
+const tr = translatorFor('tr');
 
 describe('formatMessageTimestamp', () => {
   it('reads relatively for today', () => {
@@ -59,11 +59,6 @@ describe('formatMessageTimestamp', () => {
     expect(formatMessageTimestamp(at(23), tr, NOW)).not.toContain(' at ');
   });
 
-  it('still reads English when no translator is supplied', () => {
-    // `app/lobby/page.tsx` stamps messages during SSR and has not been
-    // migrated; it must keep producing the same English it always did.
-    expect(formatMessageTimestamp(at(23), undefined, NOW)).toMatch(/^Today at /);
-  });
 });
 
 describe('formatDaySeparator', () => {
@@ -100,7 +95,7 @@ describe('isSameDay', () => {
 
 describe('formatFullTimestamp', () => {
   it('spells out the whole instant for the tooltip', () => {
-    const full = formatFullTimestamp(at(23));
+    const full = formatFullTimestamp(at(23), en);
     expect(full).toContain('2026');
     // Weekday and month names are locale-dependent; assert it is not the
     // abbreviated form the message stamp uses.
@@ -108,7 +103,7 @@ describe('formatFullTimestamp', () => {
   });
 
   it('returns an empty string for an unparseable value', () => {
-    expect(formatFullTimestamp('nope')).toBe('');
+    expect(formatFullTimestamp('nope', en)).toBe('');
   });
 });
 
@@ -119,8 +114,8 @@ describe('dates are formatted in the language of the sentence around them', () =
    * English-locale browser read "Bugün 11:34" under a separator saying
    * "23 September 2026".
    */
-  const tr = createTranslator('tr');
-  const en = createTranslator('en');
+  const tr = translatorFor('tr');
+  const en = translatorFor('en');
 
   it('names the month in the app language, not the browser default', () => {
     const separator = formatDaySeparator(at(1), tr, NOW);

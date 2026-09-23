@@ -1,4 +1,6 @@
 import type { Metadata } from 'next';
+import { getTranslator } from '@/lib/i18n/server';
+import { rich } from '@/lib/i18n/rich';
 
 /**
  * Download page — desktop installers. Honest about beta status (ADR-005:
@@ -9,11 +11,13 @@ import type { Metadata } from 'next';
 const REPO = 'https://github.com/Juanka-e/LobbyForge';
 const RELEASES = `${REPO}/releases`;
 
-export const metadata: Metadata = {
-  title: 'Download — LobbyForge desktop',
-  description:
-    'Optional desktop app for LobbyForge — the web app is fully functional on its own. Unsigned beta builds; verify checksums.',
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  return {
+    title: t('hub.download.meta.title'),
+    description: t('hub.download.meta.description'),
+  };
+}
 
 const PLATFORMS = [
   // Beta ships Windows as NSIS only — the MSI target cannot hold semver
@@ -21,35 +25,36 @@ const PLATFORMS = [
   {
     icon: 'laptop_windows',
     name: 'Windows',
-    formats: 'NSIS installer (.exe)',
+    formatsKey: 'hub.download.formats.windows',
   },
   {
     icon: 'laptop_mac',
     name: 'macOS',
-    formats: 'DMG (Apple Silicon)',
+    formatsKey: 'hub.download.formats.macos',
   },
   {
     icon: 'laptop_chromebook',
     name: 'Linux',
-    formats: 'DEB / AppImage / RPM',
+    formatsKey: 'hub.download.formats.linux',
   },
 ];
 
-export default function DownloadPage() {
+export default async function DownloadPage() {
+  const t = await getTranslator();
+  const linkClass =
+    'text-primary underline decoration-primary/40 underline-offset-4 hover:decoration-primary';
   return (
     <section className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop w-full">
       <div className="max-w-2xl flex flex-col gap-4 mb-12">
         <p className="font-label-xs text-label-xs text-ember tracking-[0.2em] uppercase">
           <span className="align-middle mr-2 inline-block size-2 rounded-full bg-ember" />
-          Beta
+          {t('hub.download.beta')}
         </p>
         <h1 className="font-display font-bold text-[36px] sm:text-[48px] leading-tight tracking-tight text-text-primary text-balance">
-          Get the desktop app
+          {t('hub.download.title')}
         </h1>
         <p className="font-body-lg text-body-lg text-text-secondary text-pretty">
-          A native window, tray and global push-to-talk for your communities. The web app is fully
-          functional on its own — the desktop shell is an opt-in extra, and per-platform
-          availability may vary between beta releases.
+          {t('hub.download.intro')}
         </p>
       </div>
 
@@ -61,14 +66,14 @@ export default function DownloadPage() {
           >
             <span className="material-symbols-outlined text-primary text-3xl">{p.icon}</span>
             <h2 className="font-display font-bold text-xl text-text-primary">{p.name}</h2>
-            <p className="text-sm text-text-muted">{p.formats}</p>
+            <p className="text-sm text-text-muted">{t(p.formatsKey)}</p>
             <a
               href={RELEASES}
               target="_blank"
               rel="noopener noreferrer"
               className="mt-auto border border-border-strong text-text-secondary px-5 py-2.5 rounded-lg font-label-sm text-label-sm hover:bg-surface-variant/30 hover:text-text-primary transition-all text-center"
             >
-              Download from GitHub Releases
+              {t('hub.download.fromReleases')}
             </a>
           </div>
         ))}
@@ -81,26 +86,27 @@ export default function DownloadPage() {
           </span>
           <div>
             <h2 className="font-label-sm text-label-sm text-text-primary mb-1">
-              Beta builds are unsigned — verify what you download
+              {t('hub.download.unsigned.title')}
             </h2>
             <p className="text-sm text-text-secondary leading-relaxed mb-3">
-              Windows SmartScreen and macOS Gatekeeper will show a warning on first launch. Every
-              release attaches a matching <span className="font-mono">&lt;installer&gt;.sha256</span>{' '}
-              file next to each installer — download the installer AND its{' '}
-              <span className="font-mono">.sha256</span> into the same folder, then verify ({' '}
-              <a
-                href={`${REPO}/blob/main/docs/ARCHITECTURE_DECISIONS.md`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary underline decoration-primary/40 underline-offset-4 hover:decoration-primary"
-              >
-                ADR-005
-              </a>
-              ):
+              {rich(t('hub.download.unsigned.body'), {
+                file: <span className="font-mono">&lt;installer&gt;.sha256</span>,
+                ext: <span className="font-mono">.sha256</span>,
+                adr: (
+                  <a
+                    href={`${REPO}/blob/main/docs/ARCHITECTURE_DECISIONS.md`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={linkClass}
+                  >
+                    ADR-005
+                  </a>
+                ),
+              })}
             </p>
             <div className="flex flex-col gap-2">
               <code className="block rounded-lg bg-surface-container px-4 py-2.5 text-sm text-text-secondary overflow-x-auto">
-                <span className="text-text-muted"># Windows (PowerShell) — prints OK or throws</span>
+                <span className="text-text-muted"># {t('hub.download.verify.windows')}</span>
                 <br />
                 {'$e=(Get-Content .\\desktop-windows-*.exe.sha256)[0].Split(\' \')[0]; '}
                 {'$a=(Get-FileHash .\\desktop-windows-*.exe -Algorithm SHA256).Hash.ToLower(); '}
@@ -122,14 +128,13 @@ export default function DownloadPage() {
       </div>
 
       <p className="text-sm text-text-muted">
-        Rather run it in a browser tab on your own server?{' '}
-        <a
-          href="/landing#self-host"
-          className="text-primary underline decoration-primary/40 underline-offset-4 hover:decoration-primary"
-        >
-          Host LobbyForge yourself
-        </a>
-        .
+        {rich(t('hub.download.selfHost'), {
+          link: (
+            <a href="/landing#self-host" className={linkClass}>
+              {t('hub.download.selfHostLink')}
+            </a>
+          ),
+        })}
       </p>
     </section>
   );

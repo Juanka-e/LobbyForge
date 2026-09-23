@@ -2,16 +2,12 @@
 
 import { useEffect } from 'react';
 import { deriveAccent } from '@/lib/accent';
-import { coerceLocaleChoice, resolveAppLocale, type AppLocaleChoice } from '@/lib/app-locale';
-import { clearLocaleCookie, serializeLocaleCookie } from '@/lib/i18n/locale-cookie';
 
 type ThemeChoice = 'dark' | 'dim' | 'light' | 'system';
 type Density = 'comfortable' | 'compact';
 
 type AppearanceExtra = {
   accent: string;
-  /** Which language plugin panels render in; see `@/lib/app-locale`. */
-  language: AppLocaleChoice;
   density: Density;
   compactMessageSpacing: boolean;
   showAvatarsInChat: boolean;
@@ -27,7 +23,6 @@ type SettingsResponse = {
 const APPEARANCE_STORAGE_KEY = 'lf-appearance';
 const DEFAULT_EXTRA: AppearanceExtra = {
   accent: '#8FB8FF',
-  language: 'system',
   density: 'comfortable',
   compactMessageSpacing: false,
   showAvatarsInChat: true,
@@ -59,7 +54,6 @@ function loadExtra(): AppearanceExtra {
     const parsed = JSON.parse(raw) as Partial<AppearanceExtra>;
     return {
       accent: normalizeHex(parsed.accent),
-      language: coerceLocaleChoice(parsed.language),
       density: parsed.density === 'compact' ? 'compact' : 'comfortable',
       compactMessageSpacing:
         typeof parsed.compactMessageSpacing === 'boolean'
@@ -123,31 +117,6 @@ export function applyAppearanceExtra(extra: AppearanceExtra): void {
   const root = document.documentElement;
   preferredAccent = normalizeHex(extra.accent);
   applyAccent();
-  // Plugins read their language from <html lang>. The layout renders a
-  // fixed "en", so without this every shipped Turkish table was dead
-  // code — the panels could only ever be English.
-  const locale = resolveAppLocale(
-    coerceLocaleChoice(extra.language),
-    typeof navigator === 'undefined' ? [] : (navigator.languages ?? [navigator.language])
-  );
-  // Plugins read this; the app's own chrome is translated from the
-  // catalogue the SERVER picked, using the cookie written below.
-  root.dataset.lfLocale = locale;
-  // Persist for the server. Without it a server render has no idea which
-  // language to use, and the page would paint English and correct itself
-  // on hydration. Changing the preference reloads (see the settings
-  // page) so the next render is server-side correct.
-  try {
-    // "Follow my browser" stores NO cookie, so the server keeps
-    // negotiating from Accept-Language instead of freezing today's answer.
-    document.cookie =
-      coerceLocaleChoice(extra.language) === 'system'
-        ? clearLocaleCookie()
-        : serializeLocaleCookie(locale);
-  } catch {
-    // Cookies blocked — the client still renders in the right language,
-    // the server just keeps using its negotiated default.
-  }
   root.classList.toggle('lf-density-compact', extra.density === 'compact');
   root.classList.toggle('lf-chat-compact', extra.compactMessageSpacing);
   root.classList.toggle('lf-chat-hide-avatars', !extra.showAvatarsInChat);

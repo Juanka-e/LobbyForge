@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useT } from '@/lib/i18n/client';
 
 interface ProfileRole {
   id: string;
@@ -37,11 +38,12 @@ export interface UserProfilePopoverProps {
   onSendMessage?: (userId: string) => void;
 }
 
+/** `labelKey` is a message key, resolved with `t()` where it renders. */
 const STATUS = {
-  online: { label: 'Online', dot: 'bg-success' },
-  in_voice: { label: 'In voice', dot: 'bg-success' },
-  idle: { label: 'Idle', dot: 'bg-tertiary' },
-  offline: { label: 'Offline', dot: 'bg-text-muted' },
+  online: { labelKey: 'shell.profile.status.online', dot: 'bg-success' },
+  in_voice: { labelKey: 'shell.profile.status.inVoice', dot: 'bg-success' },
+  idle: { labelKey: 'shell.profile.status.idle', dot: 'bg-tertiary' },
+  offline: { labelKey: 'shell.profile.status.offline', dot: 'bg-text-muted' },
 } as const;
 
 export function UserProfilePopover({
@@ -55,6 +57,7 @@ export function UserProfilePopover({
   onToggleBlock,
   onSendMessage,
 }: UserProfilePopoverProps) {
+  const t = useT();
   const ref = useRef<HTMLDivElement | null>(null);
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
   const [volume, setVolume] = useState(1);
@@ -106,7 +109,7 @@ export function UserProfilePopover({
     <div
       ref={ref}
       role="dialog"
-      aria-label={`${user.displayName} profile`}
+      aria-label={t('shell.profile.dialogLabel', { name: user.displayName })}
       className="fixed z-[70] max-h-[calc(100dvh-24px)] w-[360px] max-w-[calc(100vw-24px)] overflow-y-auto overflow-x-hidden rounded-lg border border-border-strong bg-surface-floating shadow-2xl"
       style={position ?? { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}
     >
@@ -118,7 +121,7 @@ export function UserProfilePopover({
       <button
         type="button"
         onClick={onClose}
-        aria-label="Close profile"
+        aria-label={t('shell.profile.close')}
         className="absolute right-3 top-3 grid size-8 place-items-center rounded-md bg-black/55 text-white transition-colors hover:bg-black/75 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
       >
         <span className="material-symbols-outlined text-[18px]" aria-hidden>close</span>
@@ -136,18 +139,18 @@ export function UserProfilePopover({
               </span>
             )}
           </div>
-          <span className={`absolute bottom-1 right-1 size-[18px] rounded-full border-[4px] border-surface-floating ${status.dot}`} aria-label={status.label} />
+          <span className={`absolute bottom-1 right-1 size-[18px] rounded-full border-[4px] border-surface-floating ${status.dot}`} aria-label={t(status.labelKey)} />
         </div>
 
         <div className="min-w-0">
           <h2 className="break-words text-xl font-bold leading-tight text-text-primary">{user.displayName}</h2>
           <div className="mt-1 flex min-w-0 items-center gap-2 text-sm text-text-secondary">
             <span className={`size-2 flex-none rounded-full ${status.dot}`} aria-hidden />
-            <span className="flex-none">{status.label}</span>
+            <span className="flex-none">{t(status.labelKey)}</span>
             {user.isGuest ? (
               <>
                 <span className="text-text-muted" aria-hidden>·</span>
-                <span className="truncate text-text-muted">Guest</span>
+                <span className="truncate text-text-muted">{t('common.guest')}</span>
               </>
             ) : null}
           </div>
@@ -157,15 +160,15 @@ export function UserProfilePopover({
         <div className="my-4 h-px bg-border-subtle" />
 
         <section aria-labelledby={`profile-about-${user.userId}`}>
-          <h3 id={`profile-about-${user.userId}`} className="text-xs font-bold uppercase text-text-primary">About me</h3>
+          <h3 id={`profile-about-${user.userId}`} className="text-xs font-bold uppercase text-text-primary">{t('shell.profile.about')}</h3>
           <p className={`mt-2 whitespace-pre-wrap break-words text-sm leading-5 ${user.bio ? 'text-text-secondary' : 'italic text-text-muted'}`}>
-            {user.bio || 'No bio yet.'}
+            {user.bio || t('shell.profile.noBio')}
           </p>
         </section>
 
         {roles.length ? (
           <section className="mt-5" aria-labelledby={`profile-roles-${user.userId}`}>
-            <h3 id={`profile-roles-${user.userId}`} className="text-xs font-bold uppercase text-text-primary">Roles</h3>
+            <h3 id={`profile-roles-${user.userId}`} className="text-xs font-bold uppercase text-text-primary">{t('shell.profile.roles')}</h3>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {roles.map((role) => (
                 <span key={role.id} className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border-subtle bg-surface-container px-2 py-1 text-xs font-medium text-text-secondary">
@@ -186,7 +189,7 @@ export function UserProfilePopover({
             <div className="mb-3 flex items-center justify-between text-sm text-text-secondary">
               <span className="inline-flex items-center gap-1.5">
                 <span className="material-symbols-outlined text-[17px]" aria-hidden>{volume === 0 ? 'volume_off' : 'volume_up'}</span>
-                User volume
+                {t('shell.profile.volume')}
               </span>
               <output>{Math.round(volume * 100)}%</output>
             </div>
@@ -202,7 +205,7 @@ export function UserProfilePopover({
                 onVolumeChange?.(user.userId, next);
               }}
               className="h-1.5 w-full accent-primary"
-              aria-label={`Volume for ${user.displayName}`}
+              aria-label={t('shell.profile.volumeFor', { name: user.displayName })}
             />
           </section>
         ) : null}
@@ -215,7 +218,7 @@ export function UserProfilePopover({
             className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md border border-primary/40 bg-primary/10 px-3 py-2.5 text-sm font-semibold text-primary transition-colors hover:bg-primary/20 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <span className="material-symbols-outlined text-[17px]" aria-hidden>mail</span>
-            Send message
+            {t('shell.profile.sendMessage')}
           </button>
         ) : null}
 
@@ -226,7 +229,7 @@ export function UserProfilePopover({
             className={`mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md border px-3 py-2.5 text-sm font-semibold transition-colors ${isBlocked ? 'border-border-strong text-text-secondary hover:bg-surface-container' : 'border-danger/40 text-danger hover:bg-danger/10'}`}
           >
             <span className="material-symbols-outlined text-[17px]" aria-hidden>{isBlocked ? 'remove_circle' : 'block'}</span>
-            {isBlocked ? 'Unblock user' : 'Block user'}
+            {isBlocked ? t('shell.profile.unblock') : t('shell.profile.block')}
           </button>
         ) : null}
       </div>

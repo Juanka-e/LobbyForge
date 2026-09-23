@@ -1,6 +1,6 @@
 import { createElement } from 'react';
 import type { GamePlugin } from '@lobbyforge/plugin-sdk';
-import { PluginPermission } from '@lobbyforge/plugin-sdk';
+import { CATALOG_SUMMARY_KEY, PluginPermission, loadPluginLocale } from '@lobbyforge/plugin-sdk';
 import {
   POLL_PLUGIN_ID,
   POLL_MAX_OPTIONS,
@@ -9,6 +9,11 @@ import {
   POLL_MAX_OPTION_LENGTH,
 } from './constants';
 import { PollPanel, type PollPanelClientProps } from './renderClient';
+import { LOCALE_TABLES, SHIPPED_LOCALES } from './locales.generated';
+
+// Also registered by the panel, but that is a 'use client' module the
+// server never evaluates — the host reads `catalog.summary` server-side.
+loadPluginLocale(POLL_PLUGIN_ID, LOCALE_TABLES);
 
 /**
  * Poll — an anonymous live poll for channels.
@@ -151,11 +156,14 @@ export const pollPlugin: GamePlugin<PollState, PollAction> = {
     type: 'utility',
     minAppVersion: '0.1.0',
     permissions: [PluginPermission.MANAGE_GAME_SESSION, PluginPermission.SEND_ROOM_MESSAGE],
-    locales: ['en', 'tr'],
+    // Derived from locales/*.json, so the catalogue can never claim a
+    // language the plugin does not actually ship.
+    locales: SHIPPED_LOCALES,
     entryClient: './renderClient.js',
     catalog: {
       category: 'utility',
-      summary: 'Anonymous one-vote-per-player polls for channels.',
+      // Translated in locales/*.json; the host shows the viewer's language.
+      summary: LOCALE_TABLES.en[CATALOG_SUMMARY_KEY],
       publisher: 'LobbyForge',
       trustLevel: 'official',
       playerConfig: {

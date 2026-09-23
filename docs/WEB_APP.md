@@ -10,7 +10,7 @@ This document complements [`docs/MONOREPO.md`](./MONOREPO.md) (which covers the 
 |---|---|---|
 | Framework | Next.js 15.5 (App Router) | React Server Components, server actions, `typedRoutes` |
 | UI primitives | `@lobbyforge/ui` | Local package, transpiled by Next via `transpilePackages` |
-| i18n | `@lobbyforge/i18n` | The standalone `t()` helper is used in client islands; full Next.js i18n routing is a later milestone |
+| i18n | `apps/web/lib/i18n` | Catalogues in `apps/web/messages/<code>/`, discovered from disk; `useT()` in client components, `getTranslator()` in server ones. See [TRANSLATING.md](TRANSLATING.md) |
 | Domain | `@lobbyforge/core` | Health + Doctor + roles + permissions + validation |
 | Data | `@lobbyforge/db` | Drizzle 0.45.2 + `postgres.js`; thin query helpers keep values parameterized and out of SQL structure |
 | Styling | Inline CSS (this pass) | Tailwind is in `@lobbyforge/ui` and will be wired in once a design system lands |

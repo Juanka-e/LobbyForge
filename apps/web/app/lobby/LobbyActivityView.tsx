@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { getPlugin } from '@/lib/plugin-registry';
 import { useT } from '@/lib/i18n/client';
-import type { Translator } from '@/lib/i18n/messages';
+import type { Translator } from '@/lib/i18n/core';
 import { PluginSurface } from '../room/PluginSurface';
 import { findOpenActivity, useActivitySession } from '../room/useActivitySession';
 import { useLobbyVoice } from './LobbyVoiceProvider';
@@ -245,9 +245,7 @@ export function LobbyActivityView({
               ) : null}
               <span className="flex items-center gap-1.5 font-label-xs text-[11px] text-text-secondary">
                 <span className="material-symbols-outlined text-[14px]">group</span>
-                {detail.players.length === 1
-                  ? t('lobbyMain.activities.playerCountOne', { count: detail.players.length })
-                  : t('lobbyMain.activities.playerCountOther', { count: detail.players.length })}
+                {t('lobbyMain.activities.playerCount', { count: detail.players.length })}
               </span>
               <div className="ml-auto flex items-center gap-2">
                 {detail.createdBy && currentUserId === detail.createdBy ? (
@@ -271,6 +269,7 @@ export function LobbyActivityView({
             <div className="px-6 py-6">
               {pluginClient ? (
                 <PluginSurface
+                  pluginId={detail.pluginId}
                   render={pluginClient.renderClient}
                   props={{
                     state: detail.state,

@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useT } from '@/lib/i18n/client';
 
 type RegistrationMode = 'open' | 'invite_only' | 'closed';
 
@@ -12,25 +13,26 @@ type Settings = {
   seoDescription: string | null;
 };
 
+/** Message keys, resolved with `t` where the option renders. */
 const REGISTRATION_OPTIONS: Array<{
   value: RegistrationMode;
-  title: string;
-  description: string;
+  titleKey: string;
+  descriptionKey: string;
 }> = [
   {
     value: 'open',
-    title: 'Open registration',
-    description: 'New people can create accounts and join the first community when guest access allows it.',
+    titleKey: 'adminSettings.auth.mode.openTitle',
+    descriptionKey: 'adminSettings.auth.mode.openDescription',
   },
   {
     value: 'invite_only',
-    title: 'Invite only',
-    description: 'A valid invite link is required. Direct visits cannot enter the community without an invite.',
+    titleKey: 'adminSettings.auth.mode.inviteOnlyTitle',
+    descriptionKey: 'adminSettings.auth.mode.inviteOnlyDescription',
   },
   {
     value: 'closed',
-    title: 'Closed',
-    description: 'New registrations are blocked. Existing signed-in members and admins can continue using the instance.',
+    titleKey: 'adminSettings.auth.mode.closedTitle',
+    descriptionKey: 'adminSettings.auth.mode.closedDescription',
   },
 ];
 
@@ -41,6 +43,7 @@ export default function InstanceAccessForm({
   initial: Settings;
   serverId: string | null;
 }) {
+  const t = useT();
   const [settings, setSettings] = useState(initial);
   const [savedSettings, setSavedSettings] = useState(initial);
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -89,10 +92,8 @@ export default function InstanceAccessForm({
       <div className="grid max-w-4xl gap-6">
         <section className="rounded-xl border border-border-subtle bg-surface p-5">
           <div className="mb-4">
-            <h2 className="text-base font-semibold text-text-primary">Access mode</h2>
-            <p className="mt-1 text-sm text-text-secondary">
-              Choose how people can reach this self-hosted instance.
-            </p>
+            <h2 className="text-base font-semibold text-text-primary">{t('adminSettings.auth.accessMode.title')}</h2>
+            <p className="mt-1 text-sm text-text-secondary">{t('adminSettings.auth.accessMode.description')}</p>
           </div>
 
           <div className="grid gap-3">
@@ -123,8 +124,8 @@ export default function InstanceAccessForm({
                     className="mt-1"
                   />
                   <span>
-                    <span className="block text-sm font-medium text-text-primary">{option.title}</span>
-                    <span className="mt-1 block text-sm text-text-secondary">{option.description}</span>
+                    <span className="block text-sm font-medium text-text-primary">{t(option.titleKey)}</span>
+                    <span className="mt-1 block text-sm text-text-secondary">{t(option.descriptionKey)}</span>
                   </span>
                 </label>
               );
@@ -135,8 +136,8 @@ export default function InstanceAccessForm({
             <Toggle
               checked={settings.guestAccessEnabled && settings.registrationMode !== 'closed'}
               disabled={settings.registrationMode === 'closed'}
-              label="Allow guest access"
-              description="Guests can enter permitted flows without creating a password account. Closed mode always disables this."
+              label={t('adminSettings.auth.guest.label')}
+              description={t('adminSettings.auth.guest.description')}
               onChange={(checked) => {
                 setSettings((current) => ({ ...current, guestAccessEnabled: checked }));
                 setStatus('idle');
@@ -147,16 +148,14 @@ export default function InstanceAccessForm({
 
         <section className="rounded-xl border border-border-subtle bg-surface p-5">
           <div className="mb-4">
-            <h2 className="text-base font-semibold text-text-primary">Search visibility</h2>
-            <p className="mt-1 text-sm text-text-secondary">
-              Decide whether public pages should be indexable and tune the basic SEO copy.
-            </p>
+            <h2 className="text-base font-semibold text-text-primary">{t('adminSettings.auth.search.title')}</h2>
+            <p className="mt-1 text-sm text-text-secondary">{t('adminSettings.auth.search.description')}</p>
           </div>
 
           <Toggle
             checked={settings.seoIndexingEnabled}
-            label="Allow search engine indexing"
-            description="When disabled, robots.txt and page metadata both request no indexing."
+            label={t('adminSettings.auth.indexing.label')}
+            description={t('adminSettings.auth.indexing.description')}
             onChange={(checked) => {
               setSettings((current) => ({ ...current, seoIndexingEnabled: checked }));
               setStatus('idle');
@@ -166,7 +165,7 @@ export default function InstanceAccessForm({
           <div className="mt-5 grid gap-4">
             <label className="block">
               <span className="mb-1.5 flex items-center justify-between text-xs text-text-muted">
-                SEO title
+                {t('adminSettings.auth.seoTitle')}
                 <span>{titleLength}/70</span>
               </span>
               <input
@@ -182,7 +181,7 @@ export default function InstanceAccessForm({
 
             <label className="block">
               <span className="mb-1.5 flex items-center justify-between text-xs text-text-muted">
-                SEO description
+                {t('adminSettings.auth.seoDescription')}
                 <span>{descriptionLength}/160</span>
               </span>
               <textarea
@@ -202,10 +201,8 @@ export default function InstanceAccessForm({
         <section className="rounded-xl border border-border-subtle bg-surface p-5">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 className="text-base font-semibold text-text-primary">Community identity policy</h2>
-              <p className="mt-1 max-w-2xl text-sm text-text-secondary">
-                Configure invites, local accounts, official LobbyForge sign-in, account linking, and first-join approval for the community.
-              </p>
+              <h2 className="text-base font-semibold text-text-primary">{t('adminSettings.auth.identity.title')}</h2>
+              <p className="mt-1 max-w-2xl text-sm text-text-secondary">{t('adminSettings.auth.identity.description')}</p>
             </div>
             {serverId ? (
               <a
@@ -213,10 +210,10 @@ export default function InstanceAccessForm({
                 className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-border-strong px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-surface-raised"
               >
                 <span className="material-symbols-outlined text-lg" aria-hidden>shield_lock</span>
-                Open access policy
+                {t('adminSettings.auth.identity.open')}
               </a>
             ) : (
-              <span className="text-sm text-danger">No community is assigned to this instance.</span>
+              <span className="text-sm text-danger">{t('adminSettings.auth.identity.noCommunity')}</span>
             )}
           </div>
         </section>
@@ -225,9 +222,13 @@ export default function InstanceAccessForm({
       <div className="sticky bottom-0 mt-8 border-t border-border-subtle bg-background/95 px-0 py-4 backdrop-blur">
         <div className="flex max-w-4xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="min-h-5 text-sm" aria-live="polite">
-            {status === 'saved' ? <span className="text-success">Saved.</span> : null}
-            {status === 'error' ? <span className="text-danger">{error ?? 'Could not save settings.'}</span> : null}
-            {status === 'idle' && dirty ? <span className="text-text-secondary">You have unsaved changes.</span> : null}
+            {status === 'saved' ? <span className="text-success">{t('adminSettings.auth.saved')}</span> : null}
+            {status === 'error' ? (
+              <span className="text-danger">{error ?? t('adminSettings.auth.saveFailed')}</span>
+            ) : null}
+            {status === 'idle' && dirty ? (
+              <span className="text-text-secondary">{t('adminSettings.auth.unsaved')}</span>
+            ) : null}
           </p>
           <div className="flex gap-2">
             <button
@@ -236,7 +237,7 @@ export default function InstanceAccessForm({
               disabled={!dirty || status === 'saving'}
               className="rounded-lg border border-border-strong px-4 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-raised hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Reset
+              {t('adminSettings.common.reset')}
             </button>
             <button
               type="button"
@@ -244,7 +245,7 @@ export default function InstanceAccessForm({
               disabled={!dirty || status === 'saving'}
               className="rounded-lg bg-primary-container px-4 py-2 text-sm font-semibold text-on-primary-container transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {status === 'saving' ? 'Saving...' : 'Save changes'}
+              {status === 'saving' ? t('adminSettings.common.saving') : t('adminSettings.auth.saveChanges')}
             </button>
           </div>
         </div>

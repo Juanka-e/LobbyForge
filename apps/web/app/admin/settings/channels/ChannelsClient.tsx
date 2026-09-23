@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useT } from '@/lib/i18n/client';
 
 type ChannelType = 'text' | 'voice' | 'activity' | 'announcement' | 'stage';
 
@@ -29,12 +30,13 @@ interface ApiChannelResponse {
   error?: string;
 }
 
-const CHANNEL_TYPES: Array<{ value: ChannelType; label: string; icon: string }> = [
-  { value: 'text', label: 'Text', icon: 'tag' },
-  { value: 'voice', label: 'Voice', icon: 'volume_up' },
-  { value: 'announcement', label: 'Announcement', icon: 'campaign' },
-  { value: 'stage', label: 'Stage', icon: 'podiums' },
-  { value: 'activity', label: 'Activity', icon: 'sports_esports' },
+/** `labelKey` is a message key, resolved with `t` where the type renders. */
+const CHANNEL_TYPES: Array<{ value: ChannelType; labelKey: string; icon: string }> = [
+  { value: 'text', labelKey: 'adminSettings.channels.type.text', icon: 'tag' },
+  { value: 'voice', labelKey: 'adminSettings.channels.type.voice', icon: 'volume_up' },
+  { value: 'announcement', labelKey: 'adminSettings.channels.type.announcement', icon: 'campaign' },
+  { value: 'stage', labelKey: 'adminSettings.channels.type.stage', icon: 'podiums' },
+  { value: 'activity', labelKey: 'adminSettings.channels.type.activity', icon: 'sports_esports' },
 ];
 
 const EMPTY_FORM = { name: '', type: 'text' as ChannelType, topic: '' };
@@ -50,6 +52,7 @@ export default function ChannelsClient({
   roles: RoleBrief[];
   loadError: string | null;
 }) {
+  const t = useT();
   const [channels, setChannels] = useState(initialChannels);
   const [form, setForm] = useState(EMPTY_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -78,7 +81,7 @@ export default function ChannelsClient({
     });
     const data = (await response.json().catch(() => ({}))) as ApiChannelResponse;
     if (!response.ok || !data.channels) {
-      throw new Error(data.error ?? 'Could not reload channels');
+      throw new Error(data.error ?? t('adminSettings.channels.reloadFailed'));
     }
     setChannels(data.channels);
   }
@@ -87,7 +90,7 @@ export default function ChannelsClient({
     if (!serverId || isCreating) return;
     const name = form.name.trim();
     if (name.length < 2) {
-      setMessage({ tone: 'danger', text: 'Channel name must be at least 2 characters.' });
+      setMessage({ tone: 'danger', text: t('adminSettings.channels.nameTooShort') });
       return;
     }
     setIsCreating(true);
@@ -103,10 +106,10 @@ export default function ChannelsClient({
         }),
       });
       const data = (await response.json().catch(() => ({}))) as ApiChannelResponse;
-      if (!response.ok || !data.channel) throw new Error(data.error ?? 'Could not create channel');
+      if (!response.ok || !data.channel) throw new Error(data.error ?? t('adminSettings.channels.createFailed'));
       await refreshChannels();
       setForm(EMPTY_FORM);
-      setMessage({ tone: 'success', text: 'Channel created.' });
+      setMessage({ tone: 'success', text: t('adminSettings.channels.created') });
     } catch (err) {
       setMessage({ tone: 'danger', text: (err as Error).message });
     } finally {
@@ -138,7 +141,7 @@ export default function ChannelsClient({
     if (!serverId || busyId) return;
     const name = editDraft.name.trim();
     if (name.length < 2) {
-      setMessage({ tone: 'danger', text: 'Channel name must be at least 2 characters.' });
+      setMessage({ tone: 'danger', text: t('adminSettings.channels.nameTooShort') });
       return;
     }
     setBusyId(channel.id);
@@ -157,10 +160,10 @@ export default function ChannelsClient({
         }
       );
       const data = (await response.json().catch(() => ({}))) as ApiChannelResponse;
-      if (!response.ok || !data.channel) throw new Error(data.error ?? 'Could not update channel');
+      if (!response.ok || !data.channel) throw new Error(data.error ?? t('adminSettings.channels.updateFailed'));
       await refreshChannels();
       setEditingId(null);
-      setMessage({ tone: 'success', text: 'Channel updated.' });
+      setMessage({ tone: 'success', text: t('adminSettings.channels.updated') });
     } catch (err) {
       setMessage({ tone: 'danger', text: (err as Error).message });
     } finally {
@@ -185,7 +188,7 @@ export default function ChannelsClient({
         }
       );
       const data = (await response.json().catch(() => ({}))) as ApiChannelResponse;
-      if (!response.ok || !data.channel) throw new Error(data.error ?? 'Could not reorder channel');
+      if (!response.ok || !data.channel) throw new Error(data.error ?? t('adminSettings.channels.reorderFailed'));
       await refreshChannels();
     } catch (err) {
       setMessage({ tone: 'danger', text: (err as Error).message });
@@ -196,7 +199,7 @@ export default function ChannelsClient({
 
   async function deleteChannel(channel: ChannelView) {
     if (!serverId || busyId) return;
-    if (!window.confirm(`Delete #${channel.name}? This cannot be undone.`)) return;
+    if (!window.confirm(t('adminSettings.channels.confirmDelete', { name: channel.name }))) return;
     setBusyId(channel.id);
     setMessage(null);
     try {
@@ -205,9 +208,9 @@ export default function ChannelsClient({
         { method: 'DELETE' }
       );
       const data = (await response.json().catch(() => ({}))) as ApiChannelResponse;
-      if (!response.ok) throw new Error(data.error ?? 'Could not delete channel');
+      if (!response.ok) throw new Error(data.error ?? t('adminSettings.channels.deleteFailed'));
       await refreshChannels();
-      setMessage({ tone: 'success', text: 'Channel deleted.' });
+      setMessage({ tone: 'success', text: t('adminSettings.channels.deleted') });
     } catch (err) {
       setMessage({ tone: 'danger', text: (err as Error).message });
     } finally {
@@ -218,42 +221,40 @@ export default function ChannelsClient({
   return (
     <section className="max-w-4xl mx-auto pb-32">
       <header className="mb-6">
-        <h1 className="text-2xl font-semibold text-text-primary">Channels</h1>
-        <p className="mt-1 text-sm text-text-secondary">
-          Manage text channels, voice rooms, and the order members see in the lobby.
-        </p>
+        <h1 className="text-2xl font-semibold text-text-primary">{t('adminSettings.channels.title')}</h1>
+        <p className="mt-1 text-sm text-text-secondary">{t('adminSettings.channels.subtitle')}</p>
       </header>
 
       <div className="flex flex-wrap gap-2 mb-6">
-        <Chip icon="tag" label={`${text.length} text channels`} />
-        <Chip icon="volume_up" label={`${voice.length} voice rooms`} />
+        <Chip icon="tag" label={t('adminSettings.channels.textCount', { count: text.length })} />
+        <Chip icon="volume_up" label={t('adminSettings.channels.voiceCount', { count: voice.length })} />
         {activity.length > 0 ? (
-          <Chip icon="sports_esports" label={`${activity.length} activity rooms`} />
+          <Chip icon="sports_esports" label={t('adminSettings.channels.activityCount', { count: activity.length })} />
         ) : null}
       </div>
 
       {loadError ? (
-        <Alert tone="danger" text={`Could not load channels: ${loadError}`} />
+        <Alert tone="danger" text={t('adminSettings.channels.loadError', { error: loadError })} />
       ) : null}
-      {!serverId ? <Alert tone="danger" text="No server is available for this admin account." /> : null}
+      {!serverId ? <Alert tone="danger" text={t('adminSettings.common.noServer')} /> : null}
       {message ? <Alert tone={message.tone} text={message.text} /> : null}
 
       <div className="mb-8 rounded-xl border border-border-subtle bg-surface p-4">
-        <h2 className="mb-4 text-sm font-semibold text-text-primary">Create Channel</h2>
+        <h2 className="mb-4 text-sm font-semibold text-text-primary">{t('adminSettings.channels.createTitle')}</h2>
         <div className="grid gap-3 md:grid-cols-[1fr_180px]">
           <label className="block">
-            <span className="sr-only">Channel name</span>
+            <span className="sr-only">{t('adminSettings.channels.nameLabel')}</span>
             <input
               value={form.name}
               onChange={(event) => setForm((next) => ({ ...next, name: event.target.value }))}
-              placeholder="general"
+              placeholder={t('adminSettings.channels.namePlaceholder')}
               maxLength={64}
               disabled={!serverId || isCreating}
               className="w-full rounded-lg border border-border-subtle bg-surface-container px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-primary-container"
             />
           </label>
           <label className="block">
-            <span className="sr-only">Channel type</span>
+            <span className="sr-only">{t('adminSettings.channels.typeLabel')}</span>
             <select
               value={form.type}
               onChange={(event) => setForm((next) => ({ ...next, type: event.target.value as ChannelType }))}
@@ -262,17 +263,17 @@ export default function ChannelsClient({
             >
               {CHANNEL_TYPES.map((type) => (
                 <option key={type.value} value={type.value}>
-                  {type.label}
+                  {t(type.labelKey)}
                 </option>
               ))}
             </select>
           </label>
           <label className="md:col-span-2 block">
-            <span className="sr-only">Channel topic</span>
+            <span className="sr-only">{t('adminSettings.channels.topicLabel')}</span>
             <textarea
               value={form.topic}
               onChange={(event) => setForm((next) => ({ ...next, topic: event.target.value }))}
-              placeholder="Optional topic"
+              placeholder={t('adminSettings.channels.topicPlaceholder')}
               maxLength={512}
               rows={2}
               disabled={!serverId || isCreating}
@@ -288,15 +289,15 @@ export default function ChannelsClient({
             className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-on-primary disabled:cursor-not-allowed disabled:opacity-50"
           >
             <span className="material-symbols-outlined text-[18px]">add</span>
-            {isCreating ? 'Creating...' : 'Create'}
+            {isCreating ? t('adminSettings.common.creating') : t('adminSettings.common.create')}
           </button>
         </div>
       </div>
 
       <div className="space-y-8">
         <ChannelGroup
-          title="Text Channels"
-          empty="No text channels yet."
+          title={t('adminSettings.channels.group.text')}
+          empty={t('adminSettings.channels.emptyText')}
           channels={text}
           allChannels={sortedChannels}
           editingId={editingId}
@@ -312,8 +313,8 @@ export default function ChannelsClient({
           onDelete={deleteChannel}
         />
         <ChannelGroup
-          title="Voice Channels"
-          empty="No voice rooms yet."
+          title={t('adminSettings.channels.group.voice')}
+          empty={t('adminSettings.channels.emptyVoice')}
           channels={voice}
           allChannels={sortedChannels}
           editingId={editingId}
@@ -330,7 +331,7 @@ export default function ChannelsClient({
         />
         {activity.length > 0 ? (
           <ChannelGroup
-            title="Activity Rooms"
+            title={t('adminSettings.channels.group.activity')}
             empty=""
             channels={activity}
             allChannels={sortedChannels}
@@ -385,6 +386,7 @@ function ChannelGroup({
   onMove: (channel: ChannelView, direction: -1 | 1) => void;
   onDelete: (channel: ChannelView) => void;
 }) {
+  const t = useT();
   return (
     <div>
       <div className="flex items-center gap-2 mb-3 px-2 text-text-muted">
@@ -411,13 +413,13 @@ function ChannelGroup({
                   <div className="flex flex-col gap-1">
                     <IconButton
                       icon="keyboard_arrow_up"
-                      label="Move up"
+                      label={t('adminSettings.channels.moveUp')}
                       disabled={index <= 0 || isBusy}
                       onClick={() => onMove(channel, -1)}
                     />
                     <IconButton
                       icon="keyboard_arrow_down"
-                      label="Move down"
+                      label={t('adminSettings.channels.moveDown')}
                       disabled={index < 0 || index >= allChannels.length - 1 || isBusy}
                       onClick={() => onMove(channel, 1)}
                     />
@@ -442,9 +444,7 @@ function ChannelGroup({
                           className="w-full resize-none rounded-lg border border-border-subtle bg-surface-container px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-primary-container"
                         />
                         <div>
-                          <p className="text-xs text-text-muted mb-1.5">
-                            Visible to roles — leave empty for everyone (private channel when roles are selected)
-                          </p>
+                          <p className="text-xs text-text-muted mb-1.5">{t('adminSettings.channels.visibleTo')}</p>
                           <div className="flex flex-wrap gap-1.5">
                             {roles.map((role) => {
                               const selected = editDraft.roleIds.includes(role.id);
@@ -464,7 +464,7 @@ function ChannelGroup({
                               );
                             })}
                             {roles.length === 0 ? (
-                              <span className="text-xs text-text-muted">No roles to restrict with yet.</span>
+                              <span className="text-xs text-text-muted">{t('adminSettings.channels.noRoles')}</span>
                             ) : null}
                           </div>
                         </div>
@@ -476,14 +476,15 @@ function ChannelGroup({
                           <TypeBadge type={channel.type} />
                           {channel.visibleToRoleIds && channel.visibleToRoleIds.length > 0 ? (
                             <span className="px-1.5 py-0.5 rounded text-[10px] bg-secondary-container/20 text-text-secondary border border-border-strong font-medium tracking-wide">
-                              🔒 {channel.visibleToRoleIds.length} role{channel.visibleToRoleIds.length > 1 ? 's' : ''}
+                              🔒{' '}
+                              {t('adminSettings.channels.restricted', { count: channel.visibleToRoleIds.length })}
                             </span>
                           ) : null}
                         </div>
                         {channel.topic ? (
                           <p className="text-xs text-text-muted mt-0.5 break-words">{channel.topic}</p>
                         ) : (
-                          <p className="text-xs text-text-muted mt-0.5">No topic set.</p>
+                          <p className="text-xs text-text-muted mt-0.5">{t('adminSettings.channels.noTopic')}</p>
                         )}
                       </>
                     )}
@@ -491,13 +492,34 @@ function ChannelGroup({
                   <div className="flex shrink-0 items-center gap-1">
                     {isEditing ? (
                       <>
-                        <IconButton icon="check" label="Save channel" disabled={isBusy} onClick={() => onSaveEdit(channel)} />
-                        <IconButton icon="close" label="Cancel edit" disabled={isBusy} onClick={onCancelEdit} />
+                        <IconButton
+                          icon="check"
+                          label={t('adminSettings.channels.save')}
+                          disabled={isBusy}
+                          onClick={() => onSaveEdit(channel)}
+                        />
+                        <IconButton
+                          icon="close"
+                          label={t('adminSettings.common.cancelEdit')}
+                          disabled={isBusy}
+                          onClick={onCancelEdit}
+                        />
                       </>
                     ) : (
                       <>
-                        <IconButton icon="edit" label="Edit channel" disabled={Boolean(editingId) || isBusy} onClick={() => onBeginEdit(channel)} />
-                        <IconButton icon="delete" label="Delete channel" danger disabled={Boolean(editingId) || isBusy} onClick={() => onDelete(channel)} />
+                        <IconButton
+                          icon="edit"
+                          label={t('adminSettings.channels.edit')}
+                          disabled={Boolean(editingId) || isBusy}
+                          onClick={() => onBeginEdit(channel)}
+                        />
+                        <IconButton
+                          icon="delete"
+                          label={t('adminSettings.channels.delete')}
+                          danger
+                          disabled={Boolean(editingId) || isBusy}
+                          onClick={() => onDelete(channel)}
+                        />
                       </>
                     )}
                   </div>
@@ -512,11 +534,13 @@ function ChannelGroup({
 }
 
 function TypeBadge({ type }: { type: ChannelType }) {
+  const t = useT();
   const isVoice = type === 'voice' || type === 'stage';
   const className = isVoice
     ? 'px-1.5 py-0.5 rounded text-[10px] bg-surface-bright text-text-secondary border border-border-strong font-medium tracking-wide'
     : 'px-1.5 py-0.5 rounded text-[10px] bg-primary-container/10 text-primary border border-primary-container/20 font-medium tracking-wide';
-  return <span className={className}>{type.toUpperCase()}</span>;
+  // Upper-cased in the page language, so Turkish "Sesli" becomes "SESLİ".
+  return <span className={className}>{t(labelKeyForType(type)).toLocaleUpperCase(t.locale)}</span>;
 }
 
 function Chip({ icon, label }: { icon: string; label: string }) {
@@ -561,4 +585,8 @@ function IconButton({
 
 function iconForType(type: ChannelType) {
   return CHANNEL_TYPES.find((item) => item.value === type)?.icon ?? 'tag';
+}
+
+function labelKeyForType(type: ChannelType) {
+  return CHANNEL_TYPES.find((item) => item.value === type)?.labelKey ?? 'adminSettings.channels.type.text';
 }

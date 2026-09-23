@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { Modal, ModalCancelButton, ModalPrimaryButton } from '../Modal';
+import { useT } from '@/lib/i18n/client';
 
 export interface ChangePasswordModalProps {
   open: boolean;
@@ -10,11 +11,12 @@ export interface ChangePasswordModalProps {
   onSave: (input: { currentPassword: string; newPassword: string }) => Promise<void>;
 }
 
+/** Labels are message keys, resolved with `t()` where they render. */
 interface Strength {
   score: 0 | 1 | 2 | 3 | 4;
-  label: string;
+  labelKey: string;
   tone: 'danger' | 'warning' | 'success';
-  rules: { ok: boolean; label: string }[];
+  rules: { ok: boolean; labelKey: string }[];
 }
 
 function evaluateStrength(value: string, current: string): Strength {
@@ -23,22 +25,23 @@ function evaluateStrength(value: string, current: string): Strength {
   const specialOk = /[^A-Za-z0-9]/.test(value);
   const mismatchOk = value.length > 0 && value !== current;
   const rules = [
-    { ok: lengthOk, label: 'At least 12 characters' },
-    { ok: numberOk, label: 'Contains a number' },
-    { ok: specialOk, label: 'Contains a special character' },
-    { ok: mismatchOk, label: 'Does not match current password' },
+    { ok: lengthOk, labelKey: 'shell.password.rule.length' },
+    { ok: numberOk, labelKey: 'shell.password.rule.number' },
+    { ok: specialOk, labelKey: 'shell.password.rule.special' },
+    { ok: mismatchOk, labelKey: 'shell.password.rule.differs' },
   ];
   const score = (rules.filter((rule) => rule.ok).length as 0 | 1 | 2 | 3 | 4);
   if (value.length === 0) {
-    return { score: 0, label: 'Enter a new password', tone: 'danger', rules };
+    return { score: 0, labelKey: 'shell.password.strength.empty', tone: 'danger', rules };
   }
-  if (score <= 1) return { score, label: 'Too weak', tone: 'danger', rules };
-  if (score === 2) return { score, label: 'Could be stronger', tone: 'warning', rules };
-  if (score === 3) return { score, label: 'Strong password', tone: 'success', rules };
-  return { score, label: 'Excellent password', tone: 'success', rules };
+  if (score <= 1) return { score, labelKey: 'shell.password.strength.weak', tone: 'danger', rules };
+  if (score === 2) return { score, labelKey: 'shell.password.strength.fair', tone: 'warning', rules };
+  if (score === 3) return { score, labelKey: 'shell.password.strength.strong', tone: 'success', rules };
+  return { score, labelKey: 'shell.password.strength.excellent', tone: 'success', rules };
 }
 
 export function ChangePasswordModal({ open, onClose, onSave }: ChangePasswordModalProps) {
+  const t = useT();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -93,35 +96,35 @@ export function ChangePasswordModal({ open, onClose, onSave }: ChangePasswordMod
     <Modal
       open={open}
       onClose={close}
-      title="Change Password"
-      description="Update the password for your local account."
+      title={t('shell.password.title')}
+      description={t('shell.password.description')}
       size="md"
       footer={
         <>
           <ModalCancelButton onClick={close} disabled={saving} />
           <ModalPrimaryButton onClick={save} disabled={!canSave} loading={saving}>
-            Update Password
+            {t('shell.password.submit')}
           </ModalPrimaryButton>
         </>
       }
     >
       <div className="space-y-5">
         <PasswordField
-          label="Current password"
+          label={t('shell.password.current')}
           value={currentPassword}
           onChange={setCurrentPassword}
           visible={showCurrent}
           onToggleVisible={() => setShowCurrent((value) => !value)}
-          placeholder="Enter current password"
+          placeholder={t('shell.password.currentPlaceholder')}
         />
         <div>
           <PasswordField
-            label="New password"
+            label={t('shell.password.new')}
             value={newPassword}
             onChange={setNewPassword}
             visible={showNew}
             onToggleVisible={() => setShowNew((value) => !value)}
-            placeholder="Enter new password"
+            placeholder={t('shell.password.newPlaceholder')}
           />
           {newPassword.length > 0 ? (
             <div className="mt-3 bg-surface p-3 rounded-lg border border-border-subtle">
@@ -150,12 +153,12 @@ export function ChangePasswordModal({ open, onClose, onSave }: ChangePasswordMod
                         : 'text-danger'
                   }`}
                 >
-                  {strength.label}
+                  {t(strength.labelKey)}
                 </span>
               </div>
               <ul className="space-y-1.5 text-xs text-text-muted">
                 {strength.rules.map((rule) => (
-                  <li key={rule.label} className="flex items-center">
+                  <li key={rule.labelKey} className="flex items-center">
                     <span
                       className={`material-symbols-outlined text-[14px] mr-1.5 ${
                         rule.ok ? 'text-success' : 'text-text-muted'
@@ -163,7 +166,7 @@ export function ChangePasswordModal({ open, onClose, onSave }: ChangePasswordMod
                     >
                       {rule.ok ? 'check_circle' : 'circle'}
                     </span>
-                    {rule.label}
+                    {t(rule.labelKey)}
                   </li>
                 ))}
               </ul>
@@ -171,12 +174,12 @@ export function ChangePasswordModal({ open, onClose, onSave }: ChangePasswordMod
           ) : null}
         </div>
         <PasswordField
-          label="Confirm new password"
+          label={t('shell.password.confirm')}
           value={confirm}
           onChange={setConfirm}
           visible={showConfirm}
           onToggleVisible={() => setShowConfirm((value) => !value)}
-          placeholder="Re-enter new password"
+          placeholder={t('shell.password.confirmPlaceholder')}
           invalid={confirm.length > 0 && confirm !== newPassword}
         />
         <div className="flex items-start bg-surface-container-low p-3 rounded-lg border border-border-subtle">
@@ -184,7 +187,7 @@ export function ChangePasswordModal({ open, onClose, onSave }: ChangePasswordMod
             info
           </span>
           <p className="text-xs text-text-secondary leading-relaxed">
-            Changing your password keeps this device signed in and revokes your other tracked sessions.
+            {t('shell.password.sessionsNote')}
           </p>
         </div>
         {error ? (
@@ -214,6 +217,7 @@ function PasswordField({
   placeholder: string;
   invalid?: boolean;
 }) {
+  const t = useT();
   return (
     <div className="space-y-1.5">
       <label className="text-sm text-text-secondary block">{label}</label>
@@ -234,7 +238,7 @@ function PasswordField({
         <button
           type="button"
           onClick={onToggleVisible}
-          aria-label={visible ? 'Hide password' : 'Show password'}
+          aria-label={visible ? t('shell.password.hide') : t('shell.password.show')}
           className="text-text-muted hover:text-text-primary ml-2"
         >
           <span className="material-symbols-outlined text-[20px]">

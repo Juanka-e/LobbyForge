@@ -1,7 +1,15 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render as rtlRender, screen, fireEvent } from '@testing-library/react';
+import type { ReactElement } from 'react';
 import { HushleHowToPlayModal } from '../HushleHowToPlayModal';
+import { I18nProvider } from '@/lib/i18n/client';
+import { providerPropsFor } from '@/lib/i18n/catalogue';
+
+// The modal speaks through `useT()`; render it in English, as the app does
+// for an English-speaking visitor.
+const render = (ui: ReactElement) =>
+  rtlRender(<I18nProvider {...providerPropsFor('en')}>{ui}</I18nProvider>);
 
 describe('HushleHowToPlayModal', () => {
   it('renders nothing when open is false', () => {

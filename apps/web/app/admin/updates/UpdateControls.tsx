@@ -1,8 +1,21 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useT } from '@/lib/i18n/client';
+import type { Translator } from '@/lib/i18n/core';
 
 type UpdateAction = 'dry-run' | 'apply' | 'rollback';
+
+/** Words for the execution statuses the API reports; anything else shows as-is. */
+const EXECUTION_STATUS_LABEL_KEYS: Record<string, string> = {
+  planned: 'admin.updates.status.planned',
+  locked: 'admin.updates.status.locked',
+  running: 'admin.updates.status.running',
+  succeeded: 'admin.updates.status.succeeded',
+  failed: 'admin.updates.status.failed',
+  rolled_back: 'admin.updates.status.rolled_back',
+  blocked: 'admin.updates.status.blocked',
+};
 
 interface UpdateControlsProps {
   majorUpgrade: boolean;
@@ -27,6 +40,7 @@ interface UpdateResponse {
  * with inline guidance when a gate is missing.
  */
 export default function UpdateControls({ majorUpgrade, maintenanceMode, signatureVerified }: UpdateControlsProps) {
+  const t = useT();
   const [loading, setLoading] = useState<UpdateAction | null>(null);
   const [result, setResult] = useState<UpdateResponse | null>(null);
   const [confirmAction, setConfirmAction] = useState<UpdateAction | null>(null);
@@ -34,10 +48,10 @@ export default function UpdateControls({ majorUpgrade, maintenanceMode, signatur
   // Gates that must be satisfied before a real execute.
   const gatesMissing = useMemo(() => {
     const missing: string[] = [];
-    if (!maintenanceMode) missing.push('Maintenance mode is OFF — enable it first');
-    if (!signatureVerified) missing.push('Release signature not verified');
+    if (!maintenanceMode) missing.push(t('admin.updates.gateMaintenance'));
+    if (!signatureVerified) missing.push(t('admin.updates.gateSignature'));
     return missing;
-  }, [maintenanceMode, signatureVerified]);
+  }, [maintenanceMode, signatureVerified, t]);
 
   async function runAction(act: UpdateAction, execute: boolean) {
     setLoading(act);
@@ -56,7 +70,7 @@ export default function UpdateControls({ majorUpgrade, maintenanceMode, signatur
       const data = (await res.json()) as UpdateResponse;
       setResult(data);
     } catch (err) {
-      setResult({ error: 'Request failed', detail: (err as Error).message });
+      setResult({ error: t('admin.updates.requestFailed'), detail: (err as Error).message });
     } finally {
       setLoading(null);
       setConfirmAction(null);
@@ -65,7 +79,7 @@ export default function UpdateControls({ majorUpgrade, maintenanceMode, signatur
 
   return (
     <section className="rounded-xl border border-border-subtle bg-surface p-5 mb-4">
-      <h2 className="text-lg font-semibold text-text-primary mb-4">Update Controls</h2>
+      <h2 className="text-lg font-semibold text-text-primary mb-4">{t('admin.updates.controlsTitle')}</h2>
 
       {/* Quick action buttons */}
       <div className="grid gap-3 sm:grid-cols-3">
@@ -76,7 +90,7 @@ export default function UpdateControls({ majorUpgrade, maintenanceMode, signatur
           className="rounded-lg border border-border-subtle bg-surface-raised px-4 py-3 text-sm font-medium text-text-primary hover:bg-surface-container transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
         >
           <span className="material-symbols-outlined text-[18px]">{loading === 'dry-run' ? 'progress_activity' : 'search'}</span>
-          Check for Updates
+          {t('admin.updates.checkForUpdates')}
         </button>
 
         {/* Upgrade */}
@@ -96,7 +110,11 @@ export default function UpdateControls({ majorUpgrade, maintenanceMode, signatur
           }`}
         >
           <span className="material-symbols-outlined text-[18px]">{loading === 'apply' ? 'progress_activity' : 'upgrade'}</span>
-          {confirmAction === 'apply' ? 'Click again to confirm' : `Upgrade${majorUpgrade ? ' (major)' : ''}`}
+          {confirmAction === 'apply'
+            ? t('admin.updates.clickToConfirm')
+            : majorUpgrade
+              ? t('admin.updates.upgradeMajor')
+              : t('admin.updates.upgrade')}
         </button>
 
         {/* Rollback */}
@@ -116,14 +134,14 @@ export default function UpdateControls({ majorUpgrade, maintenanceMode, signatur
           }`}
         >
           <span className="material-symbols-outlined text-[18px]">{loading === 'rollback' ? 'progress_activity' : 'restore'}</span>
-          {confirmAction === 'rollback' ? 'Click again to confirm' : 'Rollback'}
+          {confirmAction === 'rollback' ? t('admin.updates.clickToConfirm') : t('admin.updates.rollback')}
         </button>
       </div>
 
       {/* Gate warnings */}
       {gatesMissing.length > 0 ? (
         <div className="mt-3 rounded-lg border border-tertiary/30 bg-tertiary/5 p-3">
-          <p className="text-xs font-medium text-tertiary mb-1">Before upgrading or rolling back:</p>
+          <p className="text-xs font-medium text-tertiary mb-1">{t('admin.updates.gatesHeading')}</p>
           <ul className="space-y-1">
             {gatesMissing.map((g) => (
               <li key={g} className="text-xs text-text-secondary flex items-center gap-1.5">
@@ -136,38 +154,45 @@ export default function UpdateControls({ majorUpgrade, maintenanceMode, signatur
       ) : (
         <p className="mt-3 text-xs text-success flex items-center gap-1.5">
           <span className="material-symbols-outlined text-[14px]">check_circle</span>
-          All gates satisfied — upgrade/rollback ready.
+          {t('admin.updates.gatesReady')}
         </p>
       )}
 
       {/* Result */}
-      {result ? <ResultPanel result={result} /> : null}
+      {result ? <ResultPanel result={result} t={t} /> : null}
     </section>
   );
 }
 
-function ResultPanel({ result }: { result: UpdateResponse }) {
+function ResultPanel({ result, t }: { result: UpdateResponse; t: Translator }) {
+  const executionStatus = result.execution
+    ? EXECUTION_STATUS_LABEL_KEYS[result.execution.status]
+      ? t(EXECUTION_STATUS_LABEL_KEYS[result.execution.status]!)
+      : result.execution.status
+    : '';
   return (
     <div className="mt-4 pt-4 border-t border-border-subtle">
-      <h3 className="text-sm font-semibold text-text-primary mb-2">Result</h3>
+      <h3 className="text-sm font-semibold text-text-primary mb-2">{t('admin.updates.result')}</h3>
       {result.error ? (
         <p className="text-sm text-danger">{result.error}{result.detail ? `: ${result.detail}` : ''}</p>
       ) : null}
       {result.policy ? (
         <p className={`text-sm ${result.policy.allowed ? 'text-success' : 'text-tertiary'}`}>
-          Policy: {result.policy.mode} — {result.policy.allowed ? 'allowed' : 'locked'}
+          {result.policy.allowed
+            ? t('admin.updates.policyAllowed', { mode: result.policy.mode })
+            : t('admin.updates.policyLocked', { mode: result.policy.mode })}
           {result.policy.failures.length > 0 ? ` (${result.policy.failures.join(', ')})` : ''}
         </p>
       ) : null}
       {result.execution ? (
         <p className={`text-sm ${result.execution.status === 'succeeded' ? 'text-success' : 'text-danger'}`}>
-          Execution: {result.execution.status}
+          {t('admin.updates.execution', { status: executionStatus })}
           {result.execution.failures.length > 0 ? ` — ${result.execution.failures.join(', ')}` : ''}
         </p>
       ) : null}
       {result.updateRun ? (
         <a href={`/admin/updates/${result.updateRun.id}`} className="text-sm text-primary hover:underline mt-2 inline-block">
-          View run details →
+          {t('admin.updates.viewRun')}
         </a>
       ) : null}
     </div>

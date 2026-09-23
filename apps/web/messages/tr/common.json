@@ -1,7 +1,12 @@
 {
-  "common.close": "Kapat",
+  "common.adminRequired": "Yönetici erişimi gerekiyor.",
   "common.cancel": "Vazgeç",
-  "common.save": "Kaydet",
+  "common.close": "Kapat",
+  "common.guest": "Misafir",
   "common.loading": "Yükleniyor…",
-  "common.guest": "Misafir"
+  "common.maintenance.body": "LobbyForge şu anda geçici olarak bakımda.",
+  "common.maintenance.startedAt": "Başlangıç: {time} (UTC)",
+  "common.maintenance.title": "Bakım",
+  "common.meta.description": "Kendi sunucunda barındırabileceğin, sesli sohbet odaklı topluluk platformu.",
+  "common.save": "Kaydet"
 }

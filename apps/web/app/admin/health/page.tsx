@@ -1,8 +1,11 @@
 import type { AlertLevel, DoctorCategory, DoctorReport } from '@lobbyforge/core';
+import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
 import { collectDoctorReport } from '@/lib/doctor';
 import { getDb } from '@/lib/db';
+import type { Translator } from '@/lib/i18n/core';
+import { getTranslator } from '@/lib/i18n/server';
 import { getInstanceSetupStatus, listServersForUser } from '@lobbyforge/db';
 import { getServerBandwidthTotals } from '@/lib/redis';
 import SettingsShell from '@/app/SettingsShell';
@@ -12,9 +15,10 @@ import HealthActions from './HealthActions';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export const metadata = {
-  title: 'Doctor & Health — Community Settings',
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  return { title: t('admin.health.metaTitle') };
+}
 
 /**
  * Community Settings → Doctor & Health.
@@ -28,12 +32,13 @@ export const metadata = {
 export default async function HealthPage() {
   const cookieStore = await cookies();
   const token = cookieStore.get(ADMIN_TOKEN_COOKIE)?.value ?? null;
+  const t = await getTranslator();
   if (!(await isInstanceAdminAllowed(cookieStore.toString(), token))) {
     return (
       <SettingsShell scope="community">
         <section>
-          <h1 className="text-2xl font-semibold text-text-primary">Doctor & Health</h1>
-          <p className="mt-2 text-sm text-danger">Admin token required.</p>
+          <h1 className="text-2xl font-semibold text-text-primary">{t('admin.health.title')}</h1>
+          <p className="mt-2 text-sm text-danger">{t('common.adminRequired')}</p>
         </section>
       </SettingsShell>
     );
@@ -62,27 +67,66 @@ export default async function HealthPage() {
 
   return (
     <SettingsShell scope="community">
-      <DoctorBody report={report} bandwidth={bandwidth} />
+      <DoctorBody report={report} bandwidth={bandwidth} t={t} />
     </SettingsShell>
   );
 }
 
-const CATEGORY_LABELS: Record<DoctorCategory, string> = {
-  system: 'System',
-  network: 'Network',
-  services: 'Services',
-  media: 'Media',
+const CATEGORY_LABEL_KEYS: Record<DoctorCategory, string> = {
+  system: 'admin.health.category.system',
+  network: 'admin.health.category.network',
+  services: 'admin.health.category.services',
+  media: 'admin.health.category.media',
 };
+
+const LEVEL_LABEL_KEYS: Record<AlertLevel, string> = {
+  info: 'admin.health.level.info',
+  warning: 'admin.health.level.warning',
+  critical: 'admin.health.level.critical',
+  fatal: 'admin.health.level.fatal',
+};
+
+/*
+ * The capacity profile's enum values come from `@lobbyforge/core`; the
+ * words shown for them are interface. The guidance and rationale
+ * sentences beside them are generated there and stay as sent.
+ */
+const TIER_LABEL_KEYS: Record<string, string> = {
+  low: 'admin.health.tier.low',
+  medium: 'admin.health.tier.medium',
+  high: 'admin.health.tier.high',
+};
+
+const VIDEO_DEFAULT_LABEL_KEYS: Record<string, string> = {
+  off: 'admin.health.videoDefault.off',
+  'opt-in': 'admin.health.videoDefault.optIn',
+  on: 'admin.health.videoDefault.on',
+};
+
+const LAYOUT_LABEL_KEYS: Record<string, string> = {
+  'active-speaker': 'admin.health.layout.activeSpeaker',
+  'active-speaker-thumbnails': 'admin.health.layout.activeSpeakerThumbnails',
+  grid: 'admin.health.layout.grid',
+};
+
+/** A label for an enum value, or the value itself when it has none. */
+function labelFor(t: Translator, keys: Record<string, string>, value: string): string {
+  const key = keys[value];
+  return key ? t(key) : value;
+}
 
 const CATEGORY_ORDER: DoctorCategory[] = ['system', 'network', 'services', 'media'];
 
 function DoctorBody({
   report,
   bandwidth,
+  t,
 }: {
   report: DoctorReport;
   bandwidth: { totalBytes: number; todayBytes: number; alertTriggered: boolean } | null;
+  t: Translator;
 }) {
+  const categoryLabel = (cat: DoctorCategory) => labelFor(t, CATEGORY_LABEL_KEYS, cat);
   // Group checks by category so the System Status panel can render
   // each category as its own sub-section. Order is fixed by
   // CATEGORY_ORDER so the layout is stable across refreshes.
@@ -99,29 +143,33 @@ function DoctorBody({
     <section className="grid gap-8 lg:grid-cols-12 pb-32">
       <div className="lg:col-span-8 space-y-8">
         <header>
-          <h1 className="text-2xl font-semibold text-text-primary">Doctor & Health</h1>
+          <h1 className="text-2xl font-semibold text-text-primary">{t('admin.health.title')}</h1>
           <p className="mt-1 text-sm text-text-secondary">
-            Generated {new Date(report.generatedAt).toLocaleString()} · uptime{' '}
-            {report.uptimeSeconds}s
+            {t('admin.health.generated', {
+              date: new Date(report.generatedAt).toLocaleString(t.locale),
+              seconds: report.uptimeSeconds,
+            })}
           </p>
         </header>
 
-        <DoctorSummary summary={report.summary} ok={report.ok} />
+        <DoctorSummary summary={report.summary} ok={report.ok} t={t} />
 
-        <CapacityCard capacity={report.capacity} />
+        <CapacityCard capacity={report.capacity} t={t} />
 
         <section>
           <h3 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2 border-b border-border-subtle pb-2">
             <span className="material-symbols-outlined text-primary text-[20px]">health_and_safety</span>
-            System Status
+            {t('admin.health.statusTitle')}
           </h3>
           <div className="rounded-xl border border-border-subtle bg-surface overflow-hidden divide-y divide-border-subtle">
             {CATEGORY_ORDER.flatMap((cat) => {
               const list = byCategory.get(cat) ?? [];
-              return list.map((c) => <StatusRow key={`${cat}:${c.id}`} check={c} categoryLabel={CATEGORY_LABELS[cat]} />);
+              return list.map((c) => (
+                <StatusRow key={`${cat}:${c.id}`} check={c} categoryLabel={categoryLabel(cat)} t={t} />
+              ));
             })}
             {report.checks.length === 0 ? (
-              <p className="p-4 text-sm text-text-muted">No checks have been registered.</p>
+              <p className="p-4 text-sm text-text-muted">{t('admin.health.noChecks')}</p>
             ) : null}
           </div>
         </section>
@@ -129,12 +177,12 @@ function DoctorBody({
         <section>
           <h3 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2 border-b border-border-subtle pb-2">
             <span className="material-symbols-outlined text-tertiary text-[20px]">priority_high</span>
-            Recommended Attention
+            {t('admin.health.attentionTitle')}
           </h3>
           {attention.length === 0 ? (
             <div className="rounded-xl border border-border-subtle bg-surface p-6 flex items-center gap-3">
               <span className="material-symbols-outlined text-success text-[20px]">check_circle</span>
-              <p className="text-sm text-text-primary">All checks passed — nothing needs attention.</p>
+              <p className="text-sm text-text-primary">{t('admin.health.allPassed')}</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -149,12 +197,12 @@ function DoctorBody({
                       <div className="flex items-center gap-2 mb-2">
                         <h4 className="text-sm font-medium text-text-primary">{c.id}</h4>
                         <span className="px-2 py-0.5 rounded text-[10px] uppercase tracking-wider bg-surface-variant text-text-muted border border-border-subtle">
-                          {CATEGORY_LABELS[c.category]}
+                          {categoryLabel(c.category)}
                         </span>
                         <span
                           className={`px-2 py-0.5 rounded text-[10px] uppercase tracking-wider border ${levelClasses(c.level).badge}`}
                         >
-                          {c.level}
+                          {labelFor(t, LEVEL_LABEL_KEYS, c.level)}
                         </span>
                       </div>
                       <p className="text-sm text-text-secondary mb-3 max-w-xl">{c.message}</p>
@@ -172,7 +220,7 @@ function DoctorBody({
         <section>
           <h3 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2 border-b border-border-subtle pb-2">
             <span className="material-symbols-outlined text-primary text-[20px]">fact_check</span>
-            All checks
+            {t('admin.health.allChecksTitle')}
           </h3>
           <ul className="list-none p-0 space-y-1">
             {report.checks.map((c) => (
@@ -189,7 +237,7 @@ function DoctorBody({
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
                     <strong className="break-words text-sm text-text-primary">{c.id}</strong>
-                    <span className="text-xs text-text-muted">{CATEGORY_LABELS[c.category]}</span>
+                    <span className="text-xs text-text-muted">{categoryLabel(c.category)}</span>
                   </div>
                   <p className="mt-1 break-words text-pretty text-sm text-text-secondary">{c.message}</p>
                 </div>
@@ -202,50 +250,61 @@ function DoctorBody({
       <aside className="lg:col-span-4">
         <div className="bg-surface/80 backdrop-blur-md rounded-xl border border-border-subtle p-6 sticky top-8 space-y-6">
           <div className="flex items-center justify-between">
-            <h3 className="text-lg font-medium text-text-primary">Health Summary</h3>
+            <h3 className="text-lg font-medium text-text-primary">{t('admin.health.summaryTitle')}</h3>
             <span className="material-symbols-outlined text-text-muted">monitor_heart</span>
           </div>
           <div className="space-y-3">
-            <SummaryRow label="Total Checks" value={report.checks.length} />
-            <SummaryRow label="Passed" value={report.summary.ok} tone="success" />
-            <SummaryRow label="Warnings" value={report.summary.warning} tone="tertiary" />
-            <SummaryRow label="Critical" value={report.summary.critical} tone="danger" />
-            <SummaryRow label="Fatal" value={report.summary.fatal} tone="danger" />
+            <SummaryRow label={t('admin.health.summary.total')} value={report.checks.length} />
+            <SummaryRow label={t('admin.health.summary.passed')} value={report.summary.ok} tone="success" />
+            <SummaryRow
+              label={t('admin.health.summary.warnings')}
+              value={report.summary.warning}
+              tone="tertiary"
+            />
+            <SummaryRow
+              label={t('admin.health.summary.critical')}
+              value={report.summary.critical}
+              tone="danger"
+            />
+            <SummaryRow label={t('admin.health.summary.fatal')} value={report.summary.fatal} tone="danger" />
           </div>
           <div className="space-y-2">
             <HealthActions report={report} />
           </div>
           <p className="text-xs text-text-muted flex items-start gap-2 pt-4 border-t border-border-subtle">
             <span className="material-symbols-outlined text-[14px] shrink-0">info</span>
-            Doctor & Health shows safe diagnostics only. Running checks will not affect active
-            voice sessions.
+            {t('admin.health.safeNote')}
           </p>
 
           {/* Bandwidth summary — links to /admin/bandwidth for detail */}
           {bandwidth ? (
             <div className="pt-4 border-t border-border-subtle space-y-3">
               <div className="flex items-center justify-between">
-                <h4 className="text-sm font-medium text-text-primary">Bandwidth</h4>
+                <h4 className="text-sm font-medium text-text-primary">{t('admin.health.bandwidthTitle')}</h4>
                 <a
                   href="/admin/bandwidth"
                   className="text-xs text-primary hover:underline flex items-center gap-1"
                 >
-                  Details
-                  <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+                  {t('admin.health.bandwidthDetails')}
+                  <span className="material-symbols-outlined text-[14px]" aria-hidden>
+                    arrow_forward
+                  </span>
                 </a>
               </div>
               <div className="space-y-2">
                 <SummaryRow
-                  label="Total"
+                  label={t('admin.health.bandwidthTotal')}
                   value={formatBytes(bandwidth.totalBytes)}
                 />
                 <SummaryRow
-                  label="Today"
+                  label={t('admin.health.bandwidthToday')}
                   value={formatBytes(bandwidth.todayBytes)}
                 />
                 <SummaryRow
-                  label="Status"
-                  value={bandwidth.alertTriggered ? 'Over budget' : 'OK'}
+                  label={t('admin.health.bandwidthStatus')}
+                  value={
+                    bandwidth.alertTriggered ? t('admin.health.bandwidthOverBudget') : t('admin.health.bandwidthOk')
+                  }
                   tone={bandwidth.alertTriggered ? 'danger' : 'success'}
                 />
               </div>
@@ -257,7 +316,7 @@ function DoctorBody({
   );
 }
 
-function DoctorSummary({ summary, ok }: Pick<DoctorReport, 'summary' | 'ok'>) {
+function DoctorSummary({ summary, ok, t }: Pick<DoctorReport, 'summary' | 'ok'> & { t: Translator }) {
   return (
     <div
       className={`flex gap-4 p-4 rounded-xl border ${
@@ -266,30 +325,34 @@ function DoctorSummary({ summary, ok }: Pick<DoctorReport, 'summary' | 'ok'>) {
           : 'bg-danger/5 border-danger/30'
       }`}
     >
-      <Badge label="ok" value={summary.ok} tone="ok" />
-      <Badge label="warnings" value={summary.warning} tone="warn" />
-      <Badge label="critical" value={summary.critical} tone="bad" />
-      <Badge label="fatal" value={summary.fatal} tone="bad" />
+      <Badge label={t('admin.health.badge.ok')} value={summary.ok} tone="ok" />
+      <Badge label={t('admin.health.badge.warnings')} value={summary.warning} tone="warn" />
+      <Badge label={t('admin.health.badge.critical')} value={summary.critical} tone="bad" />
+      <Badge label={t('admin.health.badge.fatal')} value={summary.fatal} tone="bad" />
     </div>
   );
 }
 
-function CapacityCard({ capacity }: { capacity: DoctorReport['capacity'] }) {
+function CapacityCard({ capacity, t }: { capacity: DoctorReport['capacity']; t: Translator }) {
   return (
     <div className="rounded-xl border border-border-subtle bg-surface p-6">
       <h2 className="text-lg font-semibold text-text-primary mb-2">
-        Recommended profile ({capacity.tier})
+        {t('admin.health.capacity.title', { tier: labelFor(t, TIER_LABEL_KEYS, capacity.tier) })}
       </h2>
       <ul className="text-sm text-text-secondary grid gap-1 md:grid-cols-2">
-        <li>Max voice users per room: {capacity.maxVoiceUsersPerRoom}</li>
-        <li>Max camera users per room: {capacity.maxCameraUsersPerRoom}</li>
-        <li>Max screen share per room: {capacity.maxScreenSharePerRoom}</li>
-        <li>Video default: {capacity.videoDefault}</li>
-        <li>Layout: {capacity.layout}</li>
+        <li>{t('admin.health.capacity.maxVoice', { count: capacity.maxVoiceUsersPerRoom })}</li>
+        <li>{t('admin.health.capacity.maxCamera', { count: capacity.maxCameraUsersPerRoom })}</li>
+        <li>{t('admin.health.capacity.maxScreenShare', { count: capacity.maxScreenSharePerRoom })}</li>
+        <li>
+          {t('admin.health.capacity.videoDefault', {
+            value: labelFor(t, VIDEO_DEFAULT_LABEL_KEYS, capacity.videoDefault),
+          })}
+        </li>
+        <li>{t('admin.health.capacity.layout', { value: labelFor(t, LAYOUT_LABEL_KEYS, capacity.layout) })}</li>
       </ul>
       <p className="text-xs text-text-muted mt-3">{capacity.guidance}</p>
       <details className="mt-3">
-        <summary className="text-xs text-text-muted cursor-pointer">Rationale</summary>
+        <summary className="text-xs text-text-muted cursor-pointer">{t('admin.health.capacity.rationale')}</summary>
         <ul className="text-xs text-text-muted list-disc pl-5 mt-2 space-y-1">
           {capacity.rationale.map((r, i) => (
             <li key={i}>{r}</li>
@@ -303,9 +366,11 @@ function CapacityCard({ capacity }: { capacity: DoctorReport['capacity'] }) {
 function StatusRow({
   check,
   categoryLabel,
+  t,
 }: {
   check: DoctorReport['checks'][number];
   categoryLabel: string;
+  t: Translator;
 }) {
   const tone = levelClasses(check.level);
   const borderClass = !check.ok && check.level !== 'info' ? tone.rowBorder : 'border-transparent';
@@ -323,7 +388,11 @@ function StatusRow({
         </div>
       </div>
       <span className={`text-xs font-medium ${tone.value}`}>
-        {!check.ok && check.level !== 'info' ? capitalize(check.level) : check.ok ? 'Healthy' : 'Info'}
+        {!check.ok && check.level !== 'info'
+          ? labelFor(t, LEVEL_LABEL_KEYS, check.level)
+          : check.ok
+            ? t('admin.health.healthy')
+            : t('admin.health.level.info')}
       </span>
     </div>
   );
@@ -416,10 +485,6 @@ function iconForCategory(cat: DoctorCategory): string {
     case 'media':
       return 'movie';
   }
-}
-
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function formatBytes(n: number): string {

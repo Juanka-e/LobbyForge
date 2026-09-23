@@ -22,6 +22,7 @@ export default defineConfig({
       'lib/__tests__/**/*.test.ts',
       // Nested helper suites, e.g. lib/i18n/__tests__.
       'lib/**/__tests__/**/*.test.ts',
+      'lib/**/__tests__/**/*.test.tsx',
       'app/api/**/__tests__/**/*.test.ts',
       // React component tests (opt into happy-dom per-file via docblock).
       'app/**/__tests__/**/*.test.tsx',

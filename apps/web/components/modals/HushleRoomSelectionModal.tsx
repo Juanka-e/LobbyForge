@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Modal, ModalCancelButton, ModalPrimaryButton } from '../Modal';
+import { useT } from '@/lib/i18n/client';
 
 /**
  * Hushle Room Selection modal.
@@ -49,6 +50,7 @@ export function HushleRoomSelectionModal({
   onStart,
   starting = false,
 }: HushleRoomSelectionModalProps) {
+  const t = useT();
   const available = useMemo(() => channels.filter((c) => !c.busy), [channels]);
   const initialId =
     defaultChannelId && available.some((c) => c.id === defaultChannelId)
@@ -81,8 +83,8 @@ export function HushleRoomSelectionModal({
       open={open}
       onClose={close}
       size="md"
-      title="Start Hushle"
-      description="Pick the voice channel where the session will run."
+      title={t('shell.roomSelect.title')}
+      description={t('shell.roomSelect.description')}
       footer={
         <>
           <ModalCancelButton onClick={close} disabled={starting} />
@@ -92,7 +94,7 @@ export function HushleRoomSelectionModal({
             loading={starting}
             icon="play_arrow"
           >
-            Start Session
+            {t('shell.roomSelect.start')}
           </ModalPrimaryButton>
         </>
       }
@@ -104,8 +106,7 @@ export function HushleRoomSelectionModal({
               <span className="material-symbols-outlined text-text-muted">volume_off</span>
             </div>
             <p className="text-sm text-text-secondary">
-              All voice channels are busy with another activity. End an existing
-              session first.
+              {t('shell.roomSelect.allBusy')}
             </p>
           </div>
         ) : (
@@ -137,8 +138,8 @@ export function HushleRoomSelectionModal({
                     </span>
                     <span className="text-xs text-text-secondary">
                       {c.participantCount === 0
-                        ? 'Empty'
-                        : `${c.participantCount} in room`}
+                        ? t('shell.roomSelect.empty')
+                        : t('shell.roomSelect.inRoom', { count: c.participantCount })}
                     </span>
                   </div>
                   <span
@@ -158,7 +159,7 @@ export function HushleRoomSelectionModal({
 
         {channels.some((c) => c.busy) ? (
           <p className="text-[11px] text-text-muted pt-2 border-t border-border-subtle">
-            One activity per voice channel — busy rooms are hidden from this list.
+            {t('shell.roomSelect.busyHidden')}
           </p>
         ) : null}
       </div>

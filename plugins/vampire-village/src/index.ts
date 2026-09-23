@@ -41,7 +41,9 @@ export const vampireVillagePlugin: GamePlugin<VampireState, VampireAction> = {
       PluginPermission.MANAGE_TIMER,
       PluginPermission.SEND_DATA_CHANNEL_EVENT,
     ],
-    locales: ['en', 'tr'],
+    // English only: this plugin ships no locales/ tables yet, so it
+    // must not advertise other languages in the catalogue.
+    locales: ['en'],
     entryClient: './client.js',
     catalog: {
       category: 'game',

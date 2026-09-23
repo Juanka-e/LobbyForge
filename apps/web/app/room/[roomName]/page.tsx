@@ -35,8 +35,12 @@ import {
 } from 'livekit-client';
 import { resolveBrowserLiveKitUrl } from '@/lib/public-endpoints';
 import { getPlugin } from '@/lib/plugin-registry';
+import { useT } from '@/lib/i18n/client';
+import type { Translator } from '@/lib/i18n/core';
 import { PluginSurface } from '../PluginSurface';
 import { useActivitySession } from '../useActivitySession';
+import { rich } from '@/lib/i18n/rich';
+import { pluginSummary } from '@/lib/plugin-catalog-text';
 
 type Guest = { gid: string; uid: string | null; name: string };
 type Token = {
@@ -81,7 +85,21 @@ function isBotParticipant(participant: Participant): boolean {
   return metadata.bot === true || metadata.kind === 'bot' || participant.identity.startsWith('bot:');
 }
 
+/** Plugin and bot trust levels are codes; show the word players see. */
+function trustLabel(t: Translator, level: string | undefined): string | null {
+  if (level === 'official') return t('room.trust.official');
+  if (level === 'verified' || level === 'verified-community') return t('room.trust.verified');
+  if (level === 'unverified') return t('room.trust.unverified');
+  return level ?? null;
+}
+
 function RoomView({ roomName }: { roomName: string }) {
+  const t = useT();
+  // The connection effects read the translator through a ref: a new
+  // translator (e.g. after a router refresh) must not tear down and
+  // rebuild the voice connection.
+  const tRef = useRef(t);
+  tRef.current = t;
   const search = useSearchParams();
   const serverId = search?.get('serverId') ?? null;
   const channelId = search?.get('channelId') ?? null;
@@ -126,7 +144,7 @@ function RoomView({ roomName }: { roomName: string }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({}),
         });
-        if (!res.ok) throw new Error(`POST /api/auth/guest → ${res.status}`);
+        if (!res.ok) throw new Error(tRef.current('room.error.guest', { status: res.status }));
         const data = (await res.json()) as { guest: Guest };
         if (!cancelled) {
           setGuest(data.guest);
@@ -155,7 +173,7 @@ function RoomView({ roomName }: { roomName: string }) {
       setStatus({ kind: 'busy' });
       try {
         if (!serverId || !channelId) {
-          setStatus({ kind: 'error', message: 'Voice connection requires serverId and channelId.' });
+          setStatus({ kind: 'error', message: tRef.current('room.error.missingChannel') });
           return;
         }
         const res = await fetch('/api/livekit/token', {
@@ -165,12 +183,13 @@ function RoomView({ roomName }: { roomName: string }) {
           body: JSON.stringify({ serverId, channelId }),
         });
         if (res.status === 401) {
-          setStatus({ kind: 'error', message: 'Session expired — refresh the page.' });
+          setStatus({ kind: 'error', message: tRef.current('room.error.sessionExpired') });
           return;
         }
         if (!res.ok) {
-          const detail = await res.json().catch(() => ({}));
-          throw new Error(`POST /api/livekit/token → ${res.status} ${JSON.stringify(detail)}`);
+          // The server's own error is shown as-is; ours only when it sent none.
+          const detail = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(detail.error ?? tRef.current('room.error.token', { status: res.status }));
         }
         const token = (await res.json()) as Token;
 
@@ -219,7 +238,10 @@ function RoomView({ roomName }: { roomName: string }) {
         }
         collectParticipants(room);
         setAudioBlocked(!room.canPlaybackAudio);
-        setStatus({ kind: 'ok', message: `Connected to ${token.room} as ${token.identity}` });
+        setStatus({
+          kind: 'ok',
+          message: tRef.current('room.status.connected', { room: token.room, identity: token.identity }),
+        });
       } catch (err) {
         if (!cancelled) setStatus({ kind: 'error', message: (err as Error).message });
       }
@@ -347,38 +369,40 @@ function RoomView({ roomName }: { roomName: string }) {
   const stateLabel = useMemo(() => {
     switch (roomState) {
       case ConnectionState.Connected:
-        return 'connected';
+        return t('room.state.connected');
       case ConnectionState.Connecting:
-        return 'connecting…';
+        return t('room.state.connecting');
       case ConnectionState.Reconnecting:
-        return 'reconnecting…';
+      case ConnectionState.SignalReconnecting:
+        return t('room.state.reconnecting');
       case ConnectionState.Disconnected:
-        return 'disconnected';
+        return t('room.state.disconnected');
       default:
         return roomState;
     }
-  }, [roomState]);
+  }, [roomState, t]);
 
   return (
     <section>
       <div ref={audioContainerRef} aria-hidden style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden' }} />
-      <h1 style={{ marginTop: 0 }}>Voice room: {roomName}</h1>
+      <h1 style={{ marginTop: 0 }}>{t('room.title', { name: roomName })}</h1>
       <p style={{ color: '#9aa3ad' }}>
-        Connection: <code>{stateLabel}</code> · {participants.length} participant
-        {participants.length === 1 ? '' : 's'}
-        {localParticipant ? ` · you are ${localParticipant.identity}` : ''}
-        {serverId && channelId ? ` · presence posted to ${channelId}` : ''}
+        {rich(t('room.connection'), { state: <code>{stateLabel}</code> })}
+        {' · '}
+        {t('room.participantCount', { count: participants.length })}
+        {localParticipant ? ` · ${t('room.youAre', { identity: localParticipant.identity })}` : ''}
+        {serverId && channelId ? ` · ${t('room.presencePosted', { channel: channelId })}` : ''}
       </p>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
         <button onClick={toggleMic} disabled={!roomRef.current}>
-          {micEnabled ? 'Mute mic' : 'Unmute mic'}
+          {micEnabled ? t('room.mic.mute') : t('room.mic.unmute')}
         </button>
         <button onClick={toggleDeafen} disabled={!roomRef.current}>
-          {deafened ? 'Undeafen' : 'Deafen'}
+          {deafened ? t('room.deafen.off') : t('room.deafen.on')}
         </button>
         {audioBlocked ? (
-          <button onClick={() => void startAudio()}>Enable audio</button>
+          <button onClick={() => void startAudio()}>{t('room.enableAudio')}</button>
         ) : null}
         <ActivityPicker
           serverId={serverId}
@@ -397,22 +421,23 @@ function RoomView({ roomName }: { roomName: string }) {
           maxWidth: 640,
         }}
       >
-        <strong>Participants</strong>
+        <strong>{t('room.participants')}</strong>
         <ul style={{ margin: '8px 0 0 0', paddingLeft: 20 }}>
           {participants.map((p) => {
             const metadata = parseParticipantMetadata(p.metadata);
             const isBot = isBotParticipant(p);
+            const botTrust = trustLabel(t, metadata.trustLevel);
             return (
               <li
                 key={p.sid}
                 title={
                   isBot
-                    ? `${metadata.publisher ?? 'Unknown publisher'} - ${metadata.botType ?? 'bot'}`
+                    ? `${metadata.publisher ?? t('room.bot.unknownPublisher')} - ${metadata.botType ?? 'bot'}`
                     : undefined
                 }
               >
               {p.identity}
-              {p === localParticipant ? ' (you)' : ''}
+              {p === localParticipant ? ` ${t('room.you')}` : ''}
               {isBot ? (
                 <>
                   {' '}
@@ -427,7 +452,7 @@ function RoomView({ roomName }: { roomName: string }) {
                   >
                     BOT
                   </span>
-                  {metadata.trustLevel ? (
+                  {botTrust ? (
                     <span
                       style={{
                         marginLeft: 4,
@@ -435,13 +460,13 @@ function RoomView({ roomName }: { roomName: string }) {
                         fontSize: 12,
                       }}
                     >
-                      {metadata.trustLevel}
+                      {botTrust}
                     </span>
                   ) : null}
                 </>
               ) : null}
               {' — '}
-              {p.isSpeaking ? 'speaking' : 'silent'}
+              {p.isSpeaking ? t('room.speaking') : t('room.silent')}
             </li>
             );
           })}
@@ -459,8 +484,10 @@ function RoomView({ roomName }: { roomName: string }) {
 
       <StatusLine status={status} />
       <p style={{ color: '#9aa3ad', marginTop: 16, fontSize: 13 }}>
-        Presence TTL is {PRESENCE_TTL_SECONDS}s. The UI posts every {HEARTBEAT_INTERVAL_MS / 1000}s.
-        Server-side mute is M15.
+        {t('room.presenceNote', {
+          ttl: PRESENCE_TTL_SECONDS,
+          interval: HEARTBEAT_INTERVAL_MS / 1000,
+        })}
       </p>
     </section>
   );
@@ -515,6 +542,7 @@ function ActivityPicker({
   activeSessionId: string | null;
   onStart: (sessionId: string) => void;
 }) {
+  const t = useT();
   const [plugins, setPlugins] = useState<PluginSummary[] | null>(null);
   const [selected, setSelected] = useState<string>('');
   const [busy, setBusy] = useState(false);
@@ -526,7 +554,7 @@ function ActivityPicker({
     void (async () => {
       try {
         const res = await fetch(`/api/servers/${serverId}/apps`, { credentials: 'same-origin' });
-        if (!res.ok) throw new Error(`GET /api/servers/${serverId}/apps → ${res.status}`);
+        if (!res.ok) throw new Error(t('room.picker.loadFailed', { status: res.status }));
         const data = (await res.json()) as { apps: Array<PluginSummary & { installed: boolean; enabled: boolean }> };
         const enabledApps = data.apps.filter((app) => app.installed && app.enabled);
         if (!cancelled) {
@@ -540,7 +568,7 @@ function ActivityPicker({
     return () => {
       cancelled = true;
     };
-  }, [serverId, channelId]);
+  }, [serverId, channelId, t]);
 
   if (!serverId || !channelId) return null;
   if (activeSessionId) return null;
@@ -570,8 +598,9 @@ function ActivityPicker({
         }
       }
       if (!res.ok) {
-        const detail = await res.json().catch(() => ({}));
-        throw new Error(`${res.status} ${JSON.stringify(detail)}`);
+        // The server's own error is shown as-is; ours only when it sent none.
+        const detail = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(detail.error ?? t('room.picker.startFailed', { status: res.status }));
       }
       const data = (await res.json()) as { activity: { id: string } };
       onStart(data.activity.id);
@@ -583,25 +612,29 @@ function ActivityPicker({
   };
 
   if (!plugins) {
-    return <span style={{ color: '#9aa3ad' }}>Loading plugins…</span>;
+    return <span style={{ color: '#9aa3ad' }}>{t('room.picker.loading')}</span>;
   }
   if (plugins.length === 0) {
-    return <span style={{ color: '#9aa3ad' }}>No enabled apps for this server.</span>;
+    return <span style={{ color: '#9aa3ad' }}>{t('room.picker.empty')}</span>;
   }
   const selectedPlugin = plugins.find((p) => p.id === selected) ?? null;
+  const selectedSummary = selectedPlugin
+    ? pluginSummary(selectedPlugin.id, t.locale, selectedPlugin.catalog?.summary ?? null)
+    : null;
   const playerConfig = selectedPlugin?.catalog?.playerConfig;
   const playerRange =
     playerConfig?.minPlayers || playerConfig?.maxPlayers
-      ? `${playerConfig.minPlayers ?? 1}-${playerConfig.maxPlayers ?? 'any'} players`
+      ? t('room.picker.playerRange', {
+          min: playerConfig.minPlayers ?? 1,
+          max: playerConfig.maxPlayers ?? t('room.picker.playerRangeAny'),
+        })
       : null;
-  const trustLabel =
-    selectedPlugin?.catalog?.trustLevel === 'official'
-      ? 'Official'
-      : selectedPlugin?.catalog?.trustLevel === 'verified-community'
-        ? 'Verified'
-        : selectedPlugin?.catalog?.trustLevel === 'unverified'
-          ? 'Unverified'
-          : null;
+  // Only the three known levels get a badge here, as before.
+  const pickerTrust = selectedPlugin?.catalog?.trustLevel;
+  const trustBadge =
+    pickerTrust === 'official' || pickerTrust === 'verified-community' || pickerTrust === 'unverified'
+      ? trustLabel(t, pickerTrust)
+      : null;
 
   return (
     <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -610,6 +643,7 @@ function ActivityPicker({
         value={selected}
         onChange={(e) => setSelected(e.target.value)}
         disabled={busy}
+        aria-label={t('room.picker.selectLabel')}
         style={{ padding: '4px 8px', background: '#11151b', color: '#e6e8eb', border: '1px solid #1f242c', borderRadius: 4 }}
       >
         {plugins.map((p) => (
@@ -619,18 +653,18 @@ function ActivityPicker({
         ))}
       </select>
       <button onClick={start} disabled={busy || !selected}>
-        {busy ? 'Starting…' : 'Start activity'}
+        {busy ? t('room.picker.starting') : t('room.picker.start')}
       </button>
       </span>
       {selectedPlugin && (
         <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', color: '#9aa3ad', fontSize: 12 }}>
-          {trustLabel && (
+          {trustBadge && (
             <span style={{ border: '1px solid #2f8f62', color: '#5ad48a', borderRadius: 4, padding: '1px 5px' }}>
-              {trustLabel}
+              {trustBadge}
             </span>
           )}
           {playerRange && <span>{playerRange}</span>}
-          {selectedPlugin.catalog?.summary && <span>{selectedPlugin.catalog.summary}</span>}
+          {selectedSummary ? <span>{selectedSummary}</span> : null}
         </span>
       )}
       {error && <span style={{ color: '#e36049', fontSize: 13 }}>{error}</span>}
@@ -660,6 +694,7 @@ function ActivityPanel({
   actorUserId: string | null;
   onEnd: () => void;
 }) {
+  const t = useT();
   const { detail, error, busy, setError, dispatch: sendAction, end } = useActivitySession({
     serverId,
     sessionId,
@@ -743,6 +778,7 @@ function ActivityPanel({
           value={actionJson}
           onChange={(e) => setActionJson(e.target.value)}
           spellCheck={false}
+          aria-label={t('room.generic.actionLabel')}
           style={{
             flex: 1,
             padding: '6px 8px',
@@ -760,15 +796,15 @@ function ActivityPanel({
               const parsed = JSON.parse(actionJson) as Record<string, unknown>;
               void sendAction(parsed);
             } catch (err) {
-              setError(`Invalid JSON: ${(err as Error).message}`);
+              setError(t('room.generic.invalidJson', { error: (err as Error).message }));
             }
           }}
           disabled={busy}
         >
-          {busy ? '…' : 'Send action'}
+          {busy ? '…' : t('room.generic.send')}
         </button>
         <button onClick={end} disabled={busy}>
-          End
+          {t('room.activity.end')}
         </button>
       </div>
     </>
@@ -785,15 +821,16 @@ function ActivityPanel({
         marginTop: 16,
       }}
     >
-      <strong>Activity: {detail?.pluginId ?? '…'}</strong>
+      <strong>{t('room.activity.title', { name: detail?.pluginId ?? '…' })}</strong>
       {detail && (
         <p style={{ color: '#9aa3ad', margin: '4px 0 8px 0', fontSize: 13 }}>
-          status: <code>{detail.status}</code> · players: {detail.players.length}
+          {rich(t('room.activity.meta', { count: detail.players.length }), { status: <code>{detail.status}</code> })}
         </p>
       )}
       <div style={{ marginTop: 12 }}>
         {pluginClient && detail ? (
           <PluginSurface
+            pluginId={detail.pluginId}
             render={pluginClient.renderClient}
             props={{
               state: detail.state,
@@ -815,6 +852,7 @@ function ActivityPanel({
 }
 
 export default function RoomPage({ params }: { params: Promise<{ roomName: string }> }) {
+  const t = useT();
   const [roomName, setRoomName] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -828,11 +866,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomName: strin
   }, [params]);
 
   if (!roomName) {
-    return <p>Loading…</p>;
+    return <p>{t('common.loading')}</p>;
   }
 
   return (
-    <Suspense fallback={<p>Loading room…</p>}>
+    <Suspense fallback={<p>{t('room.loading')}</p>}>
       <RoomView roomName={roomName} />
     </Suspense>
   );

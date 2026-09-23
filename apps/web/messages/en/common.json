@@ -1,7 +1,12 @@
 {
-  "common.close": "Close",
+  "common.adminRequired": "Admin token required.",
   "common.cancel": "Cancel",
-  "common.save": "Save",
+  "common.close": "Close",
+  "common.guest": "Guest",
   "common.loading": "Loading…",
-  "common.guest": "Guest"
+  "common.maintenance.body": "LobbyForge is temporarily in maintenance mode.",
+  "common.maintenance.startedAt": "Started {time} (UTC)",
+  "common.maintenance.title": "Maintenance",
+  "common.meta.description": "Self-hostable voice-first community platform.",
+  "common.save": "Save"
 }

@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import { Modal, ModalCancelButton, ModalPrimaryButton } from '../Modal';
+import { useT } from '@/lib/i18n/client';
+import { rich } from '@/lib/i18n/rich';
 
 export type ChannelType = 'text' | 'voice';
 export type ChannelVisibility = 'public' | 'private';
@@ -31,6 +33,18 @@ export interface CreateChannelModalProps {
 
 const DEFAULT_CATEGORIES = ['Text Channels', 'Voice Channels'];
 
+/**
+ * The built-in categories are values the caller receives, so they stay
+ * as they are; only what the picker SHOWS for them is translated. A
+ * caller's own categories are data and render untouched.
+ */
+const DEFAULT_CATEGORY_LABEL_KEYS: Record<string, string> = {
+  'Text Channels': 'shell.createChannel.categoryText',
+  'Voice Channels': 'shell.createChannel.categoryVoice',
+};
+
+const USER_LIMITS: Exclude<UserLimit, 'none'>[] = ['5', '10', '25', '50'];
+
 export function CreateChannelModal({
   open,
   onClose,
@@ -38,6 +52,7 @@ export function CreateChannelModal({
   defaultType = 'voice',
   categories = DEFAULT_CATEGORIES,
 }: CreateChannelModalProps) {
+  const t = useT();
   const [type, setType] = useState<ChannelType>(defaultType);
   const [name, setName] = useState('');
   const [category, setCategory] = useState(categories[1] ?? DEFAULT_CATEGORIES[1]);
@@ -54,6 +69,9 @@ export function CreateChannelModal({
   const normalizedName = name.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-');
   const isValid = normalizedName.length >= 2 && normalizedName.length <= 32;
   const canSave = isValid && (type === 'text' || category.length > 0);
+  const usingDefaultCategories = categories === DEFAULT_CATEGORIES;
+  // "Will be created as {name}": the name is styled, and word order
+  // differs between languages, so split the whole phrase around it.
 
   function close() {
     if (saving) return;
@@ -104,35 +122,35 @@ export function CreateChannelModal({
     <Modal
       open={open}
       onClose={close}
-      title="Create Channel"
-      description="Add a new text channel or voice room to this community."
+      title={t('shell.createChannel.title')}
+      description={t('shell.createChannel.description')}
       size="md"
       footer={
         <>
           <ModalCancelButton onClick={close} disabled={saving} />
           <ModalPrimaryButton onClick={save} disabled={!canSave} loading={saving}>
-            {type === 'voice' ? 'Create Voice Room' : 'Create Channel'}
+            {type === 'voice' ? t('shell.createChannel.submitVoice') : t('shell.createChannel.title')}
           </ModalPrimaryButton>
         </>
       }
     >
       <div className="space-y-6">
         <div>
-          <label className="text-xs uppercase tracking-wider text-text-muted mb-3 block">Channel Type</label>
+          <label className="text-xs uppercase tracking-wider text-text-muted mb-3 block">{t('shell.createChannel.type')}</label>
           <div className="grid grid-cols-2 gap-3">
             <ChannelTypeCard
               type="text"
               icon="tag"
-              title="Text Channel"
-              description="Post images, GIFs, and opinions."
+              title={t('shell.createChannel.textTitle')}
+              description={t('shell.createChannel.textDescription')}
               selected={type === 'text'}
               onSelect={() => setType('text')}
             />
             <ChannelTypeCard
               type="voice"
               icon="volume_up"
-              title="Voice Room"
-              description="Hang out with voice and video."
+              title={t('shell.createChannel.voiceTitle')}
+              description={t('shell.createChannel.voiceDescription')}
               selected={type === 'voice'}
               onSelect={() => setType('voice')}
             />
@@ -140,7 +158,7 @@ export function CreateChannelModal({
         </div>
 
         <div>
-          <label className="text-xs uppercase tracking-wider text-text-muted mb-2 block">Room Name</label>
+          <label className="text-xs uppercase tracking-wider text-text-muted mb-2 block">{t('shell.createChannel.name')}</label>
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted font-medium">
               {type === 'voice' ? '🔊' : '#'}
@@ -148,35 +166,42 @@ export function CreateChannelModal({
             <input
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder={type === 'voice' ? 'strategy-room' : 'announcements'}
+              placeholder={
+                type === 'voice'
+                  ? t('shell.createChannel.namePlaceholderVoice')
+                  : t('shell.createChannel.namePlaceholderText')
+              }
               className="w-full bg-surface-container border border-border-subtle rounded-lg py-2.5 pl-8 pr-4 text-text-primary focus:ring-1 focus:ring-primary focus:border-primary outline-none"
             />
           </div>
           {name.length > 0 && !isValid ? (
             <p className="text-xs text-danger mt-1">
-              Use 2-32 characters: lowercase letters, numbers, dashes.
+              {t('shell.createChannel.nameInvalid')}
             </p>
           ) : null}
           {normalizedName && isValid ? (
             <p className="text-xs text-text-muted mt-1">
-              Will be created as <span className="text-text-primary font-mono">{normalizedName}</span>
+              {rich(t('shell.createChannel.createdAs'), { name: <span className="text-text-primary font-mono">{normalizedName}</span> })}
             </p>
           ) : null}
         </div>
 
         <div>
-          <label className="text-xs uppercase tracking-wider text-text-muted mb-2 block">Category</label>
+          <label className="text-xs uppercase tracking-wider text-text-muted mb-2 block">{t('shell.createChannel.category')}</label>
           <div className="relative">
             <select
               value={category}
               onChange={(event) => setCategory(event.target.value)}
               className="w-full appearance-none bg-surface-container border border-border-subtle rounded-lg px-4 py-2.5 text-text-primary pr-8 focus:ring-1 focus:ring-primary focus:border-primary outline-none"
             >
-              {categories.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
+              {categories.map((option) => {
+                const labelKey = usingDefaultCategories ? DEFAULT_CATEGORY_LABEL_KEYS[option] : undefined;
+                return (
+                  <option key={option} value={option}>
+                    {labelKey ? t(labelKey) : option}
+                  </option>
+                );
+              })}
             </select>
             <span className="material-symbols-outlined text-text-secondary absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
               expand_more
@@ -185,20 +210,20 @@ export function CreateChannelModal({
         </div>
 
         <div>
-          <label className="text-xs uppercase tracking-wider text-text-muted mb-3 block">Visibility</label>
+          <label className="text-xs uppercase tracking-wider text-text-muted mb-3 block">{t('shell.createChannel.visibility')}</label>
           <div className="space-y-2">
             <VisibilityCard
               icon="public"
-              label="Public"
-              description="Everyone can view this channel"
+              label={t('shell.createChannel.publicLabel')}
+              description={t('shell.createChannel.publicDescription')}
               selected={visibility === 'public'}
               onSelect={() => setVisibility('public')}
             />
             <VisibilityCard
               icon="lock"
-              label="Private"
-              description="Only selected members and roles"
-              note="Role access appears when Private is selected."
+              label={t('shell.createChannel.privateLabel')}
+              description={t('shell.createChannel.privateDescription')}
+              note={t('shell.createChannel.privateNote')}
               selected={visibility === 'private'}
               onSelect={() => setVisibility('private')}
             />
@@ -209,8 +234,8 @@ export function CreateChannelModal({
           <div className="space-y-1 pt-2">
             <div className="flex items-center justify-between py-2">
               <div>
-                <span className="text-sm font-medium text-text-primary block">User limit</span>
-                <span className="text-xs text-text-secondary">Limit the number of users in this room</span>
+                <span className="text-sm font-medium text-text-primary block">{t('shell.createChannel.userLimit')}</span>
+                <span className="text-xs text-text-secondary">{t('shell.createChannel.userLimitDescription')}</span>
               </div>
               <div className="relative">
                 <select
@@ -218,11 +243,12 @@ export function CreateChannelModal({
                   onChange={(event) => setUserLimit(event.target.value as UserLimit)}
                   className="appearance-none bg-surface-container border border-border-subtle rounded-lg px-3 py-1.5 text-sm text-text-primary pr-8 focus:ring-1 focus:ring-primary focus:border-primary outline-none"
                 >
-                  <option value="none">No limit</option>
-                  <option value="5">5 users</option>
-                  <option value="10">10 users</option>
-                  <option value="25">25 users</option>
-                  <option value="50">50 users</option>
+                  <option value="none">{t('shell.createChannel.userLimitNone')}</option>
+                  {USER_LIMITS.map((limit) => (
+                    <option key={limit} value={limit}>
+                      {t('shell.createChannel.userLimitCount', { count: limit })}
+                    </option>
+                  ))}
                 </select>
                 <span className="material-symbols-outlined text-text-secondary text-[18px] absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">
                   expand_more
@@ -230,38 +256,38 @@ export function CreateChannelModal({
               </div>
             </div>
             <ToggleRow
-              label="Allow screen sharing"
-              description="Members can share their screen"
+              label={t('shell.createChannel.screenShare')}
+              description={t('shell.createChannel.screenShareDescription')}
               checked={allowScreenShare}
               onChange={setAllowScreenShare}
             />
             <ToggleRow
-              label="Allow camera"
-              description="Members can use their camera"
+              label={t('shell.createChannel.camera')}
+              description={t('shell.createChannel.cameraDescription')}
               checked={allowCamera}
               onChange={setAllowCamera}
             />
             <ToggleRow
-              label="Allow activities"
-              description="Members can start activities"
+              label={t('shell.createChannel.activities')}
+              description={t('shell.createChannel.activitiesDescription')}
               checked={allowActivities}
               onChange={setAllowActivities}
             />
             <ToggleRow
-              label="Require push to talk"
-              description="Force members to use push to talk"
+              label={t('shell.createChannel.pushToTalk')}
+              description={t('shell.createChannel.pushToTalkDescription')}
               checked={requirePushToTalk}
               onChange={setRequirePushToTalk}
             />
             <ToggleRow
-              label="Start muted"
-              description="Members join the room muted"
+              label={t('shell.createChannel.startMuted')}
+              description={t('shell.createChannel.startMutedDescription')}
               checked={startMuted}
               onChange={setStartMuted}
               last
             />
             <p className="text-[11px] text-text-muted pt-2">
-              These settings can be changed later from room settings.
+              {t('shell.createChannel.laterNote')}
             </p>
           </div>
         ) : null}

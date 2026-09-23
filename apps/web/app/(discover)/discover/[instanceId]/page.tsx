@@ -4,6 +4,8 @@ import type { Metadata } from 'next';
 import { getRegistryInstanceByInstanceId, HEARTBEAT_STALE_MS } from '@lobbyforge/db';
 import { isOfficialDeployment } from '@/lib/deployment-mode';
 import { getDb } from '@/lib/db';
+import type { Translator } from '@/lib/i18n/core';
+import { getTranslator } from '@/lib/i18n/server';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -15,9 +17,6 @@ export const runtime = 'nodejs';
  * exits go through /discover/go (the external-redirect interceptor) —
  * never a bare external link; native desktop launches use the protected
  * lobbyforge:// deep-link flow instead.
- *
- * English-only for this increment (i18n keys to follow — the grid above
- * is already translated).
  */
 export async function generateMetadata({
   params,
@@ -25,20 +24,26 @@ export async function generateMetadata({
   params: Promise<{ instanceId: string }>;
 }): Promise<Metadata> {
   const { instanceId } = await params;
-  return { title: `Community ${instanceId} — LobbyForge` };
+  const t = await getTranslator();
+  return { title: t('pages.discoverInstance.metaTitle', { id: instanceId }) };
 }
 
-function heartbeatLabel(at: Date | null): { text: string; live: boolean } {
-  if (!at) return { text: 'No heartbeat yet', live: false };
+function heartbeatLabel(at: Date | null, t: Translator): { text: string; live: boolean } {
+  if (!at) return { text: t('pages.discoverInstance.heartbeat.none'), live: false };
   const ageMs = Date.now() - new Date(at).getTime();
-  if (ageMs < 0) return { text: 'Just now', live: true };
+  if (ageMs < 0) return { text: t('pages.discoverInstance.heartbeat.justNow'), live: true };
   const minutes = Math.floor(ageMs / 60_000);
-  if (minutes < 1) return { text: 'Live', live: true };
-  if (minutes < 60) return { text: `${minutes} min ago`, live: minutes * 60_000 < HEARTBEAT_STALE_MS };
+  if (minutes < 1) return { text: t('pages.discoverInstance.heartbeat.live'), live: true };
+  if (minutes < 60) {
+    return {
+      text: t('pages.discoverInstance.heartbeat.minutes', { count: minutes }),
+      live: minutes * 60_000 < HEARTBEAT_STALE_MS,
+    };
+  }
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return { text: `${hours} h ago`, live: false };
+  if (hours < 24) return { text: t('pages.discoverInstance.heartbeat.hours', { count: hours }), live: false };
   const days = Math.floor(hours / 24);
-  return { text: `${days} d ago`, live: false };
+  return { text: t('pages.discoverInstance.heartbeat.days', { count: days }), live: false };
 }
 
 export default async function InstanceDetailPage({
@@ -57,7 +62,8 @@ export default async function InstanceDetailPage({
   }
   if (!instance || !instance.isListed || instance.isBlocked) notFound();
 
-  const heartbeat = heartbeatLabel(instance.lastHeartbeatAt ?? null);
+  const t = await getTranslator();
+  const heartbeat = heartbeatLabel(instance.lastHeartbeatAt ?? null, t);
   const go = `/discover/go?id=${encodeURIComponent(instance.instanceId)}`;
 
   return (
@@ -67,11 +73,11 @@ export default async function InstanceDetailPage({
           <Link
             href="/discover"
             className="rounded-md p-1.5 text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors"
-            aria-label="Back to the directory"
+            aria-label={t('pages.discoverInstance.back')}
           >
             <span className="material-symbols-outlined text-[20px]">arrow_back</span>
           </Link>
-          <span className="text-sm text-text-muted truncate">Community directory</span>
+          <span className="text-sm text-text-muted truncate">{t('pages.discoverInstance.directory')}</span>
         </div>
       </header>
 
@@ -87,12 +93,12 @@ export default async function InstanceDetailPage({
                 {instance.name}
               </h1>
               {instance.isVerified ? (
-                <span className="flex items-center gap-1 text-primary text-sm" title="Domain verified">
+                <span className="flex items-center gap-1 text-primary text-sm" title={t('pages.discoverInstance.domainVerified')}>
                   <span className="material-symbols-outlined text-[18px]">verified</span>
-                  Verified
+                  {t('pages.discoverInstance.verified')}
                 </span>
               ) : (
-                <span className="text-text-muted text-sm">Not verified</span>
+                <span className="text-text-muted text-sm">{t('pages.discoverInstance.notVerified')}</span>
               )}
             </div>
             <p className="font-mono text-sm text-text-muted mb-3">{instance.domain}</p>
@@ -110,17 +116,17 @@ export default async function InstanceDetailPage({
             href={go}
             className="bg-primary-container text-on-primary-container px-8 py-4 rounded-lg font-label-sm text-label-sm hover:brightness-110 transition-all text-center"
           >
-            Open in browser
+            {t('pages.discoverInstance.openBrowser')}
           </Link>
           <a
             href={`lobbyforge://connect?host=${encodeURIComponent(instance.domain)}`}
             className="border border-border-strong text-text-secondary px-8 py-4 rounded-lg font-label-sm text-label-sm hover:bg-surface-variant/30 hover:text-text-primary transition-all text-center"
           >
-            Open in LobbyForge desktop
+            {t('pages.discoverInstance.openDesktop')}
           </a>
         </div>
         <p className="text-sm text-text-muted -mt-4">
-          You&apos;ll sign in on the community&apos;s own site — LobbyForge has no central account.
+          {t('pages.discoverInstance.signInNote')}
         </p>
 
         {/* Live stats */}
@@ -130,32 +136,32 @@ export default async function InstanceDetailPage({
               <span className={`w-2 h-2 rounded-full ${heartbeat.live ? 'bg-ember' : 'bg-text-muted'}`} />
             }
             value={String(instance.onlineUsers ?? 0)}
-            label="online now"
+            label={t('pages.discoverInstance.stat.online')}
           />
           <Stat
             icon={<span className="material-symbols-outlined text-[16px]">forum</span>}
             value={String(instance.publicRoomsCount ?? 0)}
-            label="public rooms"
+            label={t('pages.discoverInstance.stat.rooms')}
           />
           <Stat
             icon={<span className="material-symbols-outlined text-[16px]">monitor_heart</span>}
             value={instance.doctorScore != null ? String(instance.doctorScore) : '—'}
-            label="doctor score"
+            label={t('pages.discoverInstance.stat.doctor')}
           />
           <Stat
             icon={<span className="material-symbols-outlined text-[16px]">schedule</span>}
             value={heartbeat.text}
-            label="last heartbeat"
+            label={t('pages.discoverInstance.stat.heartbeat')}
           />
         </div>
 
         {/* Facts */}
         <div className="flex flex-col gap-4 border-t border-border-subtle pt-8">
           {instance.region ? (
-            <Fact icon="location_on" label="Region" value={instance.region} />
+            <Fact icon="location_on" label={t('pages.discoverInstance.fact.region')} value={instance.region} />
           ) : null}
           {(instance.languages as string[])?.length > 0 ? (
-            <Fact icon="translate" label="Languages" value={(instance.languages as string[]).join(', ')} />
+            <Fact icon="translate" label={t('pages.discoverInstance.fact.languages')} value={(instance.languages as string[]).join(', ')} />
           ) : null}
           {(instance.tags as string[])?.length > 0 ? (
             <div className="flex items-start gap-3">
@@ -173,7 +179,7 @@ export default async function InstanceDetailPage({
             </div>
           ) : null}
           {instance.version ? (
-            <Fact icon="deployed_code" label="LobbyForge version" value={instance.version} />
+            <Fact icon="deployed_code" label={t('pages.discoverInstance.fact.version')} value={instance.version} />
           ) : null}
         </div>
       </main>

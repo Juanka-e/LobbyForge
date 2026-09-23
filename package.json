@@ -23,7 +23,7 @@
     }
   },
   "scripts": {
-    "build:packages": "pnpm --filter @lobbyforge/config --filter @lobbyforge/core --filter @lobbyforge/plugin-sdk --filter @lobbyforge/bot-sdk --filter @lobbyforge/db --filter @lobbyforge/i18n --filter @lobbyforge/ui --filter @lobbyforge/registry -r --if-present build",
+    "build:packages": "pnpm --filter @lobbyforge/config --filter @lobbyforge/core --filter @lobbyforge/plugin-sdk --filter @lobbyforge/bot-sdk --filter @lobbyforge/db --filter @lobbyforge/ui --filter @lobbyforge/registry -r --if-present build",
     "build:server": "pnpm build:packages && pnpm --filter @lobbyforge/ws-gateway build && pnpm --filter @lobbyforge/web build",
     "build:desktop": "pnpm --filter @lobbyforge/desktop build",
     "build": "pnpm build:server",
@@ -36,7 +36,11 @@
     "test:e2e": "pnpm -r --if-present test:e2e",
     "test:coverage": "pnpm -r --if-present test:coverage",
     "lfctl": "node scripts/lfctl.mjs",
-    "verify": "node scripts/verify.js"
+    "verify": "node scripts/verify.js",
+    "i18n:status": "node scripts/i18n.mjs status",
+    "i18n:sync": "node scripts/i18n.mjs sync",
+    "i18n:add": "node scripts/i18n.mjs add",
+    "i18n:complete": "node scripts/i18n.mjs complete"
   },
   "devDependencies": {
     "@next/eslint-plugin-next": "^16.3.4",

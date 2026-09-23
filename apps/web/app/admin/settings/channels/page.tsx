@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import {
   getAllChannelRoleOverridesForServer,
@@ -11,25 +12,28 @@ import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
 import { getSessionSecret } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
+import { getTranslator } from '@/lib/i18n/server';
 import SettingsShell from '@/app/SettingsShell';
 import ChannelsClient, { type ChannelView } from './ChannelsClient';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export const metadata = {
-  title: 'Channels - Community Settings',
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  return { title: t('adminSettings.channels.metaTitle') };
+}
 
 export default async function ChannelsSettingsPage() {
   const cookieStore = await cookies();
   const token = cookieStore.get(ADMIN_TOKEN_COOKIE)?.value ?? null;
   if (!(await isInstanceAdminAllowed(cookieStore.toString(), token))) {
+    const t = await getTranslator();
     return (
       <SettingsShell scope="community">
         <section>
-          <h1 className="text-2xl font-semibold text-text-primary">Channels</h1>
-          <p className="mt-2 text-sm text-danger">Admin token required.</p>
+          <h1 className="text-2xl font-semibold text-text-primary">{t('adminSettings.channels.title')}</h1>
+          <p className="mt-2 text-sm text-danger">{t('common.adminRequired')}</p>
         </section>
       </SettingsShell>
     );

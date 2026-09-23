@@ -410,7 +410,7 @@ function LiveMessage({ message, currentUserId, serverId, channelId, canManageMes
           <span className={`font-label-sm font-medium ${authorColorClass}`}>{message.author}</span>
           <span
             className="font-label-xs text-[11px] text-text-secondary"
-            title={formatFullTimestamp(message.createdAt)}
+            title={formatFullTimestamp(message.createdAt, t)}
           >
             {message.timestamp}
           </span>

@@ -81,4 +81,36 @@ describe('@lobbyforge/plugin-sdk/locale', () => {
   it('detectLocale falls back when document is not available', () => {
     expect(detectLocale('en')).toBe('en');
   });
+
+  it('treats a blank value as untranslated and falls back', () => {
+    // A scaffolded language starts with every value blank; those strings
+    // must read in the fallback language, never as an empty label.
+    loadPluginLocale('hushle', { en: { a: 'Start', b: 'Stop' }, de: { a: 'Starten', b: '' } });
+    expect(tFor('hushle', 'de', 'a')).toBe('Starten');
+    expect(tFor('hushle', 'de', 'b')).toBe('Stop');
+  });
+
+  it('never serves $-prefixed metadata as a string', () => {
+    loadPluginLocale('hushle', { en: { a: 'Start' }, de: { $status: 'partial', a: 'Starten' } });
+    expect(tFor('hushle', 'de', '$status')).toBe('$status');
+    expect(tFor('hushle', 'de', 'a')).toBe('Starten');
+  });
+});
+describe('registration', () => {
+  it('ignores a second registration of the same table', () => {
+    __resetPluginLocaleRegistry();
+    const en = { 'x.a': 'A' };
+    loadPluginLocale('twice', { en });
+    loadPluginLocale('twice', { en });
+    expect(listPluginLocales('twice')).toEqual(['en']);
+    expect(tFor('twice', 'en', 'x.a')).toBe('A');
+  });
+
+  it('sees tables registered after the first lookup', () => {
+    __resetPluginLocaleRegistry();
+    loadPluginLocale('late', { en: { 'x.a': 'A' } });
+    expect(tFor('late', 'tr', 'x.a')).toBe('A');
+    loadPluginLocale('late', { tr: { 'x.a': 'Á' } });
+    expect(tFor('late', 'tr', 'x.a')).toBe('Á');
+  });
 });

@@ -15,6 +15,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useT } from '@/lib/i18n/client';
 
 type InviteMeta = {
   code: string;
@@ -41,6 +42,7 @@ type Status =
   | { kind: 'ok'; message: string };
 
 export default function JoinPage({ params }: { params: Promise<{ code: string }> }) {
+  const t = useT();
   const [code, setCode] = useState<string | null>(null);
   const [meta, setMeta] = useState<InviteMeta | null>(null);
   const [metaError, setMetaError] = useState<string | null>(null);
@@ -75,10 +77,10 @@ export default function JoinPage({ params }: { params: Promise<{ code: string }>
         });
         if (!res.ok) {
           if (res.status === 404) {
-            setMetaError('This invite code is unknown or has been revoked.');
+            setMetaError(t('auth.join.unknownCode'));
           } else {
             const detail = await res.json().catch(() => ({}));
-            setMetaError(`Failed to load invite: ${JSON.stringify(detail)}`);
+            setMetaError(t('auth.join.loadFailed', { detail: JSON.stringify(detail) }));
           }
           setStatus({ kind: 'idle' });
           return;
@@ -96,7 +98,7 @@ export default function JoinPage({ params }: { params: Promise<{ code: string }>
     return () => {
       cancelled = true;
     };
-  }, [code]);
+  }, [code, t]);
 
   // Probe an existing session so a returning visitor skips the guest step.
   useEffect(() => {
@@ -125,16 +127,16 @@ export default function JoinPage({ params }: { params: Promise<{ code: string }>
       if (!res.ok) throw new Error(`POST /api/auth/guest → ${res.status}`);
       const data = (await res.json()) as { guest: Guest };
       setGuest(data.guest);
-      setStatus({ kind: 'ok', message: `Signed in as ${data.guest.name}` });
+      setStatus({ kind: 'ok', message: t('auth.join.signedInAs', { name: data.guest.name }) });
     } catch (err) {
       setStatus({ kind: 'error', message: (err as Error).message });
     }
-  }, [code]);
+  }, [code, t]);
 
   const acceptInvite = useCallback(async () => {
     if (!code) return;
     if (!guest) {
-      setStatus({ kind: 'error', message: 'Sign in as a guest first.' });
+      setStatus({ kind: 'error', message: t('auth.join.signInFirstError') });
       return;
     }
     setStatus({ kind: 'busy' });
@@ -144,20 +146,20 @@ export default function JoinPage({ params }: { params: Promise<{ code: string }>
         credentials: 'same-origin',
       });
       if (res.status === 401) {
-        setStatus({ kind: 'error', message: 'Your session expired. Click "Sign in as guest" again.' });
+        setStatus({ kind: 'error', message: t('auth.join.sessionExpired') });
         return;
       }
       if (res.status === 409) {
-        setStatus({ kind: 'error', message: 'You are already a member of this server.' });
+        setStatus({ kind: 'error', message: t('auth.join.alreadyMember') });
         return;
       }
       if (res.status === 410) {
         const detail = (await res.json().catch(() => ({}))) as RedeemResponse;
-        setStatus({ kind: 'error', message: detail.error ?? 'This invite is no longer valid.' });
+        setStatus({ kind: 'error', message: detail.error ?? t('auth.join.noLongerValid') });
         return;
       }
       if (res.status === 404) {
-        setStatus({ kind: 'error', message: 'This invite was revoked.' });
+        setStatus({ kind: 'error', message: t('auth.join.revoked') });
         return;
       }
       if (!res.ok) {
@@ -167,63 +169,76 @@ export default function JoinPage({ params }: { params: Promise<{ code: string }>
       const data = (await res.json()) as RedeemResponse;
       if (data.membership) {
         setJoinedServerId(data.membership.serverId);
-        setStatus({ kind: 'ok', message: `Joined ${meta?.serverName ?? 'server'}.` });
+        setStatus({
+          kind: 'ok',
+          message: meta?.serverName
+            ? t('auth.join.joined', { name: meta.serverName })
+            : t('auth.join.joinedUnnamed'),
+        });
       } else {
-        setStatus({ kind: 'error', message: 'Redeem succeeded but returned no membership.' });
+        setStatus({ kind: 'error', message: t('auth.join.noMembership') });
       }
     } catch (err) {
       setStatus({ kind: 'error', message: (err as Error).message });
     }
-  }, [code, guest, meta?.serverName]);
+  }, [code, guest, meta?.serverName, t]);
 
   const inviteUnusable =
     !meta || meta.isExpired || meta.isExhausted || metaError !== null;
 
+  // "server · 3/10 uses · expires …" — a list of facts, so the parts are
+  // separate strings; each part is a whole phrase in the catalogue.
+  const inviteSummary = meta
+    ? [
+        meta.serverName,
+        meta.maxUses === null
+          ? t('auth.join.usesUnlimited')
+          : t('auth.join.usesCount', { current: meta.currentUses, max: meta.maxUses }),
+        meta.expiresAt
+          ? t('auth.join.expires', { date: new Date(meta.expiresAt).toLocaleString(t.locale) })
+          : t('auth.join.noExpiry'),
+      ].join(' · ') +
+      (meta.isExpired ? ` ${t('auth.join.expiredFlag')}` : '') +
+      (meta.isExhausted ? ` ${t('auth.join.exhaustedFlag')}` : '')
+    : t('common.loading');
+
   return (
     <section>
-      <h1 style={{ marginTop: 0 }}>Join a server</h1>
-      <p style={{ color: '#9aa3ad' }}>
-        You&apos;ve been invited to join a LobbyForge server. Sign in as a guest, then
-        accept the invite to be added to the server&apos;s @everyone role.
-      </p>
+      <h1 style={{ marginTop: 0 }}>{t('auth.join.title')}</h1>
+      <p style={{ color: '#9aa3ad' }}>{t('auth.join.intro')}</p>
 
       <div style={{ display: 'grid', gap: 16, maxWidth: 640 }}>
         <Step
           step={1}
-          title="Invite details"
-          description={
-            metaError
-              ? metaError
-              : meta
-                ? `${meta.serverName} · ${meta.maxUses === null ? 'unlimited uses' : `${meta.currentUses}/${meta.maxUses} uses`}${
-                    meta.expiresAt
-                      ? ` · expires ${new Date(meta.expiresAt).toLocaleString()}`
-                      : ' · no expiry'
-                  }${meta.isExpired ? ' (EXPIRED)' : ''}${meta.isExhausted ? ' (EXHAUSTED)' : ''}`
-                : 'Loading…'
-          }
+          title={t('auth.join.detailsTitle')}
+          description={metaError || inviteSummary}
         />
         <Step
           step={2}
-          title="Sign in as guest"
+          title={t('auth.join.signInAsGuest')}
           description={
             guest
-              ? `Active: ${guest.name} (${guest.gid})${guest.uid ? '' : ' — materializing…'}`
-              : 'No active guest session. Click to create one.'
+              ? t(guest.uid ? 'auth.join.guestActive' : 'auth.join.guestActivePending', {
+                  name: guest.name,
+                  gid: guest.gid,
+                })
+              : t('auth.join.noGuest')
           }
           actions={
             <button onClick={createGuest} disabled={status.kind === 'busy'}>
-              {guest ? 'Recreate guest' : 'Sign in as guest'}
+              {guest ? t('auth.join.recreateGuest') : t('auth.join.signInAsGuest')}
             </button>
           }
         />
         <Step
           step={3}
-          title="Accept invite"
+          title={t('auth.join.accept')}
           description={
             joinedServerId
-              ? `You are now a member of ${meta?.serverName ?? 'the server'}.`
-              : 'Sign in first, then click to join the server.'
+              ? meta?.serverName
+                ? t('auth.join.memberOf', { name: meta.serverName })
+                : t('auth.join.memberOfUnnamed')
+              : t('auth.join.signInFirst')
           }
           actions={
             joinedServerId ? (
@@ -234,14 +249,14 @@ export default function JoinPage({ params }: { params: Promise<{ code: string }>
                   textDecoration: 'underline',
                 }}
               >
-                Open server (M15 UI placeholder)
+                {t('auth.join.openServer')}
               </a>
             ) : (
               <button
                 onClick={acceptInvite}
                 disabled={status.kind === 'busy' || !guest || inviteUnusable}
               >
-                Accept invite
+                {t('auth.join.accept')}
               </button>
             )
           }
@@ -254,6 +269,7 @@ export default function JoinPage({ params }: { params: Promise<{ code: string }>
 }
 
 function Step(props: { step: number; title: string; description: string; actions?: React.ReactNode }) {
+  const t = useT();
   return (
     <div
       style={{
@@ -265,7 +281,7 @@ function Step(props: { step: number; title: string; description: string; actions
     >
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
         <strong style={{ fontSize: 18 }}>
-          Step {props.step}: {props.title}
+          {t('auth.join.stepHeading', { step: props.step, title: props.title })}
         </strong>
       </div>
       <p style={{ color: '#9aa3ad', margin: '8px 0' }}>{props.description}</p>

@@ -12,6 +12,7 @@ describe('PluginSurface', () => {
   it('renders the plugin surface when the plugin ships one', () => {
     render(
       <PluginSurface
+        pluginId="test"
         render={() => <p>plugin panel</p>}
         props={{}}
         fallback={<p>generic surface</p>}
@@ -25,13 +26,13 @@ describe('PluginSurface', () => {
     // Poll and Dice Bot do exactly this. Before the fallback moved into
     // this component, the caller only saw a truthy element and those
     // plugins rendered an empty panel with no way to act on the game.
-    render(<PluginSurface render={() => null} props={{}} fallback={<p>generic surface</p>} />);
+    render(<PluginSurface pluginId="test" render={() => null} props={{}} fallback={<p>generic surface</p>} />);
     expect(screen.getByText('generic surface')).toBeTruthy();
   });
 
   it('treats undefined the same as null', () => {
     render(
-      <PluginSurface render={() => undefined} props={{}} fallback={<p>generic surface</p>} />
+      <PluginSurface pluginId="test" render={() => undefined} props={{}} fallback={<p>generic surface</p>} />
     );
     expect(screen.getByText('generic surface')).toBeTruthy();
   });
@@ -40,6 +41,7 @@ describe('PluginSurface', () => {
     const seen: unknown[] = [];
     render(
       <PluginSurface
+        pluginId="test"
         render={(props) => {
           seen.push(props);
           return <p>ok</p>;
@@ -73,7 +75,7 @@ describe('PluginSurface', () => {
         <div>
           <span>{label}</span>
           {mounted ? (
-            <PluginSurface render={() => <HookyPlugin />} props={{}} fallback={null} />
+            <PluginSurface pluginId="test" render={() => <HookyPlugin />} props={{}} fallback={null} />
           ) : null}
         </div>
       );

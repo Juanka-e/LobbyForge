@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getRegistryInstanceByInstanceId } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
+import { getTranslator } from '@/lib/i18n/server';
+import { rich } from '@/lib/i18n/rich';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -19,6 +21,7 @@ export const runtime = 'nodejs';
  * 2. Browsers show the target URL (no sneaky redirects).
  * 3. We can check isVerified + isBlocked server-side before linking.
  */
+
 export default async function GoPage({
   searchParams,
 }: {
@@ -27,6 +30,7 @@ export default async function GoPage({
   const params = await searchParams;
   const id = params.id;
   if (!id) redirect('/discover');
+  const t = await getTranslator();
 
   let instance: Awaited<ReturnType<typeof getRegistryInstanceByInstanceId>> | null = null;
   try {
@@ -40,12 +44,12 @@ export default async function GoPage({
       <div className="min-h-dvh bg-background flex items-center justify-center p-6">
         <div className="max-w-md text-center">
           <span className="material-symbols-outlined text-5xl text-danger mb-3 block">block</span>
-          <h1 className="text-xl font-semibold text-text-primary">Community not available</h1>
+          <h1 className="text-xl font-semibold text-text-primary">{t('pages.go.unavailableTitle')}</h1>
           <p className="mt-2 text-sm text-text-secondary">
-            This community is no longer listed or has been removed from the directory.
+            {t('pages.go.unavailableBody')}
           </p>
           <Link href="/discover" className="mt-4 inline-block text-sm text-primary hover:underline">
-            ← Back to Discover
+            {t('pages.go.back')}
           </Link>
         </div>
       </div>
@@ -66,20 +70,19 @@ export default async function GoPage({
               <div className="flex items-center gap-1.5">
                 <h1 className="text-base font-semibold text-text-primary">{instance.name}</h1>
                 {isVerified ? (
-                  <span className="material-symbols-outlined text-[16px] text-primary" title="Verified by LobbyForge">
+                  <span className="material-symbols-outlined text-[16px] text-primary" title={t('pages.go.verifiedTitle')}>
                     verified
                   </span>
                 ) : null}
               </div>
-              <p className="text-xs text-text-muted">{instance.region ?? 'Unknown region'}</p>
+              <p className="text-xs text-text-muted">{instance.region ?? t('pages.go.unknownRegion')}</p>
             </div>
           </div>
 
           {/* Warning box */}
           <div className="rounded-lg border border-tertiary/30 bg-tertiary/5 p-3 mb-4">
             <p className="text-xs text-text-secondary leading-relaxed">
-              You are about to leave <strong>LobbyForge</strong> and visit a
-              community hosted by a third party at:
+              {rich(t('pages.go.leaving'), { brand: <strong>LobbyForge</strong> })}
             </p>
             <p className="mt-2 text-sm font-mono text-text-primary bg-background rounded-md px-2 py-1 break-all border border-border-subtle">
               {instance.domain}
@@ -87,22 +90,23 @@ export default async function GoPage({
             <ul className="mt-3 space-y-1 text-xs text-text-muted">
               <li className="flex items-start gap-1.5">
                 <span className="material-symbols-outlined text-[12px] mt-0.5">check_circle</span>
-                Your session and credentials are not shared with this community — you sign in
-                separately on its own site.
+                {t('pages.go.noSharedSession')}
               </li>
               <li className="flex items-start gap-1.5">
                 <span className="material-symbols-outlined text-[12px] mt-0.5">check_circle</span>
-                The destination will ask you to join or create a guest session.
+                {t('pages.go.guestSession')}
               </li>
               {!isVerified ? (
                 <li className="flex items-start gap-1.5">
                   <span className="material-symbols-outlined text-[12px] mt-0.5 text-tertiary">warning</span>
-                  This community is <strong>not verified</strong> — proceed with caution.
+                  <span>
+                    {rich(t('pages.go.notVerified'), { notVerified: <strong>{t('pages.go.notVerifiedEmphasis')}</strong> })}
+                  </span>
                 </li>
               ) : null}
               <li className="flex items-start gap-1.5">
                 <span className="material-symbols-outlined text-[12px] mt-0.5">info</span>
-                LobbyForge is not responsible for content on third-party servers.
+                {t('pages.go.notResponsible')}
               </li>
             </ul>
           </div>
@@ -112,14 +116,14 @@ export default async function GoPage({
               href="/discover"
               className="flex-1 rounded-lg border border-border-subtle bg-surface-raised px-4 py-2.5 text-sm font-medium text-text-secondary text-center hover:bg-surface-container transition-colors"
             >
-              Cancel
+              {t('common.cancel')}
             </Link>
             <a
               href={instance.domain}
               rel="noopener noreferrer"
               className="flex-1 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-on-primary text-center hover:brightness-110 transition-all"
             >
-              Continue →
+              {t('pages.go.continue')}
             </a>
           </div>
         </div>

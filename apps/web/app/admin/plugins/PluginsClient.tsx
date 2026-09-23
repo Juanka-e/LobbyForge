@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useT } from '@/lib/i18n/client';
+import { rich } from '@/lib/i18n/rich';
 
 export interface CardView {
   id: string;
@@ -26,6 +28,12 @@ type Draft = { word: string; forbiddenWords: string; difficulty: string; categor
 
 const EMPTY_DRAFT: Draft = { word: '', forbiddenWords: '', difficulty: 'easy', category: 'general' };
 
+const DIFFICULTY_LABEL_KEYS: Record<string, string> = {
+  easy: 'admin.plugins.difficulty.easy',
+  medium: 'admin.plugins.difficulty.medium',
+  hard: 'admin.plugins.difficulty.hard',
+};
+
 const DIFFICULTY_TONES: Record<string, string> = {
   easy: 'bg-success/15 text-success',
   medium: 'bg-warning/15 text-warning',
@@ -48,6 +56,7 @@ export default function PluginsClient({
   initialPacks: CardPackView[];
   loadError: string | null;
 }) {
+  const t = useT();
   const [packs, setPacks] = useState(initialPacks);
   // V4-011: cards load lazily per selected pack (?packId=…); undefined
   // means "not loaded yet", null means "loading failed".
@@ -113,7 +122,7 @@ export default function PluginsClient({
 
   async function reload(): Promise<CardPackView[]> {
     const res = await fetch('/api/admin/card-packs', { credentials: 'same-origin' });
-    if (!res.ok) throw new Error(`Failed to reload packs (HTTP ${res.status})`);
+    if (!res.ok) throw new Error(t('admin.plugins.reloadFailed', { status: res.status }));
     const data = (await res.json()) as { packs: CardPackView[] };
     setPacks(data.packs);
     if (data.packs.length === 0) {
@@ -165,7 +174,7 @@ export default function PluginsClient({
   async function createPack() {
     const language = newPackLanguage.trim().toLowerCase();
     if (!newPackName.trim() || !/^[a-z]{2,3}(-[a-z0-9]{2,8})*$/.test(language)) {
-      setMessage('Pack name and a valid language code (e.g. en, tr, de, pt-BR) are required.');
+      setMessage(t('admin.plugins.packInvalid'));
       return;
     }
     const name = newPackName.trim();
@@ -176,7 +185,7 @@ export default function PluginsClient({
         language,
         description: newPackDescription.trim() || undefined,
       },
-      `Pack "${name}" created. Add words below.`
+      t('admin.plugins.packCreated', { name })
     );
     if (ok) {
       setNewPackName('');
@@ -197,7 +206,7 @@ export default function PluginsClient({
     if (!selectedPack) return;
     const forbidden = parseForbidden(draft.forbiddenWords);
     if (!draft.word.trim() || forbidden.length === 0) {
-      setMessage('A word and at least one forbidden word are required.');
+      setMessage(t('admin.plugins.wordInvalid'));
       return;
     }
     const ok = await call(
@@ -209,7 +218,7 @@ export default function PluginsClient({
         difficulty: draft.difficulty,
         category: draft.category.trim() || 'general',
       },
-      `Word "${draft.word.trim()}" added to ${selectedPack.name}.`
+      t('admin.plugins.wordAdded', { word: draft.word.trim(), pack: selectedPack.name })
     );
     if (ok) setDraft({ ...EMPTY_DRAFT, difficulty: draft.difficulty, category: draft.category });
   }
@@ -218,7 +227,7 @@ export default function PluginsClient({
     if (!selectedPack || !editingCardId) return;
     const forbidden = parseForbidden(editDraft.forbiddenWords);
     if (!editDraft.word.trim() || forbidden.length === 0) {
-      setMessage('A word and at least one forbidden word are required.');
+      setMessage(t('admin.plugins.wordInvalid'));
       return;
     }
     const ok = await call(
@@ -230,27 +239,31 @@ export default function PluginsClient({
         difficulty: editDraft.difficulty,
         category: editDraft.category.trim() || 'general',
       },
-      'Card updated.'
+      t('admin.plugins.wordUpdated')
     );
     if (ok) setEditingCardId(null);
   }
 
   async function deleteCard(cardId: string): Promise<boolean> {
-    return (await call({ action: 'delete-card', cardId }, 'Card deleted.')) !== null;
+    return (await call({ action: 'delete-card', cardId }, t('admin.plugins.wordDeleted'))) !== null;
   }
 
   async function deletePack(pack: CardPackView) {
-    const ok = await call({ action: 'delete-pack', packId: pack.id }, `Pack "${pack.name}" deleted.`);
+    const ok = await call(
+      { action: 'delete-pack', packId: pack.id },
+      t('admin.plugins.packDeleted', { name: pack.name })
+    );
     if (ok) setPendingDeletePack(null);
   }
 
   async function duplicatePack(pack: CardPackView) {
     // The copy's name is deterministic — pick it out of the RELOADED
-    // summaries and select it (V5-008).
+    // summaries and select it (V5-008). The " (copy)" suffix is the name
+    // the SERVER gives the copy, so it is matched verbatim, not translated.
     const copyName = `${pack.name} (copy)`.slice(0, 100);
     const reloaded = await call(
       { action: 'duplicate-pack', packId: pack.id },
-      `Pack duplicated as "${copyName}" — you can now edit the copy.`
+      t('admin.plugins.packDuplicated', { name: copyName })
     );
     const copy = reloaded?.find((p) => p.name === copyName);
     if (copy) {
@@ -262,42 +275,44 @@ export default function PluginsClient({
   return (
     <section className="mx-auto max-w-5xl pb-32">
       <header className="mb-6">
-        <h1 className="text-2xl font-semibold text-text-primary">Plugins &amp; Word Packs</h1>
-        <p className="mt-1 text-sm text-text-secondary">
-          Manage activity content for installed plugins. Hosts pick these packs when starting a game;
-          create a pack in your own language and add your community&apos;s words.
-        </p>
+        <h1 className="text-2xl font-semibold text-text-primary">{t('admin.plugins.title')}</h1>
+        <p className="mt-1 text-sm text-text-secondary">{t('admin.plugins.intro')}</p>
       </header>
 
       {loadError ? (
         <div className="mb-4 rounded-lg border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
-          Could not load card packs: {loadError}
+          {t('admin.plugins.loadError', { error: loadError })}
         </div>
       ) : null}
 
       {/* ── Create pack ─────────────────────────────────────────── */}
       <section className="mb-6 rounded-xl border border-border-subtle bg-surface p-5">
         <h2 className="mb-1 text-sm font-semibold uppercase tracking-wider text-text-secondary">
-          New word pack
+          {t('admin.plugins.newPack')}
         </h2>
         <p className="mb-4 text-sm text-text-secondary">
-          Any language works — use an ISO code like <code>en</code>, <code>tr</code>, <code>de</code>,{' '}
-          <code>pt-BR</code>. The pack appears in the Hushle pack selector immediately.
+          {rich(t('admin.plugins.newPackHint'), {
+            examples: (
+              <>
+                <code>en</code>, <code>tr</code>, <code>de</code>, <code>pt-BR</code>
+              </>
+            ),
+          })}
         </p>
         <div className="grid gap-4 md:grid-cols-[1fr_160px_auto] md:items-end">
           <label className="block">
-            <span className="mb-1.5 block text-xs text-text-muted">Pack name</span>
+            <span className="mb-1.5 block text-xs text-text-muted">{t('admin.plugins.packName')}</span>
             <input
               value={newPackName}
               onChange={(e) => setNewPackName(e.target.value)}
-              placeholder="Hushle — Deutsch (Community)"
+              placeholder={t('admin.plugins.packNamePlaceholder')}
               maxLength={100}
               className="w-full rounded-lg border border-border-strong bg-surface-raised px-3 py-2 text-sm text-text-primary"
               disabled={busy}
             />
           </label>
           <label className="block">
-            <span className="mb-1.5 block text-xs text-text-muted">Language</span>
+            <span className="mb-1.5 block text-xs text-text-muted">{t('admin.plugins.language')}</span>
             <input
               value={newPackLanguage}
               onChange={(e) => setNewPackLanguage(e.target.value)}
@@ -313,15 +328,15 @@ export default function PluginsClient({
             disabled={busy}
             className="rounded-lg bg-primary-container px-4 py-2 text-sm font-semibold text-on-primary-container transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {busy ? 'Working...' : 'Create pack'}
+            {busy ? t('admin.plugins.working') : t('admin.plugins.createPack')}
           </button>
         </div>
         <label className="mt-4 block">
-          <span className="mb-1.5 block text-xs text-text-muted">Description (optional)</span>
+          <span className="mb-1.5 block text-xs text-text-muted">{t('admin.plugins.description')}</span>
           <input
             value={newPackDescription}
             onChange={(e) => setNewPackDescription(e.target.value)}
-            placeholder="Community-maintained German words"
+            placeholder={t('admin.plugins.descriptionPlaceholder')}
             maxLength={500}
             className="w-full rounded-lg border border-border-strong bg-surface-raised px-3 py-2 text-sm text-text-primary"
             disabled={busy}
@@ -332,7 +347,7 @@ export default function PluginsClient({
 
       {/* ── Pack selector ────────────────────────────────────────── */}
       {packs.length === 0 ? (
-        <p className="text-sm text-text-muted">No word packs yet — create one above.</p>
+        <p className="text-sm text-text-muted">{t('admin.plugins.noPacks')}</p>
       ) : (
         <section className="mb-4 flex flex-wrap items-center gap-2">
           {packs.map((pack) => (
@@ -355,7 +370,7 @@ export default function PluginsClient({
                 {pack.language} · {pack.cardCount}
               </span>
               {pack.isBuiltIn ? (
-                <span className="ml-1.5 text-xs text-text-muted" title="Built-in pack">
+                <span className="ml-1.5 text-xs text-text-muted" title={t('admin.plugins.builtInTitle')}>
                   ★
                 </span>
               ) : null}
@@ -371,9 +386,8 @@ export default function PluginsClient({
             <div>
               <h2 className="text-lg font-semibold text-text-primary">{selectedPack.name}</h2>
               <p className="mt-1 text-xs text-text-muted">
-                {selectedPack.slug} · language <code>{selectedPack.language}</code> ·{' '}
-                {selectedPack.cardCount} words
-                {selectedPack.isBuiltIn ? ' · built-in (re-seeded on boot)' : ''}
+                {rich(t('admin.plugins.packMeta', { slug: selectedPack.slug, count: selectedPack.cardCount }), { language: <code>{selectedPack.language}</code> })}
+                {selectedPack.isBuiltIn ? ` · ${t('admin.plugins.packMetaBuiltIn')}` : ''}
               </p>
               {selectedPack.description ? (
                 <p className="mt-2 text-sm text-text-secondary">{selectedPack.description}</p>
@@ -386,14 +400,14 @@ export default function PluginsClient({
                 disabled={busy}
                 className="rounded-md border border-border-strong px-3 py-1.5 text-xs text-text-secondary transition-colors hover:bg-surface-raised hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
               >
-                Duplicate
+                {t('admin.plugins.duplicate')}
               </button>
               {selectedPack.isBuiltIn ? (
                 <span
                   className="rounded-md border border-border-subtle px-3 py-1.5 text-xs text-text-muted"
-                  title="Built-in packs are immutable — duplicate to customise"
+                  title={t('admin.plugins.immutableTitle')}
                 >
-                  Immutable
+                  {t('admin.plugins.immutable')}
                 </span>
               ) : (
                 <button
@@ -402,7 +416,7 @@ export default function PluginsClient({
                   disabled={busy}
                   className="rounded-md border border-danger/40 px-3 py-1.5 text-xs text-danger transition-colors hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  Delete pack
+                  {t('admin.plugins.deletePack')}
                 </button>
               )}
             </div>
@@ -412,17 +426,17 @@ export default function PluginsClient({
           {selectedPack.isBuiltIn ? (
             <div className="border-b border-border-subtle p-5">
               <div className="rounded-lg border border-border-subtle bg-surface-container/50 p-3 text-sm text-text-secondary">
-                Built-in packs are immutable (the boot seeder maintains them). Use{' '}
-                <strong className="text-text-primary">Duplicate</strong> above to create an editable
-                copy with these words.
+                {rich(t('admin.plugins.builtInNotice'), {
+                  duplicate: <strong className="text-text-primary">{t('admin.plugins.duplicate')}</strong>,
+                })}
               </div>
             </div>
           ) : (
           <div className="border-b border-border-subtle p-5">
-            <h3 className="mb-3 text-sm font-semibold text-text-primary">Add a word</h3>
+            <h3 className="mb-3 text-sm font-semibold text-text-primary">{t('admin.plugins.addWord')}</h3>
             <div className="grid gap-3 md:grid-cols-[1fr_2fr_140px_140px_auto] md:items-end">
               <label className="block">
-                <span className="mb-1.5 block text-xs text-text-muted">Word</span>
+                <span className="mb-1.5 block text-xs text-text-muted">{t('admin.plugins.word')}</span>
                 <input
                   value={draft.word}
                   onChange={(e) => setDraft({ ...draft, word: e.target.value })}
@@ -433,31 +447,31 @@ export default function PluginsClient({
               </label>
               <label className="block">
                 <span className="mb-1.5 block text-xs text-text-muted">
-                  Forbidden words (comma separated)
+                  {t('admin.plugins.forbiddenLabel')}
                 </span>
                 <input
                   value={draft.forbiddenWords}
                   onChange={(e) => setDraft({ ...draft, forbiddenWords: e.target.value })}
-                  placeholder="fruit, red, pie"
+                  placeholder={t('admin.plugins.forbiddenPlaceholder')}
                   className="w-full rounded-lg border border-border-strong bg-surface-raised px-3 py-2 text-sm text-text-primary"
                   disabled={busy}
                 />
               </label>
               <label className="block">
-                <span className="mb-1.5 block text-xs text-text-muted">Difficulty</span>
+                <span className="mb-1.5 block text-xs text-text-muted">{t('admin.plugins.difficulty')}</span>
                 <select
                   value={draft.difficulty}
                   onChange={(e) => setDraft({ ...draft, difficulty: e.target.value })}
                   className="w-full rounded-lg border border-border-strong bg-surface-raised px-3 py-2 text-sm text-text-primary"
                   disabled={busy}
                 >
-                  <option value="easy">Easy</option>
-                  <option value="medium">Medium</option>
-                  <option value="hard">Hard</option>
+                  <option value="easy">{t('admin.plugins.difficulty.easy')}</option>
+                  <option value="medium">{t('admin.plugins.difficulty.medium')}</option>
+                  <option value="hard">{t('admin.plugins.difficulty.hard')}</option>
                 </select>
               </label>
               <label className="block">
-                <span className="mb-1.5 block text-xs text-text-muted">Category</span>
+                <span className="mb-1.5 block text-xs text-text-muted">{t('admin.plugins.category')}</span>
                 <input
                   value={draft.category}
                   onChange={(e) => setDraft({ ...draft, category: e.target.value })}
@@ -472,7 +486,7 @@ export default function PluginsClient({
                 disabled={busy}
                 className="rounded-lg bg-primary-container px-4 py-2 text-sm font-semibold text-on-primary-container transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                Add
+                {t('admin.plugins.add')}
               </button>
             </div>
           </div>
@@ -483,37 +497,37 @@ export default function PluginsClient({
             <table className="w-full border-collapse text-left text-sm">
               <thead>
                 <tr className="border-b border-border-subtle bg-surface-container/40 text-xs font-semibold uppercase tracking-wider text-text-secondary">
-                  <th className="px-5 py-3">Word</th>
-                  <th className="px-5 py-3">Forbidden words</th>
-                  <th className="px-5 py-3">Difficulty</th>
-                  <th className="px-5 py-3">Category</th>
-                  <th className="px-5 py-3 text-right">Actions</th>
+                  <th className="px-5 py-3">{t('admin.plugins.word')}</th>
+                  <th className="px-5 py-3">{t('admin.plugins.forbiddenWords')}</th>
+                  <th className="px-5 py-3">{t('admin.plugins.difficulty')}</th>
+                  <th className="px-5 py-3">{t('admin.plugins.category')}</th>
+                  <th className="px-5 py-3 text-right">{t('admin.plugins.actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-subtle">
                 {cardState?.status === 'loading' || cardState === undefined ? (
                   <tr>
                     <td colSpan={5} className="px-5 py-6 text-center text-text-muted">
-                      Loading words…
+                      {t('admin.plugins.loadingWords')}
                     </td>
                   </tr>
                 ) : cardState.status === 'error' ? (
                   <tr>
                     <td colSpan={5} className="px-5 py-6 text-center">
-                      <span className="text-danger">Failed to load words.</span>{' '}
+                      <span className="text-danger">{t('admin.plugins.loadWordsFailed')}</span>{' '}
                       <button
                         type="button"
                         onClick={() => invalidateCards(selectedPackId)}
                         className="ml-2 rounded-md border border-border-strong px-3 py-1 text-xs text-text-secondary hover:bg-surface-raised"
                       >
-                        Retry
+                        {t('admin.plugins.retry')}
                       </button>
                     </td>
                   </tr>
                 ) : cardState.cards.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="px-5 py-6 text-center text-text-muted">
-                      No words in this pack yet — add the first one above.
+                      {t('admin.plugins.noWords')}
                     </td>
                   </tr>
                 ) : (
@@ -543,9 +557,9 @@ export default function PluginsClient({
                             onChange={(e) => setEditDraft({ ...editDraft, difficulty: e.target.value })}
                             className="rounded border border-border-strong bg-surface-raised px-2 py-1 text-sm text-text-primary"
                           >
-                            <option value="easy">Easy</option>
-                            <option value="medium">Medium</option>
-                            <option value="hard">Hard</option>
+                            <option value="easy">{t('admin.plugins.difficulty.easy')}</option>
+                            <option value="medium">{t('admin.plugins.difficulty.medium')}</option>
+                            <option value="hard">{t('admin.plugins.difficulty.hard')}</option>
                           </select>
                         </td>
                         <td className="px-5 py-3">
@@ -564,7 +578,7 @@ export default function PluginsClient({
                               disabled={busy}
                               className="rounded-md border border-success/40 px-3 py-1.5 text-xs text-success hover:bg-success/10 disabled:opacity-40"
                             >
-                              Save
+                              {t('common.save')}
                             </button>
                             <button
                               type="button"
@@ -572,7 +586,7 @@ export default function PluginsClient({
                               disabled={busy}
                               className="rounded-md border border-border-strong px-3 py-1.5 text-xs text-text-secondary hover:bg-surface-raised disabled:opacity-40"
                             >
-                              Cancel
+                              {t('common.cancel')}
                             </button>
                           </div>
                         </td>
@@ -587,7 +601,9 @@ export default function PluginsClient({
                               DIFFICULTY_TONES[card.difficulty] ?? 'bg-surface-container text-text-secondary'
                             }`}
                           >
-                            {card.difficulty}
+                            {DIFFICULTY_LABEL_KEYS[card.difficulty]
+                              ? t(DIFFICULTY_LABEL_KEYS[card.difficulty]!)
+                              : card.difficulty}
                           </span>
                         </td>
                         <td className="px-5 py-3 text-text-secondary">{card.category}</td>
@@ -610,7 +626,7 @@ export default function PluginsClient({
                                 disabled={busy}
                                 className="rounded-md border border-border-strong px-3 py-1.5 text-xs text-text-secondary hover:bg-surface-raised hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
                               >
-                                Edit
+                                {t('admin.plugins.edit')}
                               </button>
                               <button
                                 type="button"
@@ -618,7 +634,7 @@ export default function PluginsClient({
                                 disabled={busy}
                                 className="rounded-md border border-danger/40 px-3 py-1.5 text-xs text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40"
                               >
-                                Delete
+                                {t('admin.plugins.delete')}
                               </button>
                             </div>
                           )}
@@ -636,14 +652,11 @@ export default function PluginsClient({
       {/* ── Confirmations ─────────────────────────────────────────── */}
       {pendingDeleteCard ? (
         <ConfirmModal
-          title="Delete word?"
-          body={
-            <>
-              <span className="font-medium text-text-primary">{pendingDeleteCard.word}</span> will be
-              removed from {selectedPack?.name}. Games already in progress keep their dealt cards.
-            </>
-          }
-          confirmLabel={busy ? 'Deleting...' : 'Delete word'}
+          title={t('admin.plugins.deleteWordTitle')}
+          body={rich(t('admin.plugins.deleteWordBody', { pack: selectedPack?.name ?? '' }), {
+            word: <span className="font-medium text-text-primary">{pendingDeleteCard.word}</span>,
+          })}
+          confirmLabel={busy ? t('admin.plugins.deleting') : t('admin.plugins.deleteWord')}
           busy={busy}
           onCancel={() => setPendingDeleteCard(null)}
           onConfirm={async () => {
@@ -655,15 +668,11 @@ export default function PluginsClient({
 
       {pendingDeletePack ? (
         <ConfirmModal
-          title="Delete word pack?"
-          body={
-            <>
-              <span className="font-medium text-text-primary">{pendingDeletePack.name}</span> and its{' '}
-              {pendingDeletePack.cardCount} words will be removed. Games already in progress keep
-              their dealt cards, but new games will no longer offer this pack.
-            </>
-          }
-          confirmLabel={busy ? 'Deleting...' : 'Delete pack'}
+          title={t('admin.plugins.deletePackTitle')}
+          body={rich(t('admin.plugins.deletePackBody', { count: pendingDeletePack.cardCount }), {
+            pack: <span className="font-medium text-text-primary">{pendingDeletePack.name}</span>,
+          })}
+          confirmLabel={busy ? t('admin.plugins.deleting') : t('admin.plugins.deletePack')}
           busy={busy}
           onCancel={() => setPendingDeletePack(null)}
           onConfirm={async () => {
@@ -697,6 +706,7 @@ function ConfirmModal({
   onCancel: () => void;
   onConfirm: () => void | Promise<void>;
 }) {
+  const t = useT();
   const cancelRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
@@ -726,7 +736,7 @@ function ConfirmModal({
             disabled={busy}
             className="rounded-lg border border-border-strong px-4 py-2 text-sm text-text-secondary hover:bg-surface-raised disabled:opacity-40"
           >
-            Cancel
+            {t('common.cancel')}
           </button>
           <button
             type="button"

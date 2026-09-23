@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import {
   getInstanceSetupStatus,
@@ -12,15 +13,20 @@ import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
 import { getSessionSecret } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
+import type { Translator } from '@/lib/i18n/core';
+import { getTranslator } from '@/lib/i18n/server';
 import InstanceLogoCard from './InstanceLogoCard';
 import SettingsShell from '@/app/SettingsShell';
+import { rich } from '@/lib/i18n/rich';
+import { auditActionLabelKey } from '@/lib/audit-action-labels';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export const metadata = {
-  title: 'Overview — Community Settings',
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  return { title: t('adminSettings.overview.metaTitle') };
+}
 
 interface Stats {
   members: number;
@@ -45,14 +51,15 @@ interface Stats {
  * note so the admin can see which page they tried to visit.
  */
 export default async function CommunitySettingsOverviewPage() {
+  const t = await getTranslator();
   const cookieStore = await cookies();
   const token = cookieStore.get(ADMIN_TOKEN_COOKIE)?.value ?? null;
   if (!(await isInstanceAdminAllowed(cookieStore.toString(), token))) {
     return (
       <SettingsShell scope="community">
         <section>
-          <h1 className="text-2xl font-semibold text-text-primary">Overview</h1>
-          <p className="mt-2 text-sm text-danger">Admin token required.</p>
+          <h1 className="text-2xl font-semibold text-text-primary">{t('adminSettings.overview.title')}</h1>
+          <p className="mt-2 text-sm text-danger">{t('common.adminRequired')}</p>
         </section>
       </SettingsShell>
     );
@@ -91,7 +98,7 @@ export default async function CommunitySettingsOverviewPage() {
         recentAudit = audit.map((row) => ({
           id: row.id,
           action: row.action,
-          actorLabel: row.actorUserId ?? 'system',
+          actorLabel: row.actorUserId ?? t('adminSettings.overview.system'),
           createdAt: row.createdAt,
         }));
       }
@@ -104,6 +111,7 @@ export default async function CommunitySettingsOverviewPage() {
   return (
     <SettingsShell scope="community">
       <OverviewBody
+        t={t}
         instanceName={setup.instanceName}
         instanceLogoUrl={setup.instanceLogoUrl}
         stats={stats}
@@ -114,11 +122,13 @@ export default async function CommunitySettingsOverviewPage() {
 }
 
 function OverviewBody({
+  t,
   instanceName,
   instanceLogoUrl,
   stats,
   recentAudit,
 }: {
+  t: Translator;
   instanceName: string;
   instanceLogoUrl: string | null;
   stats: Stats | null;
@@ -127,10 +137,9 @@ function OverviewBody({
   return (
     <section className="grid gap-8">
       <header>
-        <h1 className="text-2xl font-semibold text-text-primary">Overview</h1>
+        <h1 className="text-2xl font-semibold text-text-primary">{t('adminSettings.overview.title')}</h1>
         <p className="mt-1 text-sm text-text-secondary">
-          Review the health and basic configuration of{' '}
-          <span className="font-medium text-text-primary">{instanceName}</span>.
+          {rich(t('adminSettings.overview.subtitle'), { name: <span className="font-medium text-text-primary">{instanceName}</span> })}
         </p>
       </header>
 
@@ -149,24 +158,31 @@ function OverviewBody({
               <h2 className="text-body-lg font-medium text-text-primary">
                 {stats?.serverName ?? instanceName}
               </h2>
-              <p className="font-label-sm text-text-muted mt-1">Self-hosted community</p>
+              <p className="font-label-sm text-text-muted mt-1">{t('adminSettings.overview.selfHosted')}</p>
             </div>
           </div>
           <a
             href="/admin/settings/members"
             className="rounded-lg border border-border-strong px-4 py-2 font-label-sm text-text-secondary hover:bg-surface-raised transition-colors"
           >
-            Manage members
+            {t('adminSettings.overview.manageMembers')}
           </a>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-          <Stat label="Owner" value={stats?.ownerDisplayName ?? '—'} />
-          <Stat label="Members" value={stats ? String(stats.members) : '—'} />
+          <Stat label={t('adminSettings.overview.stat.owner')} value={stats?.ownerDisplayName ?? '—'} />
+          <Stat label={t('adminSettings.overview.stat.members')} value={stats ? String(stats.members) : '—'} />
           <Stat
-            label="Channels"
-            value={stats ? `${stats.textChannels} Text / ${stats.voiceChannels} Voice` : '—'}
+            label={t('adminSettings.overview.stat.channels')}
+            value={
+              stats
+                ? t('adminSettings.overview.stat.channelsValue', {
+                    text: stats.textChannels,
+                    voice: stats.voiceChannels,
+                  })
+                : '—'
+            }
           />
-          <Stat label="Invites" value={stats ? String(stats.invites) : '—'} />
+          <Stat label={t('adminSettings.overview.stat.invites')} value={stats ? String(stats.invites) : '—'} />
         </div>
       </section>
 
@@ -174,23 +190,43 @@ function OverviewBody({
 
       <section>
         <h3 className="font-label-sm text-text-muted uppercase tracking-wider mb-4">
-          Quick actions
+          {t('adminSettings.overview.quickActions')}
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <QuickAction href="/admin/settings/invites" icon="person_add" title="Invite people" hint="Create or copy an invite link." />
-          <QuickAction href="/admin/settings/members" icon="manage_accounts" title="Manage members" hint="Review members and roles." />
-          <QuickAction href="/admin/settings/channels" icon="add_circle" title="Create channel" hint="Add a text channel or voice room." />
-          <QuickAction href="/admin/audit" icon="history" title="View audit log" hint="Review recent administrative actions." />
+          <QuickAction
+            href="/admin/settings/invites"
+            icon="person_add"
+            title={t('adminSettings.overview.action.inviteTitle')}
+            hint={t('adminSettings.overview.action.inviteHint')}
+          />
+          <QuickAction
+            href="/admin/settings/members"
+            icon="manage_accounts"
+            title={t('adminSettings.overview.manageMembers')}
+            hint={t('adminSettings.overview.action.membersHint')}
+          />
+          <QuickAction
+            href="/admin/settings/channels"
+            icon="add_circle"
+            title={t('adminSettings.overview.action.channelTitle')}
+            hint={t('adminSettings.overview.action.channelHint')}
+          />
+          <QuickAction
+            href="/admin/audit"
+            icon="history"
+            title={t('adminSettings.overview.action.auditTitle')}
+            hint={t('adminSettings.overview.action.auditHint')}
+          />
         </div>
       </section>
 
       <section>
         <h3 className="font-label-sm text-text-muted uppercase tracking-wider mb-4">
-          Recent activity
+          {t('adminSettings.overview.recentActivity')}
         </h3>
         <div className="bg-surface-raised rounded-xl border border-border-subtle overflow-hidden">
           {recentAudit.length === 0 ? (
-            <p className="p-4 text-sm text-text-muted">No recent administrative actions recorded yet.</p>
+            <p className="p-4 text-sm text-text-muted">{t('adminSettings.overview.recentEmpty')}</p>
           ) : (
             <ul className="divide-y divide-border-subtle">
               {recentAudit.map((row) => (
@@ -199,10 +235,10 @@ function OverviewBody({
                     <span className="material-symbols-outlined text-text-muted text-[18px]">history</span>
                     <p className="font-label-sm text-text-secondary truncate">
                       <span className="text-text-primary font-medium">{row.actorLabel}</span>{' '}
-                      · {row.action}
+                      · {actionText(t, row.action)}
                     </p>
                   </div>
-                  <span className="text-xs text-text-muted shrink-0">{relativeTime(row.createdAt)}</span>
+                  <span className="text-xs text-text-muted shrink-0">{relativeTime(t, row.createdAt)}</span>
                 </li>
               ))}
             </ul>
@@ -212,9 +248,7 @@ function OverviewBody({
 
       <section className="rounded-lg bg-surface-container-low border border-border-subtle p-4 flex gap-3">
         <span className="material-symbols-outlined text-text-muted text-[20px] shrink-0">info</span>
-        <p className="text-xs text-text-muted leading-relaxed">
-          Community settings affect this self-hosted instance only. Member profiles, roles, channels, and messages remain stored on this server.
-        </p>
+        <p className="text-xs text-text-muted leading-relaxed">{t('adminSettings.overview.footer')}</p>
       </section>
     </section>
   );
@@ -252,15 +286,21 @@ function QuickAction({
   );
 }
 
-function relativeTime(date: Date): string {
+/** An audit action as a phrase; unknown actions show their identifier. */
+function actionText(t: Translator, action: string): string {
+  const key = auditActionLabelKey(action);
+  return key ? t(key) : action;
+}
+
+function relativeTime(t: Translator, date: Date): string {
   const ms = Date.now() - date.getTime();
   const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 60) return t('adminSettings.overview.ago.seconds', { count: seconds });
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 60) return t('adminSettings.overview.ago.minutes', { count: minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return t('adminSettings.overview.ago.hours', { count: hours });
   const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  return date.toLocaleDateString();
+  if (days < 7) return t('adminSettings.overview.ago.days', { count: days });
+  return date.toLocaleDateString(t.locale);
 }

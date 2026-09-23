@@ -13,12 +13,14 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useT } from '@/lib/i18n/client';
 
 type Guest = { gid: string; name: string; ttlSeconds?: number; iat?: number; exp?: number };
 type Token = { token: string; identity: string; room: string; ttlSeconds: number; expiresAt: number };
 type Status = { kind: 'idle' } | { kind: 'busy' } | { kind: 'error'; message: string } | { kind: 'ok'; message: string };
 
 export default function ConnectPage() {
+  const t = useT();
   const [guest, setGuest] = useState<Guest | null>(null);
   const [token, setToken] = useState<Token | null>(null);
   const [serverId, setServerId] = useState('');
@@ -42,11 +44,11 @@ export default function ConnectPage() {
       if (!res.ok) throw new Error(`GET /api/auth/guest → ${res.status}`);
       const data = (await res.json()) as { guest: Guest };
       setGuest(data.guest);
-      setStatus({ kind: 'ok', message: `Existing session for ${data.guest.name}` });
+      setStatus({ kind: 'ok', message: t('auth.connect.demo.existingSession', { name: data.guest.name }) });
     } catch (err) {
       setStatus({ kind: 'error', message: (err as Error).message });
     }
-  }, []);
+  }, [t]);
 
   const createGuest = useCallback(async () => {
     setStatus({ kind: 'busy' });
@@ -60,19 +62,19 @@ export default function ConnectPage() {
       if (!res.ok) throw new Error(`POST /api/auth/guest → ${res.status}`);
       const data = (await res.json()) as { guest: Guest };
       setGuest(data.guest);
-      setStatus({ kind: 'ok', message: `Created guest ${data.guest.name}` });
+      setStatus({ kind: 'ok', message: t('auth.connect.demo.createdGuest', { name: data.guest.name }) });
     } catch (err) {
       setStatus({ kind: 'error', message: (err as Error).message });
     }
-  }, []);
+  }, [t]);
 
   const getToken = useCallback(async () => {
     if (!guest) {
-      setStatus({ kind: 'error', message: 'Create a guest first.' });
+      setStatus({ kind: 'error', message: t('auth.connect.demo.createGuestFirst') });
       return;
     }
     if (!serverId || !channelId) {
-      setStatus({ kind: 'error', message: 'Server id and channel id are required.' });
+      setStatus({ kind: 'error', message: t('auth.connect.demo.idsRequired') });
       return;
     }
     setStatus({ kind: 'busy' });
@@ -84,7 +86,7 @@ export default function ConnectPage() {
         body: JSON.stringify({ serverId, channelId }),
       });
       if (res.status === 401) {
-        setStatus({ kind: 'error', message: 'Session expired. Click "Create guest" again.' });
+        setStatus({ kind: 'error', message: t('auth.connect.demo.sessionExpired') });
         return;
       }
       if (!res.ok) {
@@ -93,51 +95,58 @@ export default function ConnectPage() {
       }
       const data = (await res.json()) as Token;
       setToken(data);
-      setStatus({ kind: 'ok', message: `Token issued for room "${data.room}", identity ${data.identity}` });
+      setStatus({
+        kind: 'ok',
+        message: t('auth.connect.demo.tokenIssued', { room: data.room, identity: data.identity }),
+      });
     } catch (err) {
       setStatus({ kind: 'error', message: (err as Error).message });
     }
-  }, [guest, serverId, channelId]);
+  }, [guest, serverId, channelId, t]);
 
   return (
     <section>
-      <h1 style={{ marginTop: 0 }}>Connect (developer surface)</h1>
-      <p style={{ color: '#9aa3ad' }}>
-        Step 1 creates a guest session cookie. Step 2 exchanges that cookie for a LiveKit access token
-        for the room you specify. Open this page in two browsers (or one normal + one incognito) to
-        verify the two-browser voice test from the roadmap.
-      </p>
+      <h1 style={{ marginTop: 0 }}>{t('auth.connect.demo.title')}</h1>
+      <p style={{ color: '#9aa3ad' }}>{t('auth.connect.demo.intro')}</p>
 
       <div style={{ display: 'grid', gap: 16, maxWidth: 640 }}>
         <Step
           step={1}
-          title="Guest session"
-          description={guest ? `Active: ${guest.name} (${guest.gid})` : 'No active guest session.'}
+          title={t('auth.connect.demo.guestSession')}
+          description={
+            guest
+              ? t('auth.connect.demo.guestActive', { name: guest.name, gid: guest.gid })
+              : t('auth.connect.demo.noGuest')
+          }
           actions={
             <>
               <button onClick={createGuest} disabled={status.kind === 'busy'}>
-                {guest ? 'Recreate guest' : 'Create guest'}
+                {guest ? t('auth.connect.demo.recreateGuest') : t('auth.connect.demo.createGuest')}
               </button>
               <button onClick={refreshGuest} disabled={status.kind === 'busy'}>
-                Refresh
+                {t('auth.connect.demo.refresh')}
               </button>
             </>
           }
         />
         <Step
           step={2}
-          title="LiveKit token"
+          title={t('auth.connect.demo.tokenTitle')}
           description={
             token
-              ? `Issued for room "${token.room}", identity ${token.identity}, ttl ${token.ttlSeconds}s.`
-              : 'Enter a server id and voice channel id, then click "Get token".'
+              ? t('auth.connect.demo.tokenDetails', {
+                  room: token.room,
+                  identity: token.identity,
+                  ttl: token.ttlSeconds,
+                })
+              : t('auth.connect.demo.tokenHint')
           }
           actions={
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <input
                 value={serverId}
                 onChange={(e) => setServerId(e.target.value)}
-                placeholder="server uuid"
+                placeholder={t('auth.connect.demo.serverIdPlaceholder')}
                 style={{
                   padding: '6px 8px',
                   background: '#0f1115',
@@ -149,7 +158,7 @@ export default function ConnectPage() {
               <input
                 value={channelId}
                 onChange={(e) => setChannelId(e.target.value)}
-                placeholder="voice channel uuid"
+                placeholder={t('auth.connect.demo.channelIdPlaceholder')}
                 style={{
                   padding: '6px 8px',
                   background: '#0f1115',
@@ -159,7 +168,7 @@ export default function ConnectPage() {
                 }}
               />
               <button onClick={getToken} disabled={status.kind === 'busy'}>
-                Get token
+                {t('auth.connect.demo.getToken')}
               </button>
             </div>
           }
@@ -169,7 +178,7 @@ export default function ConnectPage() {
       <StatusLine status={status} />
       {token ? (
         <details style={{ marginTop: 16 }}>
-          <summary>Show token (JWT)</summary>
+          <summary>{t('auth.connect.demo.showToken')}</summary>
           <pre
             style={{
               background: '#0a0c0f',
@@ -188,6 +197,7 @@ export default function ConnectPage() {
 }
 
 function Step(props: { step: number; title: string; description: string; actions: React.ReactNode }) {
+  const t = useT();
   return (
     <div
       style={{
@@ -198,7 +208,7 @@ function Step(props: { step: number; title: string; description: string; actions
       }}
     >
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
-        <strong style={{ fontSize: 18 }}>Step {props.step}: {props.title}</strong>
+        <strong style={{ fontSize: 18 }}>{t('auth.connect.demo.stepHeading', { step: props.step, title: props.title })}</strong>
       </div>
       <p style={{ color: '#9aa3ad', margin: '8px 0' }}>{props.description}</p>
       <div style={{ display: 'flex', gap: 8 }}>{props.actions}</div>

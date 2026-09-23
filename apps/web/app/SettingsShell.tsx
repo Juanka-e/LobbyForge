@@ -3,9 +3,15 @@
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { createContext, useContext, type ReactNode } from 'react';
+import { useT } from '@/lib/i18n/client';
 import SettingsModalFrame from './SettingsModalFrame';
 
-type NavItem = { href: string; label: string; icon: string };
+/**
+ * `labelKey` is a message key, not text: these lists are module-level
+ * constants with no translator in reach, so each label is resolved where
+ * the nav renders.
+ */
+type NavItem = { href: string; labelKey: string; icon: string };
 
 /**
  * Canonical settings shell — used by every page under /admin/* and
@@ -24,43 +30,44 @@ type NavItem = { href: string; label: string; icon: string };
  */
 
 const COMMUNITY_NAV: NavItem[] = [
-  { href: '/admin/settings', label: 'Overview', icon: 'dashboard' },
-  { href: '/admin/settings/members', label: 'Members', icon: 'group' },
-  { href: '/admin/settings/channels', label: 'Channels', icon: 'forum' },
-  { href: '/admin/settings/roles', label: 'Roles & Permissions', icon: 'shield' },
-  { href: '/admin/settings/invites', label: 'Invites', icon: 'qr_code_2' },
-  { href: '/admin/settings/voice-media', label: 'Voice & Media', icon: 'mic' },
-  { href: '/admin/apps', label: 'Apps & Activities', icon: 'stadia_controller' },
-  { href: '/admin/plugins', label: 'Plugins & Word Packs', icon: 'extension' },
-  { href: '/admin/bandwidth', label: 'Bandwidth', icon: 'data_usage' },
-  { href: '/admin/settings/authentication', label: 'Authentication', icon: 'shield_lock' },
-  { href: '/admin/settings/storage', label: 'Storage', icon: 'cloud_upload' },
-  { href: '/admin/settings/backups', label: 'Backups', icon: 'backup' },
-  { href: '/admin/audit', label: 'Audit Log', icon: 'history' },
-  { href: '/admin/moderation', label: 'Moderation', icon: 'moderation' },
-  { href: '/admin/health', label: 'Doctor & Health', icon: 'health_and_safety' },
-  { href: '/admin/updates', label: 'Updates', icon: 'system_update' },
+  { href: '/admin/settings', labelKey: 'settings.nav.community.overview', icon: 'dashboard' },
+  { href: '/admin/settings/members', labelKey: 'settings.nav.community.members', icon: 'group' },
+  { href: '/admin/settings/channels', labelKey: 'settings.nav.community.channels', icon: 'forum' },
+  { href: '/admin/settings/roles', labelKey: 'settings.nav.community.roles', icon: 'shield' },
+  { href: '/admin/settings/invites', labelKey: 'settings.nav.community.invites', icon: 'qr_code_2' },
+  { href: '/admin/settings/voice-media', labelKey: 'settings.nav.community.voiceMedia', icon: 'mic' },
+  { href: '/admin/apps', labelKey: 'settings.nav.community.apps', icon: 'stadia_controller' },
+  { href: '/admin/plugins', labelKey: 'settings.nav.community.plugins', icon: 'extension' },
+  { href: '/admin/bandwidth', labelKey: 'settings.nav.community.bandwidth', icon: 'data_usage' },
+  { href: '/admin/settings/authentication', labelKey: 'settings.nav.community.authentication', icon: 'shield_lock' },
+  { href: '/admin/settings/storage', labelKey: 'settings.nav.community.storage', icon: 'cloud_upload' },
+  { href: '/admin/settings/backups', labelKey: 'settings.nav.community.backups', icon: 'backup' },
+  { href: '/admin/audit', labelKey: 'settings.nav.community.audit', icon: 'history' },
+  { href: '/admin/moderation', labelKey: 'settings.nav.community.moderation', icon: 'moderation' },
+  { href: '/admin/health', labelKey: 'settings.nav.community.health', icon: 'health_and_safety' },
+  { href: '/admin/updates', labelKey: 'settings.nav.community.updates', icon: 'system_update' },
 ];
 
 const USER_NAV: NavItem[] = [
-  { href: '/settings/my-account', label: 'My Account', icon: 'manage_accounts' },
-  { href: '/settings/profile', label: 'Profile', icon: 'person' },
-  { href: '/settings/appearance', label: 'Appearance', icon: 'palette' },
-  { href: '/settings/accessibility', label: 'Accessibility', icon: 'accessibility_new' },
-  { href: '/settings/voice-video', label: 'Voice & Video', icon: 'videocam' },
-  { href: '/settings/keybinds', label: 'Keybinds', icon: 'keyboard' },
-  { href: '/settings', label: 'Privacy & Activity', icon: 'visibility_lock' },
-  { href: '/settings/active-sessions', label: 'Active Sessions', icon: 'devices' },
-  { href: '/settings/notifications', label: 'Notifications', icon: 'notifications' },
+  { href: '/settings/my-account', labelKey: 'settings.nav.user.account', icon: 'manage_accounts' },
+  { href: '/settings/profile', labelKey: 'settings.nav.user.profile', icon: 'person' },
+  { href: '/settings/appearance', labelKey: 'settings.nav.user.appearance', icon: 'palette' },
+  { href: '/settings/accessibility', labelKey: 'settings.nav.user.accessibility', icon: 'accessibility_new' },
+  { href: '/settings/voice-video', labelKey: 'settings.nav.user.voiceVideo', icon: 'videocam' },
+  { href: '/settings/keybinds', labelKey: 'settings.nav.user.keybinds', icon: 'keyboard' },
+  { href: '/settings', labelKey: 'settings.nav.user.privacy', icon: 'visibility_lock' },
+  { href: '/settings/active-sessions', labelKey: 'settings.nav.user.sessions', icon: 'devices' },
+  { href: '/settings/notifications', labelKey: 'settings.nav.user.notifications', icon: 'notifications' },
 ];
 
 const SettingsShellContext = createContext(false);
 
 export default function SettingsShell({ scope, children }: { scope: 'community' | 'user'; children: ReactNode }) {
+  const t = useT();
   const nested = useContext(SettingsShellContext);
   const pathname = usePathname();
   const nav = scope === 'community' ? COMMUNITY_NAV : USER_NAV;
-  const title = scope === 'community' ? 'Community Settings' : 'User Settings';
+  const title = t(scope === 'community' ? 'settings.nav.communityTitle' : 'settings.nav.userTitle');
 
   // Route layouts own the canonical shell. Keep legacy page-level wrappers
   // harmless while those pages are migrated independently.
@@ -91,7 +98,7 @@ export default function SettingsShell({ scope, children }: { scope: 'community' 
                   : 'flex min-w-max items-center gap-2 rounded-md px-3 py-2 text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary'}
               >
                 <span className="material-symbols-outlined text-lg" aria-hidden>{item.icon}</span>
-                {item.label}
+                {t(item.labelKey)}
               </Link>
             );
           })}

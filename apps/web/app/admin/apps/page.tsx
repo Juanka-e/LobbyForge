@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import {
   getInstanceSetupStatus,
@@ -8,16 +9,19 @@ import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
 import { getSessionSecret } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
+import { getTranslator } from '@/lib/i18n/server';
 import { listPluginSummaries } from '@/lib/plugin-registry';
 import SettingsShell from '@/app/SettingsShell';
 import AppsClient, { type AppView } from './AppsClient';
+import { pluginSummary } from '@/lib/plugin-catalog-text';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export const metadata = {
-  title: 'Apps & Activities - Community Settings',
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  return { title: t('admin.apps.metaTitle') };
+}
 
 /**
  * Install / enable the apps a community can start in voice channels.
@@ -31,12 +35,13 @@ export const metadata = {
 export default async function AppsSettingsPage() {
   const cookieStore = await cookies();
   const token = cookieStore.get(ADMIN_TOKEN_COOKIE)?.value ?? null;
+  const t = await getTranslator();
   if (!(await isInstanceAdminAllowed(cookieStore.toString(), token))) {
     return (
       <SettingsShell scope="community">
         <section>
-          <h1 className="text-2xl font-semibold text-text-primary">Apps &amp; Activities</h1>
-          <p className="mt-2 text-sm text-danger">Admin token required.</p>
+          <h1 className="text-2xl font-semibold text-text-primary">{t('admin.apps.title')}</h1>
+          <p className="mt-2 text-sm text-danger">{t('common.adminRequired')}</p>
         </section>
       </SettingsShell>
     );
@@ -66,7 +71,7 @@ export default async function AppsSettingsPage() {
             name: plugin.name,
             version: plugin.version,
             type: plugin.type,
-            summary: plugin.catalog?.summary ?? null,
+            summary: pluginSummary(plugin.id, t.locale, plugin.catalog?.summary ?? null),
             trustLevel: plugin.catalog?.trustLevel ?? null,
             minPlayers: plugin.catalog?.playerConfig?.minPlayers ?? null,
             maxPlayers: plugin.catalog?.playerConfig?.maxPlayers ?? null,

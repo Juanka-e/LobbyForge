@@ -26,7 +26,6 @@ RUN pnpm --filter @lobbyforge/config build && \
     pnpm --filter @lobbyforge/plugin-sdk build && \
     pnpm --filter @lobbyforge/bot-sdk build && \
     pnpm --filter @lobbyforge/db build && \
-    pnpm --filter @lobbyforge/i18n build && \
     pnpm --filter @lobbyforge/ui build && \
     pnpm --filter @lobbyforge/registry build && \
     pnpm --filter @lobbyforge/ws-gateway build && \

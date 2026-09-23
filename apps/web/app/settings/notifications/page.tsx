@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import SettingsShell from '@/app/SettingsShell';
-import SettingsStickyFooter from '@/app/settings/SettingsStickyFooter';
+import SettingsStickyFooter, { type SettingsStatus } from '@/app/settings/SettingsStickyFooter';
+import { useT } from '@/lib/i18n/client';
+import { rich } from '@/lib/i18n/rich';
 
 type NotificationLevel = 'all' | 'mentions' | 'nothing';
 type Sound = 'default' | 'subtle' | 'none';
@@ -33,32 +35,44 @@ const DEFAULT_NOTIFICATIONS: NotificationPreferences = {
   suppressWhileInVoice: true,
 };
 
-const LEVEL_OPTIONS: { value: NotificationLevel; label: string; description: string; icon: string }[] = [
+// Labels are message keys, resolved where they render.
+type LevelOption = { value: NotificationLevel; labelKey: string; descriptionKey: string; icon: string };
+
+const LEVEL_OPTIONS: LevelOption[] = [
   {
     value: 'all',
-    label: 'All messages',
-    description: 'Every new message in joined channels.',
+    labelKey: 'settings.notifications.level.all',
+    descriptionKey: 'settings.notifications.level.allHint',
     icon: 'notifications_active',
   },
   {
     value: 'mentions',
-    label: 'Mentions only',
-    description: 'Only when someone @mentions or replies to you.',
+    labelKey: 'settings.notifications.level.mentions',
+    descriptionKey: 'settings.notifications.level.mentionsHint',
     icon: 'alternate_email',
   },
   {
     value: 'nothing',
-    label: 'Nothing',
-    description: 'Disable all in-app notifications.',
+    labelKey: 'settings.notifications.level.nothing',
+    descriptionKey: 'settings.notifications.level.nothingHint',
     icon: 'notifications_off',
   },
 ];
 
-const SOUND_OPTIONS: { value: Sound; label: string; description: string }[] = [
-  { value: 'default', label: 'Default chime', description: 'LobbyForge signature' },
-  { value: 'subtle', label: 'Subtle pop', description: 'Soft, low-volume ping' },
-  { value: 'none', label: 'No sound', description: 'Silent notifications only' },
+const SOUND_OPTIONS: { value: Sound; labelKey: string; descriptionKey: string }[] = [
+  { value: 'default', labelKey: 'settings.notifications.sound.default', descriptionKey: 'settings.notifications.sound.defaultHint' },
+  { value: 'subtle', labelKey: 'settings.notifications.sound.subtle', descriptionKey: 'settings.notifications.sound.subtleHint' },
+  { value: 'none', labelKey: 'settings.notifications.sound.none', descriptionKey: 'settings.notifications.sound.noneHint' },
 ];
+
+type BrowserPermission = 'unknown' | 'granted' | 'denied' | 'default';
+
+function permissionLabelKey(permission: BrowserPermission): string {
+  if (permission === 'granted') return 'settings.notifications.permission.granted';
+  if (permission === 'denied') return 'settings.notifications.permission.denied';
+  if (permission === 'default') return 'settings.notifications.permission.default';
+  return 'settings.notifications.permission.unsupported';
+}
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { credentials: 'same-origin', ...init });
@@ -99,14 +113,13 @@ function mergeNotifications(value: unknown): NotificationPreferences {
 }
 
 export default function NotificationsSettingsPage() {
+  const t = useT();
   const [prefs, setPrefs] = useState<NotificationPreferences>(DEFAULT_NOTIFICATIONS);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
-  const [status, setStatus] = useState<string>('Loading settings...');
+  const [status, setStatus] = useState<SettingsStatus>({ key: 'settings.footer.loading' });
   const [busy, setBusy] = useState(false);
   const [savedSnapshot, setSavedSnapshot] = useState<NotificationPreferences>(DEFAULT_NOTIFICATIONS);
-  const [browserPermission, setBrowserPermission] = useState<'unknown' | 'granted' | 'denied' | 'default'>(
-    'unknown'
-  );
+  const [browserPermission, setBrowserPermission] = useState<BrowserPermission>('unknown');
 
   const dirty = useMemo(
     () => JSON.stringify(prefs) !== JSON.stringify(savedSnapshot),
@@ -135,10 +148,10 @@ export default function NotificationsSettingsPage() {
           setPrefs(merged);
           setSavedSnapshot(merged);
           setUpdatedAt(data.settings.updatedAt);
-          setStatus('Ready');
+          setStatus({ key: 'settings.footer.ready' });
         }
       } catch (err) {
-        if (!cancelled) setStatus((err as Error).message);
+        if (!cancelled) setStatus({ text: (err as Error).message });
       }
     }
     void load();
@@ -161,21 +174,24 @@ export default function NotificationsSettingsPage() {
 
   async function requestBrowserPermission() {
     if (typeof window === 'undefined' || !('Notification' in window)) {
-      setStatus('Browser does not support desktop notifications.');
+      setStatus({ key: 'settings.notifications.permission.noSupport' });
       return;
     }
     try {
       const result = await window.Notification.requestPermission();
       setBrowserPermission(result as 'granted' | 'denied' | 'default');
-      setStatus(`Browser permission: ${result}`);
+      setStatus({
+        key: 'settings.notifications.permission.result',
+        params: { result: t(permissionLabelKey(result as BrowserPermission)) },
+      });
     } catch (err) {
-      setStatus(`Browser permission request failed: ${(err as Error).message}`);
+      setStatus({ key: 'settings.notifications.permission.failed', params: { error: (err as Error).message } });
     }
   }
 
   async function save() {
     setBusy(true);
-    setStatus('Saving...');
+    setStatus({ key: 'settings.footer.saving' });
     try {
       const data = await jsonFetch<SettingsResponse>('/api/settings/me', {
         method: 'PATCH',
@@ -186,9 +202,9 @@ export default function NotificationsSettingsPage() {
       setPrefs(merged);
       setSavedSnapshot(merged);
       setUpdatedAt(data.settings.updatedAt);
-      setStatus('Saved');
+      setStatus({ key: 'settings.footer.saved' });
     } catch (err) {
-      setStatus((err as Error).message);
+      setStatus({ text: (err as Error).message });
     } finally {
       setBusy(false);
     }
@@ -198,14 +214,7 @@ export default function NotificationsSettingsPage() {
     setPrefs(DEFAULT_NOTIFICATIONS);
   }
 
-  const browserPermissionLabel =
-    browserPermission === 'granted'
-      ? 'Granted'
-      : browserPermission === 'denied'
-        ? 'Blocked'
-        : browserPermission === 'default'
-          ? 'Ask on first use'
-          : 'Unsupported';
+  const browserPermissionLabel = t(permissionLabelKey(browserPermission));
 
   const browserPermissionTone =
     browserPermission === 'granted'
@@ -219,13 +228,11 @@ export default function NotificationsSettingsPage() {
       <section className="max-w-5xl mx-auto pb-32 grid gap-8 lg:grid-cols-12">
         <div className="lg:col-span-8 space-y-8">
           <header>
-            <h1 className="text-2xl font-semibold text-text-primary">Notifications</h1>
-            <p className="mt-1 text-sm text-text-secondary">
-              Control how LobbyForge notifies you on this device.
-            </p>
+            <h1 className="text-2xl font-semibold text-text-primary">{t('settings.nav.user.notifications')}</h1>
+            <p className="mt-1 text-sm text-text-secondary">{t('settings.notifications.description')}</p>
           </header>
 
-          <Section title="Notification Level">
+          <Section title={t('settings.notifications.level.title')}>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {LEVEL_OPTIONS.map((option) => (
                 <LevelCard
@@ -238,22 +245,22 @@ export default function NotificationsSettingsPage() {
             </div>
           </Section>
 
-          <Section title="Desktop Notifications">
+          <Section title={t('settings.notifications.desktop.title')}>
             <ToggleRow
-              label="Enable desktop notifications"
-              description="Receive native OS notifications."
+              label={t('settings.notifications.desktop.enable')}
+              description={t('settings.notifications.desktop.enableHint')}
               checked={prefs.desktopEnabled}
               onChange={(value) => patch({ desktopEnabled: value })}
             />
             <ToggleRow
-              label="Show preview"
-              description="Display message content in notifications."
+              label={t('settings.notifications.desktop.preview')}
+              description={t('settings.notifications.desktop.previewHint')}
               checked={prefs.showPreview}
               onChange={(value) => patch({ showPreview: value })}
             />
             <div className="flex items-center justify-between pt-3">
               <div>
-                <p className="text-sm text-text-primary">Browser permission</p>
+                <p className="text-sm text-text-primary">{t('settings.notifications.permission.label')}</p>
               </div>
               <div className="flex items-center gap-3">
                 <PermissionBadge label={browserPermissionLabel} tone={browserPermissionTone} />
@@ -263,20 +270,20 @@ export default function NotificationsSettingsPage() {
                     onClick={requestBrowserPermission}
                     className="px-3 py-1 rounded bg-surface-raised border border-border-strong text-xs font-medium text-text-primary hover:bg-surface-container transition-colors"
                   >
-                    Request
+                    {t('settings.notifications.permission.request')}
                   </button>
                 ) : null}
               </div>
             </div>
           </Section>
 
-          <Section title="Notification Sound">
+          <Section title={t('settings.notifications.sound.title')}>
             <div className="space-y-3">
               {SOUND_OPTIONS.map((option) => (
                 <RadioRow
                   key={option.value}
-                  label={option.label}
-                  description={option.description}
+                  label={t(option.labelKey)}
+                  description={t(option.descriptionKey)}
                   selected={prefs.sound === option.value}
                   onSelect={() => patch({ sound: option.value })}
                 />
@@ -284,16 +291,16 @@ export default function NotificationsSettingsPage() {
             </div>
           </Section>
 
-          <Section title="In-Experience Indicators">
+          <Section title={t('settings.notifications.indicators.title')}>
             <ToggleRow
-              label="Unread badge"
-              description="Show a red dot on channels with unread mentions."
+              label={t('settings.notifications.indicators.unread')}
+              description={t('settings.notifications.indicators.unreadHint')}
               checked={prefs.unreadBadge}
               onChange={(value) => patch({ unreadBadge: value })}
             />
             <ToggleRow
-              label="Suppress while in voice"
-              description="Pause desktop notifications while you are in a voice room."
+              label={t('settings.notifications.indicators.suppress')}
+              description={t('settings.notifications.indicators.suppressHint')}
               checked={prefs.suppressWhileInVoice}
               onChange={(value) => patch({ suppressWhileInVoice: value })}
               last
@@ -314,12 +321,12 @@ export default function NotificationsSettingsPage() {
         <aside className="lg:col-span-4">
           <div className="sticky top-8 space-y-4">
             <h3 className="text-xs uppercase tracking-wider font-bold text-text-secondary border-b border-border-subtle pb-2">
-              Preview
+              {t('settings.notifications.preview.title')}
             </h3>
             <NotificationPreviewCard prefs={prefs} />
             <p className="text-xs text-text-muted flex items-start gap-2 pt-2">
               <span className="material-symbols-outlined text-[14px] shrink-0">info</span>
-              Browser permission is per-device. Changes sync across your account on save.
+              {t('settings.notifications.preview.note')}
             </p>
           </div>
         </aside>
@@ -344,10 +351,11 @@ function LevelCard({
   selected,
   onSelect,
 }: {
-  option: { value: NotificationLevel; label: string; description: string; icon: string };
+  option: LevelOption;
   selected: boolean;
   onSelect: () => void;
 }) {
+  const t = useT();
   return (
     <button
       type="button"
@@ -380,9 +388,9 @@ function LevelCard({
         </span>
       </div>
       <span className={`text-sm font-medium ${selected ? 'text-primary' : 'text-text-primary'}`}>
-        {option.label}
+        {t(option.labelKey)}
       </span>
-      <span className="text-xs text-text-muted mt-1">{option.description}</span>
+      <span className="text-xs text-text-muted mt-1">{t(option.descriptionKey)}</span>
     </button>
   );
 }
@@ -484,19 +492,26 @@ function PermissionBadge({
   );
 }
 
+/**
+ * A mock notification. The names in it (Ayse, juanka, Main Lounge,
+ * #general) are sample data and stay as they are.
+ */
 function NotificationPreviewCard({ prefs }: { prefs: NotificationPreferences }) {
+  const t = useT();
   const mute = !prefs.desktopEnabled || prefs.level === 'nothing';
   const sampleText =
     prefs.level === 'all'
-      ? 'Ayse: anyone up for a quick match?'
+      ? t('settings.notifications.preview.all', { name: 'Ayse' })
       : prefs.level === 'mentions'
-        ? '@juanka - ready for Hushle?'
-        : 'You will not be notified.';
+        ? t('settings.notifications.preview.mention', { name: 'juanka' })
+        : t('settings.notifications.preview.nothing');
+  const soundKey = SOUND_OPTIONS.find((option) => option.value === prefs.sound)?.labelKey;
+  // The value is highlighted, so the phrase is split around its placeholder.
   return (
     <div className="rounded-xl border border-border-subtle bg-surface/80 backdrop-blur-md p-4 space-y-3">
       <div className="flex items-center gap-2 text-xs text-text-muted uppercase tracking-wider">
         <span className="material-symbols-outlined text-[14px]">notifications</span>
-        Sample
+        {t('settings.notifications.preview.sample')}
       </div>
       <div
         className={`rounded-lg p-3 border ${
@@ -508,15 +523,15 @@ function NotificationPreviewCard({ prefs }: { prefs: NotificationPreferences }) 
             {mute ? 'notifications_off' : 'notifications'}
           </span>
           <span className="text-xs font-semibold text-text-primary">LobbyForge</span>
-          <span className="text-[10px] text-text-muted ml-auto">just now</span>
+          <span className="text-[10px] text-text-muted ml-auto">{t('settings.notifications.preview.justNow')}</span>
         </div>
-        <p className="text-sm text-text-primary">{mute ? 'Notifications muted' : sampleText}</p>
+        <p className="text-sm text-text-primary">{mute ? t('settings.notifications.preview.muted') : sampleText}</p>
         {prefs.showPreview && !mute ? (
           <p className="text-xs text-text-secondary mt-1">Main Lounge - #general</p>
         ) : null}
       </div>
       <p className="text-xs text-text-muted">
-        Sound: <span className="text-text-primary">{prefs.sound}</span>
+        {rich(t('settings.notifications.preview.sound'), { sound: <span className="text-text-primary">{soundKey ? t(soundKey) : prefs.sound}</span> })}
       </p>
     </div>
   );
