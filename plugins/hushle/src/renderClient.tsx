@@ -104,11 +104,19 @@ function playerName(
   return p?.name ?? userId.slice(0, 8);
 }
 
+/**
+ * design pass: these styles were literal hex, so the panel was a
+ * dark-only island. On the light theme its card stayed near-black while
+ * headings inherited the page's dark text — the title and prompts were
+ * invisible. Every surface/text/border colour now reads the host app's
+ * theme variables, with the original hex as the fallback so the plugin
+ * still renders standalone.
+ */
 const baseButtonStyle: React.CSSProperties = {
   padding: '6px 12px',
-  background: '#1c2530',
-  color: '#e6e8eb',
-  border: '1px solid #2a3140',
+  background: 'var(--lf-surface-container, #1c2530)',
+  color: 'var(--lf-text-primary, #e6e8eb)',
+  border: '1px solid var(--lf-border-subtle, #2a3140)',
   borderRadius: 4,
   fontSize: 13,
   cursor: 'pointer',
@@ -130,9 +138,9 @@ const dangerButtonStyle: React.CSSProperties = {
 
 const inputStyle: React.CSSProperties = {
   padding: '6px 8px',
-  background: '#0e1218',
-  color: '#e6e8eb',
-  border: '1px solid #2a3140',
+  background: 'var(--lf-surface-container, #0e1218)',
+  color: 'var(--lf-text-primary, #e6e8eb)',
+  border: '1px solid var(--lf-border-subtle, #2a3140)',
   borderRadius: 4,
   fontSize: 13,
 };
@@ -142,12 +150,15 @@ const labelStyle: React.CSSProperties = {
   flexDirection: 'column',
   gap: 4,
   fontSize: 12,
-  color: '#9aa3ad',
+  color: 'var(--lf-text-secondary, #9aa3ad)',
 };
 
 const cardStyle: React.CSSProperties = {
-  background: '#0e1218',
-  border: '1px solid #2a3140',
+  background: 'var(--lf-surface, #0e1218)',
+  // Headings inside inherit this; without it they took the PAGE colour
+  // and vanished against the card on the light theme.
+  color: 'var(--lf-text-primary, #e6e8eb)',
+  border: '1px solid var(--lf-border-subtle, #2a3140)',
   borderRadius: 8,
   padding: 16,
   minWidth: 240,
@@ -249,7 +260,7 @@ function LobbyView({
       <h3 style={{ margin: '0 0 8px 0' }}>
         {t('hushle.title')} — {t('hushle.phase.lobby')}
       </h3>
-      <p style={{ color: '#9aa3ad', fontSize: 13, margin: '0 0 12px 0' }}>{t('hushle.tagline')}</p>
+      <p style={{ color: 'var(--lf-text-secondary, #9aa3ad)', fontSize: 13, margin: '0 0 12px 0' }}>{t('hushle.tagline')}</p>
       {isHost ? (
         <>
           <p style={{ fontSize: 13, margin: '0 0 12px 0' }}>{t('hushle.lobby.hostPrompt')}</p>
@@ -366,7 +377,7 @@ function TeamSetupView({
         <p style={{ fontSize: 13, margin: '0 0 12px 0' }}>{t('hushle.teamSetup.hostPrompt')}</p>
       ) : null}
       {state.teams.length === 0 ? (
-        <p style={{ color: '#9aa3ad', fontSize: 13 }}>{t('hushle.teamSetup.emptyTeams')}</p>
+        <p style={{ color: 'var(--lf-text-secondary, #9aa3ad)', fontSize: 13 }}>{t('hushle.teamSetup.emptyTeams')}</p>
       ) : (
         <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 12px 0' }}>
           {state.teams.map((team, idx) => (
@@ -376,8 +387,8 @@ function TeamSetupView({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                background: '#11151b',
-                border: '1px solid #1f242c',
+                background: 'var(--lf-surface-raised, #11151b)',
+                border: '1px solid var(--lf-border-subtle, #1f242c)',
                 borderRadius: 4,
                 padding: '6px 10px',
                 marginBottom: 4,
@@ -594,11 +605,11 @@ function PlayingView({
           <strong>
             {currentTeam ? t('hushle.playing.currentTeam', { name: currentTeam.name }) : t('hushle.title')}
           </strong>
-          <span style={{ fontSize: 13, color: remaining <= 10 ? '#e36049' : '#9aa3ad' }}>
+          <span style={{ fontSize: 13, color: remaining <= 10 ? '#e36049' : 'var(--lf-text-secondary, #9aa3ad)' }}>
             {t('hushle.playing.timer')}: {formatTime(remaining)}
           </span>
         </div>
-        <p style={{ margin: '0 0 8px 0', fontSize: 13, color: '#9aa3ad' }}>
+        <p style={{ margin: '0 0 8px 0', fontSize: 13, color: 'var(--lf-text-secondary, #9aa3ad)' }}>
           {explainerName
             ? t('hushle.playing.explainer', { name: explainerName })
             : t('hushle.playing.noExplainer')}
@@ -609,7 +620,7 @@ function PlayingView({
               ? t('hushle.playing.youAreOpponent')
               : t('hushle.playing.youAreGuesser')}
         </p>
-        <p style={{ fontSize: 12, color: '#9aa3ad', margin: 0 }}>
+        <p style={{ fontSize: 12, color: 'var(--lf-text-secondary, #9aa3ad)', margin: 0 }}>
           {t('hushle.playing.cardsPlayed', {
             count: state.totalCardsPlayed,
             max: state.settings.cardsPerTurn * Math.max(1, state.teams.length),
@@ -621,8 +632,8 @@ function PlayingView({
         // The card is present only for the explainer and opposing-team
         // players (server projection nulls it for guessers). Opponents
         // additionally get the hint + BUST button rendered above/below.
-        <div style={{ ...cardStyle, background: '#11151b' }}>
-          <p style={{ margin: '0 0 6px 0', fontSize: 12, color: '#9aa3ad' }}>
+        <div style={{ ...cardStyle, background: 'var(--lf-surface-raised, #11151b)' }}>
+          <p style={{ margin: '0 0 6px 0', fontSize: 12, color: 'var(--lf-text-secondary, #9aa3ad)' }}>
             {t('hushle.playing.word')}
           </p>
           <p
@@ -631,12 +642,12 @@ function PlayingView({
               fontSize: 32,
               fontWeight: 700,
               letterSpacing: 1,
-              color: '#e6e8eb',
+              color: 'var(--lf-text-primary, #e6e8eb)',
             }}
           >
             {card.word}
           </p>
-          <p style={{ margin: '0 0 4px 0', fontSize: 12, color: '#9aa3ad' }}>
+          <p style={{ margin: '0 0 4px 0', fontSize: 12, color: 'var(--lf-text-secondary, #9aa3ad)' }}>
             {t('hushle.playing.forbiddenWords')}
           </p>
           <ul
@@ -653,7 +664,7 @@ function PlayingView({
           </ul>
           {isOpponent ? (
             <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <p style={{ margin: 0, fontSize: 12, color: '#9aa3ad' }}>
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--lf-text-secondary, #9aa3ad)' }}>
                 {t('hushle.playing.opponentHint')}
               </p>
               {bustButton}
@@ -664,9 +675,9 @@ function PlayingView({
         <div
           style={{
             ...cardStyle,
-            background: '#11151b',
+            background: 'var(--lf-surface-raised, #11151b)',
             fontSize: 14,
-            color: '#9aa3ad',
+            color: 'var(--lf-text-secondary, #9aa3ad)',
           }}
         >
           {t('hushle.playing.noCard')}
@@ -675,9 +686,9 @@ function PlayingView({
         <div
           style={{
             ...cardStyle,
-            background: '#11151b',
+            background: 'var(--lf-surface-raised, #11151b)',
             fontSize: 14,
-            color: '#9aa3ad',
+            color: 'var(--lf-text-secondary, #9aa3ad)',
           }}
         >
           {t('hushle.playing.youAreGuesser')} — {t('hushle.playing.hideFromGuessers')}
@@ -685,7 +696,7 @@ function PlayingView({
       )}
 
       <div style={cardStyle}>
-        <p style={{ margin: '0 0 6px 0', fontSize: 12, color: '#9aa3ad' }}>
+        <p style={{ margin: '0 0 6px 0', fontSize: 12, color: 'var(--lf-text-secondary, #9aa3ad)' }}>
           {t('hushle.playing.scores')}
         </p>
         <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
@@ -697,7 +708,7 @@ function PlayingView({
                 justifyContent: 'space-between',
                 padding: '4px 0',
                 fontSize: 14,
-                color: team.id === state.currentTeamId ? '#5ad48a' : '#e6e8eb',
+                color: team.id === state.currentTeamId ? '#5ad48a' : 'var(--lf-text-primary, #e6e8eb)',
               }}
             >
               <span>
@@ -734,7 +745,7 @@ function EndedView({
   return (
     <div style={{ ...cardStyle, maxWidth: 480 }}>
       <h3 style={{ margin: '0 0 8px 0' }}>{t('hushle.ended.title')}</h3>
-      <p style={{ margin: '0 0 12px 0', fontSize: 12, color: '#9aa3ad' }}>
+      <p style={{ margin: '0 0 12px 0', fontSize: 12, color: 'var(--lf-text-secondary, #9aa3ad)' }}>
         {t('hushle.ended.finalScores')}
       </p>
       <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 12px 0' }}>
@@ -745,7 +756,7 @@ function EndedView({
               display: 'flex',
               justifyContent: 'space-between',
               padding: '6px 0',
-              borderBottom: '1px solid #1f242c',
+              borderBottom: '1px solid var(--lf-border-subtle, #1f242c)',
               fontSize: 14,
             }}
           >

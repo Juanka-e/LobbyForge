@@ -49,7 +49,17 @@ function formatDay(iso: string): string {
   }
 }
 
-export function LobbyDmView({ dm, currentUserId }: { dm: ActiveDm; currentUserId: string | null }) {
+export function LobbyDmView({
+  dm,
+  currentUserId,
+  currentDisplayName,
+}: {
+  dm: ActiveDm;
+  currentUserId: string | null;
+  /** Your own name — a transcript that labels you "You" reads oddly
+      next to the other person's real name. */
+  currentDisplayName: string;
+}) {
   const voice = useLobbyVoice();
   const [messages, setMessages] = useState<DmMessage[]>([]);
   const [draft, setDraft] = useState('');
@@ -184,7 +194,7 @@ export function LobbyDmView({ dm, currentUserId }: { dm: ActiveDm; currentUserId
           type="button"
           onClick={() => voice.setMainViewMode('chat')}
           title="Back to the channel"
-          aria-label="Back to the channel"
+          aria-label="Close conversation"
           className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors"
         >
           <span className="material-symbols-outlined text-[16px]">close</span>
@@ -211,10 +221,10 @@ export function LobbyDmView({ dm, currentUserId }: { dm: ActiveDm; currentUserId
             </p>
           </div>
         ) : (
-          <div className="space-y-1">
+          <div className="flex min-h-full flex-col justify-end space-y-1">
             {groups.map((group) => {
               const mine = group.authorId === currentUserId;
-              const author = mine ? 'You' : dm.name;
+              const author = mine ? currentDisplayName || 'You' : dm.name;
               return (
                 <div key={group.key}>
                   {group.dayLabel ? (

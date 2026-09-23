@@ -193,7 +193,7 @@ export function LobbyActivityView({
           type="button"
           onClick={() => voice.setMainViewMode('chat')}
           title="Back to the channel"
-          aria-label="Back to the channel"
+          aria-label="Close activities"
           className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors"
         >
           <span className="material-symbols-outlined text-[16px]">close</span>

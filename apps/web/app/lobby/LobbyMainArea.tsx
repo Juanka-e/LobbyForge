@@ -118,7 +118,13 @@ function LobbyMainAreaLive({ data }: { data: LobbyData }) {
   // activities hub takes it over instead of navigating away from the
   // lobby and throwing out the channel list, roster and voice controls.
   if (voice.mainViewMode === 'dm' && voice.activeDm) {
-    return <LobbyDmView dm={voice.activeDm} currentUserId={data.currentUserId} />;
+    return (
+      <LobbyDmView
+        dm={voice.activeDm}
+        currentUserId={data.currentUserId}
+        currentDisplayName={data.currentDisplayName}
+      />
+    );
   }
 
   if (voice.mainViewMode === 'activity' && voice.activeActivityChannel && data.serverId) {
