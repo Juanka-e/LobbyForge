@@ -63,7 +63,7 @@
     "happy-dom": "^20.8.9",
     "postcss": "^8.5.15",
     "typescript": "^5.4.5",
-    "typescript-eslint": "^8.7.0",
+    "typescript-eslint": "^8.70.0",
     "vitest": "^4.1.11"
   }
 }
