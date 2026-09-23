@@ -2,12 +2,15 @@
 
 import { useEffect } from 'react';
 import { deriveAccent } from '@/lib/accent';
+import { coerceLocaleChoice, resolveAppLocale, type AppLocaleChoice } from '@/lib/app-locale';
 
 type ThemeChoice = 'dark' | 'dim' | 'light' | 'system';
 type Density = 'comfortable' | 'compact';
 
 type AppearanceExtra = {
   accent: string;
+  /** Which language plugin panels render in; see `@/lib/app-locale`. */
+  language: AppLocaleChoice;
   density: Density;
   compactMessageSpacing: boolean;
   showAvatarsInChat: boolean;
@@ -23,6 +26,7 @@ type SettingsResponse = {
 const APPEARANCE_STORAGE_KEY = 'lf-appearance';
 const DEFAULT_EXTRA: AppearanceExtra = {
   accent: '#8FB8FF',
+  language: 'system',
   density: 'comfortable',
   compactMessageSpacing: false,
   showAvatarsInChat: true,
@@ -54,6 +58,7 @@ function loadExtra(): AppearanceExtra {
     const parsed = JSON.parse(raw) as Partial<AppearanceExtra>;
     return {
       accent: normalizeHex(parsed.accent),
+      language: coerceLocaleChoice(parsed.language),
       density: parsed.density === 'compact' ? 'compact' : 'comfortable',
       compactMessageSpacing:
         typeof parsed.compactMessageSpacing === 'boolean'
@@ -117,6 +122,13 @@ export function applyAppearanceExtra(extra: AppearanceExtra): void {
   const root = document.documentElement;
   preferredAccent = normalizeHex(extra.accent);
   applyAccent();
+  // Plugins read their language from <html lang>. The layout renders a
+  // fixed "en", so without this every shipped Turkish table was dead
+  // code — the panels could only ever be English.
+  root.lang = resolveAppLocale(
+    coerceLocaleChoice(extra.language),
+    typeof navigator === 'undefined' ? [] : (navigator.languages ?? [navigator.language])
+  );
   root.classList.toggle('lf-density-compact', extra.density === 'compact');
   root.classList.toggle('lf-chat-compact', extra.compactMessageSpacing);
   root.classList.toggle('lf-chat-hide-avatars', !extra.showAvatarsInChat);

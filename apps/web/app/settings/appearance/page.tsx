@@ -3,6 +3,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import SettingsShell from '@/app/SettingsShell';
 import { deriveAccent } from '@/lib/accent';
+import {
+  APP_LOCALES,
+  APP_LOCALE_LABELS,
+  coerceLocaleChoice,
+  resolveAppLocale,
+  type AppLocaleChoice,
+} from '@/lib/app-locale';
 import SettingsStickyFooter from '@/app/settings/SettingsStickyFooter';
 
 type ThemeChoice = 'dark' | 'dim' | 'light' | 'system';
@@ -21,6 +28,7 @@ type SettingsResponse = {
 
 type AppearanceExtra = {
   accent: string;
+  language: AppLocaleChoice;
   density: Density;
   compactMessageSpacing: boolean;
   showAvatarsInChat: boolean;
@@ -44,6 +52,7 @@ const ACCENT_PRESETS: { value: string; label: string }[] = [
 
 const DEFAULT_EXTRA: AppearanceExtra = {
   accent: '#8FB8FF',
+  language: 'system',
   density: 'comfortable',
   compactMessageSpacing: false,
   showAvatarsInChat: true,
@@ -79,6 +88,7 @@ function loadExtraFromStorage(): AppearanceExtra {
     const parsed = JSON.parse(raw) as Partial<AppearanceExtra>;
     return {
       accent: normalizeHex(parsed.accent ?? DEFAULT_EXTRA.accent),
+      language: coerceLocaleChoice(parsed.language),
       density: parsed.density === 'compact' ? 'compact' : 'comfortable',
       compactMessageSpacing:
         typeof parsed.compactMessageSpacing === 'boolean'
@@ -120,6 +130,10 @@ function applyAppearanceExtra(extra: AppearanceExtra): void {
   root.style.setProperty('--lf-user-accent', accent);
   root.style.setProperty('--lf-on-accent', onAccent);
   root.style.setProperty('--lf-on-accent-container', onAccent);
+  root.lang = resolveAppLocale(
+    coerceLocaleChoice(extra.language),
+    typeof navigator === 'undefined' ? [] : (navigator.languages ?? [navigator.language])
+  );
   root.classList.toggle('lf-density-compact', extra.density === 'compact');
   root.classList.toggle('lf-chat-compact', extra.compactMessageSpacing);
   root.classList.toggle('lf-chat-hide-avatars', !extra.showAvatarsInChat);
@@ -331,6 +345,29 @@ export default function AppearanceSettingsPage() {
               <span className="material-symbols-outlined text-[14px]">info</span>
               LobbyForge keeps text contrast readable automatically.
             </p>
+          </Section>
+
+          <Section title="Language">
+            <p className="mb-3 max-w-xl text-sm text-text-secondary">
+              The language games and activities are played in. LobbyForge&apos;s own menus are
+              English for now.
+            </p>
+            <div className="flex bg-surface-container rounded-lg p-1 border border-border-subtle max-w-md">
+              {(['system', ...APP_LOCALES] as AppLocaleChoice[]).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => patchExtra({ language: value })}
+                  className={`flex-1 py-2 px-4 rounded-md font-medium text-center transition-colors ${
+                    extra.language === value
+                      ? 'bg-surface-raised text-text-primary shadow-sm border border-border-subtle'
+                      : 'text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  {value === 'system' ? 'Match my browser' : APP_LOCALE_LABELS[value]}
+                </button>
+              ))}
+            </div>
           </Section>
 
           <Section title="Interface Density">
