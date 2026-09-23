@@ -79,6 +79,25 @@ export interface LobbyVoiceParticipant {
   serverMuted?: boolean;
 }
 
+/**
+ * The centre column is the app's single work surface: chat, the video
+ * grid, a direct message and the activities hub all render there. They
+ * used to be separate full-page routes, which threw away the channel
+ * list, the member roster and the voice controls on every hop.
+ */
+export type MainViewMode = 'chat' | 'voice' | 'dm' | 'activity';
+
+export interface ActiveDm {
+  channelId: string;
+  name: string;
+  avatarUrl: string | null;
+}
+
+export interface ActiveActivityChannel {
+  channelId: string;
+  channelName: string;
+}
+
 export interface LobbyVoiceContextValue {
   serverId: string;
   livekitUrl: string;
@@ -93,8 +112,16 @@ export interface LobbyVoiceContextValue {
   screenSharePreference: { quality: ScreenQuality; fps: ScreenFps };
   deafenEnabled: boolean;
   participants: LobbyVoiceParticipant[];
-  /** 'chat' = text channel visible; 'voice' = full-screen video grid. */
-  mainViewMode: 'chat' | 'voice';
+  /**
+   * What the centre column shows. Everything the user opens from the
+   * sidebar lands HERE rather than on its own page, so the channel
+   * list, the roster and the voice controls stay put.
+   */
+  mainViewMode: MainViewMode;
+  /** The conversation shown in 'dm' mode. */
+  activeDm: ActiveDm | null;
+  /** The voice channel whose activities are shown in 'activity' mode. */
+  activeActivityChannel: ActiveActivityChannel | null;
   /** Active text channel id — switchable from sidebar. */
   activeTextChannelId: string | null;
   /** Active text channel name for display. */
@@ -106,8 +133,12 @@ export interface LobbyVoiceContextValue {
   toggleScreenShare: () => Promise<void>;
   setScreenSharePreference: (quality: ScreenQuality, fps: ScreenFps) => Promise<void>;
   toggleDeafen: () => void;
-  setMainViewMode: (mode: 'chat' | 'voice') => void;
+  setMainViewMode: (mode: MainViewMode) => void;
   setActiveTextChannel: (channelId: string, channelName: string) => void;
+  /** Open a direct message in the centre column. */
+  openDm: (dm: ActiveDm) => void;
+  /** Open the activities surface for a voice channel in the centre column. */
+  openActivities: (channel: ActiveActivityChannel) => void;
   getParticipantCameraTrack: (identity: string) => MediaStreamTrack | null;
   getParticipantScreenShareTrack: (identity: string) => MediaStreamTrack | null;
   isScreenShareJoined: (identity: string) => boolean;
@@ -334,6 +365,8 @@ export interface LobbyVoiceProviderProps {
   /** Initial active text channel (from SSR). */
   initialTextChannelId?: string | null;
   initialTextChannelName?: string;
+  /** Conversation to open on first paint (a /dm/<id> deep link). */
+  initialDm?: ActiveDm | null;
   children: ReactNode;
 }
 
@@ -344,6 +377,7 @@ export function LobbyVoiceProvider({
   localDisplayName,
   initialTextChannelId,
   initialTextChannelName,
+  initialDm,
   children,
 }: LobbyVoiceProviderProps) {
   const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
@@ -368,7 +402,9 @@ export function LobbyVoiceProvider({
   const [serverMuted, setServerMuted] = useState(false);
   const [audioBlocked, setAudioBlocked] = useState(false);
   const [participants, setParticipants] = useState<LobbyVoiceParticipant[]>([]);
-  const [mainViewMode, setMainViewMode] = useState<'chat' | 'voice'>('chat');
+  const [mainViewMode, setMainViewMode] = useState<MainViewMode>(initialDm ? 'dm' : 'chat');
+  const [activeDm, setActiveDm] = useState<ActiveDm | null>(initialDm ?? null);
+  const [activeActivityChannel, setActiveActivityChannel] = useState<ActiveActivityChannel | null>(null);
   const [activeTextChannelId, setActiveTextChannelId] = useState<string | null>(initialTextChannelId ?? null);
   const [activeTextChannelName, setActiveTextChannelName] = useState<string>(initialTextChannelName ?? 'general');
 
@@ -376,6 +412,16 @@ export function LobbyVoiceProvider({
     setActiveTextChannelId(channelId);
     setActiveTextChannelName(channelName);
     setMainViewMode('chat');
+  }, []);
+
+  const openDm = useCallback((dm: ActiveDm) => {
+    setActiveDm(dm);
+    setMainViewMode('dm');
+  }, []);
+
+  const openActivities = useCallback((channel: ActiveActivityChannel) => {
+    setActiveActivityChannel(channel);
+    setMainViewMode('activity');
   }, []);
   const [guest, setGuest] = useState<Guest | null>(null);
 
@@ -955,7 +1001,9 @@ export function LobbyVoiceProvider({
     setServerMuted(false);
     setAudioBlocked(false);
     micBeforeDeafenRef.current = null;
-    setMainViewMode('chat');
+    // Leaving voice drops the video grid, but not a conversation or an
+    // activity the user is in the middle of reading.
+    setMainViewMode((mode) => (mode === 'voice' ? 'chat' : mode));
     setConnectionState(ConnectionState.Disconnected);
     setError(null);
     if (!r) return;
@@ -1483,6 +1531,8 @@ export function LobbyVoiceProvider({
       deafenEnabled,
       participants,
       mainViewMode,
+      activeDm,
+      activeActivityChannel,
       activeTextChannelId,
       activeTextChannelName,
       connectToChannel,
@@ -1494,6 +1544,8 @@ export function LobbyVoiceProvider({
       toggleDeafen,
       setMainViewMode,
       setActiveTextChannel,
+      openDm,
+      openActivities,
       getParticipantCameraTrack,
       getParticipantScreenShareTrack,
       isScreenShareJoined,
@@ -1522,6 +1574,8 @@ export function LobbyVoiceProvider({
       deafenEnabled,
       participants,
       mainViewMode,
+      activeDm,
+      activeActivityChannel,
       activeTextChannelId,
       activeTextChannelName,
       connectToChannel,
@@ -1533,6 +1587,8 @@ export function LobbyVoiceProvider({
       toggleDeafen,
       setMainViewMode,
       setActiveTextChannel,
+      openDm,
+      openActivities,
       getParticipantCameraTrack,
       getParticipantScreenShareTrack,
       isScreenShareJoined,

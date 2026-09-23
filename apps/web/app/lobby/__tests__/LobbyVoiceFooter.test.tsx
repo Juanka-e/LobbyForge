@@ -51,6 +51,10 @@ function makeVoice(overrides: Partial<LobbyVoiceContextValue> = {}): LobbyVoiceC
     getRemoteVolume: vi.fn(() => 1),
     presenceStatus: 'online',
     setPresenceStatus: vi.fn(),
+    activeDm: null,
+    activeActivityChannel: null,
+    openDm: vi.fn(),
+    openActivities: vi.fn(),
     ...overrides,
   };
 }

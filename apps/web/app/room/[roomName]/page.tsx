@@ -35,8 +35,8 @@ import {
 } from 'livekit-client';
 import { resolveBrowserLiveKitUrl } from '@/lib/public-endpoints';
 import { getPlugin } from '@/lib/plugin-registry';
-import { getRealtimeClient } from '@/lib/realtime-client';
 import { PluginSurface } from '../PluginSurface';
+import { useActivitySession } from '../useActivitySession';
 
 type Guest = { gid: string; uid: string | null; name: string };
 type Token = {
@@ -638,14 +638,6 @@ function ActivityPicker({
   );
 }
 
-type ActivityDetail = {
-  id: string;
-  pluginId: string;
-  status: string;
-  state: Record<string, unknown>;
-  createdBy: string | null;
-  players: Array<{ userId: string; name?: string | null; status: string; score: number }>;
-};
 
 /**
  * Activity panel. Polls the per-session endpoint every 2s and:
@@ -668,10 +660,12 @@ function ActivityPanel({
   actorUserId: string | null;
   onEnd: () => void;
 }) {
-  const [detail, setDetail] = useState<ActivityDetail | null>(null);
+  const { detail, error, busy, setError, dispatch: sendAction, end } = useActivitySession({
+    serverId,
+    sessionId,
+    onEnded: onEnd,
+  });
   const [actionJson, setActionJson] = useState<string>('{"type":"end"}');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   // Card packs for the lobby pack picker. Plugins that ship built-in
   // content (e.g. Hushle) read from this list when starting a new game.
   // Fetched lazily — only while the activity is in lobby phase — so we
@@ -686,118 +680,6 @@ function ActivityPanel({
       isBuiltIn: boolean;
     }>
   >([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const fetchOnce = async () => {
-      try {
-        const res = await fetch(
-          `/api/servers/${serverId}/activities/${sessionId}`,
-          { credentials: 'same-origin' }
-        );
-        if (res.status === 404) {
-          // Session ended (probably from another tab). Clear local state.
-          if (!cancelled) onEnd();
-          return;
-        }
-        if (!res.ok) {
-          throw new Error(`GET activity → ${res.status}`);
-        }
-        const data = (await res.json()) as { activity: ActivityDetail };
-        if (!cancelled) setDetail(data.activity);
-      } catch (err) {
-        if (!cancelled) setError((err as Error).message);
-      }
-    };
-
-    // Primary path: WebSocket via the realtime-client (M20-bis). The
-    // client subscribes to the per-session activity topic; the gateway
-    // pushes `event` messages as other clients dispatch actions.
-    let unsubscribe: (() => void) | null = null;
-    let pollTimer: ReturnType<typeof setInterval> | null = null;
-    let pollFallback = false;
-
-    const handleEvent = (data: unknown) => {
-      if (cancelled) return;
-      if (!data || typeof data !== 'object') return;
-      const obj = data as { type?: string; status?: string; state?: Record<string, unknown>; id?: string; pluginId?: string; publicSummary?: Record<string, unknown>; createdBy?: string; players?: unknown; at?: string };
-      if (obj.type === 'snapshot' || obj.id) {
-        // snapshot event from the activity stream — full activity payload.
-        if (!cancelled) {
-          setDetail({
-            id: obj.id ?? '',
-            pluginId: obj.pluginId ?? '',
-            status: obj.status ?? '',
-            state: obj.state ?? {},
-            createdBy: obj.createdBy ?? null,
-            players: Array.isArray(obj.players)
-              ? (obj.players as ActivityDetail['players'])
-              : [],
-          });
-        }
-      } else if (obj.status && obj.state) {
-        // state event — patch the existing detail.
-        if (!cancelled) {
-          setDetail((prev) =>
-            prev ? { ...prev, status: obj.status as string, state: obj.state as Record<string, unknown> } : prev
-          );
-        }
-      }
-    };
-
-    // beta-review: ALWAYS fetch the current state once on mount. A
-    // subscription only delivers FUTURE events, so on the WebSocket path
-    // the panel used to sit on "…" until somebody dispatched an action —
-    // a host who had just started an activity saw a dead panel and no
-    // way to start the game.
-    void fetchOnce();
-
-    try {
-      const client = getRealtimeClient();
-      client.connect();
-      unsubscribe = client.subscribe(
-        `activity-state:${serverId}:${sessionId}` as const,
-        handleEvent
-      );
-    } catch {
-      pollFallback = true;
-    }
-
-    // `connect()` is asynchronous, so the socket is still CONNECTING right
-    // here — checking readyState synchronously (the old behaviour) could
-    // never detect a failure. Re-check shortly after, and keep watching:
-    // if the socket is not OPEN we poll, and we stop polling once it is.
-    const ensureTransport = () => {
-      if (cancelled) return;
-      let open = false;
-      try {
-        open = !pollFallback && getRealtimeClient().readyState === WebSocket.OPEN;
-      } catch {
-        open = false;
-      }
-      if (open) {
-        if (pollTimer) {
-          clearInterval(pollTimer);
-          pollTimer = null;
-        }
-        return;
-      }
-      // 5s polling cadence — recovery lane when WS isn't available.
-      if (!pollTimer) pollTimer = setInterval(fetchOnce, 5_000);
-    };
-    const transportTimer = setInterval(ensureTransport, 5_000);
-    const transportDelay = setTimeout(ensureTransport, 1_500);
-
-    return () => {
-      cancelled = true;
-      if (unsubscribe) unsubscribe();
-      clearTimeout(transportDelay);
-      clearInterval(transportTimer);
-      if (pollTimer) {
-        clearInterval(pollTimer);
-      }
-    };
-  }, [serverId, sessionId, onEnd]);
 
   // Fetch the card-pack list while we're in lobby phase. The plugin
   // panel uses this to populate its pack picker.
@@ -823,84 +705,6 @@ function ActivityPanel({
     };
   }, [serverId, detail]);
 
-  const sendAction = async (body: Record<string, unknown>): Promise<boolean> => {
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await fetch(
-        `/api/servers/${serverId}/activities/${sessionId}/actions`,
-        {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          // LF-002: every dispatch carries a fresh idempotency key; a
-          // transport-level retry of THIS request reuses it server-side.
-          body: JSON.stringify({ actionId: crypto.randomUUID(), ...body }),
-        }
-      );
-      if (res.status === 409) {
-        // V4-001 reconcile: a duplicate means this action was already
-        // COMMITTED by an earlier attempt (there is no response replay
-        // server-side). Re-GET the state instead of surfacing an error —
-        // to the player the button press simply succeeded.
-        const detail = (await res.json().catch(() => ({}))) as { duplicate?: boolean };
-        if (detail.duplicate) {
-          const current = await fetch(
-            `/api/servers/${serverId}/activities/${sessionId}`,
-            { credentials: 'same-origin' }
-          );
-          if (current.ok) {
-            const data = (await current.json()) as { activity: ActivityDetail };
-            setDetail(data.activity);
-          }
-          return true;
-        }
-      }
-      if (!res.ok) {
-        const detail = await res.json().catch(() => ({}));
-        // 503 = idempotency store unavailable (retryable): a fresh press
-        // generates a fresh actionId, which is the correct user-level
-        // retry semantic.
-        throw new Error(`${res.status} ${JSON.stringify(detail)}`);
-      }
-      // Force an immediate re-fetch so the panel reflects the new state
-      // without waiting for the next 2-second poll.
-      const data = (await res.json()) as { activity: { id: string; state: Record<string, unknown>; status: string } };
-      if (!data?.activity) return true;
-      setDetail((prev) =>
-        prev
-          ? { ...prev, state: data.activity.state, status: data.activity.status }
-          : prev
-      );
-      return true;
-    } catch (err) {
-      setError((err as Error).message);
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const end = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await fetch(
-        `/api/servers/${serverId}/activities/${sessionId}/end`,
-        { method: 'POST', credentials: 'same-origin' }
-      );
-      if (!res.ok) {
-        const detail = await res.json().catch(() => ({}));
-        throw new Error(`${res.status} ${JSON.stringify(detail)}`);
-      }
-      onEnd();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   // The dispatch function handed to the plugin's renderClient. It
   // returns a promise so plugins can `await dispatch(...)` if they
   // want to; the panel ignores the return value either way.
@@ -908,9 +712,7 @@ function ActivityPanel({
     (action: Record<string, unknown>) => {
       void sendAction(action);
     },
-    // sendAction is recreated on every render but reads no deps from
-    // the closure, so we can leave it out of the deps.
-    [serverId, sessionId]
+    [sendAction]
   );
 
   const pluginClient = detail ? getPlugin(detail.pluginId) : null;

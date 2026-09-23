@@ -2,6 +2,8 @@
 
 import { useLobbyVoice, ConnectionState } from './LobbyVoiceProvider';
 import { LobbyVoiceView } from './LobbyVoiceView';
+import { LobbyDmView } from './LobbyDmView';
+import { LobbyActivityView } from './LobbyActivityView';
 import { LobbyLiveRoster } from './LobbyLiveRoster';
 import { MentionInput, type MentionUser } from './MentionInput';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
@@ -41,6 +43,8 @@ interface LobbyData {
   messages: ChatMessage[];
   isLive: boolean;
   canManageMessages: boolean;
+  canManageServer: boolean;
+  installedApps: Array<{ id: string; name: string; summary: string | null }>;
   members?: Array<{
     id: string;
     name: string;
@@ -103,6 +107,26 @@ function LobbyMainAreaLive({ data }: { data: LobbyData }) {
     });
   }
 
+  // The centre column is the single work surface: a conversation or the
+  // activities hub takes it over instead of navigating away from the
+  // lobby and throwing out the channel list, roster and voice controls.
+  if (voice.mainViewMode === 'dm' && voice.activeDm) {
+    return <LobbyDmView dm={voice.activeDm} currentUserId={data.currentUserId} />;
+  }
+
+  if (voice.mainViewMode === 'activity' && voice.activeActivityChannel && data.serverId) {
+    return (
+      <LobbyActivityView
+        serverId={data.serverId}
+        channelId={voice.activeActivityChannel.channelId}
+        channelName={voice.activeActivityChannel.channelName}
+        apps={data.installedApps}
+        currentUserId={data.currentUserId}
+        canManageServer={data.canManageServer}
+      />
+    );
+  }
+
   if (connected && voice.mainViewMode === 'voice' && voice.activeChannelId) {
     return (
       <main className="flex-1 flex flex-col bg-background min-w-0 relative animate-fade-in-up">
@@ -123,6 +147,13 @@ function LobbyMainAreaLive({ data }: { data: LobbyData }) {
         onToggleNotifications={toggleChannelNotifications}
         serverId={data.serverId}
         voiceChannelId={voice.activeChannelId ?? data.activeVoiceChannel?.id ?? null}
+        onOpenActivities={(channelId) =>
+          voice.openActivities({
+            channelId,
+            channelName:
+              data.voiceChannels.find((c) => c.id === channelId)?.name ?? 'this room',
+          })
+        }
       />
       <MessagesArea data={data} activeChannelId={activeChannelId} channelName={channelName} searchQuery={searchQuery} showPinned={showPinned} />
       <Composer
@@ -167,6 +198,7 @@ function ChannelHeader({
   onToggleNotifications,
   serverId,
   voiceChannelId,
+  onOpenActivities,
 }: {
   channelName: string;
   searchQuery: string;
@@ -177,6 +209,7 @@ function ChannelHeader({
   onToggleNotifications: () => void;
   serverId: string | null;
   voiceChannelId: string | null;
+  onOpenActivities?: (channelId: string) => void;
 }) {
   return (
     <header className="h-16 px-6 flex items-center justify-between border-b border-border-subtle bg-surface-dim/80 backdrop-blur-md z-10 sticky top-0 shadow-sm">
@@ -189,16 +222,18 @@ function ChannelHeader({
         </p>
       </div>
       <div className="flex items-center gap-4">
-        {/* Start Activity — links to the /room page where ActivityPicker lives */}
+        {/* Opens the activities hub in the centre column — it used to
+            navigate to the developer-facing /room page. */}
         {serverId && voiceChannelId ? (
-          <a
-            href={`/room/${voiceChannelId}?serverId=${serverId}&channelId=${voiceChannelId}`}
+          <button
+            type="button"
+            onClick={() => onOpenActivities?.(voiceChannelId)}
             title="Start a game or activity in this voice room"
             className="flex items-center gap-1.5 rounded-md bg-primary/10 px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
           >
             <span className="material-symbols-outlined text-[16px]">stadia_controller</span>
             <span className="hidden sm:inline">Activities</span>
-          </a>
+          </button>
         ) : null}
         <button type="button" onClick={onToggleNotifications} title={notificationsMuted ? 'Enable channel notifications' : 'Mute channel notifications'} className={notificationsMuted ? 'text-danger hover:text-danger/80' : 'hover:text-text-primary transition-colors text-text-secondary'}>
           <span className="material-symbols-outlined">{notificationsMuted ? 'notifications_off' : 'notifications'}</span>
