@@ -48,6 +48,7 @@ import { getRuntimeLiveKitUrl } from '@/lib/public-endpoints';
 import { projectServerPresenceForViewer } from '@/lib/presence-view';
 import { toPresenceStatus, type PresenceStatus } from '@/lib/presence-status';
 import { formatMessageTimestamp } from '@/lib/chat-time';
+import { getTranslator } from '@/lib/i18n/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -1250,7 +1251,8 @@ function VoiceControlFooter({ serverName, hasUser }: { serverName: string; hasUs
 }
 
 
-function MembersPanel({ data }: { data: LobbyData }) {
+async function MembersPanel({ data }: { data: LobbyData }) {
+  const t = await getTranslator();
   const online = data.members.filter((m) => m.status === 'online' || m.status === 'in-voice');
   const offline = data.members.filter((m) => m.status === 'offline');
 
@@ -1259,10 +1261,10 @@ function MembersPanel({ data }: { data: LobbyData }) {
       className="w-[200px] lg:w-[230px] flex-shrink-0 bg-surface-dim border-l border-border-subtle hidden lg:flex flex-col h-full z-20 overflow-y-auto p-4 animate-fade-in-left"
     >
       {data.members.length === 0 ? (
-        <p className="font-label-xs text-text-muted italic">No members yet.</p>
+        <p className="font-label-xs text-text-muted italic">{t('lobby.roster.empty')}</p>
       ) : null}
-        <MemberSection label={`Online - ${online.length}`} members={online} />
-        <MemberSection label={`Offline - ${offline.length}`} members={offline} dimmed />
+        <MemberSection label={t('lobby.roster.onlineGroup', { count: online.length })} members={online} />
+        <MemberSection label={t('lobby.roster.offlineGroup', { count: offline.length })} members={offline} dimmed />
     </aside>
   );
 }

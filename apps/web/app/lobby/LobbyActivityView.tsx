@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { getPlugin } from '@/lib/plugin-registry';
+import { useT } from '@/lib/i18n/client';
+import type { Translator } from '@/lib/i18n/messages';
 import { PluginSurface } from '../room/PluginSurface';
 import { findOpenActivity, useActivitySession } from '../room/useActivitySession';
 import { useLobbyVoice } from './LobbyVoiceProvider';
@@ -41,16 +43,25 @@ const APP_ACCENTS: Record<string, { spine: string; glyph: string; icon: string }
 };
 const DEFAULT_ACCENT = { spine: 'bg-secondary-container', glyph: 'text-text-secondary', icon: 'stadia_controller' };
 
-const TRUST_LABELS: Record<string, string> = {
-  official: 'Official',
-  'verified-community': 'Verified',
-  unverified: 'Unverified',
+const TRUST_KEYS: Record<string, string> = {
+  official: 'lobbyMain.activities.trustOfficial',
+  'verified-community': 'lobbyMain.activities.trustVerified',
+  unverified: 'lobbyMain.activities.trustUnverified',
 };
 
+/** A trust level we ship a word for; anything else shows its raw value. */
+function trustLabel(t: Translator, trustLevel: string): string {
+  const key = TRUST_KEYS[trustLevel];
+  return key ? t(key) : trustLevel;
+}
+
 /** "4–12 players", or null when the app declares no range. */
-function playerRange(app: InstalledApp): string | null {
+function playerRange(t: Translator, app: InstalledApp): string | null {
   if (app.minPlayers == null && app.maxPlayers == null) return null;
-  return `${app.minPlayers ?? 1}–${app.maxPlayers ?? 'any'} players`;
+  return t('lobbyMain.activities.playerRange', {
+    min: app.minPlayers ?? 1,
+    max: app.maxPlayers ?? t('lobbyMain.activities.playerRangeAny'),
+  });
 }
 
 function accentFor(pluginId: string) {
@@ -79,6 +90,7 @@ export function LobbyActivityView({
   currentUserId: string | null;
   canManageServer: boolean;
 }) {
+  const t = useT();
   const voice = useLobbyVoice();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [resolving, setResolving] = useState(true);
@@ -137,7 +149,9 @@ export function LobbyActivityView({
         }
         if (!res.ok) {
           const body = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(body.error ?? `Could not start the activity (${res.status})`);
+          throw new Error(
+            body.error ?? t('lobbyMain.activities.launchFailed', { status: res.status })
+          );
         }
         const data = (await res.json()) as { activity: { id: string } };
         setSessionId(data.activity.id);
@@ -147,7 +161,7 @@ export function LobbyActivityView({
         setLaunching(null);
       }
     },
-    [serverId, channelId]
+    [serverId, channelId, t]
   );
 
   const inLobbyPhase = (detail?.state as { phase?: unknown } | undefined)?.phase === 'lobby';
@@ -183,27 +197,32 @@ export function LobbyActivityView({
       <header className="h-16 px-6 flex items-center justify-between border-b border-border-subtle bg-surface-dim/80 backdrop-blur-md z-10 sticky top-0 shadow-sm">
         <div className="flex items-center gap-3 min-w-0">
           <span className="material-symbols-outlined text-[24px] text-text-secondary">stadia_controller</span>
-          <h2 className="font-body-lg font-bold text-text-primary truncate">Activities</h2>
+          <h2 className="font-body-lg font-bold text-text-primary truncate">
+            {t('lobbyMain.activities.title')}
+          </h2>
           <div className="h-4 w-[1px] bg-border-subtle mx-1" />
+          {/* One phrase, one key: Turkish puts the channel name first
+              and the postposition after it, so "in" cannot be a span of
+              its own with the name emphasised inside it. */}
           <p className="font-label-sm hidden md:block text-text-secondary truncate">
-            in <span className="text-text-primary">{channelName}</span>
+            {t('lobbyMain.activities.inChannel', { name: channelName })}
           </p>
         </div>
         <button
           type="button"
           onClick={() => voice.setMainViewMode('chat')}
-          title="Back to the channel"
-          aria-label="Close activities"
+          title={t('lobbyMain.activities.backTitle')}
+          aria-label={t('lobbyMain.activities.closeLabel')}
           className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors"
         >
           <span className="material-symbols-outlined text-[16px]">close</span>
-          <span className="hidden sm:inline">Close</span>
+          <span className="hidden sm:inline">{t('lobbyMain.activities.close')}</span>
         </button>
       </header>
 
       <div className="flex-1 overflow-y-auto">
         {resolving ? (
-          <p className="px-6 py-8 text-sm text-text-muted">Checking for a game in progress…</p>
+          <p className="px-6 py-8 text-sm text-text-muted">{t('lobbyMain.activities.resolving')}</p>
         ) : sessionId && detail ? (
           <section className="flex flex-col">
             {/* Status rail — what is running, where it is, who is in. */}
@@ -217,7 +236,7 @@ export function LobbyActivityView({
                   {accentFor(detail.pluginId).icon}
                 </span>
                 <span className="font-label-sm font-semibold text-text-primary truncate">{appName}</span>
-                <span className="sr-only">Live</span>
+                <span className="sr-only">{t('lobbyMain.activities.live')}</span>
               </span>
               {phase ? (
                 <span className="rounded-full border border-border-subtle bg-surface-container px-2.5 py-0.5 font-label-xs text-[11px] text-text-secondary">
@@ -226,23 +245,25 @@ export function LobbyActivityView({
               ) : null}
               <span className="flex items-center gap-1.5 font-label-xs text-[11px] text-text-secondary">
                 <span className="material-symbols-outlined text-[14px]">group</span>
-                {detail.players.length} {detail.players.length === 1 ? 'player' : 'players'}
+                {detail.players.length === 1
+                  ? t('lobbyMain.activities.playerCountOne', { count: detail.players.length })
+                  : t('lobbyMain.activities.playerCountOther', { count: detail.players.length })}
               </span>
               <div className="ml-auto flex items-center gap-2">
                 {detail.createdBy && currentUserId === detail.createdBy ? (
                   <span className="rounded-full bg-primary/15 px-2.5 py-0.5 font-label-xs text-[11px] font-medium text-primary">
-                    You are the host
+                    {t('lobbyMain.activities.host')}
                   </span>
                 ) : null}
                 <button
                   type="button"
                   onClick={() => void end()}
                   disabled={busy}
-                  title="End this activity for everyone"
+                  title={t('lobbyMain.activities.endTitle')}
                   className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-danger transition-colors hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <span className="material-symbols-outlined text-[16px]">stop_circle</span>
-                  End
+                  {t('lobbyMain.activities.end')}
                 </button>
               </div>
             </div>
@@ -274,10 +295,11 @@ export function LobbyActivityView({
         ) : (
           <section className="px-6 py-8">
             <div className="mb-6">
-              <h1 className="font-section-h2-mobile text-text-primary">Start something together</h1>
+              <h1 className="font-section-h2-mobile text-text-primary">
+                {t('lobbyMain.activities.heading')}
+              </h1>
               <p className="mt-1 max-w-xl font-body-md text-text-secondary">
-                Everyone in <span className="text-text-primary">{channelName}</span> joins the same game.
-                One activity runs per voice channel at a time.
+                {t('lobbyMain.activities.intro', { name: channelName })}
               </p>
             </div>
 
@@ -286,11 +308,13 @@ export function LobbyActivityView({
                 <span className="material-symbols-outlined text-[40px] text-text-muted" aria-hidden>
                   extension_off
                 </span>
-                <h2 className="mt-3 font-body-lg font-semibold text-text-primary">No apps installed yet</h2>
+                <h2 className="mt-3 font-body-lg font-semibold text-text-primary">
+                  {t('lobbyMain.activities.emptyTitle')}
+                </h2>
                 <p className="mx-auto mt-1 max-w-sm font-body-md text-text-secondary">
                   {canManageServer
-                    ? 'Install a game or activity and it shows up here for every member.'
-                    : 'Ask a server admin to install a game — it will show up here for everyone.'}
+                    ? t('lobbyMain.activities.emptyManage')
+                    : t('lobbyMain.activities.emptyMember')}
                 </p>
                 {canManageServer ? (
                   <Link
@@ -298,7 +322,7 @@ export function LobbyActivityView({
                     className="mt-5 inline-flex items-center gap-2 rounded-lg bg-primary-container px-4 py-2 text-sm font-semibold text-on-primary-container transition-all hover:brightness-110"
                   >
                     <span className="material-symbols-outlined text-[18px]">add</span>
-                    Install an app
+                    {t('lobbyMain.activities.install')}
                   </Link>
                 ) : null}
               </div>
@@ -333,16 +357,18 @@ export function LobbyActivityView({
                           <span className="flex flex-wrap items-center gap-2 font-label-xs text-[11px] text-text-muted">
                             {app.trustLevel ? (
                               <span className="rounded border border-border-subtle px-1.5 py-0.5">
-                                {TRUST_LABELS[app.trustLevel] ?? app.trustLevel}
+                                {trustLabel(t, app.trustLevel)}
                               </span>
                             ) : null}
-                            {playerRange(app) ? <span>{playerRange(app)}</span> : null}
+                            {playerRange(t, app) ? <span>{playerRange(t, app)}</span> : null}
                           </span>
                           <span className="mt-auto flex items-center gap-2 pt-2 font-label-xs text-[11px] text-primary">
                             <span className="material-symbols-outlined text-[16px]">
                               {isLaunching ? 'progress_activity' : 'play_arrow'}
                             </span>
-                            {isLaunching ? 'Starting…' : 'Start'}
+                            {isLaunching
+                              ? t('lobbyMain.activities.starting')
+                              : t('lobbyMain.activities.start')}
                           </span>
                         </span>
                       </button>
@@ -369,17 +395,17 @@ export function LobbyActivityView({
  * tool; players get an honest message instead.
  */
 function NoPlayerSurface({ pluginId }: { pluginId: string }) {
+  const t = useT();
   return (
     <div className="rounded-xl border border-dashed border-border-subtle bg-surface/40 px-6 py-10 text-center">
       <span className="material-symbols-outlined text-[32px] text-text-muted" aria-hidden>
         construction
       </span>
       <h2 className="mt-3 font-body-lg font-semibold text-text-primary">
-        This app has no player screen yet
+        {t('lobbyMain.activities.noSurfaceTitle')}
       </h2>
       <p className="mx-auto mt-1 max-w-sm font-body-md text-text-secondary">
-        <span className="text-text-primary">{pluginId}</span> is running, but it doesn&apos;t provide a
-        game view. Ending it frees the channel for another activity.
+        {t('lobbyMain.activities.noSurfaceBody', { name: pluginId })}
       </p>
     </div>
   );

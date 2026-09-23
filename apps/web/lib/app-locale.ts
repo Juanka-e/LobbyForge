@@ -9,10 +9,11 @@
  * matter where the user was.
  *
  * This resolves the language once, on the client, from an explicit
- * preference or the browser, and writes it to the document so plugins
- * pick it up. The app's OWN chrome is still English-only: it has no
- * translation layer at all, which is a much larger piece of work than
- * this and is deliberately not pretended at here.
+ * preference or the browser. `AppearanceRuntime` publishes the result
+ * two ways: `data-lf-locale` for plugins, and a cookie so the SERVER
+ * can translate the app's own chrome (see `lib/i18n`). The two have to
+ * agree — if they drifted, a page would render its frame in one
+ * language and the game inside it in another.
  */
 
 /** Languages the bundled plugins actually ship tables for. */

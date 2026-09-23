@@ -6,6 +6,8 @@ import {
   LobbyVoiceContext,
   type LobbyVoiceContextValue,
 } from '../LobbyVoiceProvider';
+import { I18nProvider } from '@/lib/i18n/client';
+import type { AppLocale } from '@/lib/app-locale';
 import { ConnectionState } from 'livekit-client';
 
 // Stub next/link so it renders an <a> we can query in the DOM.
@@ -59,11 +61,23 @@ function makeVoice(overrides: Partial<LobbyVoiceContextValue> = {}): LobbyVoiceC
   };
 }
 
-function renderFooter(voice: LobbyVoiceContextValue, props = { serverName: 'Community', hasUser: true }) {
+/**
+ * The footer's chrome is translated, so the language is pinned here
+ * rather than inherited from the provider's default — otherwise these
+ * assertions would quietly start testing whatever `DEFAULT_APP_LOCALE`
+ * happens to be.
+ */
+function renderFooter(
+  voice: LobbyVoiceContextValue,
+  props = { serverName: 'Community', hasUser: true },
+  locale: AppLocale = 'en'
+) {
   render(
-    <LobbyVoiceContext.Provider value={voice}>
-      <LobbyVoiceFooter {...props} />
-    </LobbyVoiceContext.Provider>
+    <I18nProvider locale={locale}>
+      <LobbyVoiceContext.Provider value={voice}>
+        <LobbyVoiceFooter {...props} />
+      </LobbyVoiceContext.Provider>
+    </I18nProvider>
   );
 }
 
@@ -137,6 +151,12 @@ describe('LobbyVoiceFooter', () => {
     renderFooter(makeVoice({ error: 'Session expired' }));
     const alert = screen.getByRole('alert');
     expect(alert).toHaveTextContent('Session expired');
+  });
+
+  it('renders its chrome in the active language', () => {
+    renderFooter(makeVoice(), { serverName: 'Community', hasUser: true }, 'tr');
+    expect(screen.getByText('Ses Hazır')).toBeInTheDocument();
+    expect(screen.getByTitle('Bağlantıyı kes')).toBeInTheDocument();
   });
 
   it('links to /settings/voice-video for the settings shortcut', () => {

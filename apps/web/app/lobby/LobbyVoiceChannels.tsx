@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { useT } from '@/lib/i18n/client';
 import { useLobbyVoice, type LobbyVoiceParticipant } from './LobbyVoiceProvider';
 import Link from 'next/link';
 
@@ -52,6 +53,7 @@ export function LobbyVoiceChannels({
   currentUserId,
   canMuteMembers = false,
 }: LobbyVoiceChannelsProps) {
+  const t = useT();
   const voice = useLobbyVoice();
   const [moderationError, setModerationError] = useState<string | null>(null);
   const [pendingMute, setPendingMute] = useState<string | null>(null);
@@ -75,15 +77,17 @@ export function LobbyVoiceChannels({
         );
         if (!res.ok) {
           const detail = (await res.json().catch(() => ({}))) as { error?: string };
-          setModerationError(detail.error ?? `Could not change server mute (${res.status}).`);
+          setModerationError(
+            detail.error ?? t('lobbyMain.voice.muteFailedStatus', { status: res.status })
+          );
         }
       } catch {
-        setModerationError('Could not change server mute.');
+        setModerationError(t('lobbyMain.voice.muteFailed'));
       } finally {
         setPendingMute(null);
       }
     },
-    [voice.serverId]
+    [t, voice.serverId]
   );
   const connectedId = voice.activeChannelId;
   const voiceChannelIdsRef = useRef(new Set(channels.map((c) => c.id)));
@@ -92,7 +96,7 @@ export function LobbyVoiceChannels({
   // Name cache: userId → displayName. Seeded from SSR, updated by polls.
   const [nameCache, setNameCache] = useState<Record<string, string>>(() => {
     const cache: Record<string, string> = {};
-    if (currentUserId) cache[currentUserId] = 'You';
+    if (currentUserId) cache[currentUserId] = t('lobbyMain.chat.you');
     for (const users of Object.values(initialVoiceUsersByChannel)) {
       for (const u of users) cache[u.id] = u.name;
     }
@@ -164,7 +168,7 @@ export function LobbyVoiceChannels({
     <div>
       <div className="flex items-center justify-between mb-2 group cursor-pointer">
         <h3 className="font-label-xs uppercase tracking-wider group-hover:text-text-secondary transition-colors text-text-secondary">
-          Voice Channels
+          {t('lobbyMain.voice.heading')}
         </h3>
         <span className="material-symbols-outlined text-[16px] opacity-0 group-hover:opacity-100 transition-opacity text-text-secondary">
           add
@@ -173,7 +177,7 @@ export function LobbyVoiceChannels({
       <ul className="space-y-[2px]">
         {channels.length === 0 ? (
           <li className="px-2 py-1 text-label-xs text-text-muted italic">
-            No voice channels yet
+            {t('lobbyMain.voice.empty')}
           </li>
         ) : null}
         {channels.map((c) => {
@@ -190,7 +194,7 @@ export function LobbyVoiceChannels({
             participants = userIds.map((uid) => ({
               id: uid,
               identity: uid,
-              name: nameCache[uid] ?? 'User',
+              name: nameCache[uid] ?? t('lobbyMain.chat.unknownUser'),
               isLocal: uid === currentUserId,
               isSpeaking: false,
               micEnabled: true,
@@ -231,12 +235,12 @@ export function LobbyVoiceChannels({
                   <span className="font-label-sm font-medium truncate">{c.name}</span>
                   {isConnecting ? (
                     <span className="text-[10px] uppercase tracking-wider text-text-muted ml-1">
-                      connecting…
+                      {t('lobbyMain.voice.connecting')}
                     </span>
                   ) : null}
                   {!isConnected && participants.length > 0 ? (
                     <span className="text-[10px] text-text-muted ml-1">
-                      {participants.length} in voice
+                      {t('lobbyMain.voice.inVoice', { count: participants.length })}
                     </span>
                   ) : null}
                 </button>
@@ -245,8 +249,8 @@ export function LobbyVoiceChannels({
                     type="button"
                     onClick={() => voice.setMainViewMode('voice')}
                     className="grid size-7 flex-none place-items-center rounded text-primary hover:bg-surface-raised"
-                    title="Open voice view"
-                    aria-label={`Open ${c.name} voice view`}
+                    title={t('lobbyMain.voice.openTitle')}
+                    aria-label={t('lobbyMain.voice.openLabel', { name: c.name })}
                   >
                     <span className="material-symbols-outlined text-[16px]" aria-hidden>video_call</span>
                   </button>
@@ -254,8 +258,8 @@ export function LobbyVoiceChannels({
                 <Link
                   href="/admin/settings/channels"
                   className="mr-1 grid size-7 flex-none place-items-center rounded text-text-secondary opacity-0 transition-opacity hover:bg-surface-raised hover:text-text-primary group-hover:opacity-100 focus-visible:opacity-100"
-                  title="Channel settings"
-                  aria-label={`Settings for ${c.name}`}
+                  title={t('lobbyMain.voice.settingsTitle')}
+                  aria-label={t('lobbyMain.voice.settingsLabel', { name: c.name })}
                 >
                   <span className="material-symbols-outlined text-[16px]" aria-hidden>settings</span>
                 </Link>
@@ -290,8 +294,8 @@ export function LobbyVoiceChannels({
                       {u.serverMuted ? (
                         <span
                           className="material-symbols-outlined text-[14px] text-danger"
-                          title="Server muted"
-                          aria-label="Server muted"
+                          title={t('lobbyMain.voice.serverMuted')}
+                          aria-label={t('lobbyMain.voice.serverMuted')}
                         >
                           block
                         </span>
@@ -308,8 +312,16 @@ export function LobbyVoiceChannels({
                             event.stopPropagation();
                             void setServerMute(c.id, u.identity, !u.serverMuted);
                           }}
-                          title={u.serverMuted ? `Remove server mute for ${u.name}` : `Server mute ${u.name}`}
-                          aria-label={u.serverMuted ? `Remove server mute for ${u.name}` : `Server mute ${u.name}`}
+                          title={
+                            u.serverMuted
+                              ? t('lobbyMain.voice.serverUnmute', { name: u.name })
+                              : t('lobbyMain.voice.serverMute', { name: u.name })
+                          }
+                          aria-label={
+                            u.serverMuted
+                              ? t('lobbyMain.voice.serverUnmute', { name: u.name })
+                              : t('lobbyMain.voice.serverMute', { name: u.name })
+                          }
                           className="grid size-5 place-items-center rounded text-text-muted opacity-0 transition-opacity hover:text-danger group-hover:opacity-100 focus-visible:opacity-100 disabled:opacity-40"
                         >
                           <span className="material-symbols-outlined text-[14px]" aria-hidden>
@@ -318,10 +330,10 @@ export function LobbyVoiceChannels({
                         </button>
                       ) : null}
                       {u.cameraEnabled ? (
-                        <span className="material-symbols-outlined text-[14px] text-primary" title="Camera on" aria-label="Camera on">videocam</span>
+                        <span className="material-symbols-outlined text-[14px] text-primary" title={t('lobbyMain.voice.cameraOn')} aria-label={t('lobbyMain.voice.cameraOn')}>videocam</span>
                       ) : null}
                       {u.hasScreenShare ? (
-                        <span className="material-symbols-outlined text-[14px] text-success" title="Sharing screen" aria-label="Sharing screen">present_to_all</span>
+                        <span className="material-symbols-outlined text-[14px] text-success" title={t('lobbyMain.voice.sharingScreen')} aria-label={t('lobbyMain.voice.sharingScreen')}>present_to_all</span>
                       ) : null}
                     </li>
                   ))}

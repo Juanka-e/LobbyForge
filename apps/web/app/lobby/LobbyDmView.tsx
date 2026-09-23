@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { getRealtimeClient } from '@/lib/realtime-client';
+import { useT } from '@/lib/i18n/client';
 import { useLobbyVoice, type ActiveDm } from './LobbyVoiceProvider';
 import {
   formatDaySeparator,
@@ -43,6 +44,7 @@ export function LobbyDmView({
       next to the other person's real name. */
   currentDisplayName: string;
 }) {
+  const t = useT();
   const voice = useLobbyVoice();
   const [messages, setMessages] = useState<DmMessage[]>([]);
   const [draft, setDraft] = useState('');
@@ -57,7 +59,7 @@ export function LobbyDmView({
         credentials: 'same-origin',
         cache: 'no-store',
       });
-      if (!res.ok) throw new Error(`Failed to load messages (${res.status})`);
+      if (!res.ok) throw new Error(t('lobbyMain.dm.loadFailed', { status: res.status }));
       const data = (await res.json()) as { messages?: DmMessage[] };
       // The API returns newest-first; the transcript reads oldest-first.
       setMessages([...(data.messages ?? [])].reverse());
@@ -67,7 +69,7 @@ export function LobbyDmView({
     } finally {
       setLoading(false);
     }
-  }, [dm.channelId]);
+  }, [dm.channelId, t]);
 
   useEffect(() => {
     setLoading(true);
@@ -114,7 +116,7 @@ export function LobbyDmView({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content }),
       });
-      if (!res.ok) throw new Error(`Failed to send (${res.status})`);
+      if (!res.ok) throw new Error(t('lobbyMain.dm.sendFailed', { status: res.status }));
       setDraft('');
       await load();
     } catch (err) {
@@ -130,7 +132,7 @@ export function LobbyDmView({
     const out: Array<{ key: string; authorId: string; at: string; items: DmMessage[]; dayLabel: string | null }> = [];
     let lastDay = '';
     for (const message of messages) {
-      const day = formatDaySeparator(message.createdAt);
+      const day = formatDaySeparator(message.createdAt, t);
       const dayLabel = day !== lastDay ? day : null;
       lastDay = day;
       const previous = out[out.length - 1];
@@ -153,7 +155,7 @@ export function LobbyDmView({
       });
     }
     return out;
-  }, [messages]);
+  }, [messages, t]);
 
   const initial = dm.name.trim().charAt(0).toUpperCase() || '?';
 
@@ -171,23 +173,23 @@ export function LobbyDmView({
           </div>
           <h2 className="font-body-lg font-bold text-text-primary truncate">{dm.name}</h2>
           <div className="h-4 w-[1px] bg-border-subtle mx-1" />
-          <p className="font-label-sm hidden md:block text-text-secondary">Direct message</p>
+          <p className="font-label-sm hidden md:block text-text-secondary">{t('lobbyMain.dm.subtitle')}</p>
         </div>
         <button
           type="button"
           onClick={() => voice.setMainViewMode('chat')}
-          title="Back to the channel"
-          aria-label="Close conversation"
+          title={t('lobbyMain.dm.backTitle')}
+          aria-label={t('lobbyMain.dm.closeLabel')}
           className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors"
         >
           <span className="material-symbols-outlined text-[16px]">close</span>
-          <span className="hidden sm:inline">Close</span>
+          <span className="hidden sm:inline">{t('lobbyMain.dm.close')}</span>
         </button>
       </header>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-6" role="log" aria-live="polite">
         {loading ? (
-          <p className="text-sm text-text-muted">Loading conversation…</p>
+          <p className="text-sm text-text-muted">{t('lobbyMain.dm.loading')}</p>
         ) : groups.length === 0 ? (
           <div className="py-12 flex flex-col items-start">
             <div className="w-16 h-16 rounded-full bg-secondary-container flex items-center justify-center mb-4 overflow-hidden">
@@ -200,14 +202,14 @@ export function LobbyDmView({
             </div>
             <h1 className="font-section-h2-mobile text-text-primary mb-2">{dm.name}</h1>
             <p className="font-body-md text-text-secondary">
-              This is the beginning of your direct message history with {dm.name}.
+              {t('lobbyMain.dm.emptyBody', { name: dm.name })}
             </p>
           </div>
         ) : (
           <div className="flex min-h-full flex-col justify-end space-y-1">
             {groups.map((group) => {
               const mine = group.authorId === currentUserId;
-              const author = mine ? currentDisplayName || 'You' : dm.name;
+              const author = mine ? currentDisplayName || t('lobbyMain.chat.you') : dm.name;
               return (
                 <div key={group.key}>
                   {group.dayLabel ? (
@@ -239,7 +241,7 @@ export function LobbyDmView({
                           className="font-label-xs text-[11px] text-text-secondary"
                           title={formatFullTimestamp(group.at)}
                         >
-                          {formatMessageTimestamp(group.at)}
+                          {formatMessageTimestamp(group.at, t)}
                         </span>
                       </div>
                       {group.items.map((message) => (
@@ -249,7 +251,7 @@ export function LobbyDmView({
                             message.deletedAt ? 'italic text-text-muted' : 'text-text-secondary'
                           }`}
                         >
-                          {message.deletedAt ? 'message deleted' : message.content}
+                          {message.deletedAt ? t('lobbyMain.dm.deleted') : message.content}
                         </p>
                       ))}
                     </div>
@@ -272,16 +274,16 @@ export function LobbyDmView({
             type="text"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder={`Message ${dm.name}`}
+            placeholder={t('lobbyMain.dm.placeholder', { name: dm.name })}
             maxLength={4000}
-            aria-label={`Message ${dm.name}`}
+            aria-label={t('lobbyMain.dm.placeholder', { name: dm.name })}
             className="flex-1 bg-transparent py-1.5 text-sm text-text-primary placeholder:text-text-muted outline-none"
           />
           <button
             type="submit"
             disabled={!draft.trim() || sending}
-            title="Send"
-            aria-label="Send message"
+            title={t('lobbyMain.dm.sendTitle')}
+            aria-label={t('lobbyMain.dm.sendLabel')}
             className="flex items-center justify-center rounded-lg bg-primary-container px-3 py-1.5 text-on-primary-container transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-30"
           >
             <span className="material-symbols-outlined text-[18px]">send</span>

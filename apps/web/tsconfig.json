@@ -18,6 +18,15 @@
     },
     "plugins": [{ "name": "next" }]
   },
-  "include": ["next-env.d.ts", "src/**/*", "app/**/*", "lib/**/*.ts", "instrumentation.ts", ".next/types/**/*.ts"],
+  "include": [
+    "next-env.d.ts",
+    "src/**/*",
+    "app/**/*",
+    "lib/**/*.ts",
+    "lib/**/*.tsx",
+    "messages/**/*.json",
+    "instrumentation.ts",
+    ".next/types/**/*.ts"
+  ],
   "exclude": ["node_modules", ".next", "dist"]
 }

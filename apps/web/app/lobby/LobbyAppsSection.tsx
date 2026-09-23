@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useT } from '@/lib/i18n/client';
 import { useLobbyVoice } from './LobbyVoiceProvider';
 import type { InstalledApp } from './page';
 
@@ -28,6 +29,7 @@ export function LobbyAppsSection({
   serverId: string | null;
   canManageServer: boolean;
 }) {
+  const t = useT();
   const voice = useLobbyVoice();
   const open = Boolean(serverId && voiceChannelId);
   const active =
@@ -43,13 +45,13 @@ export function LobbyAppsSection({
     <div>
       <div className="flex items-center justify-between px-2 mb-2">
         <h3 className="font-label-xs uppercase tracking-wider text-text-muted font-bold">
-          Activities
+          {t('lobby.apps.title')}
         </h3>
         {canManageServer ? (
           <Link
             href="/admin/apps"
-            title="Install or remove apps"
-            aria-label="Install or remove apps"
+            title={t('lobby.apps.manage')}
+            aria-label={t('lobby.apps.manage')}
             className="text-text-muted hover:text-text-primary transition-colors"
           >
             <span className="material-symbols-outlined text-[16px]">add</span>
@@ -64,8 +66,8 @@ export function LobbyAppsSection({
         aria-current={active ? 'page' : undefined}
         title={
           open
-            ? `Open activities in ${voiceChannelName}`
-            : 'Activities need a voice channel'
+            ? t('lobby.apps.openIn', { channel: voiceChannelName })
+            : t('lobby.apps.needsVoice')
         }
         className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors ${
           active
@@ -80,7 +82,7 @@ export function LobbyAppsSection({
           stadia_controller
         </span>
         <span className="font-label-sm truncate">
-          {apps.length > 0 ? 'Play together' : 'Activities'}
+          {apps.length > 0 ? t('lobby.apps.playTogether') : t('lobby.apps.title')}
         </span>
         {apps.length > 0 ? (
           <span className="ml-auto rounded-full bg-surface-container-high px-1.5 py-0.5 font-label-xs text-[10px] text-text-muted">
@@ -93,14 +95,14 @@ export function LobbyAppsSection({
         <p className="mt-1 px-2 text-[11px] leading-relaxed text-text-muted">
           {canManageServer ? (
             <>
-              No apps yet —{' '}
+              {t('lobby.apps.emptyLead')}{' '}
               <Link href="/admin/apps" className="text-primary hover:underline">
-                install one
+                {t('lobby.apps.emptyInstallLink')}
               </Link>
               .
             </>
           ) : (
-            'No apps yet — ask a server admin.'
+            t('lobby.apps.emptyMember')
           )}
         </p>
       ) : (
@@ -111,7 +113,7 @@ export function LobbyAppsSection({
                 type="button"
                 onClick={openHub}
                 disabled={!open}
-                title={app.summary ?? `Start ${app.name}`}
+                title={app.summary ?? t('lobby.apps.start', { name: app.name })}
                 className="rounded-full border border-border-subtle px-2 py-0.5 font-label-xs text-[11px] text-text-secondary transition-colors hover:border-primary/40 hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {app.name}

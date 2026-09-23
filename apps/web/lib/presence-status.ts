@@ -12,19 +12,41 @@
 export const PRESENCE_STATUSES = ['online', 'idle', 'dnd', 'offline'] as const;
 export type PresenceStatus = (typeof PRESENCE_STATUSES)[number];
 
-/** `offline` is what Discord calls "invisible" when YOU pick it. */
+/**
+ * Message KEYS, not text.
+ *
+ * This module is imported by client components AND by server code, so it
+ * cannot hold a hook and must not bake one language in. It names the
+ * strings; the caller resolves them with its own translator
+ * (`useT()` in a client component, `getTranslator()` on the server).
+ *
+ * `offline` is what Discord calls "invisible" when YOU pick it.
+ */
+export const PRESENCE_LABEL_KEYS: Record<PresenceStatus, string> = {
+  online: 'lobby.presence.online.label',
+  idle: 'lobby.presence.idle.label',
+  dnd: 'lobby.presence.dnd.label',
+  offline: 'lobby.presence.offline.label',
+};
+
+export const PRESENCE_DESCRIPTION_KEYS: Record<PresenceStatus, string> = {
+  online: 'lobby.presence.online.description',
+  idle: 'lobby.presence.idle.description',
+  dnd: 'lobby.presence.dnd.description',
+  offline: 'lobby.presence.offline.description',
+};
+
+/**
+ * @deprecated English-only fallback for the surfaces that have not been
+ * migrated to `PRESENCE_LABEL_KEYS` yet (the member roster). Reach for
+ * the key map plus a translator in anything new; delete this once the
+ * last caller is gone.
+ */
 export const PRESENCE_LABELS: Record<PresenceStatus, string> = {
   online: 'Online',
   idle: 'Idle',
   dnd: 'Do Not Disturb',
   offline: 'Invisible',
-};
-
-export const PRESENCE_DESCRIPTIONS: Record<PresenceStatus, string> = {
-  online: 'Visible to everyone in the community.',
-  idle: 'Away from keyboard.',
-  dnd: 'Visible, but asking not to be disturbed.',
-  offline: 'You appear offline. Voice still works.',
 };
 
 export const PRESENCE_ICONS: Record<PresenceStatus, string> = {

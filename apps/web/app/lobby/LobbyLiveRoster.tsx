@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useRef, useState, useCallback } from 'react';
 import { getRealtimeClient } from '@/lib/realtime-client';
+import { useT } from '@/lib/i18n/client';
 import {
   formatDaySeparator,
   formatFullTimestamp,
@@ -71,15 +72,14 @@ export interface LobbyLiveRosterData {
 
 const PRESENCE_POLL_MS = 8_000;
 
-const formatTimestamp = formatMessageTimestamp;
-
 /** The rule between two days of conversation. */
 function DaySeparator({ at }: { at: string }) {
+  const t = useT();
   return (
     <div className="flex items-center gap-3 py-1" aria-hidden>
       <div className="h-px flex-1 bg-border-subtle/60" />
       <span className="font-label-xs text-[11px] uppercase tracking-wider text-text-muted">
-        {formatDaySeparator(at)}
+        {formatDaySeparator(at, t)}
       </span>
       <div className="h-px flex-1 bg-border-subtle/60" />
     </div>
@@ -87,6 +87,7 @@ function DaySeparator({ at }: { at: string }) {
 }
 
 export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: { data: LobbyLiveRosterData; searchQuery?: string; showPinned?: boolean }) {
+  const t = useT();
   const [messages, setMessages] = useState<ChatMessage[]>(data.initialMessages);
   const nameCacheRef = useRef<Map<string, string>>(new Map(Object.entries(data.knownNames)));
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -138,9 +139,13 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
         setMessages(body.messages.map((message) => ({
           id: message.id,
           authorId: message.userId,
-          author: message.blocked ? 'Blocked user' : message.userId ? (nameCacheRef.current.get(message.userId) ?? 'User') : 'Deleted User',
+          author: message.blocked
+            ? t('lobbyMain.chat.blockedUser')
+            : message.userId
+              ? (nameCacheRef.current.get(message.userId) ?? t('lobbyMain.chat.unknownUser'))
+              : t('lobbyMain.chat.deletedUser'),
           authorColor: message.userId === data.currentUserId ? 'primary' : 'default',
-          timestamp: formatTimestamp(message.createdAt),
+          timestamp: formatMessageTimestamp(message.createdAt, t),
           createdAt: message.createdAt,
           body: message.content,
           blocked: message.blocked,
@@ -152,7 +157,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
     }
     void loadMessages();
     return () => { cancelled = true; };
-  }, [data.channelId, data.currentUserId, data.serverId]);
+  }, [data.channelId, data.currentUserId, data.serverId, t]);
 
   // ---- Chat WS subscribe ----
   useEffect(() => {
@@ -161,7 +166,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
     const unsubscribe = rc.subscribe<WsChatEnvelope>(topic, (env) => {
       if (!env || env.type !== 'message' || !env.message) return;
       const m = env.message;
-      const author = nameCacheRef.current.get(m.userId) ?? 'User';
+      const author = nameCacheRef.current.get(m.userId) ?? t('lobbyMain.chat.unknownUser');
       setMessages((prev) => {
         if (prev.some((x) => x.id === m.id)) return prev;
         const next: ChatMessage = {
@@ -169,7 +174,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
           authorId: m.userId,
           author,
           authorColor: m.userId === data.currentUserId ? 'primary' : 'default',
-          timestamp: formatTimestamp(m.createdAt),
+          timestamp: formatMessageTimestamp(m.createdAt, t),
           createdAt: m.createdAt,
           body: m.content,
         };
@@ -191,8 +196,8 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
         Notification.permission === 'granted' &&
         document.visibilityState !== 'visible'
       ) {
-        new Notification(`${author} in #${data.channelName}`, {
-          body: prefs.showPreview ? m.content : 'New message',
+        new Notification(t('lobbyMain.chat.notificationTitle', { author, channel: data.channelName }), {
+          body: prefs.showPreview ? m.content : t('lobbyMain.chat.notificationBody'),
           silent: prefs.sound === 'none',
           tag: `lf-message:${data.channelId}`,
         });
@@ -201,7 +206,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
     return () => {
       unsubscribe();
     };
-  }, [data.serverId, data.channelId, data.channelName, data.currentUserId]);
+  }, [data.serverId, data.channelId, data.channelName, data.currentUserId, t]);
 
   // ---- Local message echo — listens for 'lf-message-sent' custom events
   // dispatched by the Composer after a successful POST. This provides
@@ -216,13 +221,15 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
       const m = detail.message;
       setMessages((prev) => {
         if (prev.some((x) => x.id === m.id)) return prev;
-        const author = m.userId ? (nameCacheRef.current.get(m.userId) ?? 'You') : 'Deleted User';
+        const author = m.userId
+          ? (nameCacheRef.current.get(m.userId) ?? t('lobbyMain.chat.you'))
+          : t('lobbyMain.chat.deletedUser');
         const next: ChatMessage = {
           id: m.id,
           authorId: m.userId,
           author,
           authorColor: m.userId === data.currentUserId ? 'primary' : 'default',
-          timestamp: formatTimestamp(m.createdAt),
+          timestamp: formatMessageTimestamp(m.createdAt, t),
           createdAt: m.createdAt,
           body: m.content,
         };
@@ -231,7 +238,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
     }
     window.addEventListener('lf-message-sent', onMessageSent as EventListener);
     return () => window.removeEventListener('lf-message-sent', onMessageSent as EventListener);
-  }, [data.channelId, data.currentUserId]);
+  }, [data.channelId, data.currentUserId, t]);
 
   // ---- Presence polling (channel only — server-wide members panel uses
   // the initial SSR snapshot until the next navigation) ----
@@ -247,13 +254,13 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
       if (!body.presences) return;
       for (const p of body.presences) {
         if (p.userId && !nameCacheRef.current.has(p.userId)) {
-          nameCacheRef.current.set(p.userId, 'User');
+          nameCacheRef.current.set(p.userId, t('lobbyMain.chat.unknownUser'));
         }
       }
     } catch {
       // Network/endpoint hiccups are fine — next poll will retry.
     }
-  }, [data.serverId, data.voiceChannelId]);
+  }, [data.serverId, data.voiceChannelId, t]);
 
   // ---- Typing indicator poll ----
   const [typers, setTypers] = useState<string[]>([]);
@@ -292,10 +299,10 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
       {visibleMessages.length === 0 ? (
         <p className="font-body-md text-text-muted italic">
           {showPinned
-            ? 'No pinned messages in this channel.'
+            ? t('lobbyMain.chat.emptyPinned')
             : normalizedSearch
-              ? 'No messages match your search.'
-              : 'No messages yet. Be the first to say something.'}
+              ? t('lobbyMain.chat.emptySearch')
+              : t('lobbyMain.chat.empty')}
         </p>
       ) : null}
       {visibleMessages.map((m, index) => {
@@ -321,10 +328,10 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
           </div>
           <span>
             {typers.length === 1
-              ? `${typers[0]} is typing...`
+              ? t('lobbyMain.chat.typingOne', { first: typers[0] ?? '' })
               : typers.length === 2
-                ? `${typers[0]} and ${typers[1]} are typing...`
-                : `${typers[0]} and ${typers.length - 1} others are typing...`}
+                ? t('lobbyMain.chat.typingTwo', { first: typers[0] ?? '', second: typers[1] ?? '' })
+                : t('lobbyMain.chat.typingMany', { first: typers[0] ?? '', count: typers.length - 1 })}
           </span>
         </div>
       ) : null}
@@ -334,6 +341,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
 }
 
 function LiveMessage({ message, currentUserId, serverId, channelId, canManageMessages, onPinnedChange }: { message: ChatMessage; currentUserId: string | null; serverId: string; channelId: string; canManageMessages: boolean; onPinnedChange: (pinned: boolean) => void }) {
+  const t = useT();
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(message.body);
   const isOwn = message.authorId === currentUserId;
@@ -385,7 +393,7 @@ function LiveMessage({ message, currentUserId, serverId, channelId, canManageMes
           <span className="material-symbols-outlined text-danger text-[20px]">block</span>
         </div>
         <div className="flex flex-col w-full">
-          <span className="font-label-sm font-medium text-text-muted">Blocked user</span>
+          <span className="font-label-sm font-medium text-text-muted">{t('lobbyMain.chat.blockedUser')}</span>
           <p className="font-body-md text-text-muted mt-1 italic">{message.body}</p>
         </div>
       </div>
@@ -406,7 +414,7 @@ function LiveMessage({ message, currentUserId, serverId, channelId, canManageMes
           >
             {message.timestamp}
           </span>
-          {message.pinned ? <span className="material-symbols-outlined text-[13px] text-primary" title="Pinned">push_pin</span> : null}
+          {message.pinned ? <span className="material-symbols-outlined text-[13px] text-primary" title={t('lobbyMain.chat.pinned')}>push_pin</span> : null}
         </div>
         {editing ? (
           <div className="mt-1 flex gap-2">
@@ -417,8 +425,8 @@ function LiveMessage({ message, currentUserId, serverId, channelId, canManageMes
               autoFocus
               className="flex-1 bg-surface-container border border-border-subtle rounded px-2 py-1 text-body-md text-text-primary outline-none focus:border-primary"
             />
-            <button onClick={saveEdit} className="text-xs px-2 py-1 bg-primary-container text-on-primary-container rounded font-medium">Save</button>
-            <button onClick={() => setEditing(false)} className="text-xs px-2 py-1 text-text-secondary hover:text-text-primary">Cancel</button>
+            <button onClick={saveEdit} className="text-xs px-2 py-1 bg-primary-container text-on-primary-container rounded font-medium">{t('lobbyMain.chat.save')}</button>
+            <button onClick={() => setEditing(false)} className="text-xs px-2 py-1 text-text-secondary hover:text-text-primary">{t('lobbyMain.chat.cancel')}</button>
           </div>
         ) : (
           <p className="font-body-md text-text-secondary mt-1 whitespace-pre-wrap">{message.body}</p>
@@ -430,7 +438,7 @@ function LiveMessage({ message, currentUserId, serverId, channelId, canManageMes
           {canManageMessages ? <button
             type="button"
             onClick={() => void togglePinned()}
-            title={message.pinned ? 'Unpin' : 'Pin'}
+            title={message.pinned ? t('lobbyMain.chat.unpin') : t('lobbyMain.chat.pin')}
             className={message.pinned ? 'p-1 text-primary' : 'p-1 text-text-secondary hover:text-primary'}
           >
             <span className="material-symbols-outlined text-[16px]">push_pin</span>
@@ -438,7 +446,7 @@ function LiveMessage({ message, currentUserId, serverId, channelId, canManageMes
           {isOwn ? <button
             type="button"
             onClick={() => { setEditing(true); setEditValue(message.body); }}
-            title="Edit"
+            title={t('lobbyMain.chat.edit')}
             className="p-1 text-text-secondary hover:text-text-primary"
           >
             <span className="material-symbols-outlined text-[16px]">edit</span>
@@ -446,7 +454,7 @@ function LiveMessage({ message, currentUserId, serverId, channelId, canManageMes
           <button
             type="button"
             onClick={deleteMessage}
-            title="Delete"
+            title={t('lobbyMain.chat.delete')}
             className="p-1 text-text-secondary hover:text-danger"
           >
             <span className="material-symbols-outlined text-[16px]">delete</span>
@@ -458,16 +466,17 @@ function LiveMessage({ message, currentUserId, serverId, channelId, canManageMes
 }
 
 function ChannelWelcome({ channelName }: { channelName: string }) {
+  const t = useT();
   return (
     <div className="py-12 flex flex-col items-start border-b border-border-subtle/30 mb-4">
       <div className="w-16 h-16 rounded-full bg-surface-container flex items-center justify-center mb-4">
         <span className="material-symbols-outlined text-[32px] text-text-primary">tag</span>
       </div>
       <h1 className="font-section-h2-mobile text-text-primary mb-2">
-        Welcome to #{channelName}!
+        {t('lobbyMain.channel.welcomeTitle', { name: channelName })}
       </h1>
       <p className="font-body-md text-text-secondary">
-        This is the start of the #{channelName} channel. Keep discussions focused and respectful.
+        {t('lobbyMain.channel.welcomeBody', { name: channelName })}
       </p>
     </div>
   );

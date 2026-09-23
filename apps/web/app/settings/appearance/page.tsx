@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import SettingsShell from '@/app/SettingsShell';
 import { deriveAccent } from '@/lib/accent';
+import { clearLocaleCookie, serializeLocaleCookie } from '@/lib/i18n/locale-cookie';
 import {
   APP_LOCALES,
   APP_LOCALE_LABELS,
@@ -130,13 +131,21 @@ function applyAppearanceExtra(extra: AppearanceExtra): void {
   root.style.setProperty('--lf-user-accent', accent);
   root.style.setProperty('--lf-on-accent', onAccent);
   root.style.setProperty('--lf-on-accent-container', onAccent);
-  // `data-lf-locale`, NOT `<html lang>`: the chrome around the plugin is
-  // English, and claiming the document is Turkish makes CSS uppercase
-  // apply Turkish casing to it ("ACTIVITIES" → "ACTİVİTİES").
-  root.dataset.lfLocale = resolveAppLocale(
+  const locale = resolveAppLocale(
     coerceLocaleChoice(extra.language),
     typeof navigator === 'undefined' ? [] : (navigator.languages ?? [navigator.language])
   );
+  root.dataset.lfLocale = locale;
+  try {
+    // "Follow my browser" stores NO cookie, so the server keeps
+    // negotiating from Accept-Language instead of freezing today's answer.
+    document.cookie =
+      coerceLocaleChoice(extra.language) === 'system'
+        ? clearLocaleCookie()
+        : serializeLocaleCookie(locale);
+  } catch {
+    // Cookies blocked — the server keeps its negotiated default.
+  }
   root.classList.toggle('lf-density-compact', extra.density === 'compact');
   root.classList.toggle('lf-chat-compact', extra.compactMessageSpacing);
   root.classList.toggle('lf-chat-hide-avatars', !extra.showAvatarsInChat);
@@ -228,6 +237,21 @@ export default function AppearanceSettingsPage() {
       applyAppearanceExtra(next);
       return next;
     });
+  }
+
+  /**
+   * Changing the language has to reload: the chrome is translated during
+   * the SERVER render, from the cookie written above. Re-rendering on the
+   * client alone would leave every server-rendered string in the old
+   * language until the next navigation.
+   */
+  function selectLanguage(language: AppLocaleChoice) {
+    if (language === extra.language) return;
+    const next = { ...extra, language };
+    setExtra(next);
+    applyAppearanceExtra(next);
+    saveExtraToStorage(next);
+    window.location.reload();
   }
 
   function selectAccent(accent: string) {
@@ -360,7 +384,7 @@ export default function AppearanceSettingsPage() {
                 <button
                   key={value}
                   type="button"
-                  onClick={() => patchExtra({ language: value })}
+                  onClick={() => selectLanguage(value)}
                   className={`flex-1 py-2 px-4 rounded-md font-medium text-center transition-colors ${
                     extra.language === value
                       ? 'bg-surface-raised text-text-primary shadow-sm border border-border-subtle'
