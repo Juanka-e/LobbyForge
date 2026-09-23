@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { deriveAccent } from '@/lib/accent';
 
 type ThemeChoice = 'dark' | 'dim' | 'light' | 'system';
 type Density = 'comfortable' | 'compact';
@@ -72,6 +73,34 @@ function loadExtra(): AppearanceExtra {
   }
 }
 
+/**
+ * The accent the user PICKED, remembered so a theme switch can re-derive
+ * from it rather than from the already-adapted value (which would
+ * darken a little further on every switch).
+ */
+let preferredAccent = DEFAULT_EXTRA.accent;
+
+/**
+ * Write the accent, adapted to the theme that is active right now.
+ *
+ * The accent is an inline custom property, so it beats every
+ * `.lf-theme-*` rule — a light theme cannot declare its own. Rather
+ * than fight the preference, honour it and make it readable: see
+ * `deriveAccent`.
+ */
+function applyAccent(): void {
+  const root = document.documentElement;
+  const theme = root.classList.contains('lf-theme-light')
+    ? 'light'
+    : root.classList.contains('lf-theme-dim')
+      ? 'dim'
+      : 'dark';
+  const { accent, onAccent } = deriveAccent(preferredAccent, theme);
+  root.style.setProperty('--lf-user-accent', accent);
+  root.style.setProperty('--lf-on-accent', onAccent);
+  root.style.setProperty('--lf-on-accent-container', onAccent);
+}
+
 export function applyAppearanceTheme(theme: ThemeChoice): void {
   const root = document.documentElement;
   const resolved = resolveTheme(theme);
@@ -80,11 +109,14 @@ export function applyAppearanceTheme(theme: ThemeChoice): void {
   root.classList.toggle('lf-theme-dim', resolved === 'dim');
   root.classList.toggle('lf-theme-light', resolved === 'light');
   root.dataset.lfTheme = theme;
+  // The accent depends on the theme, so it has to follow it.
+  applyAccent();
 }
 
 export function applyAppearanceExtra(extra: AppearanceExtra): void {
   const root = document.documentElement;
-  root.style.setProperty('--lf-user-accent', normalizeHex(extra.accent));
+  preferredAccent = normalizeHex(extra.accent);
+  applyAccent();
   root.classList.toggle('lf-density-compact', extra.density === 'compact');
   root.classList.toggle('lf-chat-compact', extra.compactMessageSpacing);
   root.classList.toggle('lf-chat-hide-avatars', !extra.showAvatarsInChat);

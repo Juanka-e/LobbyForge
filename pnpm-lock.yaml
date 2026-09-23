@@ -412,6 +412,12 @@ importers:
       '@lobbyforge/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@types/react':
+        specifier: ^19.2.17
+        version: 19.2.17
+      react:
+        specifier: ^19.2.7
+        version: 19.2.7
       typescript:
         specifier: ^5.4.5
         version: 5.9.3
@@ -453,6 +459,12 @@ importers:
       '@lobbyforge/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@types/react':
+        specifier: ^19.2.17
+        version: 19.2.17
+      react:
+        specifier: ^19.2.7
+        version: 19.2.7
       typescript:
         specifier: ^5.4.5
         version: 5.9.3

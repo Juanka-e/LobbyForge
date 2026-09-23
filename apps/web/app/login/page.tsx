@@ -52,7 +52,7 @@ export default async function LoginPage({
     <div className="flex h-full w-full items-center justify-center bg-background px-5 py-10 safe-area-page">
       <section className="w-full max-w-md rounded-lg border border-border-subtle bg-surface-raised p-6 md:p-8 shadow-lg">
         <div className="mb-7 flex items-center gap-3">
-          <div className="size-11 rounded-lg bg-primary-container flex items-center justify-center font-bold text-[#07101e]">
+          <div className="size-11 rounded-lg bg-primary-container flex items-center justify-center font-bold text-on-primary-container">
             {instanceName.charAt(0).toUpperCase()}
           </div>
           <div className="min-w-0">

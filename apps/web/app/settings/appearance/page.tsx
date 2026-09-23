@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import SettingsShell from '@/app/SettingsShell';
+import { deriveAccent } from '@/lib/accent';
 import SettingsStickyFooter from '@/app/settings/SettingsStickyFooter';
 
 type ThemeChoice = 'dark' | 'dim' | 'light' | 'system';
@@ -107,7 +108,18 @@ function saveExtraToStorage(extra: AppearanceExtra): void {
 
 function applyAppearanceExtra(extra: AppearanceExtra): void {
   const root = document.documentElement;
-  root.style.setProperty('--lf-user-accent', extra.accent);
+  // Same derivation the runtime uses, so this live preview shows the
+  // accent the user will actually get on the active theme rather than
+  // the raw swatch (which is unreadable as ink on the light theme).
+  const theme = root.classList.contains('lf-theme-light')
+    ? 'light'
+    : root.classList.contains('lf-theme-dim')
+      ? 'dim'
+      : 'dark';
+  const { accent, onAccent } = deriveAccent(extra.accent, theme);
+  root.style.setProperty('--lf-user-accent', accent);
+  root.style.setProperty('--lf-on-accent', onAccent);
+  root.style.setProperty('--lf-on-accent-container', onAccent);
   root.classList.toggle('lf-density-compact', extra.density === 'compact');
   root.classList.toggle('lf-chat-compact', extra.compactMessageSpacing);
   root.classList.toggle('lf-chat-hide-avatars', !extra.showAvatarsInChat);
@@ -127,6 +139,9 @@ function applyAppearanceTheme(theme: ThemeChoice): void {
   root.classList.toggle('lf-theme-dim', resolved === 'dim');
   root.classList.toggle('lf-theme-light', resolved === 'light');
   root.dataset.lfTheme = theme;
+  // The accent is derived FROM the theme, so switching theme has to
+  // re-derive it or the preview keeps the previous theme's accent.
+  applyAppearanceExtra(loadExtraFromStorage());
 }
 
 export default function AppearanceSettingsPage() {

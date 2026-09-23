@@ -417,7 +417,7 @@ function LiveMessage({ message, currentUserId, serverId, channelId, canManageMes
               autoFocus
               className="flex-1 bg-surface-container border border-border-subtle rounded px-2 py-1 text-body-md text-text-primary outline-none focus:border-primary"
             />
-            <button onClick={saveEdit} className="text-xs px-2 py-1 bg-primary-container text-[#07101e] rounded font-medium">Save</button>
+            <button onClick={saveEdit} className="text-xs px-2 py-1 bg-primary-container text-on-primary-container rounded font-medium">Save</button>
             <button onClick={() => setEditing(false)} className="text-xs px-2 py-1 text-text-secondary hover:text-text-primary">Cancel</button>
           </div>
         ) : (

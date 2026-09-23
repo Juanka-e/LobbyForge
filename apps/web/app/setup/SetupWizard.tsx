@@ -177,7 +177,7 @@ export default function SetupWizard({
                 className="size-11 rounded-lg object-cover"
               />
             ) : (
-              <div className="size-11 rounded-lg bg-primary-container flex items-center justify-center font-bold text-[#07101e]">
+              <div className="size-11 rounded-lg bg-primary-container flex items-center justify-center font-bold text-on-primary-container">
                 {form.instanceName.charAt(0).toUpperCase() || 'L'}
               </div>
             )}
@@ -481,7 +481,7 @@ export default function SetupWizard({
               type="button"
               onClick={next}
               disabled={!canAdvance}
-              className="rounded-md bg-primary-container px-4 py-2 text-sm font-semibold text-[#07101e] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-md bg-primary-container px-4 py-2 text-sm font-semibold text-on-primary-container hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Continue
             </button>
@@ -489,7 +489,7 @@ export default function SetupWizard({
             <button
               type="submit"
               disabled={submitting}
-              className="rounded-md bg-primary-container px-4 py-2 text-sm font-semibold text-[#07101e] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-md bg-primary-container px-4 py-2 text-sm font-semibold text-on-primary-container hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {submitting ? 'Finishing…' : 'Complete setup'}
             </button>
@@ -530,9 +530,9 @@ function ProgressBar({ stepIndex }: { stepIndex: number }) {
               aria-hidden
               className={`flex size-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${
                 state === 'done'
-                  ? 'bg-success text-[#07101e]'
+                  ? 'bg-success text-on-primary-container'
                   : state === 'current'
-                    ? 'bg-primary-container text-[#07101e]'
+                    ? 'bg-primary-container text-on-primary-container'
                     : 'border border-border-subtle bg-background text-text-muted'
               }`}
             >

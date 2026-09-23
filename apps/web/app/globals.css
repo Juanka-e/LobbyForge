@@ -89,9 +89,13 @@
     --lf-text-primary: #101826;
     --lf-text-secondary: #3d4a5c;
     --lf-text-muted: #6b7787;
-    /* Deep enough to read as text on white (~7:1) and to carry white
-       text when it is a button fill. */
-    --lf-user-accent: #1c56b8;
+    /* Only the FIRST paint uses these. The accent is a user preference
+       that `AppearanceRuntime` writes inline on <html>, which outranks
+       every rule here — see `deriveAccent`, which adapts whatever the
+       user picked to the active theme. These values are what the
+       default accent derives to on light, so the pre-hydration paint
+       matches what lands a moment later. */
+    --lf-user-accent: #546d97;
     --lf-on-accent: #ffffff;
     --lf-on-accent-container: #ffffff;
   }

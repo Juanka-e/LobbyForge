@@ -176,8 +176,8 @@ export function ModalPrimaryButton({
 }) {
   const className =
     tone === 'danger'
-      ? 'px-5 py-2.5 rounded-lg bg-danger text-[#07101e] text-sm font-medium hover:brightness-110 transition-all disabled:opacity-40 disabled:cursor-not-allowed'
-      : 'px-5 py-2.5 rounded-lg bg-primary-container text-[#07101e] text-sm font-medium hover:brightness-110 shadow-[0_0_15px_rgba(143,184,255,0.15)] transition-all disabled:opacity-40 disabled:cursor-not-allowed';
+      ? 'px-5 py-2.5 rounded-lg bg-danger text-on-primary-container text-sm font-medium hover:brightness-110 transition-all disabled:opacity-40 disabled:cursor-not-allowed'
+      : 'px-5 py-2.5 rounded-lg bg-primary-container text-on-primary-container text-sm font-medium hover:brightness-110 shadow-[0_0_15px_rgba(143,184,255,0.15)] transition-all disabled:opacity-40 disabled:cursor-not-allowed';
   return (
     <button
       type="button"

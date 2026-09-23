@@ -1,5 +1,13 @@
+import { createElement } from 'react';
 import type { GamePlugin } from '@lobbyforge/plugin-sdk';
 import { PluginPermission } from '@lobbyforge/plugin-sdk';
+import {
+  DICE_HISTORY_LIMIT,
+  DICE_MAX_SIDES,
+  DICE_MIN_SIDES,
+  DICE_PLUGIN_ID,
+} from './constants';
+import { DicePanel, type DicePanelClientProps } from './renderClient';
 
 /**
  * Dice Bot — a bot-style utility plugin.
@@ -13,10 +21,17 @@ import { PluginPermission } from '@lobbyforge/plugin-sdk';
  * clients never supply the outcome.
  */
 
-export const DICE_PLUGIN_ID = 'dice-bot';
-export const DICE_MIN_SIDES = 2;
-export const DICE_MAX_SIDES = 100;
-export const DICE_HISTORY_LIMIT = 20;
+// Re-exported from `./constants` so the panel can read them without
+// importing this module (which would create an ESM cycle — see the
+// comment at the top of constants.ts).
+export { DICE_PLUGIN_ID, DICE_MIN_SIDES, DICE_MAX_SIDES, DICE_HISTORY_LIMIT } from './constants';
+export {
+  DicePanel,
+  DICE_DIE_SIZES,
+  type DicePanelClientProps,
+  type DicePanelProps,
+  type DicePanelPlayer,
+} from './renderClient';
 
 export interface DiceRoll {
   playerId: string;
@@ -99,7 +114,7 @@ export const diceBotPlugin: GamePlugin<DiceState, DiceAction> = {
     minAppVersion: '0.1.0',
     permissions: [PluginPermission.MANAGE_GAME_SESSION, PluginPermission.SEND_ROOM_MESSAGE],
     locales: ['en', 'tr'],
-    entryClient: './client.js',
+    entryClient: './renderClient.js',
     catalog: {
       category: 'utility',
       summary: 'Dice rolls with per-player stats for voice rooms.',
@@ -165,5 +180,11 @@ export const diceBotPlugin: GamePlugin<DiceState, DiceAction> = {
         return state;
     }
   },
-  renderClient: () => null,
+  // Must RETURN an element, never call DicePanel as a plain function:
+  // doing so appends the panel's hooks to whatever component invoked
+  // renderClient, and because the host mounts the panel conditionally
+  // the hook count changes between renders — React #310, which takes
+  // the whole voice room down to its error boundary.
+  renderClient: (props: unknown) =>
+    createElement(DicePanel, props as DicePanelClientProps),
 };

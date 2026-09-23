@@ -721,7 +721,7 @@ function AppsPanel({
                         },
                       })
                     }
-                    className="inline-flex items-center gap-1.5 rounded-md bg-primary-container px-3 py-2 text-xs font-semibold text-[#07101e] disabled:opacity-40"
+                    className="inline-flex items-center gap-1.5 rounded-md bg-primary-container px-3 py-2 text-xs font-semibold text-on-primary-container disabled:opacity-40"
                   >
                     <span className="material-symbols-outlined text-base" aria-hidden>add</span>
                     {isOwner ? 'Install' : 'Owner only'}
@@ -851,7 +851,7 @@ function AccessPanel({
         </SettingsField>
       </div>
       <div className="flex justify-end">
-        <button type="button" onClick={save} disabled={disabled} className="rounded-md bg-primary-container px-4 py-2.5 text-sm font-semibold text-[#07101e] disabled:cursor-not-allowed disabled:opacity-40">
+        <button type="button" onClick={save} disabled={disabled} className="rounded-md bg-primary-container px-4 py-2.5 text-sm font-semibold text-on-primary-container disabled:cursor-not-allowed disabled:opacity-40">
           {isOwner ? (busy ? 'Saving...' : 'Save access policy') : 'Owner only'}
         </button>
       </div>
@@ -1002,7 +1002,7 @@ function InvitesPanel({
 
       {isOwner || invites.length > 0 ? (
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => create(null)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-md bg-primary-container px-3 py-2 text-xs font-semibold text-[#07101e] disabled:opacity-40">
+          <button type="button" onClick={() => create(null)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-md bg-primary-container px-3 py-2 text-xs font-semibold text-on-primary-container disabled:opacity-40">
             <span className="material-symbols-outlined text-base" aria-hidden>link</span>
             Create unlimited
           </button>
