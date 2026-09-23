@@ -125,7 +125,10 @@ export function applyAppearanceExtra(extra: AppearanceExtra): void {
   // Plugins read their language from <html lang>. The layout renders a
   // fixed "en", so without this every shipped Turkish table was dead
   // code — the panels could only ever be English.
-  root.lang = resolveAppLocale(
+  // `data-lf-locale`, NOT `<html lang>`: the chrome around the plugin is
+  // English, and claiming the document is Turkish makes CSS uppercase
+  // apply Turkish casing to it ("ACTIVITIES" → "ACTİVİTİES").
+  root.dataset.lfLocale = resolveAppLocale(
     coerceLocaleChoice(extra.language),
     typeof navigator === 'undefined' ? [] : (navigator.languages ?? [navigator.language])
   );

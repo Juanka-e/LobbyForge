@@ -225,6 +225,7 @@ export {
   listPluginLocales,
   detectLocale,
   pickBestLocale,
+  HOST_LOCALE_ATTRIBUTE,
   __resetPluginLocaleRegistry,
   type LocaleId,
   type LocaleTable,

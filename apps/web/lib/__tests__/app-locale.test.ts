@@ -68,3 +68,33 @@ describe('coerceLocaleChoice', () => {
     expect(coerceLocaleChoice('system')).toBe('system');
   });
 });
+
+describe('the document language is not the plugin language', () => {
+  /**
+   * Regression guard. Publishing the plugin language on `<html lang>`
+   * looked right and shipped: the plugin panels did render in Turkish.
+   * But `lang` states the language of the DOCUMENT, and the app's own
+   * chrome is English — so CSS `text-transform: uppercase` started
+   * applying Turkish casing to English labels and the sidebar read
+   * "ACTİVİTİES", "DİRECT MESSAGES", "VOİCE CONNECTED".
+   *
+   * The host publishes `data-lf-locale` instead and tags only the
+   * plugin's own subtree with `lang`. These assertions pin that split;
+   * the casing itself is a browser behaviour no unit test can observe.
+   */
+  it('turns English labels into Turkish casing when lang says tr', () => {
+    // Why the attribute matters, demonstrated on the exact strings that
+    // regressed. `toLocaleUpperCase` follows the same Unicode rules the
+    // CSS transform does.
+    expect('Activities'.toLocaleUpperCase('tr')).toBe('ACTİVİTİES');
+    expect('Direct Messages'.toLocaleUpperCase('tr')).toBe('DİRECT MESSAGES');
+    // ...and is correct under English rules, which is what the chrome needs.
+    expect('Activities'.toLocaleUpperCase('en')).toBe('ACTIVITIES');
+  });
+
+  it('keeps the host attribute separate from the document language', async () => {
+    const { HOST_LOCALE_ATTRIBUTE } = await import('@lobbyforge/plugin-sdk');
+    // `dataset.lfLocale` ⇄ the `data-lf-locale` attribute.
+    expect(HOST_LOCALE_ATTRIBUTE).toBe('lfLocale');
+  });
+});

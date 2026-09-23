@@ -179,14 +179,28 @@ export function tFor(
 }
 
 /**
- * Detect the active locale from the browser. Reads the host's
- * `<html lang>` attribute (which the host sets from the user
- * preference at SSR time). Returns `null` if document is not
- * available (server render) or the language is missing.
+ * The attribute the host uses to publish the PLUGIN language.
+ *
+ * Deliberately not `<html lang>`. That attribute states the language of
+ * the document, and the host's own chrome is English — setting it to
+ * `tr` made CSS `text-transform: uppercase` apply Turkish casing to
+ * English labels, so "ACTIVITIES" rendered as "ACTİVİTİES". The plugin
+ * language is a separate fact, and the host tags the translated panel
+ * itself with `lang` so casing and screen readers are right THERE.
+ */
+export const HOST_LOCALE_ATTRIBUTE = 'lfLocale';
+
+/**
+ * Detect the active plugin locale. Reads the host's
+ * `data-lf-locale` attribute, falling back to `<html lang>` for hosts
+ * that do not set it. Returns `fallback` when there is no document
+ * (server render) or no language.
  */
 export function detectLocale(fallback: LocaleId = 'en'): LocaleId {
   if (typeof document === 'undefined') return fallback;
-  const lang = document.documentElement.lang?.toLowerCase() ?? '';
+  const root = document.documentElement;
+  const published = root.dataset?.[HOST_LOCALE_ATTRIBUTE]?.toLowerCase() ?? '';
+  const lang = published || (root.lang?.toLowerCase() ?? '');
   if (!lang) return fallback;
   // Trim region tags: `tr-TR` → `tr`.
   const trimmed = lang.split(/[-_]/)[0] ?? '';

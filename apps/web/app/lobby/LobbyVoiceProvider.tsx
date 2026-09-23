@@ -1486,6 +1486,29 @@ export function LobbyVoiceProvider({
     applyRemoteAudio(r, !deafenEnabled);
   }, [deafenEnabled, applyRemoteAudio]);
 
+  /**
+   * Don't let someone drop out of a call by accident.
+   *
+   * Everything the lobby opens — the activities hub, a conversation, the
+   * admin and settings overlays — renders in the centre column, so the
+   * room survives all of it. What does NOT survive is leaving the page:
+   * a reload, closing the tab, or one of the hub-only links out of the
+   * lobby (`/discover`, `/marketplace`, `/instances/new`). Those are
+   * plain anchors ON PURPOSE — a full navigation is what lets the
+   * browser ask first. Routing them through `next/link` would make the
+   * lobby unmount silently and take the call with it.
+   */
+  useEffect(() => {
+    if (connectionState !== ConnectionState.Connected || !activeChannelId) return;
+    const confirmLeave = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      // Legacy browsers need a returnValue; the string itself is ignored.
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', confirmLeave);
+    return () => window.removeEventListener('beforeunload', confirmLeave);
+  }, [connectionState, activeChannelId]);
+
   // Restore the last chosen status before the first heartbeat goes out.
   useEffect(() => {
     const stored = readStoredPresenceStatus();

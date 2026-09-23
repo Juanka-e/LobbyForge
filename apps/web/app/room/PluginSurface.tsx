@@ -1,6 +1,7 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { detectLocale } from '@lobbyforge/plugin-sdk';
 
 /**
  * Mounts a plugin's client surface in its OWN component instance.
@@ -35,5 +36,25 @@ export function PluginSurface({
   fallback: ReactNode;
 }) {
   const ui = render(props);
-  return <>{ui ?? fallback}</>;
+  // Tag the plugin's own subtree with the language it renders in. The
+  // host chrome is English, so `<html lang>` stays English — but this
+  // content really is Turkish (or whatever the user picked), and saying
+  // so here is what gets casing, hyphenation and screen readers right
+  // without leaking Turkish casing rules onto English labels.
+  const lang = usePluginLocale();
+  return <div lang={lang}>{ui ?? fallback}</div>;
+}
+
+/**
+ * The plugin language, read after mount. It lives on the document (the
+ * host publishes it), so it is not knowable during a server render —
+ * starting at the default and correcting on mount keeps SSR and the
+ * first client paint identical.
+ */
+function usePluginLocale(): string {
+  const [locale, setLocale] = useState('en');
+  useEffect(() => {
+    setLocale(detectLocale('en'));
+  }, []);
+  return locale;
 }
