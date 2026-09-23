@@ -19,6 +19,7 @@ interface ChatMessage {
   author: string;
   authorColor?: 'primary' | 'default';
   timestamp: string;
+  createdAt: string;
   body: string;
   attachment?: { name: string; size: string };
   blocked?: boolean;

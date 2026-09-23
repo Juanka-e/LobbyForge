@@ -54,7 +54,13 @@
     --lf-text-primary: #f4f7fb;
     --lf-text-secondary: #b7c0cc;
     --lf-text-muted: #7f8a99;
+    /* The accent is used two ways: as INK (`text-primary`, borders,
+       tints — ~500 call sites) and as a FILL behind `on-accent` text.
+       Both need a per-theme value, because an accent that reads on a
+       near-black page is far too pale on a white one. */
     --lf-user-accent: #8fb8ff;
+    --lf-on-accent: #003063;
+    --lf-on-accent-container: #144787;
   }
 
   .lf-theme-dim {
@@ -83,6 +89,11 @@
     --lf-text-primary: #101826;
     --lf-text-secondary: #3d4a5c;
     --lf-text-muted: #6b7787;
+    /* Deep enough to read as text on white (~7:1) and to carry white
+       text when it is a button fill. */
+    --lf-user-accent: #1c56b8;
+    --lf-on-accent: #ffffff;
+    --lf-on-accent-container: #ffffff;
   }
 
   html,
