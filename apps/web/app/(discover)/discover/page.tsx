@@ -1,22 +1,15 @@
-import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { isOfficialDeployment } from '@/lib/deployment-mode';
 import { getDb } from '@/lib/db';
 import { listPublicRegistryInstances } from '@lobbyforge/db';
-import { t, type TranslationKey } from '@lobbyforge/i18n';
+import { getTranslator } from '@/lib/i18n/server';
+import type { Translator } from '@/lib/i18n/core';
 import DiscoveryGrid from './DiscoveryGrid';
-
-/** Resolve the visitor locale for the (public) discovery page: the two
- * supported languages via Accept-Language, defaulting to English. */
-async function resolveLocale(): Promise<'en' | 'tr'> {
-  const accept = (await headers()).get('accept-language') ?? '';
-  return accept.toLowerCase().includes('tr') ? 'tr' : 'en';
-}
 
 /** Pre-translate the labels the grid needs (RSC → props — no client
  * i18n machinery required). */
-function buildLabels(locale: 'en' | 'tr'): Record<string, string> {
-  const keys: TranslationKey[] = [
+function buildLabels(t: Translator): Record<string, string> {
+  const keys = [
     'discovery.title',
     'discovery.subtitle',
     'discovery.search',
@@ -48,7 +41,7 @@ function buildLabels(locale: 'en' | 'tr'): Record<string, string> {
   ];
   const labels: Record<string, string> = {};
   for (const key of keys) {
-    labels[key.replace('discovery.', '')] = t(key, undefined, locale);
+    labels[key.replace('discovery.', '')] = t(key);
   }
   return labels;
 }
@@ -93,8 +86,9 @@ export default async function DiscoverPage({
       })
     : instances;
 
-  const locale = await resolveLocale();
-  const labels = buildLabels(locale);
+  // The same resolution as every other page — this one used to guess by
+  // checking whether the Accept-Language header contained "tr" anywhere.
+  const labels = buildLabels(await getTranslator());
 
   return <DiscoveryGrid instances={filtered} region={region} query={query} labels={labels} />;
 }

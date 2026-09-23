@@ -8,7 +8,7 @@
   - `plugins/*`: Activity plugins that run inside the voice channels (hushle, quiz, vampire-village, watch-party).
 - Dependencies:
   - Plugins depend on `@lobbyforge/plugin-sdk`.
-  - Apps depend on packages (`@lobbyforge/config`, `@lobbyforge/core`, `@lobbyforge/db`, `@lobbyforge/i18n`, `@lobbyforge/ui`).
+  - Apps depend on packages (`@lobbyforge/config`, `@lobbyforge/core`, `@lobbyforge/db`, `@lobbyforge/ui`).
   - Shared packages may depend on `@lobbyforge/config`.
 
 ### MVP Architecture Extensions
@@ -51,7 +51,6 @@
   - `packages/config`
   - `packages/core`
   - `packages/db`
-  - `packages/i18n`
   - `packages/plugin-sdk`
   - `packages/ui`
   - `plugins/hushle`

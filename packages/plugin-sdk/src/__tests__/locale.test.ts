@@ -81,4 +81,18 @@ describe('@lobbyforge/plugin-sdk/locale', () => {
   it('detectLocale falls back when document is not available', () => {
     expect(detectLocale('en')).toBe('en');
   });
+
+  it('treats a blank value as untranslated and falls back', () => {
+    // A scaffolded language starts with every value blank; those strings
+    // must read in the fallback language, never as an empty label.
+    loadPluginLocale('hushle', { en: { a: 'Start', b: 'Stop' }, de: { a: 'Starten', b: '' } });
+    expect(tFor('hushle', 'de', 'a')).toBe('Starten');
+    expect(tFor('hushle', 'de', 'b')).toBe('Stop');
+  });
+
+  it('never serves $-prefixed metadata as a string', () => {
+    loadPluginLocale('hushle', { en: { a: 'Start' }, de: { $status: 'partial', a: 'Starten' } });
+    expect(tFor('hushle', 'de', '$status')).toBe('$status');
+    expect(tFor('hushle', 'de', 'a')).toBe('Starten');
+  });
 });

@@ -35,8 +35,7 @@ import {
   detectLocale,
   loadPluginLocale,
 } from '@lobbyforge/plugin-sdk';
-import en from '../locales/en.json';
-import tr from '../locales/tr.json';
+import { LOCALE_TABLES } from './locales.generated';
 import {
   POLL_PLUGIN_ID,
   POLL_MAX_OPTIONS,
@@ -50,7 +49,7 @@ import { pollLeader } from './tally';
 // Register the plugin's locale tables the moment the module loads.
 // Adding a language is a one-line change: drop `locales/<lang>.json`
 // in and add it to the map below.
-loadPluginLocale(POLL_PLUGIN_ID, { en, tr });
+loadPluginLocale(POLL_PLUGIN_ID, LOCALE_TABLES);
 
 export interface PollPanelClientProps {
   state: PollViewState;

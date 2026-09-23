@@ -12,7 +12,7 @@ import GlobalHeader from './GlobalHeader';
 import AppearanceRuntime from './AppearanceRuntime';
 import DesktopHandoffListener from '@/components/DesktopHandoffListener';
 import { REALTIME_URL_META, getRuntimeRealtimeUrl } from '@/lib/public-endpoints';
-import { getRequestLocale } from '@/lib/i18n/server';
+import { getRequestI18n } from '@/lib/i18n/server';
 import { I18nProvider } from '@/lib/i18n/client';
 
 const geist = Geist({ subsets: ['latin'], variable: '--font-geist' });
@@ -49,7 +49,7 @@ export default async function RootLayout({ children, modal }: { children: ReactN
   // right language instead of flashing English and correcting on
   // hydration — and so `<html lang>` describes what is actually on the
   // page, which is what CSS casing and screen readers go by.
-  const locale = await getRequestLocale();
+  const i18n = await getRequestI18n();
   const content = maintenance?.maintenanceMode ? (
     <section className="max-w-[720px]">
       <h1 className="mt-0">Maintenance</h1>
@@ -67,12 +67,26 @@ export default async function RootLayout({ children, modal }: { children: ReactN
   );
 
   return (
-    <html lang={locale} className={`${geist.variable} dark`}>
+    <html
+      lang={i18n.locale}
+      dir={i18n.info.dir}
+      // Plugins resolve their language from this (see plugin-sdk
+      // `detectLocale`); rendering it here means a plugin never has to
+      // wait for client code to learn which language to speak.
+      data-lf-locale={i18n.locale}
+      className={`${geist.variable} dark`}
+    >
       {/* Resolved at REQUEST time so one published image works for any
           deployment (the browser client reads this before connecting). */}
       {realtimeUrl ? <meta name={REALTIME_URL_META} content={realtimeUrl} /> : null}
       <body className="bg-background text-text-primary font-body-md antialiased min-h-screen flex flex-col">
-        <I18nProvider locale={locale}>
+        <I18nProvider
+          locale={i18n.locale}
+          dir={i18n.info.dir}
+          messages={i18n.messages}
+          locales={i18n.locales}
+          choice={i18n.choice}
+        >
           <AppearanceRuntime />
           <GlobalHeader />
           <DesktopHandoffListener />

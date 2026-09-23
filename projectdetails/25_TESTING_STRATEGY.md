@@ -288,7 +288,7 @@ describe('Hushle Game Logic', () => {
 | `apps/web` (API routes) | 75%+ | High — auth, permissions |
 | `apps/web` (components) | 60%+ | Medium — key UI components |
 | `packages/ui` | 70%+ | Medium — shared components |
-| `packages/i18n` | 80%+ | Medium — fallback logic |
+| `apps/web/lib/i18n` + `scripts/i18n` | 80%+ | Medium — discovery, fallback, catalogue rules |
 
 ## Test Commands
 

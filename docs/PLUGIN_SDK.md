@@ -386,12 +386,14 @@ A few conventions plugins should follow:
    from a server component route.
 2. **Inline-style the UI.** The host doesn't ship a CSS framework to
    the plugin; the panel must look right with no external stylesheets.
-   Use the same dark `#0e1218` / `#1c2530` / `#e6e8eb` palette as the
-   rest of the voice room.
-3. **Bundle your own locales.** `plugins/{id}/locales/{en,tr}.json` is
-   the convention; a tiny `t(key, params)` helper inside the
-   renderClient file is enough. Don't depend on `@lobbyforge/i18n` —
-   the plugin should be self-contained.
+   Colour everything with the host's theme variables and a fallback —
+   `var(--lf-surface, #0e1218)`, `var(--lf-text-primary, #e6e8eb)` —
+   and set `color` on your root element, or the panel stays dark on
+   the light theme and its headings inherit the page's text colour.
+3. **Bundle your own locales.** One `locales/<code>.json` per language,
+   loaded with `loadPluginLocale` and read with `tFor`; the plugin stays
+   self-contained. `pnpm i18n:add` scaffolds a new language for every
+   plugin at once — see [TRANSLATING.md](TRANSLATING.md).
 4. **Gate every action through `dispatch`.** No `fetch`, no DB calls,
    no side effects in the panel. Every state transition is a reducer
    call that the host persists.

@@ -1,1 +1,7 @@
-{}
+{
+  "settings.language.description": "The language LobbyForge, and the games and activities in it, are shown in.",
+  "settings.language.partial": "In progress",
+  "settings.language.partialHint": "Translations marked in progress are still being written; anything not yet translated appears in English.",
+  "settings.language.system": "Match my browser",
+  "settings.language.title": "Language"
+}

@@ -794,6 +794,7 @@ function ActivityPanel({
       <div style={{ marginTop: 12 }}>
         {pluginClient && detail ? (
           <PluginSurface
+            pluginId={detail.pluginId}
             render={pluginClient.renderClient}
             props={{
               state: detail.state,

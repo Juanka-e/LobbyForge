@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState, type ReactNode } from 'react';
-import { detectLocale } from '@lobbyforge/plugin-sdk';
+import type { ReactNode } from 'react';
+import { pickBestLocale } from '@lobbyforge/plugin-sdk';
+import { useLocale } from '@/lib/i18n/client';
 
 /**
  * Mounts a plugin's client surface in its OWN component instance.
@@ -26,35 +27,24 @@ import { detectLocale } from '@lobbyforge/plugin-sdk';
  *     plugin's actual return value is visible.
  */
 export function PluginSurface({
+  pluginId,
   render,
   props,
   fallback,
 }: {
+  /** Used to work out which of the plugin's languages it will render in. */
+  pluginId: string;
   render: (props: unknown) => ReactNode;
   props: Record<string, unknown>;
   /** Shown when the plugin ships no client UI (`renderClient` → null). */
   fallback: ReactNode;
 }) {
   const ui = render(props);
-  // Tag the plugin's own subtree with the language it renders in. The
-  // host chrome is English, so `<html lang>` stays English — but this
-  // content really is Turkish (or whatever the user picked), and saying
-  // so here is what gets casing, hyphenation and screen readers right
-  // without leaking Turkish casing rules onto English labels.
-  const lang = usePluginLocale();
+  // Tag the subtree with the language the plugin will ACTUALLY speak.
+  // That is the app's language when the plugin ships it, and otherwise
+  // the plugin's own fallback — an app switched to German still gets a
+  // plugin that only knows English and Turkish, and its text is English.
+  // Saying so is what gets casing, hyphenation and screen readers right.
+  const lang = pickBestLocale(pluginId, useLocale());
   return <div lang={lang}>{ui ?? fallback}</div>;
-}
-
-/**
- * The plugin language, read after mount. It lives on the document (the
- * host publishes it), so it is not knowable during a server render —
- * starting at the default and correcting on mount keeps SSR and the
- * first client paint identical.
- */
-function usePluginLocale(): string {
-  const [locale, setLocale] = useState('en');
-  useEffect(() => {
-    setLocale(detectLocale('en'));
-  }, []);
-  return locale;
 }

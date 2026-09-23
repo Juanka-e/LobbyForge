@@ -276,11 +276,11 @@ Four phase views:
 
 ### Locale loader
 
-The panel bundles `locales/en.json` and `locales/tr.json`. The active
-locale is detected from `document.documentElement.lang` (the host's
-`<html lang>` attribute). A small `t(key, params)` helper does
-`{name}` interpolation. The panel does not depend on
-`@lobbyforge/i18n` so the plugin stays self-contained.
+The panel bundles one `locales/<code>.json` per language (loaded through
+the generated `src/locales.generated.ts`). The active locale is read from
+the host's `data-lf-locale` attribute, falling back to `<html lang>`, and
+`{name}` placeholders are filled by the plugin SDK's `tFor`. See
+[TRANSLATING.md](TRANSLATING.md) for adding a language.
 
 ### Timer countdown
 

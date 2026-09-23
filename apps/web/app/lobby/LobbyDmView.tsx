@@ -239,7 +239,7 @@ export function LobbyDmView({
                         </span>
                         <span
                           className="font-label-xs text-[11px] text-text-secondary"
-                          title={formatFullTimestamp(group.at)}
+                          title={formatFullTimestamp(group.at, t)}
                         >
                           {formatMessageTimestamp(group.at, t)}
                         </span>

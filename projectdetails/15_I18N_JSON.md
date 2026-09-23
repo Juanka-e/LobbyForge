@@ -8,28 +8,35 @@ Kullanıcılar yeni dil eklemek için JSON dosyası çevirir ve PR açar.
 
 ## 2. Yapı
 
+Klasör kayıt defteridir — kodda dil listesi yoktur. Bir dil bir klasördür:
+
 ```txt
-packages/i18n/locales/
-  en.json
-  tr.json
-  es.json
+apps/web/messages/
+  en/_locale.json      ad, yazı yönü, durum (complete | partial)
+  en/lobby.json        alan başına bir dosya, düz "anahtar": "metin"
+  en/admin.json
+  tr/…
+  de/…                 ← `pnpm i18n:add de` ile oluşur
 
 plugins/hushle/locales/
   en.json
   tr.json
-
-plugins/vampire-village/locales/
-  en.json
-  tr.json
+  de.json              ← "$status": "partial" taşıyabilir
 ```
+
+Uygulanan sistemin ayrıntısı: `docs/TRANSLATING.md`.
 
 ## 3. Fallback
 
 Sıra:
 
 ```txt
-user locale → server default locale → en
+kullanıcının seçimi (lf_locale çerezi) → tarayıcı (Accept-Language, q değerleriyle)
+  → örnek varsayılanı (LOBBYFORGE_DEFAULT_LOCALE) → en
 ```
+
+Çevrilmemiş (boş) bir metin anahtar bazında İngilizceye düşer; bu yüzden
+yarım bir çeviri de yayınlanabilir.
 
 ## 4. Örnek JSON
 
@@ -47,21 +54,25 @@ user locale → server default locale → en
 
 ## 5. Yeni dil ekleme
 
-1. `en.json` kopyalanır.
-2. `fr.json` yapılır.
-3. Değerler çevrilir.
-4. `pnpm i18n:check` çalıştırılır.
+1. `pnpm i18n:add fr --name Français --english French` — uygulama ve tüm
+   çevrilebilir eklentiler için boş şablonlar oluşur.
+2. Boş değerler doldurulur (İngilizcesi `en/` klasöründe aynı sırada durur).
+3. `pnpm i18n:status` ile ilerleme ve hatalar görülür.
+4. Hepsi bitince `pnpm i18n:complete fr`.
 5. PR açılır.
 
 ## 6. CI check
 
-Kontrol edilmeli:
+`pnpm test` ve `pnpm i18n:status` şunları denetler:
 
-- eksik key var mı
-- fazla key var mı
-- JSON valid mi
-- placeholder korunmuş mu
-- ICU syntax bozulmuş mu
+- `complete` işaretli dillerde eksik key var mı (`partial` dillerde eksik = ilerleme)
+- İngilizcede olmayan (fazla/yetim) key var mı
+- JSON geçerli mi, `_locale.json` doğru mu
+- placeholder'lar korunmuş mu
+- bir key İngilizcedeki ile aynı dosyada mı, iki dosyada birden tanımlı mı
+- eklentilerin oluşturulmuş tablo dizini (`src/locales.generated.ts`) güncel mi
+
+ICU/çoğul sözdizimi henüz kullanılmıyor; metinler yalnızca `{yer_tutucu}` içerir.
 
 ## 7. AI ile çeviri
 
@@ -77,9 +88,11 @@ Kurallar:
 
 ## 8. Plugin çevirileri
 
-Her plugin kendi locale dosyalarını taşır.
-
-Plugin yüklenince locale dosyaları ana i18n sistemine register edilir.
+Her plugin kendi `locales/<kod>.json` dosyalarını taşır ve plugin SDK'sının
+`loadPluginLocale` / `tFor` fonksiyonlarıyla kullanır; ana uygulamanın
+kataloğuna bağımlı değildir. Host, plugin'e hangi dili konuşacağını
+`data-lf-locale` ile bildirir. Bir plugin o dili taşımıyorsa kendi
+İngilizcesine düşer.
 
 ## 9. Panel gerekir mi?
 

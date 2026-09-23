@@ -113,7 +113,12 @@ function materializeLocaleTables(pluginId: string): Map<LocaleId, LocaleTable> {
         try {
           const t = fn();
           if (t && typeof t === 'object') {
-            Object.assign(merged, t);
+            for (const [key, value] of Object.entries(t)) {
+              // `$`-prefixed entries are file metadata (`$status`), not
+              // strings anyone should ever be shown.
+              if (key.startsWith('$')) continue;
+              merged[key] = value;
+            }
           }
         } catch {
           // A failing loader shouldn't break the whole plugin — skip
@@ -166,8 +171,11 @@ export function tFor(
   const tables = materializeLocaleTables(pluginId);
   const tryLookup = (loc: LocaleId | null | undefined): string | undefined => {
     if (!loc) return undefined;
-    const table = tables.get(loc);
-    return table ? table[key] : undefined;
+    const value = tables.get(loc)?.[key];
+    // A blank value is a string nobody has translated yet — that is what
+    // `pnpm i18n:add` scaffolds — so it falls through to the fallback
+    // language instead of rendering an empty label.
+    return typeof value === 'string' && value.trim() !== '' ? value : undefined;
   };
   const template =
     tryLookup(locale) ?? tryLookup(fallbackLocale) ?? key;

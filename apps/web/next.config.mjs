@@ -31,7 +31,6 @@ const nextConfig = {
   // so the @lobbyforge/* package TS sources compile in the same step.
   transpilePackages: [
     '@lobbyforge/core',
-    '@lobbyforge/i18n',
     '@lobbyforge/ui',
   ],
   // @lobbyforge/db is consumed as a runtime require() (not bundled) because

@@ -2,6 +2,7 @@ import { createElement } from 'react';
 import type { GamePlugin } from '@lobbyforge/plugin-sdk';
 import { PluginPermission } from '@lobbyforge/plugin-sdk';
 import { hushleReducer } from './actions';
+import { SHIPPED_LOCALES } from './locales.generated';
 import { createHushleInitialState, migrateHushleState } from './state';
 import type { HushleAction, HushleState } from './state';
 import { HushlePanel, type HushlePanelClientProps } from './renderClient';
@@ -54,7 +55,9 @@ export const hushlePlugin: GamePlugin<HushleState, HushleAction> = {
       PluginPermission.SEND_ROOM_MESSAGE,
       PluginPermission.MANAGE_TIMER,
     ],
-    locales: ['en', 'tr'],
+    // Derived from locales/*.json, so the catalogue can never claim a
+    // language the plugin does not actually ship.
+    locales: SHIPPED_LOCALES,
     entryClient: './renderClient.js',
     catalog: {
       category: 'game',

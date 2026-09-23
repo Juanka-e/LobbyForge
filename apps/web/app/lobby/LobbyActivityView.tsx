@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { getPlugin } from '@/lib/plugin-registry';
 import { useT } from '@/lib/i18n/client';
-import type { Translator } from '@/lib/i18n/messages';
+import type { Translator } from '@/lib/i18n/core';
 import { PluginSurface } from '../room/PluginSurface';
 import { findOpenActivity, useActivitySession } from '../room/useActivitySession';
 import { useLobbyVoice } from './LobbyVoiceProvider';
@@ -271,6 +271,7 @@ export function LobbyActivityView({
             <div className="px-6 py-6">
               {pluginClient ? (
                 <PluginSurface
+                  pluginId={detail.pluginId}
                   render={pluginClient.renderClient}
                   props={{
                     state: detail.state,

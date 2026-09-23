@@ -228,7 +228,9 @@ export const quizPlugin: GamePlugin<QuizState, QuizAction> = {
       PluginPermission.SEND_ROOM_MESSAGE,
       PluginPermission.MANAGE_TIMER,
     ],
-    locales: ['en', 'tr'],
+    // English only: this plugin ships no locales/ tables yet, so it
+    // must not advertise other languages in the catalogue.
+    locales: ['en'],
     entryClient: './client.js',
     catalog: {
       category: 'game',

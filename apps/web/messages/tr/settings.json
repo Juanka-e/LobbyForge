@@ -1,1 +1,7 @@
-{}
+{
+  "settings.language.description": "LobbyForge’un ve içindeki oyunlarla etkinliklerin gösterildiği dil.",
+  "settings.language.partial": "Devam ediyor",
+  "settings.language.partialHint": "Devam ediyor olarak işaretli çeviriler hâlâ yazılıyor; henüz çevrilmemiş her şey İngilizce görünür.",
+  "settings.language.system": "Tarayıcımı takip et",
+  "settings.language.title": "Dil"
+}

@@ -30,15 +30,14 @@ import {
   pickBestLocale,
   detectLocale,
 } from '@lobbyforge/plugin-sdk';
-import en from '../locales/en.json';
-import tr from '../locales/tr.json';
+import { LOCALE_TABLES } from './locales.generated';
 import { DICE_MAX_SIDES, DICE_MIN_SIDES, DICE_PLUGIN_ID } from './constants';
 import type { DiceAction, DiceRoll, DiceState } from './index';
 
 // Register the plugin's locale tables with the shared SDK registry.
 // Adding a language is a one-liner: drop `locales/<lang>.json` in and
 // add it to this map.
-loadPluginLocale(DICE_PLUGIN_ID, { en, tr });
+loadPluginLocale(DICE_PLUGIN_ID, LOCALE_TABLES);
 
 export interface DicePanelPlayer {
   userId: string;
@@ -63,13 +62,9 @@ export type DicePanelProps = DicePanelClientProps;
 
 type Translate = (key: string, params?: Record<string, string | number>) => string;
 
-const localeTables: Record<string, Record<string, string>> = { en, tr };
-
 function tFor(locale: string, key: string, params?: Record<string, string | number>): string {
-  // Delegate to the shared SDK helper so this file reads the same as a
-  // community plugin would write it. `localeTables` is kept so a later
-  // iteration can swap in a remote catalog without touching call sites.
-  void localeTables;
+  // Delegate to the shared SDK helper — the same call a community
+  // plugin makes.
   return tForShared(DICE_PLUGIN_ID, locale, key, params);
 }
 

@@ -49,6 +49,7 @@ import { projectServerPresenceForViewer } from '@/lib/presence-view';
 import { toPresenceStatus, type PresenceStatus } from '@/lib/presence-status';
 import { formatMessageTimestamp } from '@/lib/chat-time';
 import { getTranslator } from '@/lib/i18n/server';
+import type { Translator } from '@/lib/i18n/core';
 
 export const dynamic = 'force-dynamic';
 
@@ -210,9 +211,7 @@ function toCategory(type: ChannelType): ChannelCategory {
   return type === 'voice' || type === 'stage' ? 'voice' : 'text';
 }
 
-// Same stamp the client renders, so the SSR paint doesn't flip format
-// on hydration.
-const formatTimestamp = formatMessageTimestamp;
+
 
 function buildMembers(
   summaries: MemberSummary[],
@@ -291,7 +290,8 @@ function buildMessages(
   rows: MessageRow[],
   authors: Map<string, { displayName: string; avatarUrl: string | null }>,
   currentUserId: string | null,
-  blockedIds: Set<string>
+  blockedIds: Set<string>,
+  t: Translator
 ): ChatMessage[] {
   // listMessagesForChannel returns newest first; UI uses flex-col-reverse
   // so the visual order is correct. We preserve insertion order here.
@@ -301,21 +301,21 @@ function buildMessages(
       return {
         id: m.id,
         authorId: null,
-        author: 'Blocked user',
-        timestamp: formatTimestamp(m.createdAt),
+        author: t('lobbyMain.chat.blockedUser'),
+        timestamp: formatMessageTimestamp(m.createdAt, t),
         createdAt: m.createdAt.toISOString(),
-        body: '[blocked] This message is hidden because the sender is blocked.',
+        body: t('lobbyMain.chat.blockedBody'),
         blocked: true,
       } satisfies ChatMessage;
     }
     const author = m.userId ? authors.get(m.userId) : null;
-    const displayName = author?.displayName ?? 'Deleted User';
+    const displayName = author?.displayName ?? t('lobbyMain.chat.deletedUser');
     return {
       id: m.id,
       authorId: m.userId,
       author: displayName,
       authorColor: m.userId && m.userId === currentUserId ? 'primary' : 'default',
-      timestamp: formatTimestamp(m.createdAt),
+      timestamp: formatMessageTimestamp(m.createdAt, t),
       createdAt: m.createdAt.toISOString(),
       body: m.content,
       pinned: typeof m.metadata.$pinnedAt === 'string',
@@ -459,7 +459,10 @@ async function loadLiveData(
   // Resolve the caller's block list so blocked authors' messages are
   // masked at the server level - the content never reaches the client.
   const blockedIds = currentUserId ? await getBlockedUserIds(db, currentUserId) : new Set<string>();
-  const messages = buildMessages(messageRows, authorMap, currentUserId, blockedIds);
+  // The SAME stamps and author labels the client renders, in the same
+  // language — otherwise the first paint is English and flips on
+  // hydration when the roster re-renders them.
+  const messages = buildMessages(messageRows, authorMap, currentUserId, blockedIds, await getTranslator());
   const canManageMessages = hasPermission(view.permissions, CorePermission.MANAGE_MESSAGES);
   const canMuteMembers = hasPermission(view.permissions, CorePermission.MUTE_MEMBERS);
   const canManageServer = hasPermission(view.permissions, CorePermission.MANAGE_SERVER);

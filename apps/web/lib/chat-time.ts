@@ -1,5 +1,4 @@
-import { createTranslator, type Translator } from '@/lib/i18n/messages';
-import { DEFAULT_APP_LOCALE } from '@/lib/app-locale';
+import type { Translator } from '@/lib/i18n/core';
 
 /**
  * How a message is stamped in every transcript — channels and DMs.
@@ -22,17 +21,6 @@ import { DEFAULT_APP_LOCALE } from '@/lib/app-locale';
  */
 
 const DAY_MS = 86_400_000;
-
-/**
- * The stand-in for call sites that have not been migrated yet — it
- * reads the real English catalogue rather than duplicating the strings,
- * so there is exactly one copy of every phrase.
- */
-let englishTranslator: Translator | null = null;
-function english(): Translator {
-  if (!englishTranslator) englishTranslator = createTranslator(DEFAULT_APP_LOCALE);
-  return englishTranslator;
-}
 
 function toDate(value: string | Date): Date | null {
   const date = value instanceof Date ? value : new Date(value);
@@ -83,7 +71,7 @@ function time(date: Date, locale: string | undefined): string {
  */
 export function formatMessageTimestamp(
   value: string | Date,
-  t: Translator = english(),
+  t: Translator,
   now: Date = new Date()
 ): string {
   const date = toDate(value);
@@ -104,7 +92,7 @@ export function formatMessageTimestamp(
 /** The divider between days: "Today", "Yesterday", "22 September 2026". */
 export function formatDaySeparator(
   value: string | Date,
-  t: Translator = english(),
+  t: Translator,
   now: Date = new Date()
 ): string {
   const date = toDate(value);
@@ -120,7 +108,7 @@ export function formatDaySeparator(
 }
 
 /** The full instant, for the `title` tooltip — never abbreviated. */
-export function formatFullTimestamp(value: string | Date, t: Translator = english()): string {
+export function formatFullTimestamp(value: string | Date, t: Translator): string {
   const date = toDate(value);
   if (!date) return '';
   return date.toLocaleString(intlLocale(t), {

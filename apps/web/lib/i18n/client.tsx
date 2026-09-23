@@ -1,28 +1,70 @@
 'use client';
 
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
-import { createTranslator, type Translator } from './messages';
-import { DEFAULT_APP_LOCALE, type AppLocale } from '@/lib/app-locale';
+import {
+  SOURCE_LOCALE,
+  createTranslator,
+  type LocaleInfo,
+  type Messages,
+  type TextDirection,
+  type Translator,
+} from './core';
 
 /**
- * The language for client components.
+ * Language for client components.
  *
- * Seeded by the server (see `getRequestLocale`) and passed down, rather
- * than re-detected in the browser — if the two disagreed, React would
- * throw a hydration mismatch on every translated string.
+ * Everything here arrives from the server (see `getRequestI18n` and the
+ * root layout) rather than being re-detected in the browser: if the two
+ * sides disagreed about the language, React would report a hydration
+ * mismatch on every translated string.
+ *
+ * Only the ACTIVE language's messages are passed down, already merged
+ * over English. The browser never downloads the other languages, so the
+ * bundle does not grow as languages are added.
  */
-const LocaleContext = createContext<AppLocale>(DEFAULT_APP_LOCALE);
-
-export function I18nProvider({ locale, children }: { locale: AppLocale; children: ReactNode }) {
-  return <LocaleContext.Provider value={locale}>{children}</LocaleContext.Provider>;
+interface I18nContextValue {
+  locale: string;
+  dir: TextDirection;
+  messages: Messages;
+  locales: LocaleInfo[];
+  choice: string;
 }
 
-export function useLocale(): AppLocale {
-  return useContext(LocaleContext);
+const I18nContext = createContext<I18nContextValue>({
+  locale: SOURCE_LOCALE,
+  dir: 'ltr',
+  messages: {},
+  locales: [],
+  choice: 'system',
+});
+
+export function I18nProvider({
+  locale,
+  dir,
+  messages,
+  locales,
+  choice,
+  children,
+}: I18nContextValue & { children: ReactNode }) {
+  const value = useMemo(
+    () => ({ locale, dir, messages, locales, choice }),
+    [locale, dir, messages, locales, choice]
+  );
+  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+}
+
+export function useLocale(): string {
+  return useContext(I18nContext).locale;
+}
+
+/** The languages on offer and the user's current choice — for the picker. */
+export function useLocaleOptions(): { locales: LocaleInfo[]; choice: string; locale: string } {
+  const { locales, choice, locale } = useContext(I18nContext);
+  return { locales, choice, locale };
 }
 
 /** `const t = useT()` — then `t('lobby.activities.title')`. */
 export function useT(): Translator {
-  const locale = useContext(LocaleContext);
-  return useMemo(() => createTranslator(locale), [locale]);
+  const { locale, messages } = useContext(I18nContext);
+  return useMemo(() => createTranslator(locale, messages), [locale, messages]);
 }

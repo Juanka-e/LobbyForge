@@ -8,6 +8,7 @@ import {
   DICE_PLUGIN_ID,
 } from './constants';
 import { DicePanel, type DicePanelClientProps } from './renderClient';
+import { SHIPPED_LOCALES } from './locales.generated';
 
 /**
  * Dice Bot — a bot-style utility plugin.
@@ -132,7 +133,9 @@ export const diceBotPlugin: GamePlugin<DiceState, DiceAction> = {
     type: 'utility',
     minAppVersion: '0.1.0',
     permissions: [PluginPermission.MANAGE_GAME_SESSION, PluginPermission.SEND_ROOM_MESSAGE],
-    locales: ['en', 'tr'],
+    // Derived from locales/*.json, so the catalogue can never claim a
+    // language the plugin does not actually ship.
+    locales: SHIPPED_LOCALES,
     entryClient: './renderClient.js',
     catalog: {
       category: 'utility',

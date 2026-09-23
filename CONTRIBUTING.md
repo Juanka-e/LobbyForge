@@ -37,7 +37,7 @@ pnpm --filter @lobbyforge/hushle exec vitest
 | Add a new SDK type that plugins consume | `packages/plugin-sdk/src/` |
 | Add a new shared React component | `packages/ui/src/` |
 | Add a new table to the DB schema | `packages/db/src/schema.ts` |
-| Add a new language pack | `packages/i18n/locales/<lang>.json` |
+| Add a language | `pnpm i18n:add <code> --name <native> --english <English>` — see [docs/TRANSLATING.md](docs/TRANSLATING.md) |
 | Add a new game plugin | `plugins/<name>/src/` |
 | Change a root script | root `package.json` |
 
