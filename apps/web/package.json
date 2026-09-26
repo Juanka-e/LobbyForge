@@ -64,6 +64,6 @@
     "postcss": "^8.5.15",
     "typescript": "^5.4.5",
     "typescript-eslint": "^8.7.0",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.1"
   }
 }
