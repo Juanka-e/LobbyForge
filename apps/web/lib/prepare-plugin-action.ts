@@ -5,6 +5,9 @@ import {
   listServerLocalCards,
   type DbClient,
 } from '@lobbyforge/db';
+// Server-only subpath: the built-in quiz packs WITH their answers. Never
+// import it from client code (the plugin's main entry deliberately cannot).
+import { hydrateQuizPackStart } from '@lobbyforge/quiz/packs';
 
 type PreparedAction =
   | { ok: true; action: Record<string, unknown> }
@@ -42,6 +45,13 @@ export async function preparePluginAction(
   db: DbClient,
   input: { pluginId: string; serverId: string; action: Record<string, unknown> }
 ): Promise<PreparedAction> {
+  if (input.pluginId === 'quiz') {
+    // A pack game's questions are loaded HERE, on the server, and replace
+    // anything the client sent: the answers never ship to browsers, and a
+    // pack game only ever plays the pack. Unknown pack → 404. Pasted
+    // (custom) questions pass through to the plugin's own validation.
+    return hydrateQuizPackStart(input.action);
+  }
   if (input.pluginId !== 'hushle' || input.action.type !== 'start-game') {
     return { ok: true, action: input.action };
   }
