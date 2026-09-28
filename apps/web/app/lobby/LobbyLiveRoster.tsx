@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useRef, useState, useCallback } from 'react';
 import { getRealtimeClient } from '@/lib/realtime-client';
 import { useT } from '@/lib/i18n/client';
+import { BotAvatar, BotBadge } from './BotIdentity';
 import {
   formatDaySeparator,
   formatFullTimestamp,
@@ -37,6 +38,14 @@ interface ChatMessage {
   attachment?: { name: string; size: string };
   blocked?: boolean;
   pinned?: boolean;
+  /** Set when a bot wrote the message — rendered with the BOT badge. */
+  bot?: MessageBot | null;
+}
+
+interface MessageBot {
+  id: string | null;
+  name: string;
+  type: string;
 }
 
 interface WsChatEnvelope {
@@ -44,11 +53,24 @@ interface WsChatEnvelope {
   message: {
     id: string;
     channelId: string;
-    userId: string;
+    /** null when a bot wrote the message. */
+    userId: string | null;
+    bot?: MessageBot | null;
     content: string;
     createdAt: string;
   };
   at: string;
+}
+
+/** A bot author from an API or realtime payload; anything malformed is not a bot. */
+function asMessageBot(value: unknown): MessageBot | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  return {
+    id: typeof raw.id === 'string' ? raw.id : null,
+    name: typeof raw.name === 'string' ? raw.name : '',
+    type: typeof raw.type === 'string' ? raw.type : 'custom',
+  };
 }
 
 interface PresenceApiSnapshot {
@@ -134,23 +156,29 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
           cache: 'no-store',
         });
         if (!res.ok) return;
-        const body = (await res.json()) as { messages?: Array<{ id: string; userId: string | null; content: string; createdAt: string; metadata?: Record<string, unknown>; blocked?: boolean }> };
+        const body = (await res.json()) as { messages?: Array<{ id: string; userId: string | null; content: string; createdAt: string; metadata?: Record<string, unknown>; blocked?: boolean; bot?: unknown }> };
         if (cancelled || !body.messages) return;
-        setMessages(body.messages.map((message) => ({
-          id: message.id,
-          authorId: message.userId,
-          author: message.blocked
-            ? t('lobbyMain.chat.blockedUser')
-            : message.userId
-              ? (nameCacheRef.current.get(message.userId) ?? t('lobbyMain.chat.unknownUser'))
-              : t('lobbyMain.chat.deletedUser'),
-          authorColor: message.userId === data.currentUserId ? 'primary' : 'default',
-          timestamp: formatMessageTimestamp(message.createdAt, t),
-          createdAt: message.createdAt,
-          body: message.content,
-          blocked: message.blocked,
-          pinned: typeof message.metadata?.$pinnedAt === 'string',
-        })));
+        setMessages(body.messages.map((message) => {
+          const bot = message.userId ? null : asMessageBot(message.bot);
+          return {
+            id: message.id,
+            authorId: message.userId,
+            author: message.blocked
+              ? t('lobbyMain.chat.blockedUser')
+              : bot
+                ? (bot.name || t('lobbyMain.chat.unknownBot'))
+                : message.userId
+                  ? (nameCacheRef.current.get(message.userId) ?? t('lobbyMain.chat.unknownUser'))
+                  : t('lobbyMain.chat.deletedUser'),
+            authorColor: message.userId === data.currentUserId ? 'primary' : 'default',
+            timestamp: formatMessageTimestamp(message.createdAt, t),
+            createdAt: message.createdAt,
+            body: message.content,
+            blocked: message.blocked,
+            pinned: typeof message.metadata?.$pinnedAt === 'string',
+            bot,
+          };
+        }));
       } catch {
         // Realtime/local echo can continue from the current snapshot.
       }
@@ -166,7 +194,12 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
     const unsubscribe = rc.subscribe<WsChatEnvelope>(topic, (env) => {
       if (!env || env.type !== 'message' || !env.message) return;
       const m = env.message;
-      const author = nameCacheRef.current.get(m.userId) ?? t('lobbyMain.chat.unknownUser');
+      const bot = m.userId ? null : asMessageBot(m.bot);
+      const author = bot
+        ? (bot.name || t('lobbyMain.chat.unknownBot'))
+        : m.userId
+          ? (nameCacheRef.current.get(m.userId) ?? t('lobbyMain.chat.unknownUser'))
+          : t('lobbyMain.chat.deletedUser');
       setMessages((prev) => {
         if (prev.some((x) => x.id === m.id)) return prev;
         const next: ChatMessage = {
@@ -177,6 +210,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
           timestamp: formatMessageTimestamp(m.createdAt, t),
           createdAt: m.createdAt,
           body: m.content,
+          bot,
         };
         // Newest first; UI uses flex-col-reverse so newest appears at bottom.
         return [next, ...prev];
@@ -401,13 +435,18 @@ function LiveMessage({ message, currentUserId, serverId, channelId, canManageMes
   }
   const authorColorClass = message.authorColor === 'primary' ? 'text-primary' : 'text-text-primary';
   return (
-    <div data-chat-message className="flex gap-4 group hover:bg-surface-container/30 p-2 -mx-2 rounded-lg transition-colors animate-fade-in-up relative">
-      <div data-chat-avatar className="chat-avatar w-10 h-10 rounded-full bg-secondary-container flex-shrink-0 mt-1 flex items-center justify-center font-bold text-text-primary">
-        {message.author.charAt(0).toUpperCase()}
-      </div>
+    <div data-chat-message data-bot-message={message.bot ? 'true' : undefined} className="flex gap-4 group hover:bg-surface-container/30 p-2 -mx-2 rounded-lg transition-colors animate-fade-in-up relative">
+      {message.bot ? (
+        <BotAvatar size="md" className="mt-1" />
+      ) : (
+        <div data-chat-avatar className="chat-avatar w-10 h-10 rounded-full bg-secondary-container flex-shrink-0 mt-1 flex items-center justify-center font-bold text-text-primary">
+          {message.author.charAt(0).toUpperCase()}
+        </div>
+      )}
       <div className="flex flex-col w-full">
         <div className="flex items-baseline gap-2">
           <span className={`font-label-sm font-medium ${authorColorClass}`}>{message.author}</span>
+          {message.bot ? <BotBadge className="self-center" /> : null}
           <span
             className="font-label-xs text-[11px] text-text-secondary"
             title={formatFullTimestamp(message.createdAt, t)}

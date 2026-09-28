@@ -19,6 +19,8 @@ import {
 } from '@/lib/permissions';
 import { authorizeChannelMessageAccess } from '@/lib/message-authorization';
 import { publishChatMessage } from '@/lib/chat-bus';
+import { moderateMessage, moderationBlockedBody } from '@/lib/bots/moderation';
+import { readMessageBot } from '@/lib/bots/message-meta';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -65,6 +67,9 @@ function toJson(message: MessageRow): Record<string, unknown> {
     id: message.id,
     channelId: message.channelId,
     userId: message.userId,
+    // Bots milestone: a bot-authored message has userId null and names its bot.
+    botId: message.botId ?? null,
+    bot: readMessageBot(message),
     content: message.content,
     metadata: message.metadata,
     replyToId: message.replyToId,
@@ -223,6 +228,24 @@ async function handlePost(
     }
     const metadataError = validateUserMetadata(body.metadata);
     if (metadataError) return metadataError;
+
+    // Bots milestone: the server's Moderation Bot (if enabled) checks the
+    // message before it is stored. A blocked sender gets a 422 whose
+    // code + rule the lobby translates; the bot writes the audit entry.
+    const moderation = await moderateMessage({
+      serverId,
+      channelId,
+      userId: session.uid,
+      content: body.content,
+      ownerUserId: access.context.server.ownerUserId,
+      kind: 'create',
+    });
+    if (moderation.action === 'block') {
+      return NextResponse.json(moderationBlockedBody(moderation), {
+        status: 422,
+        headers: { 'Cache-Control': 'no-store' },
+      });
+    }
 
     const created = await createMessage(getDb(), {
       channelId,

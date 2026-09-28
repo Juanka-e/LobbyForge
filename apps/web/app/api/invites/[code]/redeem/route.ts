@@ -4,6 +4,7 @@ import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { normalizeInviteCode } from '@/lib/invite-code';
 import { withApiSecurity } from '@/lib/security-headers';
+import { notifyMemberJoined } from '@/lib/bots/welcome';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -57,6 +58,8 @@ async function handlePost(req: Request, ctx: { params: Promise<{ code: string }>
         targetId: result.membershipId,
         metadata: { code, roleId: result.roleId },
       }).catch((err) => console.error('[audit] invite.redeem failed:', (err as Error).message));
+      // Bots milestone: the Welcome Bot greets the new member (never throws).
+      await notifyMemberJoined({ serverId: result.serverId, userId: session.uid });
       return NextResponse.json(
         {
           membership: {

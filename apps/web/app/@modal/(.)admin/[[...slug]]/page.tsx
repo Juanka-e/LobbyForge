@@ -10,6 +10,7 @@ import UpdateRunPage from '@/app/admin/updates/[runId]/page';
 import AdminSettingsPage from '@/app/admin/settings/page';
 import AuthenticationPage from '@/app/admin/settings/authentication/page';
 import BackupsPage from '@/app/admin/settings/backups/page';
+import BotsPage from '@/app/admin/settings/bots/page';
 import ChannelsPage from '@/app/admin/settings/channels/page';
 import InvitesPage from '@/app/admin/settings/invites/page';
 import MembersPage from '@/app/admin/settings/members/page';
@@ -41,6 +42,7 @@ const PAGES = {
   settings: AdminSettingsPage,
   'settings/authentication': AuthenticationPage,
   'settings/backups': BackupsPage,
+  'settings/bots': BotsPage,
   'settings/channels': ChannelsPage,
   'settings/invites': InvitesPage,
   'settings/members': MembersPage,

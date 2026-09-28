@@ -246,6 +246,20 @@
       "when": 1785990400000,
       "tag": "0036_member_voice_mute",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1786076800000,
+      "tag": "0037_bots_runtime",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1786163200000,
+      "tag": "0038_backfill_everyone_role",
+      "breakpoints": true
     }
   ]
 }

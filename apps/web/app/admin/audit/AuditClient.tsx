@@ -326,6 +326,8 @@ function SummaryCard({
 }
 
 function categorizeAction(action: string): Category {
+  if (action.startsWith('bot.moderation.')) return 'moderation';
+  if (action.startsWith('bot.')) return 'system';
   if (action.startsWith('ban.') || action.startsWith('moderation.') || action === 'kick') {
     return 'moderation';
   }
@@ -422,7 +424,7 @@ function relativeTime(t: Translator, timestamp: number): string {
   return new Date(timestamp).toLocaleDateString(t.locale);
 }
 
-const TARGET_TYPES = ['card_pack', 'channel', 'invite', 'membership', 'message', 'plugin', 'role', 'server', 'session', 'user'];
+const TARGET_TYPES = ['bot', 'card_pack', 'channel', 'invite', 'membership', 'message', 'plugin', 'role', 'server', 'session', 'user'];
 
 /** What an audit entry acted on, in words; an unknown type shows as written. */
 function targetTypeLabel(t: Translator, type: string): string {

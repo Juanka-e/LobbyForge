@@ -7,6 +7,8 @@ import { LobbyActivityView } from './LobbyActivityView';
 import { LobbyLiveRoster } from './LobbyLiveRoster';
 import { MentionInput, type MentionUser } from './MentionInput';
 import { useT } from '@/lib/i18n/client';
+import { moderationBlockedMessageKey } from '@/lib/bots/catalog';
+import { BotAvatar, BotBadge } from './BotIdentity';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 
 /**
@@ -25,6 +27,8 @@ interface ChatMessage {
   attachment?: { name: string; size: string };
   blocked?: boolean;
   pinned?: boolean;
+  /** Set when a bot wrote the message — rendered with the BOT badge. */
+  bot?: { id: string | null; name: string; type: string } | null;
 }
 
 interface Channel {
@@ -334,13 +338,18 @@ function Message({ message }: { message: ChatMessage }) {
   }
   const authorColorClass = message.authorColor === 'primary' ? 'text-primary' : 'text-text-primary';
   return (
-    <div data-chat-message className="flex gap-4 group hover:bg-surface-container/30 p-2 -mx-2 rounded-lg transition-colors">
-      <div data-chat-avatar className="chat-avatar w-10 h-10 rounded-full bg-secondary-container flex-shrink-0 mt-1 flex items-center justify-center font-bold text-text-primary">
-        {message.author.charAt(0).toUpperCase()}
-      </div>
+    <div data-chat-message data-bot-message={message.bot ? 'true' : undefined} className="flex gap-4 group hover:bg-surface-container/30 p-2 -mx-2 rounded-lg transition-colors">
+      {message.bot ? (
+        <BotAvatar size="md" className="mt-1" />
+      ) : (
+        <div data-chat-avatar className="chat-avatar w-10 h-10 rounded-full bg-secondary-container flex-shrink-0 mt-1 flex items-center justify-center font-bold text-text-primary">
+          {message.author.charAt(0).toUpperCase()}
+        </div>
+      )}
       <div className="flex flex-col w-full">
         <div className="flex items-baseline gap-2">
           <span className={`font-label-sm font-medium ${authorColorClass} hover:underline cursor-pointer`}>{message.author}</span>
+          {message.bot ? <BotBadge className="self-center" /> : null}
           <span className="font-label-xs text-[11px] text-text-secondary">{message.timestamp}</span>
         </div>
         <p className="font-body-md text-text-secondary mt-1 whitespace-pre-wrap">{message.body}</p>
@@ -415,7 +424,11 @@ function Composer({
         body: JSON.stringify({ content }),
       });
       if (!res.ok) {
-        const detail = (await res.json().catch(() => ({}))) as { error?: string };
+        const detail = (await res.json().catch(() => ({}))) as { error?: string; code?: string; rule?: string };
+        // The Moderation Bot's refusal is explained in the reader's language.
+        if (detail.code === 'blocked_by_moderation') {
+          throw new Error(t(moderationBlockedMessageKey(detail.rule)));
+        }
         throw new Error(detail.error ?? t('lobbyMain.composer.failed', { status: res.status }));
       }
       const created = (await res.json()) as { message?: { id: string; content: string; userId: string | null; createdAt: string } };

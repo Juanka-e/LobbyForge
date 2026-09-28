@@ -21,6 +21,7 @@ import { and, asc, eq, inArray, isNull, not } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
 import { membershipRoles, memberships, roles, users } from '../schema.js';
 import { activeBanOnMembershipSql, isCurrentlyBanned } from './bans.js';
+import { EVERYONE_ROLE_NAME } from './roles.js';
 
 export interface MembershipRow {
   id: string;
@@ -112,9 +113,36 @@ export async function ensureServerMembership(
   serverId: string,
   userId: string
 ): Promise<MembershipRow | null> {
+  const result = await ensureServerMembershipDetailed(db, serverId, userId);
+  return result ? result.membership : null;
+}
+
+/**
+ * `ensureServerMembership` that also says whether THIS call created the
+ * membership — the join hooks (Welcome Bot) fire only for a real join,
+ * never for a returning member.
+ *
+ * A new membership holds the server's `@everyone` role (in
+ * `membership_roles`, the set `getUserPermissions` reads): the auto-join
+ * used to insert a role-less membership, and a member without roles has
+ * no permissions at all — the newcomer could not read or send anywhere.
+ * The display role (`memberships.roleId`) stays empty, as before, so
+ * `seedDefaultRoles` can still make `@admin` the owner's display role.
+ */
+export async function ensureServerMembershipDetailed(
+  db: DbClient,
+  serverId: string,
+  userId: string
+): Promise<{ membership: MembershipRow; created: boolean } | null> {
   if (await isCurrentlyBanned(db, serverId, userId)) return null;
   const existing = await getServerMember(db, serverId, userId);
-  if (existing) return existing;
+  if (existing) return { membership: existing, created: false };
+
+  const [everyone] = await db
+    .select({ id: roles.id })
+    .from(roles)
+    .where(and(eq(roles.serverId, serverId), eq(roles.name, EVERYONE_ROLE_NAME)))
+    .limit(1);
 
   const [created] = await db
     .insert(memberships)
@@ -130,11 +158,19 @@ export async function ensureServerMembership(
       nickname: memberships.nickname,
       createdAt: memberships.createdAt,
     });
-  if (created) return created as MembershipRow;
+  if (created) {
+    if (everyone) {
+      await db
+        .insert(membershipRoles)
+        .values({ membershipId: created.id, roleId: everyone.id })
+        .onConflictDoNothing();
+    }
+    return { membership: created as MembershipRow, created: true };
+  }
 
   const repaired = await getServerMember(db, serverId, userId);
   if (!repaired) throw new Error(`ensureServerMembership: could not create membership for ${userId}`);
-  return repaired;
+  return { membership: repaired, created: false };
 }
 
 export async function updateMemberNickname(

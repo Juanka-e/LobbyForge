@@ -39,7 +39,11 @@ const states = new Map<string, TopicState>();
 export interface ChatMessagePayload {
   id: string;
   channelId: string;
-  userId: string;
+  /** null for a bot-authored message — see `bot`. */
+  userId: string | null;
+  /** Set when a bot wrote the message (Bot API or a built-in bot). */
+  botId?: string | null;
+  bot?: { id: string; name: string; type: string } | null;
   content: string;
   metadata: Record<string, unknown> | null;
   replyToId: string | null;

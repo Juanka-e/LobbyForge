@@ -37,6 +37,7 @@ const COMMUNITY_NAV: NavItem[] = [
   { href: '/admin/settings/invites', labelKey: 'settings.nav.community.invites', icon: 'qr_code_2' },
   { href: '/admin/settings/voice-media', labelKey: 'settings.nav.community.voiceMedia', icon: 'mic' },
   { href: '/admin/apps', labelKey: 'settings.nav.community.apps', icon: 'stadia_controller' },
+  { href: '/admin/settings/bots', labelKey: 'settings.nav.community.bots', icon: 'smart_toy' },
   { href: '/admin/plugins', labelKey: 'settings.nav.community.plugins', icon: 'extension' },
   { href: '/admin/bandwidth', labelKey: 'settings.nav.community.bandwidth', icon: 'data_usage' },
   { href: '/admin/settings/authentication', labelKey: 'settings.nav.community.authentication', icon: 'shield_lock' },

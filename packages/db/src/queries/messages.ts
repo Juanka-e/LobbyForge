@@ -26,6 +26,8 @@ export interface MessageRow {
   id: string;
   channelId: string;
   userId: string | null;
+  /** 0037: set when a bot wrote the message (userId is then null). */
+  botId: string | null;
   content: string;
   metadata: Record<string, unknown>;
   replyToId: string | null;
@@ -36,7 +38,12 @@ export interface MessageRow {
 
 export interface CreateMessageInput {
   channelId: string;
-  userId: string;
+  /**
+   * The author. A member message sets `userId`; a bot message sets
+   * `botId` and leaves `userId` null — never both.
+   */
+  userId: string | null;
+  botId?: string | null;
   content: string;
   metadata?: Record<string, unknown>;
   replyToId?: string | null;
@@ -62,12 +69,17 @@ async function assertChannelAlive(db: DbClient, channelId: string): Promise<void
 /**
  * Create a message. The `userId` is the materialized UUID from the
  * `lf_guest` cookie's `uid` field; the route layer is responsible for
- * making sure that field is non-null before calling.
+ * making sure that field is non-null before calling. A bot message
+ * (Bot API / built-in bots) passes `userId: null` and its `botId`.
  *
  * The insert is atomic: the FK on `messages.channelId` cascades, so
  * a hard-deleted channel rejects the insert with a constraint error.
  */
 export async function createMessage(db: DbClient, input: CreateMessageInput): Promise<MessageRow> {
+  const botId = input.botId ?? null;
+  if ((input.userId === null) === (botId === null)) {
+    throw new Error('createMessage: exactly one of userId and botId must be set');
+  }
   await assertChannelAlive(db, input.channelId);
 
   if (input.replyToId) {
@@ -93,6 +105,7 @@ export async function createMessage(db: DbClient, input: CreateMessageInput): Pr
     .values({
       channelId: input.channelId,
       userId: input.userId,
+      botId,
       content: input.content,
       metadata: input.metadata ?? {},
       replyToId: input.replyToId ?? null,
@@ -129,6 +142,7 @@ export async function listMessagesForChannel(
       id: messages.id,
       channelId: messages.channelId,
       userId: messages.userId,
+      botId: messages.botId,
       content: messages.content,
       metadata: messages.metadata,
       replyToId: messages.replyToId,
@@ -156,6 +170,7 @@ export async function getMessageById(db: DbClient, messageId: string): Promise<M
       id: messages.id,
       channelId: messages.channelId,
       userId: messages.userId,
+      botId: messages.botId,
       content: messages.content,
       metadata: messages.metadata,
       replyToId: messages.replyToId,

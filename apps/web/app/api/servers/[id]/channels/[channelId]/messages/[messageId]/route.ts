@@ -14,6 +14,8 @@ import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
 import { authorizeChannelMessageAccess } from '@/lib/message-authorization';
+import { moderateMessage, moderationBlockedBody } from '@/lib/bots/moderation';
+import { readMessageBot } from '@/lib/bots/message-meta';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -36,6 +38,8 @@ function toJson(message: MessageRow): Record<string, unknown> {
     id: message.id,
     channelId: message.channelId,
     userId: message.userId,
+    botId: message.botId ?? null,
+    bot: readMessageBot(message),
     content: message.content,
     metadata: message.metadata,
     replyToId: message.replyToId,
@@ -196,6 +200,25 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
 
     if (body.content !== undefined && !(await canMutateMessage(serverId, access.isAuthor, session.uid))) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+    // Bots milestone: an edit cannot slip past the Moderation Bot — its
+    // content rules run on the new text (the counting rules only count
+    // new messages).
+    if (body.content !== undefined) {
+      const moderation = await moderateMessage({
+        serverId,
+        channelId,
+        userId: session.uid,
+        content: body.content,
+        ownerUserId: access.isOwner ? session.uid : null,
+        kind: 'edit',
+      });
+      if (moderation.action === 'block') {
+        return NextResponse.json(moderationBlockedBody(moderation), {
+          status: 422,
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
     }
     if (body.pinned !== undefined) {
       const permissions = await getUserPermissions(getDb(), session.uid, serverId);
