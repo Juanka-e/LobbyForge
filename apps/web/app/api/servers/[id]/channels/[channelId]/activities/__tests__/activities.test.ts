@@ -16,6 +16,8 @@ const setGameSessionStateCAS = vi.fn();
 const endGameSession = vi.fn();
 const listPlayersForSession = vi.fn();
 const logAction = vi.fn().mockResolvedValue(undefined);
+const addPlayerToSession = vi.fn(async () => ({ id: 'player-row', sessionId: 'sess', userId: 'u' }));
+const publishActivityStateChange = vi.fn();
 
 // Mock the plugin-registry — the route uses `getPlugin` to look up the
 // plugin by id; the tests pin a single fake plugin that echoes the
@@ -34,7 +36,7 @@ const getPluginServer = vi.fn((id: string) => (id === 'fake' ? fakePlugin : null
 vi.mock('@lobbyforge/db', () => ({
   getServerById,
   getChannelById,
-  addPlayerToSession: vi.fn(async () => ({ id: 'player-row', sessionId: 'sess', userId: 'u' })),
+  addPlayerToSession,
   isServerMember,
   getUserPermissions,
   createGameSession,
@@ -48,6 +50,8 @@ vi.mock('@lobbyforge/db', () => ({
   listPlayersForSession,
   logAction,
 }));
+
+vi.mock('@/lib/activity-bus', () => ({ publishActivityStateChange }));
 
 vi.mock('@/lib/permissions', () => ({
   CorePermission: new Proxy({}, { get: (_t, key: string) => key }),
@@ -471,6 +475,54 @@ describe('POST /api/servers/{id}/activities/{sessionId}/actions', () => {
     const json = (await res.json()) as { activity: { state: { count: number } } };
     expect(json.activity.state).toEqual({ count: 3 });
     expect(setGameSessionStateCAS).toHaveBeenCalled();
+  });
+
+  it('adds a first-time actor to the roster and tells subscribers to re-read it', async () => {
+    getServerById.mockResolvedValue(mockServer(OWNER_ID));
+    isServerMember.mockResolvedValue(true);
+    getGameSessionById.mockResolvedValue(mockSession({ state: { count: 0 } }));
+    listPlayersForSession.mockResolvedValue([{ userId: 'someone-else', characterName: null }]);
+    setGameSessionStateCAS.mockResolvedValue({ ok: true, row: { ...mockSession({ state: { count: 1 } }), revision: 1 } });
+    addPlayerToSession.mockClear();
+    publishActivityStateChange.mockClear();
+    const { POST } = await loadActionRoute();
+    const res = await POST(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/activities/${SESSION_ID}/actions`, {
+        method: 'POST',
+        headers: { cookie: makeSessionCookie() },
+        body: JSON.stringify({ type: 'inc', amount: 1 }),
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, sessionId: SESSION_ID }) }
+    );
+    expect(res.status).toBe(200);
+    expect(addPlayerToSession).toHaveBeenCalledTimes(1);
+    expect(publishActivityStateChange).toHaveBeenCalledWith(
+      expect.objectContaining({ publicSummary: expect.objectContaining({ rosterChanged: true }) })
+    );
+  });
+
+  it('leaves the roster alone for someone already in it', async () => {
+    getServerById.mockResolvedValue(mockServer(OWNER_ID));
+    isServerMember.mockResolvedValue(true);
+    getGameSessionById.mockResolvedValue(mockSession({ state: { count: 0 } }));
+    setGameSessionStateCAS.mockResolvedValue({ ok: true, row: { ...mockSession({ state: { count: 1 } }), revision: 1 } });
+    const { POST } = await loadActionRoute();
+    // makeSessionCookie() signs in as this user id.
+    listPlayersForSession.mockImplementation(async () => [{ userId: '00000000-0000-0000-0000-000000000001', characterName: null }]);
+    addPlayerToSession.mockClear();
+    publishActivityStateChange.mockClear();
+    const res = await POST(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/activities/${SESSION_ID}/actions`, {
+        method: 'POST',
+        headers: { cookie: makeSessionCookie() },
+        body: JSON.stringify({ type: 'inc', amount: 1 }),
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, sessionId: SESSION_ID }) }
+    );
+    expect(res.status).toBe(200);
+    expect(addPlayerToSession).not.toHaveBeenCalled();
+    const published = publishActivityStateChange.mock.calls[0]?.[0] as { publicSummary?: Record<string, unknown> };
+    expect(published.publicSummary?.rosterChanged).toBeUndefined();
   });
 });
 

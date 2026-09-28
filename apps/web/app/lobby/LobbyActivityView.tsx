@@ -10,6 +10,9 @@ import { findOpenActivity, useActivitySession } from '../room/useActivitySession
 import { useLobbyVoice } from './LobbyVoiceProvider';
 import type { InstalledApp } from './page';
 
+/** How often the picker looks for a session someone else started. */
+const OPEN_ACTIVITY_POLL_MS = 4000;
+
 /**
  * The activities surface, in the centre column.
  *
@@ -21,7 +24,7 @@ import type { InstalledApp } from './page';
  * Two states, one grammar with the rest of the app:
  *  - nothing running → a gallery of the community's installed apps,
  *    each a launch card with its accent spine, player range and trust.
- *  - a session running → a status rail (app, phase, players) above the
+ *  - a session running → a status rail (app, players) above the
  *    plugin's own surface, which finally gets room to breathe.
  */
 
@@ -36,10 +39,12 @@ interface CardPack {
 
 /** Per-app accent, so each game is recognisable at a glance in the gallery. */
 const APP_ACCENTS: Record<string, { spine: string; glyph: string; icon: string }> = {
-  hushle: { spine: 'bg-primary', glyph: 'text-primary', icon: 'forum' },
-  quiz: { spine: 'bg-tertiary', glyph: 'text-tertiary', icon: 'quiz' },
-  poll: { spine: 'bg-success', glyph: 'text-success', icon: 'ballot' },
-  'dice-bot': { spine: 'bg-danger', glyph: 'text-danger', icon: 'casino' },
+  hushle: { spine: 'bg-ember', glyph: 'text-ember', icon: 'forum' },
+  quiz: { spine: 'bg-primary', glyph: 'text-primary', icon: 'quiz' },
+  'vampire-village': { spine: 'bg-danger', glyph: 'text-danger', icon: 'dark_mode' },
+  'watch-party': { spine: 'bg-success', glyph: 'text-success', icon: 'smart_display' },
+  poll: { spine: 'bg-secondary', glyph: 'text-secondary', icon: 'ballot' },
+  'dice-bot': { spine: 'bg-tertiary', glyph: 'text-tertiary', icon: 'casino' },
 };
 const DEFAULT_ACCENT = { spine: 'bg-secondary-container', glyph: 'text-text-secondary', icon: 'stadia_controller' };
 
@@ -69,12 +74,6 @@ function accentFor(pluginId: string) {
 }
 
 /** `team_setup` → `Team setup`. Phases are plugin-defined snake_case. */
-function humanisePhase(phase: unknown): string | null {
-  if (typeof phase !== 'string' || !phase) return null;
-  const spaced = phase.replace(/_/g, ' ');
-  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
-}
-
 export function LobbyActivityView({
   serverId,
   channelId,
@@ -112,6 +111,22 @@ export function LobbyActivityView({
     onEnded: handleEnded,
   });
 
+  // Everyone the panel may need to name: the session's roster (people who
+  // have acted), plus whoever is in this voice channel — their LiveKit
+  // identity is their user id — so a host can seat players by name before
+  // they have pressed anything.
+  const roster = detail?.players;
+  const panelPlayers = useMemo(() => {
+    const byId = new Map<string, { userId: string; name: string | null }>();
+    for (const p of roster ?? []) byId.set(p.userId, { userId: p.userId, name: p.name ?? null });
+    if (voice.activeChannelId === channelId) {
+      for (const p of voice.participants) {
+        if (!byId.has(p.identity)) byId.set(p.identity, { userId: p.identity, name: p.name || null });
+      }
+    }
+    return [...byId.values()];
+  }, [roster, voice.activeChannelId, voice.participants, channelId]);
+
   // Join whatever is already running in this channel, rather than
   // offering a launch that would answer 409.
   useEffect(() => {
@@ -127,6 +142,23 @@ export function LobbyActivityView({
       cancelled = true;
     };
   }, [serverId, channelId]);
+
+  // Someone else may start a game while this hub sits on the picker: look
+  // again every few seconds until a session exists, so every viewer lands
+  // in it without closing and reopening the hub.
+  useEffect(() => {
+    if (sessionId || resolving) return;
+    let cancelled = false;
+    const timer = setInterval(() => {
+      void findOpenActivity(serverId, channelId).then((open) => {
+        if (!cancelled && open) setSessionId(open.id);
+      });
+    }, OPEN_ACTIVITY_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [sessionId, resolving, serverId, channelId]);
 
   const launch = useCallback(
     async (pluginId: string) => {
@@ -190,7 +222,6 @@ export function LobbyActivityView({
     if (!detail) return null;
     return apps.find((a) => a.id === detail.pluginId)?.name ?? detail.pluginId;
   }, [apps, detail]);
-  const phase = humanisePhase((detail?.state as { phase?: unknown } | undefined)?.phase);
 
   return (
     <main className="flex-1 flex flex-col bg-background min-w-0 relative text-[14px] animate-fade-in-up">
@@ -238,11 +269,6 @@ export function LobbyActivityView({
                 <span className="font-label-sm font-semibold text-text-primary truncate">{appName}</span>
                 <span className="sr-only">{t('lobbyMain.activities.live')}</span>
               </span>
-              {phase ? (
-                <span className="rounded-full border border-border-subtle bg-surface-container px-2.5 py-0.5 font-label-xs text-[11px] text-text-secondary">
-                  {phase}
-                </span>
-              ) : null}
               <span className="flex items-center gap-1.5 font-label-xs text-[11px] text-text-secondary">
                 <span className="material-symbols-outlined text-[14px]">group</span>
                 {t('lobbyMain.activities.playerCount', { count: detail.players.length })}
@@ -276,7 +302,7 @@ export function LobbyActivityView({
                     dispatch: (action: unknown) => void dispatch(action as Record<string, unknown>),
                     actorUserId: currentUserId ?? '',
                     hostUserId: detail.createdBy,
-                    players: detail.players.map((p) => ({ userId: p.userId, name: p.name ?? null })),
+                    players: panelPlayers,
                     cardPacks,
                   }}
                   fallback={<NoPlayerSurface pluginId={detail.pluginId} />}

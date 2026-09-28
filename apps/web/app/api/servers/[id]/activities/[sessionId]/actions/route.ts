@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import {
+  addPlayerToSession,
   getGameSessionById,
   getServerById,
   getUserPermissions,
@@ -319,6 +320,22 @@ async function handlePost(
       return NextResponse.json({ error: prepared.error }, { status: prepared.status });
     }
 
+    // The roster is everyone who has acted in this activity. Only the
+    // creator used to be added, so `player` policies admitted one person
+    // and every panel could name only them. Whoever the policy just
+    // authorised joins here (idempotent) — BEFORE the context snapshot,
+    // so the reducer's `ctx.players` includes the actor too.
+    let rosterChanged = false;
+    try {
+      const roster = await listPlayersForSession(getDb(), sessionId);
+      if (!roster.some((p) => p.userId === session.uid)) {
+        await addPlayerToSession(getDb(), sessionId, session.uid);
+        rosterChanged = true;
+      }
+    } catch (err) {
+      console.warn('[activity-action] roster update failed:', (err as Error).message);
+    }
+
     const ctx2 = await buildHttpPluginContext({
       db: getDb(),
       sessionId,
@@ -388,12 +405,17 @@ async function handlePost(
     const deckSize = Array.isArray((committedState as { deck?: unknown }).deck)
       ? ((committedState as { deck?: unknown[] }).deck as unknown[]).length
       : undefined;
+    // `rosterChanged` tells subscribers to re-read the player list (names
+    // included) — the bus itself never carries identities.
+    const publicSummary: Record<string, unknown> = {};
+    if (deckSize !== undefined) publicSummary.deckSize = deckSize;
+    if (rosterChanged) publicSummary.rosterChanged = true;
     publishActivityStateChange({
       serverId,
       sessionId,
       status: (casResult.row as { status?: string })?.status ?? row.status,
       revision: (casResult.row as { revision?: number })?.revision,
-      publicSummary: deckSize !== undefined ? { deckSize } : undefined,
+      publicSummary: Object.keys(publicSummary).length > 0 ? publicSummary : undefined,
     });
     void logAction(getDb(), {
       serverId,
