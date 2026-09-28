@@ -7,9 +7,10 @@
  * persisted state is the source of truth for every other participant's view.
  *
  * Phases:
- *   - lobby      : no game yet. Host can pick a language.
- *   - team_setup : language is picked, host is configuring teams.
- *   - playing    : a team's turn is in progress. Timer is running.
+ *   - lobby      : no game yet. The host picks a pack and the settings.
+ *   - team_setup : the host is building the teams.
+ *   - playing    : a turn runs while `timer.startedAt` is set; between two
+ *                  turns the phase stays `playing` with the timer cleared.
  *   - ended      : the game is over; only scores are valid.
  *
  * State versioning:
@@ -24,6 +25,8 @@
  *   in the database.
  */
 
+import { cursorAfter } from './rotation';
+
 export type HushlePhase = 'lobby' | 'team_setup' | 'playing' | 'ended';
 
 /**
@@ -36,8 +39,7 @@ export type HushleLanguage = 'en' | 'tr' | (string & {});
 
 /**
  * Difficulty tiers for a Hushle card. The visual treatment (color +
- * top-right icon) is plugin-owned; the reducer only knows the label.
- * M20a — the M17 reducer had no notion of difficulty.
+ * top-right pips) is plugin-owned; the reducer only knows the label.
  */
 export type HushleDifficulty = 'easy' | 'medium' | 'hard';
 
@@ -58,6 +60,13 @@ export interface HushleTeam {
   correctCount: number;
   passCount: number;
   penaltyCount: number;
+  /**
+   * v3 — where this team's explainer rotation stands: the slot in its
+   * rotation (see `rotation.ts`) that the team's NEXT turn goes to. It
+   * moves on by one each time the team's turn starts; an explainer the
+   * host picks by hand moves it to the slot after theirs.
+   */
+  nextExplainerSlot: number;
 }
 
 export interface HushleSettings {
@@ -66,27 +75,32 @@ export interface HushleSettings {
   language: HushleLanguage;
   packId: string | null;
   /**
-   * Target number of players per team. The reducer uses this to
-   * validate `set-teams` and to drive the explainer rotation. Hushle
-   * defaults to 2 (the 2v2 format); odd-player games carry the
-   * extra player as a `floaterPlayerId` on state.
+   * Target number of players per team. `set-teams` trims every team to
+   * it. Hushle defaults to 2 (the 2v2 format); an odd player count
+   * carries the extra player as `floaterPlayerId`.
    */
   teamSize: number;
   /**
    * Weighted draw distribution. Keys are HushleDifficulty; values are
    * fractions in [0, 1] that sum to 1. Default is
-   * `{ easy: 0.6, medium: 0.3, hard: 0.1 }` — 60% easy / 30% medium /
-   * 10% hard. Server owners can override per session via the start
-   * action. The reducer samples a tier by `pickDifficultyTier`, then
-   * draws a card from that tier's bucket.
+   * `{ easy: 0.6, medium: 0.3, hard: 0.1 }`. The reducer samples a tier,
+   * then draws an unused card from that tier's bucket.
    */
   difficultyDistribution: Record<HushleDifficulty, number>;
 }
 
+/**
+ * The turn timer. A turn has ONE clock: it starts with the turn and does
+ * not restart per card, so the explaining team gets the whole duration for
+ * as many cards as they manage. `endsAt` is the deadline every client
+ * counts down to; after it, the turn's scoring is over.
+ */
 export interface HushleTimer {
   startedAt: string | null;
   durationSeconds: number;
   paused: boolean;
+  /** v3 — when the running turn's time is up (ISO). Null between turns. */
+  endsAt: string | null;
 }
 
 export interface HushleState {
@@ -94,32 +108,22 @@ export interface HushleState {
   phase: HushlePhase;
   teams: HushleTeam[];
   /**
-   * M20a — odd-player support. When the player count isn't divisible
-   * by `settings.teamSize * 2`, the host passes a single extra player
-   * via `set-teams` (or as a `floaterPlayerId`). The floater explains
-   * for whichever team's turn it is on alternating turns — across a
-   * 4-turn round, the floater ends up explaining twice. The reducer
-   * carries the floater on state so `end-turn`'s auto-rotation can
-   * pick the right explainer without the host passing it explicitly.
+   * The extra player of an odd player count. They sit on no team; they
+   * have a slot in EVERY team's explainer rotation instead, so they
+   * explain once for each team per round.
    */
   floaterPlayerId: string | null;
-  /**
-   * M20a — index into the flattened explainer rotation. The reducer
-   * uses this to auto-pick the next explainer on `end-turn`. Stored
-   * on state so the host doesn't have to recompute the rotation
-   * from scratch on every turn. Resets to 0 when `set-teams` runs.
-   */
-  currentExplainerIndex: number;
+  /** v3 — the current turn's number, 1 for the first; 0 before play starts. */
+  turnNumber: number;
   currentTeamId: string | null;
   currentExplainerId: string | null;
   currentCard: HushleCard | null;
   deck: HushleCard[];
   deckIndex: number;
   /**
-   * Card IDs already drawn this game. The reducer consults this set
-   * (in addition to the deck index) when sampling from a difficulty
-   * tier to avoid repeating the same card. Resets to `[]` on
-   * `set-teams` / `start-game`.
+   * Card IDs already drawn this game. The reducer consults this set when
+   * sampling from a difficulty tier to avoid repeating the same card.
+   * Resets to `[]` on `start-game`.
    *
    * beta-review: SERVER ONLY. These are stable DB card ids and the last
    * entry is the current card, so the canonical projector
@@ -142,18 +146,12 @@ export type HushleAction =
       language?: HushleLanguage;
       turnDurationSeconds?: number;
       createdBy: string;
-      /**
-       * M20a — optional server-configured difficulty distribution and
-       * team size. Both default to the Hushle MVP defaults (60/30/10
-       * and teamSize 2). Server owners override at start-game time.
-       */
+      /** Optional difficulty weights and team size; default 60/30/10 and 2. */
       difficultyDistribution?: Partial<Record<HushleDifficulty, number>>;
       teamSize?: number;
       /**
-       * M20a — cards per turn before the turn auto-rotates to the
-       * next team. Defaults to `HUSHLE_DEFAULT_CARDS_PER_TURN` (15).
-       * Tests override this to draw the whole deck without the
-       * turn-ending mid-session.
+       * Cards per turn before the turn ends. Defaults to
+       * `HUSHLE_DEFAULT_CARDS_PER_TURN` (15).
        */
       cardsPerTurn?: number;
       /** Host-injected DB deck. Client input is overwritten at the API boundary. */
@@ -162,11 +160,7 @@ export type HushleAction =
   | {
       type: 'set-teams';
       teams: Array<{ name: string; playerIds: string[] }>;
-      /**
-       * M20a — single extra player for odd-player games. The floater
-       * explains for whichever team's turn it is on alternating
-       * turns. Pass null (the default) for even-player games.
-       */
+      /** The single extra player of an odd count, or null (the default). */
       floaterPlayerId?: string | null;
     }
   | { type: 'start-turn'; teamId: string; explainerId: string | null }
@@ -197,15 +191,23 @@ export const HUSHLE_DEFAULT_DIFFICULTY_DISTRIBUTION: Record<HushleDifficulty, nu
 };
 
 /**
+ * How late a card may still be scored after the turn's deadline: the time
+ * a host's last-second tap takes to reach the server. Past it, the turn's
+ * scoring is over.
+ */
+export const HUSHLE_TIME_UP_GRACE_MS = 2000;
+
+/**
  * The current Hushle state schema version. Bump this and add a step
  * to `migrateHushleState` below whenever the state shape changes in
  * a backwards-incompatible way.
  *
- * M20a — bumped to 2. v2 adds `floaterPlayerId`, `currentExplainerIndex`,
- * `usedCardIds`, `settings.teamSize`, `settings.difficultyDistribution`,
- * and `difficulty` on each card.
+ * v2 (M20a) added the floater, the difficulty tiers and the weighted draw.
+ * v3 gives every team its own explainer rotation (`teams[].nextExplainerSlot`,
+ * replacing the single `currentExplainerIndex`), counts turns
+ * (`turnNumber`) and keeps the turn's deadline (`timer.endsAt`).
  */
-export const HUSHLE_STATE_VERSION = 2;
+export const HUSHLE_STATE_VERSION = 3;
 
 export function createHushleInitialState(): HushleState {
   return {
@@ -213,7 +215,7 @@ export function createHushleInitialState(): HushleState {
     phase: 'lobby',
     teams: [],
     floaterPlayerId: null,
-    currentExplainerIndex: 0,
+    turnNumber: 0,
     currentTeamId: null,
     currentExplainerId: null,
     currentCard: null,
@@ -232,6 +234,7 @@ export function createHushleInitialState(): HushleState {
       startedAt: null,
       durationSeconds: HUSHLE_DEFAULT_TURN_DURATION_SECONDS,
       paused: true,
+      endsAt: null,
     },
     cardsPlayedThisTurn: 0,
     totalCardsPlayed: 0,
@@ -240,13 +243,18 @@ export function createHushleInitialState(): HushleState {
   };
 }
 
-/**
- * Default values used when migrating a pre-versioned row to v2. Each
- * migration step returns a partial that gets merged onto the
- * previous shape, so adding v3 doesn't have to repeat v2's defaults.
- */
-const HUSHLE_V2_DEFAULTS: Partial<HushleState> = {
-  version: HUSHLE_STATE_VERSION,
+// ---------------------------------------------------------------------------
+// Migrations. Older shapes are handled as loose records: each step takes the
+// previous version's shape and returns the next one's.
+// ---------------------------------------------------------------------------
+
+type Loose = Record<string, unknown>;
+
+const asRecord = (value: unknown): Loose =>
+  value && typeof value === 'object' && !Array.isArray(value) ? (value as Loose) : {};
+
+/** The v2 defaults — the shape v0 and v1 rows are brought up to first. */
+const HUSHLE_V2_DEFAULTS: Loose = {
   phase: 'lobby',
   teams: [],
   floaterPlayerId: null,
@@ -276,100 +284,104 @@ const HUSHLE_V2_DEFAULTS: Partial<HushleState> = {
   createdAt: null,
 };
 
-const HUSHLE_V1_DEFAULTS: Partial<HushleState> = {
-  ...HUSHLE_V2_DEFAULTS,
-  // v1 had no floater / difficulty fields — they fall through to v2's defaults.
-};
-
-function migrateV0ToV1(raw: unknown): HushleState {
+function migrateV0ToV1(raw: unknown): Loose {
   // Pre-versioned state had no `version` field. Promote it to v1 with
   // defaults for any fields added in v1. The reducer's view of the
   // data is unchanged — `phase` / `teams` / `deck` already existed.
-  const base = (raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}) as Record<
-    string,
-    unknown
-  >;
-  return {
-    ...HUSHLE_V1_DEFAULTS,
-    ...base,
-    version: HUSHLE_STATE_VERSION,
-    // settings was already in v0 but the schema may have drifted; merge
-    // defaults so a partially-shaped row still loads.
-    settings: {
-      ...HUSHLE_V1_DEFAULTS.settings,
-      ...(typeof base.settings === 'object' && base.settings !== null
-        ? (base.settings as Record<string, unknown>)
-        : {}),
-    } as HushleSettings,
-    timer: {
-      ...HUSHLE_V1_DEFAULTS.timer,
-      ...(typeof base.timer === 'object' && base.timer !== null
-        ? (base.timer as Record<string, unknown>)
-        : {}),
-    } as HushleTimer,
-  } as HushleState;
-}
-
-function migrateV1ToV2(raw: unknown): HushleState {
-  // v1 had no `difficulty` on cards, no floater support, no
-  // `teamSize` / `difficultyDistribution` on settings, no `usedCardIds`.
-  // Promote every card to `easy` (the safest default; the per-session
-  // `difficultyDistribution` will re-weight on first action if the
-  // server owner configured non-default tiers). The reducer treats
-  // unknown tiers as a no-op tier (drops out of the weighted draw).
-  const base = (raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}) as Record<
-    string,
-    unknown
-  >;
-  const oldDeck = Array.isArray(base.deck) ? (base.deck as Array<Record<string, unknown>>) : [];
-  const deck: HushleCard[] = oldDeck.map((c) => ({
-    id: typeof c.id === 'string' ? c.id : 'card-migrated',
-    language: c.language === 'tr' ? 'tr' : 'en',
-    word: typeof c.word === 'string' ? c.word : '',
-    forbiddenWords: Array.isArray(c.forbiddenWords)
-      ? (c.forbiddenWords as unknown[]).filter((w): w is string => typeof w === 'string')
-      : [],
-    difficulty: 'easy',
-  }));
-  const oldCurrentCard = base.currentCard as Record<string, unknown> | null | undefined;
-  const currentCard: HushleCard | null =
-    oldCurrentCard && typeof oldCurrentCard === 'object'
-      ? {
-          id: typeof oldCurrentCard.id === 'string' ? oldCurrentCard.id : 'card-migrated',
-          language: oldCurrentCard.language === 'tr' ? 'tr' : 'en',
-          word: typeof oldCurrentCard.word === 'string' ? oldCurrentCard.word : '',
-          forbiddenWords: Array.isArray(oldCurrentCard.forbiddenWords)
-            ? (oldCurrentCard.forbiddenWords as unknown[]).filter((w): w is string =>
-                typeof w === 'string'
-              )
-            : [],
-          difficulty: 'easy',
-        }
-      : null;
+  const base = asRecord(raw);
   return {
     ...HUSHLE_V2_DEFAULTS,
     ...base,
-    version: HUSHLE_STATE_VERSION,
+    version: 1,
+    // settings was already in v0 but the schema may have drifted; merge
+    // defaults so a partially-shaped row still loads.
+    settings: { ...asRecord(HUSHLE_V2_DEFAULTS.settings), ...asRecord(base.settings) },
+    timer: { ...asRecord(HUSHLE_V2_DEFAULTS.timer), ...asRecord(base.timer) },
+  };
+}
+
+function migrateV1ToV2(raw: unknown): Loose {
+  // v1 had no `difficulty` on cards, no floater support, no
+  // `teamSize` / `difficultyDistribution` on settings, no `usedCardIds`.
+  // Promote every card to `easy` (the safest default).
+  const base = asRecord(raw);
+  const toCard = (value: unknown) => {
+    const c = asRecord(value);
+    return {
+      id: typeof c.id === 'string' ? c.id : 'card-migrated',
+      language: c.language === 'tr' ? 'tr' : 'en',
+      word: typeof c.word === 'string' ? c.word : '',
+      forbiddenWords: Array.isArray(c.forbiddenWords)
+        ? (c.forbiddenWords as unknown[]).filter((w): w is string => typeof w === 'string')
+        : [],
+      difficulty: 'easy',
+    };
+  };
+  const deck = Array.isArray(base.deck) ? (base.deck as unknown[]).map(toCard) : [];
+  const currentCard = base.currentCard && typeof base.currentCard === 'object' ? toCard(base.currentCard) : null;
+  return {
+    ...HUSHLE_V2_DEFAULTS,
+    ...base,
+    version: 2,
     floaterPlayerId: null,
     currentExplainerIndex: 0,
     usedCardIds: [],
     deck,
     currentCard,
     settings: {
-      ...HUSHLE_V2_DEFAULTS.settings,
-      ...(typeof base.settings === 'object' && base.settings !== null
-        ? (base.settings as Record<string, unknown>)
-        : {}),
+      ...asRecord(HUSHLE_V2_DEFAULTS.settings),
+      ...asRecord(base.settings),
       teamSize: HUSHLE_DEFAULT_TEAM_SIZE,
       difficultyDistribution: { ...HUSHLE_DEFAULT_DIFFICULTY_DISTRIBUTION },
-    } as HushleSettings,
-    timer: {
-      ...HUSHLE_V2_DEFAULTS.timer,
-      ...(typeof base.timer === 'object' && base.timer !== null
-        ? (base.timer as Record<string, unknown>)
-        : {}),
-    } as HushleTimer,
-  } as HushleState;
+    },
+    timer: { ...asRecord(HUSHLE_V2_DEFAULTS.timer), ...asRecord(base.timer) },
+  };
+}
+
+function migrateV2ToV3(raw: unknown): HushleState {
+  // v2 had one rotation index for all teams (`currentExplainerIndex`), a
+  // timer that restarted with every card, and no turn counter. v3 gives
+  // every team its own rotation cursor, numbers the turns, and keeps the
+  // turn's deadline.
+  const { currentExplainerIndex, ...base } = asRecord(raw);
+  const oldIndex = typeof currentExplainerIndex === 'number' ? Math.max(0, Math.floor(currentExplainerIndex)) : 0;
+  const teams = (Array.isArray(base.teams) ? (base.teams as unknown[]) : []).map((value) => {
+    const team = asRecord(value);
+    return {
+      ...team,
+      nextExplainerSlot: typeof team.nextExplainerSlot === 'number' ? team.nextExplainerSlot : 0,
+    } as unknown as HushleTeam;
+  });
+
+  const timer = asRecord(base.timer);
+  const startedAt = typeof timer.startedAt === 'string' ? timer.startedAt : null;
+  const durationSeconds =
+    typeof timer.durationSeconds === 'number' ? timer.durationSeconds : HUSHLE_DEFAULT_TURN_DURATION_SECONDS;
+  const paused = timer.paused === true;
+  const start = startedAt ? Date.parse(startedAt) : Number.NaN;
+  const endsAt =
+    startedAt && !paused && Number.isFinite(start) ? new Date(start + durationSeconds * 1000).toISOString() : null;
+
+  const inPlay = (base.phase === 'playing' || base.phase === 'ended') && typeof base.currentTeamId === 'string';
+  const state = {
+    ...(base as unknown as HushleState),
+    version: HUSHLE_STATE_VERSION,
+    teams,
+    turnNumber: inPlay ? oldIndex + 1 : 0,
+    timer: { startedAt, durationSeconds, paused, endsAt },
+  };
+
+  // A game in progress: the explaining team's rotation continues after
+  // whoever explains now. The other teams start their rotation afresh.
+  if (inPlay) {
+    const index = teams.findIndex((team) => team.id === base.currentTeamId);
+    const explainer = typeof base.currentExplainerId === 'string' ? base.currentExplainerId : null;
+    const cursor = index === -1 ? null : cursorAfter(state, index, explainer);
+    if (cursor !== null) {
+      state.teams = teams.map((team, i) => (i === index ? { ...team, nextExplainerSlot: cursor } : team));
+    }
+  }
+  return state;
 }
 
 /**
@@ -394,7 +406,7 @@ export function migrateHushleState(raw: unknown): HushleState {
   let state: unknown = raw;
   if (version < 1) state = migrateV0ToV1(state);
   if (version < 2) state = migrateV1ToV2(state);
-  // if (version < 3) state = migrateV2ToV3(state);   ← add when v3 lands
-  // ... chain forward ...
+  if (version < 3) state = migrateV2ToV3(state);
+  // if (version < 4) state = migrateV3ToV4(state);   ← add when v4 lands
   return state as HushleState;
 }

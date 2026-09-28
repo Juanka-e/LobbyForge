@@ -17,19 +17,33 @@ describe('HushleHowToPlayModal', () => {
     expect(screen.queryByText('Hushle')).not.toBeInTheDocument();
   });
 
-  it('renders the title, the three how-to steps, and the Start button when open', () => {
+  it('renders the title, the four how-to steps, and the Start button when open', () => {
     render(<HushleHowToPlayModal open onClose={vi.fn()} onStart={vi.fn()} />);
     expect(screen.getByText('Hushle')).toBeInTheDocument();
     expect(screen.getByText('Join a voice room')).toBeInTheDocument();
     expect(screen.getByText('Describe the word')).toBeInTheDocument();
-    expect(screen.getByText('Guess before time runs out')).toBeInTheDocument();
+    expect(screen.getByText('Guess out loud')).toBeInTheDocument();
+    expect(screen.getByText('Catch a forbidden word')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Start in Voice Room/i })).toBeInTheDocument();
+  });
+
+  it('tells the rules the game plays by', () => {
+    render(<HushleHowToPlayModal open onClose={vi.fn()} onStart={vi.fn()} />);
+    // The other team busts; the host scores each card; one timer per turn;
+    // the game opens in the lobby's centre column.
+    expect(screen.getByText(/they press Bust and the explaining team loses a point/)).toBeInTheDocument();
+    expect(screen.getByText(/The host scores each card/)).toBeInTheDocument();
+    expect(screen.getByText(/A turn has one timer/)).toBeInTheDocument();
+    expect(screen.getByText(/opens in the middle of the lobby/)).toBeInTheDocument();
   });
 
   it('shows the default player + duration metadata when no metadata prop is given', () => {
     render(<HushleHowToPlayModal open onClose={vi.fn()} onStart={vi.fn()} />);
-    expect(screen.getByText('3–12 players')).toBeInTheDocument();
+    expect(screen.getByText('4–12 players')).toBeInTheDocument();
     expect(screen.getByText('10–30 min')).toBeInTheDocument();
+    // Hushle ships with LobbyForge: an official app, not a community install.
+    expect(screen.getByText('Official')).toBeInTheDocument();
+    expect(screen.queryByText('Community installed')).not.toBeInTheDocument();
   });
 
   it('uses custom metadata when provided', () => {
