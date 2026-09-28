@@ -17,21 +17,27 @@
     "./testing": {
       "types": "./dist/testing.d.ts",
       "import": "./dist/testing.js"
+    },
+    "./ui": {
+      "types": "./dist/ui/index.d.ts",
+      "import": "./dist/ui/index.js"
     }
   },
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "lint": "eslint \"src/**/*.ts\""
+    "lint": "eslint \"src/**/*.{ts,tsx}\""
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0"
   },
   "devDependencies": {
     "@lobbyforge/config": "workspace:*",
-    "@types/react": "^18.3.3",
-    "react": "^18.3.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "typescript": "^5.4.5",
     "vitest": "^4.1.11"
   }

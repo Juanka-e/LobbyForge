@@ -166,6 +166,13 @@ type GamePluginActionPolicy = {
   `START_ACTIVITY` can also perform it for moderation/admin control.
 - `member`: any server member can perform the action.
 - `player`: the user must be an active player in `game_session_players`.
+  The host adds everyone whose action it authorises to that roster
+  (idempotently, before the reducer runs), so `player` means "has taken
+  part already" — give your join/ready action the `member` policy and
+  gate the rest on it. The roster is also what fills `ctx.players` (named
+  by character name, then display name) and the panel's `players` prop;
+  in the lobby, the people in the voice channel are added to `players`
+  as well, so a host can seat them by name.
 - `actorFields`: fields overwritten by the host with `ctx.actorUserId`.
   Use this for `playerId`, `voterId`, `hostId`, and similar identity fields.
 
@@ -394,12 +401,12 @@ A few conventions plugins should follow:
    client code — it uses hooks, accesses `document.documentElement.lang`,
    etc. Without the directive the Next.js bundler refuses to import it
    from a server component route.
-2. **Inline-style the UI.** The host doesn't ship a CSS framework to
-   the plugin; the panel must look right with no external stylesheets.
-   Colour everything with the host's theme variables and a fallback —
-   `var(--lf-surface, #0e1218)`, `var(--lf-text-primary, #e6e8eb)` —
-   and set `color` on your root element, or the panel stays dark on
-   the light theme and its headings inherit the page's text colour.
+2. **Build the UI with the kit** (`@lobbyforge/plugin-sdk/ui`, below).
+   The host doesn't ship a CSS framework to the plugin — Tailwind never
+   sees plugin files — so the kit carries its own theme-aware styles.
+   If you style something by hand, colour it with the host's theme
+   variables and a fallback — `var(--lf-surface, #0e1218)`,
+   `var(--lf-text-primary, #e6e8eb)` — never a bare dark hex.
 3. **Bundle your own locales.** One `locales/<code>.json` per language,
    loaded with `loadPluginLocale` and read with `tFor`; the plugin stays
    self-contained. `pnpm i18n:add` scaffolds a new language for every
@@ -412,10 +419,53 @@ A few conventions plugins should follow:
    today and is the right answer for plugins whose state is best
    inspected raw.
 
-The full worked example is `plugins/hushle/src/renderClient.tsx`
-(~660 lines). It demonstrates the four-phase machine pattern
-(`lobby → team_setup → playing → ended`), the host-only / member /
-guessers branching, and the locale loader.
+The full worked example is Hushle's panel (`plugins/hushle/src/renderClient.tsx`
+and `src/ui/`). It demonstrates the four-phase machine pattern
+(`lobby → team_setup → playing → ended`), per-seat views (host, explainer,
+guessers, the opposing team, spectators) and the locale loader.
+
+## The activity UI kit (`@lobbyforge/plugin-sdk/ui`)
+
+Every official panel is built from the same pieces, so games feel like
+one product and follow the viewer's theme (dark, dim, light) with no
+work from the plugin. The design reference is the "Plugin UI" page of the
+LobbyForge design canvas.
+
+```tsx
+'use client';
+import {
+  ActivityShell, ActivityHeader, PhasePill, TimerRing, Panel, Grid,
+  Button, PlayerChip, Scoreboard, Callout, EmptyState, useSecondsLeft,
+} from '@lobbyforge/plugin-sdk/ui';
+
+export function QuizPanel({ state, dispatch }: QuizPanelProps) {
+  const left = useSecondsLeft(state.deadline);          // counts down to a shared deadline
+  return (
+    <ActivityShell>                                      {/* required: theme variables + stylesheet */}
+      <ActivityHeader glyph="Q" tone="accent" title="Quiz"
+        status={<PhasePill tone="accent">{t('quiz.question', { n: 4, total: 10 })}</PhasePill>}
+        timer={left == null ? null : <TimerRing seconds={left} total={20} label={t('quiz.secondsLeft', { count: left })} />} />
+      <Panel>…</Panel>
+    </ActivityShell>
+  );
+}
+```
+
+| Piece | Use |
+|---|---|
+| `ActivityShell` | The panel root. Defines the `--lfui-*` variables and brings the kit's stylesheet (hover, focus, motion, reduced motion). Required. |
+| `ActivityHeader`, `PhasePill`, `Badge`, `TimerRing`, `ProgressBar` | Title row, phase, timers. Timers take a translated `label`. |
+| `Button` | `primary`, `game`, `success`, `danger`, `secondary`, `ghost`; `sm`/`md`/`lg`. |
+| `SegmentedControl` | Mutually exclusive settings (mode, difficulty). |
+| `Panel`, `Stack`, `Row`, `Grid`, `SectionLabel`, `Stat` | Surfaces and layout. `Grid min={…}` wraps responsively — panels run from narrow to full width. |
+| `Avatar`, `PlayerChip`, `Scoreboard` | People and scores. |
+| `Callout`, `EmptyState` | Messages and "waiting for players". |
+| `useNow`, `useSecondsLeft`, `secondsUntil`, `formatClock` | Countdowns. Store DEADLINES in state, not "seconds left". |
+| `tone(name)`, `lf` | Raw colour tokens for anything custom. |
+
+Tones: `accent` (the user's accent — primary actions), `game` (amber —
+games and live state), `success`, `danger`, `info`, `neutral`. Colour is
+never the only signal: pair it with text, an icon or a count.
 
 ## State versioning + migrators (M19)
 
@@ -547,22 +597,23 @@ Drizzle SQL and run before web startup. Next instrumentation must not import the
 DB because its development webpack target is Edge-compatible. Untrusted
 community plugins do not get raw DB migration callbacks.
 
-## Deferred plugins
+## The official plugins
 
-`plugins/quiz`, `plugins/vampire-village`, and `plugins/watch-party`
-ship as stubs since the M16 plugin SDK minimal work. The stubs
-export a single `GamePlugin` and let the registry resolve them, but
-they don't yet render custom UI (they fall back to the generic JSON
-panel) and they don't ship built-in content yet. Each will be its
-own aşama milestone:
+Every official plugin is complete and built on the UI kit:
 
-- **Quiz** — Aşama 4 quiz MVP is M20+.
-- **Vampire Village** — Aşama 4 village mechanics are M21+.
-- **Watch Party** — Aşama 4 YouTube / Together sync is M22+.
+| Plugin | What it is | Guide |
+|---|---|---|
+| `hushle` | Taboo-style team word game with card packs and difficulty tiers | [HUSHLE.md](HUSHLE.md) |
+| `quiz` | Timed trivia with built-in question packs, speed scoring and a leaderboard | [QUIZ.md](QUIZ.md) |
+| `vampire-village` | Social deduction: hidden roles, night actions, day votes | [VAMPIRE_VILLAGE.md](VAMPIRE_VILLAGE.md) |
+| `watch-party` | YouTube playback kept in sync for everyone in the room | [WATCH_PARTY.md](WATCH_PARTY.md) |
+| `poll` | Anonymous one-vote-per-player polls | `plugins/poll` |
+| `dice-bot` | Dice rolls with per-player stats | `plugins/dice-bot` |
 
-Until then, Hushle is the only fully-wired game plugin in the
-catalog and the only one the `apps/web/lib/plugin-registry.ts`
-treats as `installed`/`enabled` by default.
+They are the best reference for a new plugin: `hushle` for teams, turns
+and hidden cards; `vampire-village` for per-role secrets in the
+projection; `watch-party` for time sync and an embedded player; `poll`
+and `dice-bot` for small, complete panels.
 
 ## Reference
 
