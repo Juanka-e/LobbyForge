@@ -1,7 +1,9 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getRegistryInstanceByInstanceId } from '@lobbyforge/db';
+import { buttonOutline, buttonPrimary, container, textLink } from '@/app/(marketing)/_components/styles';
 import { getDb } from '@/lib/db';
+import { isOfficialDeployment } from '@/lib/deployment-mode';
 import { getTranslator } from '@/lib/i18n/server';
 import { rich } from '@/lib/i18n/rich';
 
@@ -20,6 +22,10 @@ export const runtime = 'nodejs';
  * 1. The user explicitly confirms they're leaving the official host.
  * 2. Browsers show the target URL (no sneaky redirects).
  * 3. We can check isVerified + isBlocked server-side before linking.
+ *
+ * It lives under /discover (the static `go` segment wins over
+ * `[instanceId]`), where the directory's links, robots.txt and the docs
+ * have always pointed. Official hub only, like the rest of the directory.
  */
 
 export default async function GoPage({
@@ -27,6 +33,7 @@ export default async function GoPage({
 }: {
   searchParams: Promise<{ id?: string }>;
 }) {
+  if (!isOfficialDeployment()) redirect('/lobby');
   const params = await searchParams;
   const id = params.id;
   if (!id) redirect('/discover');
@@ -41,14 +48,14 @@ export default async function GoPage({
 
   if (!instance || !instance.isListed || instance.isBlocked) {
     return (
-      <div className="min-h-dvh bg-background flex items-center justify-center p-6">
+      <div className={`${container} flex justify-center pb-24 pt-16 sm:pt-24`}>
         <div className="max-w-md text-center">
-          <span className="material-symbols-outlined text-5xl text-danger mb-3 block">block</span>
-          <h1 className="text-xl font-semibold text-text-primary">{t('pages.go.unavailableTitle')}</h1>
-          <p className="mt-2 text-sm text-text-secondary">
-            {t('pages.go.unavailableBody')}
-          </p>
-          <Link href="/discover" className="mt-4 inline-block text-sm text-primary hover:underline">
+          <span className="material-symbols-outlined mb-3 block text-5xl text-text-muted" aria-hidden>
+            block
+          </span>
+          <h1 className="font-display text-2xl font-bold text-text-primary">{t('pages.go.unavailableTitle')}</h1>
+          <p className="mt-2 text-pretty text-sm text-text-secondary">{t('pages.go.unavailableBody')}</p>
+          <Link href="/discover" className={`${textLink} mt-5 inline-block text-sm`}>
             {t('pages.go.back')}
           </Link>
         </div>
@@ -57,18 +64,20 @@ export default async function GoPage({
   }
 
   const isVerified = instance.isVerified;
+  const item = 'flex items-start gap-2';
+  const itemIcon = 'material-symbols-outlined mt-0.5 text-[14px]';
 
   return (
-    <div className="min-h-dvh bg-background flex items-center justify-center p-6">
-      <div className="max-w-md w-full">
-        <div className="rounded-2xl border border-border-subtle bg-surface p-6">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-12 h-12 rounded-xl bg-secondary-container flex items-center justify-center font-bold text-text-primary text-lg">
+    <div className={`${container} flex justify-center pb-24 pt-12 sm:pt-20`}>
+      <div className="w-full max-w-md">
+        <div className="rounded-[22px] border border-border-subtle/70 bg-surface p-6">
+          <div className="mb-5 flex items-center gap-3">
+            <div className="flex size-12 shrink-0 items-center justify-center rounded-[14px] bg-primary/10 font-display text-lg font-bold text-primary">
               {instance.name.charAt(0).toUpperCase()}
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-1.5">
-                <h1 className="text-base font-semibold text-text-primary">{instance.name}</h1>
+                <h1 className="truncate text-base font-semibold text-text-primary">{instance.name}</h1>
                 {isVerified ? (
                   <span className="material-symbols-outlined text-[16px] text-primary" title={t('pages.go.verifiedTitle')}>
                     verified
@@ -80,49 +89,42 @@ export default async function GoPage({
           </div>
 
           {/* Warning box */}
-          <div className="rounded-lg border border-tertiary/30 bg-tertiary/5 p-3 mb-4">
-            <p className="text-xs text-text-secondary leading-relaxed">
-              {rich(t('pages.go.leaving'), { brand: <strong>LobbyForge</strong> })}
+          <div className="mb-5 rounded-2xl border border-ember/30 bg-ember/5 p-4">
+            <p className="text-sm leading-relaxed text-text-secondary">
+              {rich(t('pages.go.leaving'), { brand: <strong className="text-text-primary">LobbyForge</strong> })}
             </p>
-            <p className="mt-2 text-sm font-mono text-text-primary bg-background rounded-md px-2 py-1 break-all border border-border-subtle">
+            <p className="mt-2 break-all rounded-lg border border-border-subtle bg-background px-2.5 py-1.5 font-mono text-sm text-text-primary">
               {instance.domain}
             </p>
-            <ul className="mt-3 space-y-1 text-xs text-text-muted">
-              <li className="flex items-start gap-1.5">
-                <span className="material-symbols-outlined text-[12px] mt-0.5">check_circle</span>
+            <ul className="mt-3 space-y-1.5 text-xs text-text-secondary">
+              <li className={item}>
+                <span className={itemIcon} aria-hidden>check_circle</span>
                 {t('pages.go.noSharedSession')}
               </li>
-              <li className="flex items-start gap-1.5">
-                <span className="material-symbols-outlined text-[12px] mt-0.5">check_circle</span>
+              <li className={item}>
+                <span className={itemIcon} aria-hidden>check_circle</span>
                 {t('pages.go.guestSession')}
               </li>
               {!isVerified ? (
-                <li className="flex items-start gap-1.5">
-                  <span className="material-symbols-outlined text-[12px] mt-0.5 text-tertiary">warning</span>
+                <li className={item}>
+                  <span className={`${itemIcon} text-ember`} aria-hidden>warning</span>
                   <span>
                     {rich(t('pages.go.notVerified'), { notVerified: <strong>{t('pages.go.notVerifiedEmphasis')}</strong> })}
                   </span>
                 </li>
               ) : null}
-              <li className="flex items-start gap-1.5">
-                <span className="material-symbols-outlined text-[12px] mt-0.5">info</span>
+              <li className={item}>
+                <span className={itemIcon} aria-hidden>info</span>
                 {t('pages.go.notResponsible')}
               </li>
             </ul>
           </div>
 
           <div className="flex gap-3">
-            <Link
-              href="/discover"
-              className="flex-1 rounded-lg border border-border-subtle bg-surface-raised px-4 py-2.5 text-sm font-medium text-text-secondary text-center hover:bg-surface-container transition-colors"
-            >
+            <Link href="/discover" className={`${buttonOutline} h-11 flex-1 rounded-xl px-4 text-sm`}>
               {t('common.cancel')}
             </Link>
-            <a
-              href={instance.domain}
-              rel="noopener noreferrer"
-              className="flex-1 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-on-primary text-center hover:brightness-110 transition-all"
-            >
+            <a href={instance.domain} rel="noopener noreferrer" className={`${buttonPrimary} h-11 flex-1 rounded-xl px-4 text-sm`}>
               {t('pages.go.continue')}
             </a>
           </div>

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import type { Metadata } from 'next';
 import { getRegistryInstanceByInstanceId, HEARTBEAT_STALE_MS } from '@lobbyforge/db';
+import { buttonOutline, buttonPrimary, focusRing } from '@/app/(marketing)/_components/styles';
 import { isOfficialDeployment } from '@/lib/deployment-mode';
 import { getDb } from '@/lib/db';
 import type { Translator } from '@/lib/i18n/core';
@@ -67,122 +68,108 @@ export default async function InstanceDetailPage({
   const go = `/discover/go?id=${encodeURIComponent(instance.instanceId)}`;
 
   return (
-    <div className="min-h-dvh bg-background">
-      <header className="border-b border-border-subtle bg-surface/80 backdrop-blur-md sticky top-0 z-10">
-        <div className="mx-auto max-w-4xl px-6 py-4 flex items-center gap-3">
-          <Link
-            href="/discover"
-            className="rounded-md p-1.5 text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors"
-            aria-label={t('pages.discoverInstance.back')}
-          >
-            <span className="material-symbols-outlined text-[20px]">arrow_back</span>
-          </Link>
-          <span className="text-sm text-text-muted truncate">{t('pages.discoverInstance.directory')}</span>
-        </div>
-      </header>
+    // A detail page reads better narrower than the hub's 1240 px grid.
+    <div className="mx-auto flex w-full max-w-[960px] flex-col gap-10 px-5 pb-24 pt-10 sm:px-8 sm:pt-12 lg:px-0">
+      <Link
+        href="/discover"
+        className={`inline-flex items-center gap-1.5 self-start rounded-md text-sm text-text-secondary transition-colors hover:text-text-primary ${focusRing}`}
+      >
+        <span className="material-symbols-outlined text-[18px]" aria-hidden>
+          arrow_back
+        </span>
+        {t('pages.discoverInstance.back')}
+      </Link>
 
-      <main className="mx-auto max-w-4xl px-6 py-10 flex flex-col gap-10">
-        {/* Identity */}
-        <div className="flex flex-col sm:flex-row sm:items-start gap-6">
-          <div className="w-20 h-20 rounded-2xl bg-primary/10 flex items-center justify-center text-primary font-display font-bold text-3xl shrink-0">
-            {instance.name.charAt(0).toUpperCase()}
-          </div>
-          <div className="min-w-0 flex-grow">
-            <div className="flex items-center gap-2 flex-wrap mb-2">
-              <h1 className="font-display font-bold text-3xl tracking-tight text-text-primary">
-                {instance.name}
-              </h1>
-              {instance.isVerified ? (
-                <span className="flex items-center gap-1 text-primary text-sm" title={t('pages.discoverInstance.domainVerified')}>
-                  <span className="material-symbols-outlined text-[18px]">verified</span>
-                  {t('pages.discoverInstance.verified')}
-                </span>
-              ) : (
-                <span className="text-text-muted text-sm">{t('pages.discoverInstance.notVerified')}</span>
-              )}
-            </div>
-            <p className="font-mono text-sm text-text-muted mb-3">{instance.domain}</p>
-            {instance.description ? (
-              <p className="text-text-secondary text-pretty leading-relaxed">
-                {instance.description}
-              </p>
-            ) : null}
-          </div>
+      {/* Identity */}
+      <div className="flex flex-col gap-6 sm:flex-row sm:items-start">
+        <div className="flex size-20 shrink-0 items-center justify-center rounded-[22px] bg-primary/10 font-display text-3xl font-bold text-primary">
+          {instance.name.charAt(0).toUpperCase()}
         </div>
+        <div className="min-w-0 flex-grow">
+          <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+            <h1 className="font-display text-[34px] font-bold leading-tight tracking-[-0.02em] text-text-primary sm:text-[42px]">
+              {instance.name}
+            </h1>
+            {instance.isVerified ? (
+              <span className="flex items-center gap-1 text-sm text-primary" title={t('pages.discoverInstance.domainVerified')}>
+                <span className="material-symbols-outlined text-[18px]" aria-hidden>verified</span>
+                {t('pages.discoverInstance.verified')}
+              </span>
+            ) : (
+              <span className="text-sm text-text-muted">{t('pages.discoverInstance.notVerified')}</span>
+            )}
+          </div>
+          <p className="mb-3 break-all font-mono text-sm text-text-muted">{instance.domain}</p>
+          {instance.description ? (
+            <p className="text-pretty leading-relaxed text-text-secondary">{instance.description}</p>
+          ) : null}
+        </div>
+      </div>
 
-        {/* CTAs — the exit ALWAYS goes through the interceptor */}
-        <div className="flex flex-col sm:flex-row gap-4">
-          <Link
-            href={go}
-            className="bg-primary-container text-on-primary-container px-8 py-4 rounded-lg font-label-sm text-label-sm hover:brightness-110 transition-all text-center"
-          >
+      {/* CTAs — the exit ALWAYS goes through the interceptor */}
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:gap-3.5">
+          <Link href={go} className={`${buttonPrimary} h-[52px] rounded-[14px] px-7 text-base`}>
             {t('pages.discoverInstance.openBrowser')}
           </Link>
           <a
             href={`lobbyforge://connect?host=${encodeURIComponent(instance.domain)}`}
-            className="border border-border-strong text-text-secondary px-8 py-4 rounded-lg font-label-sm text-label-sm hover:bg-surface-variant/30 hover:text-text-primary transition-all text-center"
+            className={`${buttonOutline} h-[52px] rounded-[14px] px-6 text-base`}
           >
             {t('pages.discoverInstance.openDesktop')}
           </a>
         </div>
-        <p className="text-sm text-text-muted -mt-4">
-          {t('pages.discoverInstance.signInNote')}
-        </p>
+        <p className="text-pretty text-sm text-text-muted">{t('pages.discoverInstance.signInNote')}</p>
+      </div>
 
-        {/* Live stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Stat
-            icon={
-              <span className={`w-2 h-2 rounded-full ${heartbeat.live ? 'bg-ember' : 'bg-text-muted'}`} />
-            }
-            value={String(instance.onlineUsers ?? 0)}
-            label={t('pages.discoverInstance.stat.online')}
-          />
-          <Stat
-            icon={<span className="material-symbols-outlined text-[16px]">forum</span>}
-            value={String(instance.publicRoomsCount ?? 0)}
-            label={t('pages.discoverInstance.stat.rooms')}
-          />
-          <Stat
-            icon={<span className="material-symbols-outlined text-[16px]">monitor_heart</span>}
-            value={instance.doctorScore != null ? String(instance.doctorScore) : '—'}
-            label={t('pages.discoverInstance.stat.doctor')}
-          />
-          <Stat
-            icon={<span className="material-symbols-outlined text-[16px]">schedule</span>}
-            value={heartbeat.text}
-            label={t('pages.discoverInstance.stat.heartbeat')}
-          />
-        </div>
+      {/* Live stats */}
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <Stat
+          icon={<span className={`size-2 rounded-full ${heartbeat.live ? 'bg-ember' : 'bg-text-muted'}`} />}
+          value={String(instance.onlineUsers ?? 0)}
+          label={t('pages.discoverInstance.stat.online')}
+        />
+        <Stat
+          icon={<span className="material-symbols-outlined text-[16px]" aria-hidden>forum</span>}
+          value={String(instance.publicRoomsCount ?? 0)}
+          label={t('pages.discoverInstance.stat.rooms')}
+        />
+        <Stat
+          icon={<span className="material-symbols-outlined text-[16px]" aria-hidden>monitor_heart</span>}
+          value={instance.doctorScore != null ? String(instance.doctorScore) : '—'}
+          label={t('pages.discoverInstance.stat.doctor')}
+        />
+        <Stat
+          icon={<span className="material-symbols-outlined text-[16px]" aria-hidden>schedule</span>}
+          value={heartbeat.text}
+          label={t('pages.discoverInstance.stat.heartbeat')}
+        />
+      </div>
 
-        {/* Facts */}
-        <div className="flex flex-col gap-4 border-t border-border-subtle pt-8">
-          {instance.region ? (
-            <Fact icon="location_on" label={t('pages.discoverInstance.fact.region')} value={instance.region} />
-          ) : null}
-          {(instance.languages as string[])?.length > 0 ? (
-            <Fact icon="translate" label={t('pages.discoverInstance.fact.languages')} value={(instance.languages as string[]).join(', ')} />
-          ) : null}
-          {(instance.tags as string[])?.length > 0 ? (
-            <div className="flex items-start gap-3">
-              <span className="material-symbols-outlined text-text-muted text-[18px] mt-0.5">sell</span>
-              <div className="flex flex-wrap gap-1.5">
-                {(instance.tags as string[]).map((tag) => (
-                  <span
-                    key={tag}
-                    className="rounded-full bg-surface-container px-2.5 py-0.5 text-xs text-text-secondary"
-                  >
-                    {tag}
-                  </span>
-                ))}
-              </div>
+      {/* Facts */}
+      <div className="flex flex-col gap-4 border-t border-border-subtle/70 pt-8">
+        {instance.region ? (
+          <Fact icon="location_on" label={t('pages.discoverInstance.fact.region')} value={instance.region} />
+        ) : null}
+        {(instance.languages as string[])?.length > 0 ? (
+          <Fact icon="translate" label={t('pages.discoverInstance.fact.languages')} value={(instance.languages as string[]).join(', ')} />
+        ) : null}
+        {(instance.tags as string[])?.length > 0 ? (
+          <div className="flex items-start gap-3">
+            <span className="material-symbols-outlined mt-0.5 text-[18px] text-text-muted" aria-hidden>sell</span>
+            <div className="flex flex-wrap gap-1.5">
+              {(instance.tags as string[]).map((tag) => (
+                <span key={tag} className="rounded-full bg-surface-raised px-2.5 py-0.5 text-xs text-text-secondary">
+                  {tag}
+                </span>
+              ))}
             </div>
-          ) : null}
-          {instance.version ? (
-            <Fact icon="deployed_code" label={t('pages.discoverInstance.fact.version')} value={instance.version} />
-          ) : null}
-        </div>
-      </main>
+          </div>
+        ) : null}
+        {instance.version ? (
+          <Fact icon="deployed_code" label={t('pages.discoverInstance.fact.version')} value={instance.version} />
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -197,8 +184,8 @@ function Stat({
   label: string;
 }) {
   return (
-    <div className="rounded-xl border border-border-subtle bg-surface p-4 flex flex-col gap-1">
-      <span className="flex items-center gap-1.5 text-text-muted text-xs">{icon} {label}</span>
+    <div className="flex flex-col gap-1 rounded-[18px] border border-border-subtle/70 bg-surface p-4">
+      <span className="flex items-center gap-1.5 text-xs text-text-muted">{icon} {label}</span>
       <span className="text-xl font-semibold text-text-primary">{value}</span>
     </div>
   );
@@ -207,8 +194,8 @@ function Stat({
 function Fact({ icon, label, value }: { icon: string; label: string; value: string }) {
   return (
     <div className="flex items-center gap-3">
-      <span className="material-symbols-outlined text-text-muted text-[18px]">{icon}</span>
-      <span className="text-xs text-text-muted w-32 shrink-0">{label}</span>
+      <span className="material-symbols-outlined text-[18px] text-text-muted" aria-hidden>{icon}</span>
+      <span className="w-32 shrink-0 text-xs text-text-muted">{label}</span>
       <span className="text-sm text-text-secondary">{value}</span>
     </div>
   );

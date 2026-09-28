@@ -191,8 +191,11 @@ The implementation is a self-hosted, no-Supabase adaptation of the `secure-nextj
 
 The latest security pass added these concrete guards:
 
-- A global CSP denies objects and framing, restricts forms/assets/connections,
-  omits `unsafe-eval` in production, and upgrades insecure production requests.
+- A global CSP denies objects and being framed, frames only YouTube's
+  privacy-enhanced player (`frame-src https://www.youtube-nocookie.com`, for
+  Watch Party — see [WATCH_PARTY.md](./WATCH_PARTY.md)), restricts
+  forms/assets/connections, omits `unsafe-eval` in production, and upgrades
+  insecure production requests.
 - HSTS, `nosniff`, `DENY`, strict referrer policy, and camera/microphone
   permissions are emitted for every route.
 - Production dependencies are pinned to patched Drizzle/PostCSS/esbuild
@@ -262,7 +265,7 @@ The interaction contract is fixed:
 - one `role="dialog"` with `aria-modal="true"` per settings route;
 - an icon-only close button in the top-right corner;
 - initial keyboard focus on that close button;
-- both the close button and `Escape` replace the current route with `/lobby`;
+- both the close button and `Escape` replace the current route with `/lobby` on a self-hosted community; on the official hub they return to the page settings were opened from (tracked per tab by `SettingsReturnTracker`, validated by `lib/settings-return.ts`), or `/home`;
 - the sidebar/header stays fixed while the settings content scrolls.
 
 `e2e/settings-modal.spec.ts` protects this contract in Chromium.

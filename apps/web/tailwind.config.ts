@@ -50,8 +50,10 @@ const config: Config = {
         background: themed('--lf-background', '#101419'),
         'bg-soft': '#0B1018',
         // "On-air" signal — the live-activities accent promoted to a named
-        // token. Used sparingly: speaking states, live indicators.
-        ember: '#E7B86A',
+        // token. Used sparingly: speaking states, live indicators. Themed:
+        // the pale amber that reads on dark is ~1.8:1 on the light theme.
+        ember: themed('--lf-ember', '#E7B86A'),
+        'on-ember': themed('--lf-on-ember', '#2A1B00'),
         surface: themed('--lf-surface', '#111722'),
         'surface-raised': themed('--lf-surface-raised', '#171E2B'),
         'surface-floating': themed('--lf-surface-raised', '#1D2533'),

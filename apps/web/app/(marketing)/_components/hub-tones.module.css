@@ -1,0 +1,55 @@
+/*
+ * Hub colours the Tailwind palette does not theme.
+ *
+ * Activity marks: each activity has an identity hue. The design draws it
+ * pale, for the dark themes, and pale ink is unreadable on the light
+ * theme — so every tone is a pair, set on the element:
+ *
+ *   style={{ '--tone': tone.dark, '--tone-light': tone.light }}
+ *
+ * Status inks: the palette's `success` and `danger` are pale hexes built
+ * for dark surfaces (~1.9:1 on white). Hub text in those colours uses
+ * these classes instead, which switch to a deeper shade on light.
+ */
+
+.tone {
+  color: var(--tone);
+  background-color: color-mix(in srgb, var(--tone) 15%, transparent);
+}
+
+:global(.lf-theme-light) .tone {
+  color: var(--tone-light, var(--tone));
+  background-color: color-mix(in srgb, var(--tone-light, var(--tone)) 12%, transparent);
+}
+
+.success {
+  color: #7ccfa6;
+}
+
+:global(.lf-theme-light) .success {
+  color: #1f7a52;
+}
+
+.successFill {
+  background-color: #7ccfa6;
+}
+
+:global(.lf-theme-light) .successFill {
+  background-color: #1f7a52;
+}
+
+.danger {
+  color: #e98282;
+}
+
+:global(.lf-theme-light) .danger {
+  color: #b42318;
+}
+
+.dangerFill {
+  background-color: #e98282;
+}
+
+:global(.lf-theme-light) .dangerFill {
+  background-color: #b42318;
+}

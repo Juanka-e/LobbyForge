@@ -1,10 +1,20 @@
+import { Fragment } from 'react';
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { isOfficialDeployment } from '@/lib/deployment-mode';
-import { getTranslator } from '@/lib/i18n/server';
-import type { Translator } from '@/lib/i18n/core';
-import VoiceStrip from './VoiceStrip';
-import { rich } from '@/lib/i18n/rich';
+import { LOBBYFORGE_REPO } from '@/lib/github-repo';
+import { playerRange } from '@/lib/hub-format';
+import type { LocaleInfo, Translator } from '@/lib/i18n/core';
+import { getRequestI18n, getTranslator } from '@/lib/i18n/server';
+import { getPlugin } from '@/lib/plugin-registry';
+import ActivityMark from '../_components/ActivityMark';
+import tones from '../_components/hub-tones.module.css';
+import { ArrowRightIcon, BranchIcon } from '../_components/icons';
+import StarOnGitHub from '../_components/StarOnGitHub';
+import { buttonOutline, buttonPrimary, container, eyebrow, focusRing } from '../_components/styles';
+import CommunityPreview from './CommunityPreview';
+import LiveRoomMockup from './LiveRoomMockup';
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslator();
@@ -14,306 +24,295 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-const REPO = 'https://github.com/Juanka-e/LobbyForge';
+/** The official activities, in the design's order. Names are brand words. */
+const SHOWCASE = [
+  { id: 'hushle', name: 'Hushle', copy: 'hub.landing.activities.hushle' },
+  { id: 'quiz', name: 'Quiz', copy: 'hub.landing.activities.quiz' },
+  { id: 'vampire-village', name: 'Vampire Village', copy: 'hub.landing.activities.vampireVillage' },
+  { id: 'watch-party', name: 'Watch Party', copy: 'hub.landing.activities.watchParty' },
+  { id: 'poll', name: 'Poll', copy: 'hub.landing.activities.poll' },
+  { id: 'dice-bot', name: 'Dice Bot', copy: 'hub.landing.activities.diceBot' },
+] as const;
+
+const HIGHLIGHTS = ['voice', 'activities', 'selfHosted', 'ecosystem'] as const;
 
 export default async function LandingPage() {
   if (!isOfficialDeployment()) redirect('/lobby');
-  const t = await getTranslator();
+  const [t, i18n] = await Promise.all([getTranslator(), getRequestI18n()]);
   return (
     <>
-      <Hero t={t} />
-      <RoomPreview t={t} />
-      <Values t={t} />
-      <SelfHost t={t} />
+      <Hero t={t} languages={i18n.locales} />
+      <Highlights t={t} />
+      <Activities t={t} />
+      <Community t={t} />
+      <HostAndSource t={t} />
       <FinalCta t={t} />
     </>
   );
 }
 
-function Hero({ t }: { t: Translator }) {
+function Hero({ t, languages }: { t: Translator; languages: LocaleInfo[] }) {
   return (
-    <section className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop w-full">
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] gap-10 lg:gap-16 items-center">
-        <div>
-          <p className="font-label-xs text-label-xs text-ember tracking-[0.2em] uppercase mb-5">
-            {t('hub.landing.hero.eyebrow')}
-          </p>
-          <h1 className="font-display font-extrabold text-[40px] leading-[1.05] sm:text-[56px] lg:text-[68px] tracking-tight text-text-primary mb-6 text-balance">
-            {t('hub.landing.hero.title')}
-          </h1>
-          <p className="font-body-lg text-body-lg text-text-secondary mb-10 max-w-xl text-pretty">
-            {t('hub.landing.hero.body')}
-          </p>
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
-            <a
-              href="/discover"
-              className="bg-primary-container text-on-primary-container px-8 py-4 rounded-lg font-label-sm text-label-sm hover:brightness-110 transition-all text-center"
-            >
-              {t('hub.landing.cta.explore')}
-            </a>
-            <a
-              href="#self-host"
-              className="border border-border-strong text-text-secondary px-8 py-4 rounded-lg font-label-sm text-label-sm hover:bg-surface-variant/30 hover:text-text-primary transition-all text-center"
-            >
-              {t('hub.landing.cta.host')}
-            </a>
-            <a
-              href={REPO}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center justify-center gap-2 text-text-muted px-4 py-4 rounded-lg font-label-sm text-label-sm hover:text-text-primary transition-colors"
-            >
-              {/* GitHub mark (public domain shape) */}
-              <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden>
-                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
-              </svg>
-              {t('hub.landing.cta.star')}
-              <GitHubStars />
-            </a>
-          </div>
-        </div>
-        <VoiceStrip />
-      </div>
-    </section>
-  );
-}
-
-function RoomPreview({ t }: { t: Translator }) {
-  return (
-    <section className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop w-full">
-      <p className="font-label-xs text-label-xs text-text-muted tracking-[0.2em] uppercase mb-6">
-        {t('hub.landing.preview.eyebrow')}
-      </p>
-      <HeroMockup t={t} />
-    </section>
-  );
-}
-
-function HeroMockup({ t }: { t: Translator }) {
-  // Clock times in the reader's own format ("12:00 PM" / "12:00").
-  const clock = new Intl.DateTimeFormat(t.locale, { hour: 'numeric', minute: '2-digit' });
-  const noon = clock.format(new Date(2000, 0, 1, 12, 0));
-  const noonPlusOne = clock.format(new Date(2000, 0, 1, 12, 1));
-  const userName = t('hub.landing.mockup.user');
-  const userInitial = userName.charAt(0).toLocaleUpperCase(t.locale);
-  return (
-    <div
-      className="w-full rounded-[32px] bg-surface border border-border-subtle/30 overflow-hidden shadow-mockup relative flex"
-      style={{ minHeight: 500 }}
+    <section
+      className={`${container} grid items-center gap-10 pb-14 pt-11 sm:pt-16 lg:grid-cols-2 lg:gap-16 lg:pb-24 lg:pt-[104px]`}
     >
-      {/* Left Sidebar */}
-      <div className="w-64 bg-surface-raised border-r border-border-subtle/50 p-4 flex-col gap-4 hidden md:flex shrink-0">
-        <div className="flex items-center gap-2 text-text-primary font-label-sm text-label-sm pb-4 border-b border-border-subtle/50">
-          <span
-            className="material-symbols-outlined text-primary"
-            style={{ fontVariationSettings: "'FILL' 1" }}
+      <div className="flex flex-col gap-5 sm:gap-7">
+        <p className={`${eyebrow} text-ember`}>
+          <span className="sm:hidden">{t('hub.landing.hero.eyebrowShort')}</span>
+          <span className="hidden sm:inline">{t('hub.landing.hero.eyebrow')}</span>
+        </p>
+        <h1 className="font-display text-[42px] font-extrabold leading-[1.04] tracking-[-0.03em] text-text-primary sm:text-[56px] lg:text-[64px] xl:text-[76px] xl:leading-[1.02]">
+          {t('hub.landing.hero.title')}
+        </h1>
+        <p className="max-w-[520px] text-pretty text-[17px] leading-[1.6] text-text-secondary sm:text-[19px]">
+          {t('hub.landing.hero.body')}
+        </p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3.5">
+          <Link href="/register" className={`${buttonPrimary} h-[52px] rounded-[14px] px-[26px] text-base`}>
+            {t('hub.nav.getStarted')}
+          </Link>
+          <a href="#self-host" className={`${buttonOutline} h-[52px] rounded-[14px] px-6 text-base`}>
+            {t('hub.landing.cta.hostYourOwn')}
+          </a>
+          <a
+            href={LOBBYFORGE_REPO.url}
+            className={`hidden h-[52px] items-center gap-2 rounded-lg px-2 text-[15px] text-text-secondary transition-colors hover:text-text-primary sm:inline-flex ${focusRing}`}
           >
-            dns
-          </span>
-          {t('hub.landing.mockup.server')}
+            {t('hub.landing.cta.viewSource')}
+            <ArrowRightIcon />
+          </a>
         </div>
-        <div className="flex flex-col gap-2">
-          <div className="text-text-muted font-label-xs text-label-xs mb-1 uppercase">
-            {t('hub.landing.mockup.voiceRooms')}
-          </div>
-          <div className="flex items-center gap-2 text-text-primary bg-surface-variant/50 p-2 rounded-lg">
-            <span className="material-symbols-outlined text-text-secondary text-sm">volume_up</span>
-            {t('hub.landing.mockup.mainLounge')}
-          </div>
-          <div className="flex items-center gap-2 text-text-secondary p-2 hover:bg-surface-variant/30 rounded-lg cursor-pointer">
-            <span className="material-symbols-outlined text-sm">volume_up</span>
-            {t('hub.landing.mockup.gameRoom')}
-          </div>
-        </div>
-        <div className="mt-auto">
-          <div className="flex items-center gap-2 text-primary bg-primary/10 p-2 rounded-lg font-label-xs text-label-xs border border-primary/20">
-            <span
-              className="material-symbols-outlined text-sm"
-              style={{ fontVariationSettings: "'FILL' 1" }}
-            >
-              health_and_safety
-            </span>
-            {t('hub.landing.mockup.doctor')}
-          </div>
-        </div>
+        <ul className="hidden flex-wrap gap-x-[22px] gap-y-2 text-sm text-text-muted sm:flex">
+          <li>{LOBBYFORGE_REPO.license}</li>
+          <li>{t('hub.landing.hero.factDocker')}</li>
+          <li>{t('hub.landing.hero.factDesktop')}</li>
+          {/* Every language the hub speaks, each in its own name — adding a
+              language to messages/ adds it here with no code change. */}
+          <li>
+            {languages.map((language, index) => (
+              <Fragment key={language.code}>
+                {index > 0 ? ' · ' : null}
+                <span lang={language.code}>{language.name}</span>
+              </Fragment>
+            ))}
+          </li>
+        </ul>
       </div>
-
-      {/* Main Area */}
-      <div className="flex-grow flex flex-col bg-background/50">
-        <div className="h-16 border-b border-border-subtle/50 flex items-center px-6 justify-between bg-surface/50 backdrop-blur-sm z-10 sticky top-0">
-          <div className="flex items-center gap-2 text-text-primary font-label-sm text-label-sm">
-            <span className="material-symbols-outlined text-text-secondary">tag</span>
-            {t('hub.landing.mockup.mainLounge')}
-          </div>
-          <div className="flex gap-2">
-            <button className="bg-primary/20 border border-primary/30 px-3 py-1.5 rounded-md text-primary font-label-xs text-label-xs flex items-center gap-1 hover:brightness-110 transition-all">
-              <span className="material-symbols-outlined text-sm">sports_esports</span>
-              {t('hub.landing.mockup.startActivity')}
-            </button>
-          </div>
-        </div>
-        <div className="flex-grow flex flex-col overflow-y-auto">
-          <div className="p-6 flex flex-col gap-6 mt-auto">
-            {/* Activity Panel */}
-            <div className="bg-surface-raised border border-primary/30 rounded-xl p-4 flex gap-4 items-center shadow-sm shadow-primary/5">
-              <div className="w-12 h-12 bg-[#E7B86A]/20 border border-[#E7B86A]/30 rounded-lg flex items-center justify-center text-[#E7B86A] shrink-0">
-                <span className="material-symbols-outlined">videogame_asset</span>
-              </div>
-              <div className="flex-grow">
-                <div className="text-text-primary font-semibold text-label-sm">Hushle</div>
-                <div className="text-text-secondary text-xs">
-                  {t('hub.landing.mockup.hushleMeta', { count: 2 })}
-                </div>
-              </div>
-              <button className="bg-[#E7B86A] text-on-primary-container px-4 py-1.5 rounded font-bold text-label-xs hover:brightness-110 transition-all">
-                {t('hub.landing.mockup.joinGame')}
-              </button>
-            </div>
-            {/* Chat Messages */}
-            <div className="flex gap-4 items-start w-max">
-              <div className="w-10 h-10 rounded-full bg-surface-variant flex items-center justify-center text-primary font-bold shrink-0">
-                {userInitial}
-              </div>
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-text-primary font-label-sm text-label-sm">{userName}</span>
-                  <span className="text-text-muted font-label-xs text-label-xs">{noon}</span>
-                </div>
-                <div className="text-text-secondary text-sm bg-surface p-3 rounded-lg border border-border-subtle/30 shadow-sm">
-                  {t('hub.landing.mockup.userMessage')}
-                </div>
-              </div>
-            </div>
-            <div className="flex gap-4 items-start w-max">
-              <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold shrink-0">
-                B
-              </div>
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-text-primary font-label-sm text-label-sm">GameBot</span>
-                  <span className="bg-primary/20 text-primary text-[10px] px-1 rounded uppercase font-bold tracking-wider">
-                    {t('hub.landing.mockup.bot')}
-                  </span>
-                  <span className="text-text-muted font-label-xs text-label-xs">{noonPlusOne}</span>
-                </div>
-                <div className="text-text-secondary text-sm bg-surface p-3 rounded-lg border border-border-subtle/30 shadow-sm">
-                  {t('hub.landing.mockup.botMessage')}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Right Sidebar */}
-      <div className="w-60 bg-surface-raised border-l border-border-subtle/50 p-4 flex-col gap-4 hidden lg:flex shrink-0">
-        <div className="text-text-muted font-label-xs text-label-xs mb-1 uppercase">
-          {t('hub.landing.mockup.online', { count: 2 })}
-        </div>
-        <div className="flex items-center gap-3 p-2 hover:bg-surface-variant/30 rounded-lg cursor-pointer">
-          <div className="w-8 h-8 rounded-full bg-surface-variant flex items-center justify-center text-primary font-bold text-xs relative">
-            {userInitial}
-            <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-success rounded-full border-2 border-surface-raised" />
-          </div>
-          <span className="text-text-secondary font-label-sm text-label-sm">{userName}</span>
-        </div>
-        <div className="flex items-center gap-3 p-2 hover:bg-surface-variant/30 rounded-lg cursor-pointer">
-          <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-xs">
-            B
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-text-secondary font-label-sm text-label-sm">GameBot</span>
-            <span className="bg-primary/20 text-primary text-[10px] px-1 rounded uppercase font-bold tracking-wider">
-              {t('hub.landing.mockup.bot')}
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
+      <LiveRoomMockup t={t} />
+    </section>
   );
 }
 
-function Values({ t }: { t: Translator }) {
-  const values = [
-    { id: 'voice', icon: 'record_voice_over', iconColor: 'text-primary' },
-    { id: 'selfHosted', icon: 'dns', iconColor: 'text-primary' },
-    { id: 'activities', icon: 'sports_esports', iconColor: 'text-ember' },
-    { id: 'ecosystem', icon: 'extension', iconColor: 'text-ember' },
+function Highlights({ t }: { t: Translator }) {
+  return (
+    <section aria-label={t('hub.landing.highlights.label')} className={`${container} pb-20 lg:pb-[136px]`}>
+      <ul className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4 lg:gap-5">
+        {HIGHLIGHTS.map((id, index) => (
+          <li
+            key={id}
+            className="flex flex-col gap-2 rounded-[20px] border border-border-subtle/70 bg-surface/80 p-5 sm:gap-3 lg:rounded-[22px] lg:p-[26px]"
+          >
+            <span
+              aria-hidden
+              className="hidden size-10 items-center justify-center rounded-xl bg-primary/10 font-mono text-sm font-medium text-primary sm:flex"
+            >
+              {String(index + 1).padStart(2, '0')}
+            </span>
+            <h2 className="text-[17px] font-semibold text-text-primary lg:text-lg">{t(`hub.landing.highlights.${id}.title`)}</h2>
+            <p className="text-[15px] leading-[1.6] text-text-secondary">{t(`hub.landing.highlights.${id}.body`)}</p>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** "4–12 players" / "Up to 50 players", read from the plugin's manifest. */
+function playersLabel(t: Translator, pluginId: string): string | null {
+  const range = playerRange(getPlugin(pluginId)?.manifest.catalog?.playerConfig);
+  if (!range) return null;
+  return range.kind === 'range'
+    ? t('hub.marketplace.playerRange', { min: range.min, max: range.max })
+    : t('hub.landing.activities.upTo', { max: range.max });
+}
+
+function Activities({ t }: { t: Translator }) {
+  return (
+    <section id="activities" aria-labelledby="hub-activities-title" className={`${container} pb-20 lg:pb-[136px]`}>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between lg:gap-10">
+        <div className="flex max-w-[720px] flex-col gap-3.5">
+          <p className={`${eyebrow} text-ember`}>{t('hub.landing.activities.eyebrow')}</p>
+          <h2
+            id="hub-activities-title"
+            className="text-balance font-display text-[32px] font-bold leading-[1.1] tracking-[-0.02em] text-text-primary sm:text-[40px] lg:text-[50px] lg:leading-[1.08]"
+          >
+            {t('hub.landing.activities.title')}
+          </h2>
+          <p className="hidden max-w-[620px] text-pretty text-lg leading-[1.6] text-text-secondary sm:block">
+            {t('hub.landing.activities.body')}
+          </p>
+        </div>
+        <Link
+          href="/marketplace"
+          className={`${buttonOutline} hidden h-12 shrink-0 rounded-[14px] px-5 text-[15px] lg:inline-flex`}
+        >
+          {t('hub.landing.activities.browse')}
+        </Link>
+      </div>
+      <ul className="mt-5 grid grid-cols-2 gap-3 sm:mt-8 lg:mt-10 lg:grid-cols-3 lg:gap-5">
+        {SHOWCASE.map((activity) => {
+          const players = playersLabel(t, activity.id);
+          const id = `hub-activity-${activity.id}`;
+          // Named by the activity, described by its players and blurb — the
+          // player pill comes first on screen but should not be heard first.
+          return (
+            <li key={activity.id}>
+              <Link
+                href="/marketplace"
+                aria-labelledby={`${id}-name`}
+                aria-describedby={players ? `${id}-players ${id}-body` : `${id}-body`}
+                className={`flex h-full flex-col gap-2.5 rounded-[18px] border border-border-subtle/70 bg-surface p-4 transition-colors hover:border-border-strong sm:gap-4 sm:rounded-[22px] sm:p-6 ${focusRing}`}
+              >
+                <span className="flex items-center justify-between gap-3">
+                  <ActivityMark
+                    pluginId={activity.id}
+                    name={activity.name}
+                    className="sm:size-12 sm:rounded-[14px] sm:text-[22px]"
+                  />
+                  {players ? (
+                    <span
+                      id={`${id}-players`}
+                      className="hidden h-[26px] items-center rounded-full bg-surface-raised px-2.5 text-xs text-text-secondary sm:inline-flex"
+                    >
+                      {players}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="flex flex-col gap-1 sm:gap-1.5">
+                  <span id={`${id}-name`} className="text-[15px] font-semibold text-text-primary sm:text-[19px]">
+                    {activity.name}
+                  </span>
+                  {players ? (
+                    <span aria-hidden className="text-xs text-text-muted sm:hidden">
+                      {players}
+                    </span>
+                  ) : null}
+                  <span id={`${id}-body`} className="hidden text-[15px] leading-[1.55] text-text-secondary sm:block">
+                    {t(activity.copy)}
+                  </span>
+                </span>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+      <Link href="/marketplace" className={`${buttonOutline} mt-4 h-12 w-full rounded-[14px] px-5 text-[15px] lg:hidden`}>
+        {t('hub.landing.activities.browse')}
+      </Link>
+    </section>
+  );
+}
+
+function Community({ t }: { t: Translator }) {
+  // A still of the whole app needs the width of one: tablets and up.
+  return (
+    <section aria-labelledby="hub-community-title" className={`${container} hidden pb-[136px] md:block`}>
+      <div className="mb-9 flex max-w-[720px] flex-col gap-3.5">
+        <p className={`${eyebrow} text-primary`}>{t('hub.landing.preview.eyebrow')}</p>
+        <h2
+          id="hub-community-title"
+          className="text-balance font-display text-[40px] font-bold leading-[1.08] tracking-[-0.02em] text-text-primary lg:text-[50px]"
+        >
+          {t('hub.landing.preview.title')}
+        </h2>
+      </div>
+      <CommunityPreview t={t} />
+    </section>
+  );
+}
+
+function HostAndSource({ t }: { t: Translator }) {
+  const card =
+    'flex flex-col gap-5 rounded-[24px] border border-border-subtle/70 bg-background p-6 sm:gap-[22px] sm:rounded-[28px] sm:p-10';
+  const heading = 'font-display text-[32px] font-bold leading-[1.1] tracking-[-0.02em] text-text-primary sm:text-[40px]';
+  const chips = [
+    { href: LOBBYFORGE_REPO.pluginSdkUrl, label: t('hub.footer.pluginSdk') },
+    { href: LOBBYFORGE_REPO.botSdkUrl, label: t('hub.landing.openSource.botSdk') },
+    { href: LOBBYFORGE_REPO.translatingUrl, label: t('hub.landing.openSource.translations') },
   ];
   return (
-    <section className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop w-full">
-      <h2 className="font-display font-bold text-[32px] md:text-[44px] leading-tight tracking-tight text-text-primary mb-4">
-        {t('hub.landing.values.title')}
-      </h2>
-      <p className="font-body-lg text-body-lg text-text-secondary mb-12 max-w-2xl">
-        {t('hub.landing.values.body')}
-      </p>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {values.map((v) => (
-          <div
-            key={v.id}
-            className="bg-surface/80 backdrop-blur-sm rounded-2xl border border-border-subtle/30 p-8 flex flex-col gap-4"
-          >
-            <div className="flex items-center gap-3">
-              <span className={`material-symbols-outlined ${v.iconColor}`}>{v.icon}</span>
-              <h3 className="font-display font-bold text-xl text-text-primary">
-                {t(`hub.landing.values.${v.id}.title`)}
-              </h3>
-            </div>
-            <p className="text-text-secondary text-sm leading-relaxed">
-              {t(`hub.landing.values.${v.id}.body`)}
-            </p>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function SelfHost({ t }: { t: Translator }) {
-  const steps = ['clone', 'install', 'setup', 'invite'];
-  return (
-    <section id="self-host" className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop w-full">
-      <div className="rounded-2xl border border-border-subtle/40 bg-surface/60 p-8 md:p-12 flex flex-col gap-10">
-        <div>
-          <p className="font-label-xs text-label-xs text-ember tracking-[0.2em] uppercase mb-4">
-            {t('hub.landing.selfHost.eyebrow')}
+    <section id="self-host" className={`${container} grid scroll-mt-24 gap-6 pb-20 lg:grid-cols-2 lg:pb-[136px]`}>
+      <div className={card}>
+        <p className={`${eyebrow} text-ember`}>{t('hub.landing.selfHost.eyebrow')}</p>
+        <h2 className={heading}>{t('hub.landing.selfHost.title')}</h2>
+        <p className="hidden text-base leading-[1.6] text-text-secondary sm:block">{t('hub.landing.selfHost.body')}</p>
+        <div
+          role="group"
+          aria-label={t('hub.landing.selfHost.commandsLabel')}
+          className="rounded-2xl border border-border-subtle/70 bg-[color:var(--lf-page-bg)] p-4 font-mono text-xs leading-[1.9] text-text-primary sm:p-5 sm:text-sm"
+        >
+          <p className="break-words">
+            <span aria-hidden className="select-none text-text-muted">$ </span>
+            git clone --branch &lt;release-tag&gt; {LOBBYFORGE_REPO.cloneUrl}
           </p>
-          <h2 className="font-display font-bold text-[32px] md:text-[44px] leading-tight tracking-tight text-text-primary mb-4">
-            {t('hub.landing.selfHost.title')}
-          </h2>
-          <p className="text-text-secondary text-sm leading-relaxed">
-            {rich(t('hub.landing.selfHost.body'), { link: <a
-                href={`${REPO}/blob/main/docs/DEPLOY_CLOUDFLARE.md`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary underline decoration-primary/40 underline-offset-4 hover:decoration-primary"
-              >
-                {t('hub.landing.selfHost.cloudflareLink')}
-              </a> })}
+          <p>
+            <span aria-hidden className="select-none text-text-muted">$ </span>
+            cd LobbyForge &amp;&amp; bash install.sh
+          </p>
+          <p className={`hidden sm:block ${tones.success}`}>
+            <span aria-hidden>✓ </span>
+            {t('hub.landing.selfHost.running')}
           </p>
         </div>
-        <ol className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {steps.map((step, i) => (
-            <li key={step} className="flex flex-col gap-2">
-              <span className="font-display font-bold text-ember text-lg">{i + 1}</span>
-              <h3 className="font-label-sm text-label-sm text-text-primary">
-                {t(`hub.landing.selfHost.steps.${step}.title`)}
-              </h3>
-              <p className="text-text-muted text-sm leading-relaxed">
-                {t(`hub.landing.selfHost.steps.${step}.body`)}
-              </p>
-            </li>
-          ))}
-        </ol>
         <a
-          href={`${REPO}#install`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="self-start border border-border-strong text-text-secondary px-6 py-3 rounded-lg font-label-sm text-label-sm hover:bg-surface-variant/30 hover:text-text-primary transition-all"
+          href={LOBBYFORGE_REPO.installGuideUrl}
+          className={`${buttonOutline} h-11 self-stretch rounded-xl px-[18px] text-[15px] sm:self-start`}
         >
           {t('hub.landing.selfHost.guide')}
         </a>
+      </div>
+
+      <div className={card}>
+        <p className={`${eyebrow} text-primary`}>{t('hub.landing.openSource.eyebrow')}</p>
+        <h2 className={heading}>{t('hub.landing.openSource.title')}</h2>
+        <div className="flex flex-col gap-3.5 rounded-[18px] border border-border-subtle/70 bg-surface p-5 sm:p-[22px]">
+          <div className="flex items-center gap-3">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-surface-raised text-text-primary">
+              <BranchIcon size={20} />
+            </span>
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <a
+                href={LOBBYFORGE_REPO.url}
+                className={`truncate rounded-sm font-mono text-[15px] text-text-primary underline-offset-4 hover:underline ${focusRing}`}
+              >
+                {LOBBYFORGE_REPO.slug}
+              </a>
+              <span className="text-[13px] text-text-muted">{LOBBYFORGE_REPO.license} · TypeScript · Rust</span>
+            </span>
+          </div>
+          <p className="text-[15px] leading-[1.6] text-text-secondary">{t('hub.landing.openSource.description')}</p>
+          <div className="flex flex-wrap gap-2.5">
+            <StarOnGitHub variant="primary" />
+            <a
+              href={LOBBYFORGE_REPO.contributingUrl}
+              className={`${buttonOutline} h-11 rounded-xl px-[18px] text-[15px]`}
+            >
+              {t('hub.landing.openSource.contribute')}
+            </a>
+          </div>
+        </div>
+        <ul className="grid gap-3 sm:grid-cols-3">
+          {chips.map((chip) => (
+            <li key={chip.href}>
+              <a
+                href={chip.href}
+                className={`flex h-full items-center rounded-[14px] bg-surface p-3.5 text-sm text-text-secondary transition-colors hover:text-text-primary ${focusRing}`}
+              >
+                {chip.label}
+              </a>
+            </li>
+          ))}
+        </ul>
       </div>
     </section>
   );
@@ -321,41 +320,19 @@ function SelfHost({ t }: { t: Translator }) {
 
 function FinalCta({ t }: { t: Translator }) {
   return (
-    <section className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop w-full text-center py-section-gap">
-      <h2 className="font-display font-bold text-[32px] md:text-[44px] leading-tight tracking-tight text-text-primary mb-8 max-w-3xl mx-auto text-balance">
+    <section className={`${container} flex flex-col items-center gap-5 pb-24 pt-4 text-center sm:gap-7 lg:pb-[140px] lg:pt-10`}>
+      <h2 className="max-w-[880px] text-balance font-display text-[38px] font-extrabold leading-[1.05] tracking-[-0.03em] text-text-primary sm:text-[52px] lg:text-[64px] lg:leading-[1.04]">
         {t('hub.landing.final.title')}
       </h2>
-      <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
-        <a
-          href="/discover"
-          className="w-full sm:w-auto bg-primary-container text-on-primary-container px-8 py-4 rounded-lg font-label-sm text-label-sm hover:brightness-110 transition-all"
-        >
-          {t('hub.landing.cta.explore')}
-        </a>
-        <a
-          href="#self-host"
-          className="w-full sm:w-auto border border-border-strong text-text-secondary px-8 py-4 rounded-lg font-label-sm text-label-sm hover:bg-surface-variant/30 hover:text-text-primary transition-all"
-        >
-          {t('hub.landing.cta.host')}
-        </a>
+      <p className="hidden text-[19px] text-text-secondary sm:block">{t('hub.landing.final.body')}</p>
+      <div className="flex w-full flex-col gap-3.5 sm:w-auto sm:flex-row">
+        <Link href="/register" className={`${buttonPrimary} h-[52px] rounded-[14px] px-7 text-base`}>
+          {t('hub.landing.final.createAccount')}
+        </Link>
+        <Link href="/discover" className={`${buttonOutline} hidden h-[52px] rounded-[14px] px-6 text-base sm:inline-flex`}>
+          {t('hub.landing.final.explore')}
+        </Link>
       </div>
     </section>
   );
-}
-
-
-// Star count via the GitHub API, cached for an hour. Falls back to a
-// plain link when the API is unreachable (rate limits/offline).
-async function GitHubStars() {
-    try {
-    const res = await fetch('https://api.github.com/repos/Juanka-e/LobbyForge', {
-      next: { revalidate: 3600 },
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as { stargazers_count?: number };
-    if (typeof data.stargazers_count !== 'number') return null;
-    return <span className="ml-1 rounded-full bg-surface-variant/60 px-2 py-0.5 text-xs text-text-secondary">{data.stargazers_count}</span>;
-  } catch {
-    return null;
-  }
 }

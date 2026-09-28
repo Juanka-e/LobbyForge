@@ -1,8 +1,6 @@
 {
   "discovery.allLanguages": "Tüm diller",
   "discovery.allRegions": "Tüm bölgeler",
-  "discovery.backToDirectory": "Dizine dön",
-  "discovery.backToLobby": "Lobiye dön",
   "discovery.cancel": "Vazgeç",
   "discovery.clearFiltersHint": "Yukarıdaki filtreleri temizlemeyi dene ya da {link}.",
   "discovery.close": "Kapat",

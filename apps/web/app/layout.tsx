@@ -1,8 +1,9 @@
-import type { ReactNode } from 'react';
+import { Suspense, type ReactNode } from 'react';
 import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import { Geist } from 'next/font/google';
 import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
+import { isOfficialDeployment } from '@/lib/deployment-mode';
 import { readMaintenanceSnapshot } from '@/lib/maintenance-guard';
 import { getEffectiveInstanceAccessSettings, getInstanceSetupStatus } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
@@ -10,6 +11,7 @@ import 'material-symbols/outlined.css';
 import './globals.css';
 import GlobalHeader from './GlobalHeader';
 import AppearanceRuntime from './AppearanceRuntime';
+import SettingsReturnTracker from './SettingsReturnTracker';
 import DesktopHandoffListener from '@/components/DesktopHandoffListener';
 import { REALTIME_URL_META, getRuntimeRealtimeUrl } from '@/lib/public-endpoints';
 import { getRequestI18n, getTranslator } from '@/lib/i18n/server';
@@ -51,6 +53,7 @@ export default async function RootLayout({ children, modal }: { children: ReactN
   // page, which is what CSS casing and screen readers go by.
   const i18n = await getRequestI18n();
   const t = await getTranslator();
+  const official = isOfficialDeployment();
   const content = maintenance?.maintenanceMode ? (
     <section className="max-w-[720px]">
       <h1 className="mt-0">{t('common.maintenance.title')}</h1>
@@ -79,6 +82,9 @@ export default async function RootLayout({ children, modal }: { children: ReactN
       // `detectLocale`); rendering it here means a plugin never has to
       // wait for client code to learn which language to speak.
       data-lf-locale={i18n.locale}
+      // Client code that behaves differently on the official hub reads
+      // this (e.g. where the settings modal returns to).
+      data-lf-deployment={official ? 'official' : 'self-host'}
       className={`${geist.variable} dark`}
     >
       {/* Resolved at REQUEST time so one published image works for any
@@ -94,7 +100,10 @@ export default async function RootLayout({ children, modal }: { children: ReactN
           choice={i18n.choice}
         >
           <AppearanceRuntime />
-          <GlobalHeader />
+          <GlobalHeader official={official} />
+          <Suspense fallback={null}>
+            <SettingsReturnTracker />
+          </Suspense>
           <DesktopHandoffListener />
           <main className="flex-1">{content}</main>
           {maintenance?.maintenanceMode ? null : modal}

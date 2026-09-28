@@ -99,3 +99,19 @@ Consequences:
   developer profile, plugin publishing, synced desktop instance list)
   and may be offered to instances as an OAuth provider — it is NEVER
   required to self-host or to run an instance.
+
+**Amended 2026-09-28 — the optional hub account exists.** The official
+hub now has sign-up and sign-in (`/login`, `/register`, hub home at
+`/home`) — the "LobbyForge ID" foreseen above, in its first form. What
+did NOT change:
+- It is optional: every hub page a visitor used before stays public.
+- It is not an identity for other instances. A self-hosted community
+  still signs people in on its own `/login`; the hub account does not
+  log you in anywhere else and no instance depends on it.
+- It carries hub conveniences only: the communities you belong to on the
+  official instance, the desktop app, the marketplace and (later)
+  plugin publishing and a synced instance list.
+
+Open: email verification and abuse protection beyond the per-IP rate
+limit on sign-up; "Sign in with LobbyForge" as an OAuth provider for
+instances remains future work.

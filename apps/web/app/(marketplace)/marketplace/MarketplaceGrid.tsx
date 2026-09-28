@@ -1,7 +1,9 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import type { PluginCatalogRow } from '@lobbyforge/db';
+import { LOBBYFORGE_REPO } from '@/lib/github-repo';
 import { useT } from '@/lib/i18n/client';
 
 const TRUST_COLORS: Record<string, string> = {
@@ -19,37 +21,44 @@ const TRUST_LABEL_KEYS: Record<string, string> = {
 
 type InstallResult = { kind: 'installed' } | { kind: 'failed'; message: string };
 
-interface MarketplaceCard {
-  pluginId: string;
-  name: string;
-  version: string;
-  type: string;
-  summary: string | null;
-  publisher: string;
-  trustLevel: string;
-  category: string | null;
-  tags: string[];
-  permissions: string[];
-  playerConfig: Record<string, unknown> | null;
-  iconUrl: string | null;
-  requiresVoiceRoom: boolean;
-  downloadCount: number;
-}
+const emptyAction =
+  'mt-5 inline-flex h-11 items-center justify-center rounded-xl bg-primary px-5 text-sm font-semibold text-on-primary transition-[filter] hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary';
 
 export default function MarketplaceGrid({
   plugins,
+  filtered = false,
 }: {
   plugins: PluginCatalogRow[];
+  /** A search or category is narrowing the list — the way out is to clear it. */
+  filtered?: boolean;
 }) {
   const t = useT();
   if (plugins.length === 0) {
+    // Every empty state ends in something to do next.
     return (
-      <div className="rounded-2xl border border-border-subtle bg-surface p-12 text-center">
-        <span className="material-symbols-outlined text-5xl text-text-muted mb-3 block">
-          extension_off
+      <div className="rounded-2xl border border-border-subtle bg-surface px-6 py-12 text-center">
+        <span className="material-symbols-outlined text-5xl text-text-muted mb-3 block" aria-hidden>
+          {filtered ? 'search_off' : 'extension'}
         </span>
-        <h2 className="text-base font-semibold text-text-primary">{t('hub.marketplace.empty.title')}</h2>
-        <p className="mt-1 text-sm text-text-muted">{t('hub.marketplace.empty.body')}</p>
+        {filtered ? (
+          <>
+            <h2 className="text-base font-semibold text-text-primary">{t('hub.marketplace.empty.filteredTitle')}</h2>
+            <p className="mx-auto mt-1 max-w-md text-pretty text-sm text-text-secondary">
+              {t('hub.marketplace.empty.filteredBody')}
+            </p>
+            <Link href="/marketplace" className={emptyAction}>
+              {t('hub.marketplace.empty.clearFilters')}
+            </Link>
+          </>
+        ) : (
+          <>
+            <h2 className="text-base font-semibold text-text-primary">{t('hub.marketplace.empty.title')}</h2>
+            <p className="mx-auto mt-1 max-w-md text-pretty text-sm text-text-secondary">{t('hub.marketplace.empty.body')}</p>
+            <a href={LOBBYFORGE_REPO.pluginPublishingUrl} className={emptyAction}>
+              {t('hub.marketplace.empty.publish')}
+            </a>
+          </>
+        )}
       </div>
     );
   }
