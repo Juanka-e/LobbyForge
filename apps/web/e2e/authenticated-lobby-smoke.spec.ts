@@ -4,6 +4,20 @@ import { buildGuestSessionCookie } from '@lobbyforge/core';
 const uid = process.env.LF_E2E_EXISTING_UID;
 const sessionSecret = process.env.LOBBYFORGE_SESSION_SECRET;
 
+// The config's --disable-web-security makes Chromium drop the Origin header,
+// and a production image's CSRF guard refuses the voice-token POST without it
+// ("Missing request origin"). The config's other flags, minus that one.
+test.use({
+  launchOptions: {
+    args: [
+      '--use-fake-ui-for-media-stream',
+      '--use-fake-device-for-media-stream',
+      '--auto-select-desktop-capture-source=Entire screen',
+      '--disable-features=BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessRespectPreflightResults,LocalNetworkAccessChecks',
+    ],
+  },
+});
+
 test.describe('authenticated lobby smoke without database reset', () => {
   test.skip(!uid || !sessionSecret, 'Requires an existing local user id and session secret.');
 

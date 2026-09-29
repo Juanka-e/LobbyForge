@@ -1,14 +1,34 @@
 'use client';
 
+import type { Route } from 'next';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, type ReactNode } from 'react';
 import { useT } from '@/lib/i18n/client';
+import { SETTINGS_RETURN_KEY, settingsCloseTarget } from '@/lib/settings-return';
+
+/**
+ * Where closing goes: the lobby on a self-hosted instance; on the official
+ * hub, the page the visitor came from (or the hub home) — see
+ * lib/settings-return.ts. Read at close time, so it is always current.
+ */
+function closeTarget(): string {
+  const official = document.documentElement.dataset.lfDeployment === 'official';
+  let remembered: string | null = null;
+  try {
+    remembered = window.sessionStorage.getItem(SETTINGS_RETURN_KEY);
+  } catch {
+    remembered = null;
+  }
+  return settingsCloseTarget({ official, remembered });
+}
 
 export default function SettingsModalFrame({ children, label }: { children: ReactNode; label: string }) {
   const t = useT();
   const router = useRouter();
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const close = useCallback(() => router.replace('/lobby'), [router]);
+  // A validated same-origin path (settingsCloseTarget), so the cast only
+  // tells typed routes what the checks already guarantee.
+  const close = useCallback(() => router.replace(closeTarget() as Route), [router]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {

@@ -1,28 +1,33 @@
 /**
  * Hushle action reducer.
  *
- * Every action in this file is host-only (`role: 'host'` in
- * `actionPolicies`). The game is moderated by the host: the host
- * decides when a card is correct/pass/penalty, when the turn ends,
- * and which team/explainer goes next. This keeps the action surface
- * small and the server-authoritative state machine easy to reason
- * about.
+ * The host moderates the game (`role: 'host'` in `actionPolicies`): the
+ * host decides when a card is correct / skipped / penalised, when the turn
+ * ends, and when the game ends. The one player action is `bust-forbidden`,
+ * the other team's buzzer. The reducer is pure apart from reading the
+ * clock, and defensive: an action that does not fit the phase returns the
+ * state unchanged.
  *
- * Timer model: the state records `timer.startedAt` and
- * `timer.durationSeconds`; the client UI runs a local countdown
- * and only round-trips to the server when the host pauses, resumes,
- * or the round ends. This is intentional — a per-second `tick` action
- * would flood the activity dispatch route for no game-state reason.
+ * Turns: teams play in seat order. Each team has its own explainer
+ * rotation (see `rotation.ts`) — its players in turn, plus the floater's
+ * slot when the player count is odd — so every player explains in turn.
+ *
+ * Timer model: a turn has ONE clock. The turn's start sets
+ * `timer.startedAt` and the deadline `timer.endsAt`; scoring a card does
+ * not restart it, so the explaining team has the whole duration for as
+ * many cards as they manage. Once the deadline (plus a short grace for a
+ * last-second tap in flight) has passed, the turn's scoring is over: the
+ * reducer refuses further cards until the host starts the next turn.
+ * There is no per-second tick — every client counts down to `endsAt`.
  *
  * Card draw model (M20a): the reducer samples a difficulty tier from
  * `settings.difficultyDistribution`, then draws the next unused card
  * from that tier's bucket. If that tier is exhausted, falls back to
- * any unused card from any tier. The pure-deck walk (M17) is gone —
- * weighted draw means the host can run a session that's mostly easy
- * (60% / 30% / 10%) without writing a custom plugin.
+ * any unused card from any tier.
  */
 
 import { getDefaultDeck, getLanguageForPackSlug } from './decks';
+import { cursorAfter, explainerQueue, nextExplainer } from './rotation';
 import type {
   HushleAction,
   HushleCard,
@@ -31,29 +36,42 @@ import type {
   HushleSettings,
   HushleState,
   HushleTeam,
+  HushleTimer,
 } from './state';
 import {
   HUSHLE_DEFAULT_DIFFICULTY_DISTRIBUTION,
   HUSHLE_DEFAULT_TEAM_SIZE,
   HUSHLE_DEFAULT_TURN_DURATION_SECONDS,
+  HUSHLE_TIME_UP_GRACE_MS,
 } from './state';
 
-function nowIso(): string {
-  return new Date().toISOString();
+function nowMs(): number {
+  return Date.now();
 }
 
 function makeTeamId(): string {
   return `team-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+/** A stopped clock: between turns, before play, after the game. */
+function stoppedTimer(settings: HushleSettings): HushleTimer {
+  return { startedAt: null, durationSeconds: settings.turnDurationSeconds, paused: true, endsAt: null };
+}
+
+/**
+ * True once the running turn's time is up: its deadline plus the grace
+ * for a tap already on its way has passed.
+ */
+function turnTimeIsUp(state: HushleState, now: number): boolean {
+  if (!state.timer.startedAt || !state.timer.endsAt) return false;
+  const deadline = Date.parse(state.timer.endsAt);
+  return Number.isFinite(deadline) && now > deadline + HUSHLE_TIME_UP_GRACE_MS;
+}
+
 /**
  * M20a — pick a difficulty tier by sampling the configured
- * distribution. Pure (no RNG state) so the host can run deterministic
- * tests by stubbing `Math.random` in the test harness.
- *
- * Tiers with zero weight are skipped; if every tier has zero weight
- * we fall back to `'easy'` (the column default) so the reducer never
- * fails to draw.
+ * distribution. Tiers with zero weight are skipped; if every tier has zero
+ * weight we fall back to `'easy'` so the reducer never fails to draw.
  */
 function pickDifficultyTier(
   distribution: Record<HushleDifficulty, number>,
@@ -80,14 +98,6 @@ function pickDifficultyTier(
 /**
  * M20a — sample a card respecting `usedCardIds` and the difficulty
  * tier. Returns null when the deck is fully exhausted.
- *
- * Algorithm:
- *  1. Pick a tier from the distribution.
- *  2. Find any card of that tier whose id is not in `usedCardIds`.
- *  3. If none in that tier, fall back to any unused card from any
- *     tier (keeps the game running even if the configured distribution
- *     doesn't match the seeded deck).
- *  4. If every card is used, return null.
  */
 function drawNextCardWeighted(
   deck: HushleCard[],
@@ -122,47 +132,44 @@ function nextTeamIndex(state: HushleState): number {
   return (idx + 1) % state.teams.length;
 }
 
-/**
- * M20a — pick the next explainer for a team. If the team has no
- * regular players left to explain, fall back to the floater (if any).
- * If the team's players list is empty AND there's no floater, returns
- * null (the host UI is expected to surface this as a configuration
- * error rather than crash the reducer).
- *
- * The "rotation" is a flat circular index into the team's playerIds
- * array (or [floater] if the team is empty). The reducer increments
- * `state.currentExplainerIndex` on every turn so the same player
- * doesn't explain twice in a row when teamSize > 1.
- */
-function pickExplainerForTeam(state: HushleState, team: HushleTeam): string | null {
-  if (team.playerIds.length > 0) {
-    const idx = state.currentExplainerIndex % team.playerIds.length;
-    return team.playerIds[idx] ?? null;
-  }
-  if (state.floaterPlayerId) return state.floaterPlayerId;
-  return null;
+/** The teams with one team's rotation cursor moved, when there is somewhere to move it. */
+function withCursor(teams: HushleTeam[], teamIndex: number, cursor: number | null): HushleTeam[] {
+  if (cursor === null) return teams;
+  return teams.map((team, i) => (i === teamIndex ? { ...team, nextExplainerSlot: cursor } : team));
 }
 
-function startTurn(state: HushleState, team: HushleTeam, explainerId: string | null): HushleState {
-  const explainer = explainerId ?? pickExplainerForTeam(state, team);
+/**
+ * Start a turn for `team`. The explainer is the one the host named, or
+ * the next in the team's rotation; either way the team's rotation then
+ * continues after them. The turn's clock starts now.
+ */
+function startTurn(state: HushleState, team: HushleTeam, requestedExplainer: string | null): HushleState {
+  const teamIndex = state.teams.findIndex((t) => t.id === team.id);
+  const explainer = requestedExplainer ?? nextExplainer(state, teamIndex).explainerId;
+  const teams = withCursor(state.teams, teamIndex, cursorAfter(state, teamIndex, explainer));
   const card = drawNextCardWeighted(
     state.deck,
     state.usedCardIds,
     state.settings.difficultyDistribution
   );
   const usedCardIds = card ? [...state.usedCardIds, card.id] : state.usedCardIds;
+  const start = nowMs();
+  const duration = state.settings.turnDurationSeconds;
   return {
     ...state,
+    teams,
     phase: 'playing',
+    turnNumber: state.turnNumber + 1,
     currentTeamId: team.id,
     currentExplainerId: explainer,
     currentCard: card,
     usedCardIds,
     cardsPlayedThisTurn: 0,
     timer: {
-      startedAt: nowIso(),
-      durationSeconds: state.settings.turnDurationSeconds,
+      startedAt: new Date(start).toISOString(),
+      durationSeconds: duration,
       paused: false,
+      endsAt: new Date(start + duration * 1000).toISOString(),
     },
   };
 }
@@ -173,6 +180,10 @@ function applyCorrectPassPenalty(
 ): HushleState {
   if (state.phase !== 'playing') return state;
   if (!state.currentTeamId) return state;
+  // Between turns there is no card to score.
+  if (!state.timer.startedAt) return state;
+  // Time's up: the turn's scoring is over.
+  if (turnTimeIsUp(state, nowMs())) return state;
   const team = findTeam(state, state.currentTeamId);
   if (!team) return state;
 
@@ -212,9 +223,11 @@ function applyCorrectPassPenalty(
         usedCardIds,
         totalCardsPlayed: state.totalCardsPlayed + 1,
         phase: 'ended',
-        timer: { startedAt: null, durationSeconds: state.settings.turnDurationSeconds, paused: true },
+        timer: stoppedTimer(state.settings),
       };
     }
+    // Between turns: the card and the clock are cleared but the phase
+    // stays `playing`; `end-turn` starts the next team's turn.
     return {
       ...state,
       teams: updatedTeams,
@@ -222,14 +235,11 @@ function applyCorrectPassPenalty(
       usedCardIds,
       cardsPlayedThisTurn: 0,
       totalCardsPlayed: state.totalCardsPlayed + 1,
-      // Caller (host UI) is expected to call `start-turn` with the
-      // explicit team + explainer. We hand back a "between_turns"
-      // state by clearing the active card but staying in `playing`
-      // so the next `start-turn` can pick the explainer.
-      timer: { startedAt: null, durationSeconds: state.settings.turnDurationSeconds, paused: true },
+      timer: stoppedTimer(state.settings),
     };
   }
 
+  // The turn goes on with the next card — on the same clock.
   return {
     ...state,
     teams: updatedTeams,
@@ -237,22 +247,13 @@ function applyCorrectPassPenalty(
     usedCardIds,
     cardsPlayedThisTurn,
     totalCardsPlayed: state.totalCardsPlayed + 1,
-    timer: {
-      startedAt: nowIso(),
-      durationSeconds: state.settings.turnDurationSeconds,
-      paused: false,
-    },
   };
 }
 
 export function hushleReducer(state: HushleState, action: HushleAction): HushleState {
   switch (action.type) {
     case 'start-game': {
-      // Resolve language from the packId slug. M18 only ships the two
-      // built-in packs; custom packs (M19+) will need a richer resolver
-      // that hits the `card_packs` table. The reducer stays pure, so
-      // for now the host sends `language` alongside the packId and the
-      // reducer uses whichever is consistent — packId wins when its
+      // Resolve language from the packId slug: packId wins when its
       // built-in language is known, otherwise we fall back to language.
       const fromSlug = getLanguageForPackSlug(action.packId);
       const language: HushleLanguage = fromSlug ?? action.language ?? 'en';
@@ -301,7 +302,7 @@ export function hushleReducer(state: HushleState, action: HushleAction): HushleS
         phase: 'team_setup',
         teams: [],
         floaterPlayerId: null,
-        currentExplainerIndex: 0,
+        turnNumber: 0,
         currentTeamId: null,
         currentExplainerId: null,
         currentCard: null,
@@ -309,15 +310,11 @@ export function hushleReducer(state: HushleState, action: HushleAction): HushleS
         deckIndex: 0,
         usedCardIds: [],
         settings,
-        timer: {
-          startedAt: null,
-          durationSeconds: settings.turnDurationSeconds,
-          paused: true,
-        },
+        timer: stoppedTimer(settings),
         cardsPlayedThisTurn: 0,
         totalCardsPlayed: 0,
         createdBy: action.createdBy,
-        createdAt: nowIso(),
+        createdAt: new Date(nowMs()).toISOString(),
       };
     }
 
@@ -330,37 +327,40 @@ export function hushleReducer(state: HushleState, action: HushleAction): HushleS
       // validate against a falsified player list.
       const floater = action.floaterPlayerId ?? null;
       const allRequestedPlayers = new Set<string>();
-      for (const t of action.teams) for (const id of t.playerIds) allRequestedPlayers.add(id);
+      for (const t of action.teams) {
+        for (const id of t.playerIds) {
+          // A player on two teams would see every card while guessing:
+          // refuse the whole seating rather than guess which team was meant.
+          if (allRequestedPlayers.has(id)) return state;
+          allRequestedPlayers.add(id);
+        }
+      }
       const validatedFloater = floater && !allRequestedPlayers.has(floater) ? floater : null;
       const teams: HushleTeam[] = action.teams
         .filter((t) => t.name.trim().length > 0)
         .map((t) => ({
           id: makeTeamId(),
           name: t.name.trim().slice(0, 40),
-          // Trim each team to `teamSize` players. The host UI is
-          // expected to surface "too many players" as a separate
-          // validation error before dispatch; the reducer is the
-          // last line of defence.
+          // Trim each team to `teamSize` players. The host UI offers only
+          // teams with room; the reducer is the last line of defence.
           playerIds: t.playerIds.slice(0, Math.max(1, teamSize)),
           score: 0,
           correctCount: 0,
           passCount: 0,
           penaltyCount: 0,
+          nextExplainerSlot: 0,
         }));
       return {
         ...state,
         teams,
         floaterPlayerId: validatedFloater,
-        currentExplainerIndex: 0,
+        turnNumber: 0,
         phase: 'team_setup',
       };
     }
 
     case 'start-turn': {
-      if (state.phase !== 'team_setup' && state.phase !== 'playing' && state.phase !== 'ended') {
-        return state;
-      }
-      if (state.phase === 'ended') return state;
+      if (state.phase !== 'team_setup' && state.phase !== 'playing') return state;
       const team = findTeam(state, action.teamId);
       if (!team) return state;
       return startTurn(state, team, action.explainerId);
@@ -368,27 +368,33 @@ export function hushleReducer(state: HushleState, action: HushleAction): HushleS
 
     case 'set-explainer': {
       if (state.phase !== 'playing' && state.phase !== 'team_setup') return state;
-      return { ...state, currentExplainerId: action.explainerId };
+      // The host hands the turn to someone else; the team's rotation then
+      // continues after whoever explains now.
+      const teamIndex = state.teams.findIndex((t) => t.id === state.currentTeamId);
+      const teams =
+        state.phase === 'playing' && teamIndex !== -1
+          ? withCursor(state.teams, teamIndex, cursorAfter(state, teamIndex, action.explainerId))
+          : state.teams;
+      return { ...state, teams, currentExplainerId: action.explainerId };
     }
 
     case 'next-card': {
       if (state.phase !== 'playing') return state;
+      if (!state.timer.startedAt) return state;
+      if (turnTimeIsUp(state, nowMs())) return state;
       const card = drawNextCardWeighted(
         state.deck,
         state.usedCardIds,
         state.settings.difficultyDistribution
       );
       if (card === null) return state;
+      // A swapped card counts toward the turn's cards but not the score,
+      // and the turn's clock keeps running.
       return {
         ...state,
         currentCard: card,
         usedCardIds: [...state.usedCardIds, card.id],
         cardsPlayedThisTurn: state.cardsPlayedThisTurn + 1,
-        timer: {
-          startedAt: nowIso(),
-          durationSeconds: state.settings.turnDurationSeconds,
-          paused: false,
-        },
       };
     }
 
@@ -421,24 +427,13 @@ export function hushleReducer(state: HushleState, action: HushleAction): HushleS
     case 'end-turn': {
       if (state.phase !== 'playing') return state;
       const idx = nextTeamIndex(state);
-      if (idx < 0) {
-        return { ...state, phase: 'ended', currentCard: null };
-      }
-      const nextTeam = state.teams[idx];
+      const nextTeam = idx >= 0 ? state.teams[idx] : undefined;
       if (!nextTeam) {
-        return { ...state, phase: 'ended', currentCard: null };
+        return { ...state, phase: 'ended', currentCard: null, timer: stoppedTimer(state.settings) };
       }
-      // M20a — advance the rotation index so the same player doesn't
-      // explain two turns in a row. For odd-player games with a
-      // floater, the floater alternates teams across turns because
-      // `nextTeamIndex` swaps teams while `pickExplainerForTeam`
-      // returns the floater when the next team has empty `playerIds`.
-      const nextExplainerIndex = state.currentExplainerIndex + 1;
-      return startTurn(
-        { ...state, currentExplainerIndex: nextExplainerIndex },
-        nextTeam,
-        null
-      );
+      // The next team's turn starts at once, with the next player in its
+      // own rotation explaining.
+      return startTurn(state, nextTeam, null);
     }
 
     case 'end-game':
@@ -447,7 +442,7 @@ export function hushleReducer(state: HushleState, action: HushleAction): HushleS
         phase: 'ended',
         currentCard: null,
         currentExplainerId: null,
-        timer: { startedAt: null, durationSeconds: state.settings.turnDurationSeconds, paused: true },
+        timer: stoppedTimer(state.settings),
       };
 
     default:
@@ -456,17 +451,27 @@ export function hushleReducer(state: HushleState, action: HushleAction): HushleS
 }
 
 /**
- * M20a — pure helper exported so the host UI (and tests) can ask
- * "who explains next on team X" without re-implementing the rotation.
- * Mirrors `pickExplainerForTeam` but reads from a snapshot, not
- * mutable state, so React components can use it safely.
+ * The explainer rotation of a team, in the order its turns go: its players,
+ * plus the floater's slot when there is one. Exported so the panel (and
+ * tests) read the same rotation the reducer uses.
  */
-export function hushleNextExplainerForTeam(
-  state: Pick<HushleState, 'currentExplainerIndex' | 'floaterPlayerId'>,
-  team: Pick<HushleTeam, 'playerIds'>
-): string | null {
-  return pickExplainerForTeam(
-    state as HushleState,
-    team as HushleTeam
+export function hushleExplainerQueue(
+  state: Pick<HushleState, 'teams' | 'floaterPlayerId'>,
+  teamId: string
+): string[] {
+  return explainerQueue(
+    state,
+    state.teams.findIndex((team) => team.id === teamId)
   );
+}
+
+/** Who explains the team's NEXT turn, if the host leaves it to the rotation. */
+export function hushleNextExplainerForTeam(
+  state: Pick<HushleState, 'teams' | 'floaterPlayerId'>,
+  teamId: string
+): string | null {
+  return nextExplainer(
+    state,
+    state.teams.findIndex((team) => team.id === teamId)
+  ).explainerId;
 }

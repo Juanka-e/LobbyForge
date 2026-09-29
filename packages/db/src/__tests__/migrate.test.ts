@@ -56,6 +56,47 @@ describe('db:migrate', () => {
     expect(sql).toContain('s."deleted_at" IS NULL');
   });
 
+  it('adds the bots runtime additively (0037)', () => {
+    const sql = readFileSync(
+      join(__dirname, '..', '..', 'drizzle', '0037_bots_runtime.sql'),
+      'utf8'
+    );
+    // Expand-only: no table is created, dropped or rewritten, no column removed.
+    expect(sql).not.toMatch(/CREATE TABLE|DROP TABLE|DROP COLUMN|ALTER COLUMN "[a-z_]+" TYPE/);
+    expect(sql).toContain('ALTER TABLE "messages" ADD COLUMN IF NOT EXISTS "bot_id" uuid');
+    expect(sql).toContain('REFERENCES "bots"("id") ON DELETE set null');
+    expect(sql).toContain('"bots_server_builtin_type_unique"');
+    expect(sql).toMatch(/WHERE "type" IN \('welcome', 'moderation'\)/);
+    // Tokens stay hashes: there is no column that could hold a raw token.
+    expect(sql).not.toMatch(/ADD COLUMN[^;]*"token"\s/);
+    expect(sql).toContain(`ALTER COLUMN "permissions" SET DEFAULT '[]'::jsonb`);
+    // Every statement is separated for the migrator.
+    const statements = sql
+      .split('--> statement-breakpoint')
+      .map((part) => part.replace(/^\s*--.*$/gm, '').trim())
+      .filter(Boolean);
+    expect(statements.every((statement) => statement.split(';').filter((s) => s.trim()).length === 1)).toBe(true);
+  });
+
+  it('gives role-less members @everyone and touches nothing else (0038)', () => {
+    const sql = readFileSync(
+      join(__dirname, '..', '..', 'drizzle', '0038_backfill_everyone_role.sql'),
+      'utf8'
+    );
+    // Data only: one INSERT, no schema change, no update or delete.
+    expect(sql).not.toMatch(/CREATE|DROP|ALTER|UPDATE|DELETE/);
+    expect(sql.match(/INSERT INTO "membership_roles"/g)).toHaveLength(1);
+    // Only members with no display role AND no role rows; idempotent.
+    expect(sql).toContain('m."role_id" IS NULL');
+    expect(sql).toContain('NOT EXISTS (SELECT 1 FROM "membership_roles"');
+    expect(sql).toContain(`WHERE "name" = '@everyone'`);
+    expect(sql).toContain('ON CONFLICT DO NOTHING');
+    // A moderator's deliberate lock-out (roles set to none) is not undone.
+    expect(sql).toContain(`a."action" = 'member.set_roles'`);
+    // One role per server even if someone named another role @everyone.
+    expect(sql).toContain('DISTINCT ON ("server_id")');
+  });
+
   it('adds identity links without recreating previously migrated tables', () => {
     const sql = readFileSync(
       join(__dirname, '..', '..', 'drizzle', '0018_user_identity_links.sql'),

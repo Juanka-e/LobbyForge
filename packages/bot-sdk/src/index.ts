@@ -54,6 +54,38 @@ export interface Bot {
 // BotClient is an alias of Bot, with room to grow with client-specific members later.
 export type BotClient = Bot;
 
+/** Every permission a bot can be granted, in display order. */
+export const BOT_PERMISSIONS: readonly BotPermission[] = Object.freeze(Object.values(BotPermission));
+
+export function isBotPermission(value: unknown): value is BotPermission {
+  return typeof value === 'string' && (BOT_PERMISSIONS as readonly string[]).includes(value);
+}
+
+// Bot API v1 HTTP client — `createBotClient({ baseUrl, token })`.
+export {
+  createBotClient,
+  toBotApiError,
+  isBotTokenFormat,
+  BOT_TOKEN_PATTERN,
+  MAX_MESSAGE_LENGTH,
+  MAX_READ_LIMIT,
+  BotApiError,
+  BotAuthError,
+  BotForbiddenError,
+  BotNotFoundError,
+  BotRateLimitError,
+  BotValidationError,
+  BotServerError,
+  BotNetworkError,
+  type BotApiClient,
+  type BotClientOptions,
+  type BotIdentity,
+  type BotChannel,
+  type BotApiMessage,
+  type BotMessageAuthor,
+  type ReadMessagesOptions,
+} from './client.js';
+
 // Re-export the shared locale helper so consumers can `import { tFor,
 // loadBotLocale, detectLocale, pickBestLocale, listBotLocales,
 // registerBotLocale } from '@lobbyforge/bot-sdk'`. The dedicated

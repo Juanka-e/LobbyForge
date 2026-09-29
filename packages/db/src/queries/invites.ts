@@ -8,8 +8,8 @@
  * `currentUses`, and inserts a `memberships` row assigned to the server's
  * `@everyone` role.
  */
-import { and, eq, isNull, sql } from 'drizzle-orm';
-import { randomBytes } from 'node:crypto';
+import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { randomInt } from 'node:crypto';
 import type { DbClient } from '../client.js';
 import { invites, membershipRoles, memberships, roles, serverBans, servers } from '../schema.js';
 import { EVERYONE_ROLE_NAME } from './roles.js';
@@ -46,15 +46,16 @@ export interface CreateInviteInput {
 /**
  * Crockford's base32 alphabet, minus `U` (excluded by spec to avoid
  * accidental obscenities) and minus `0`/`O`/`1`/`I`/`L` (visually
- * ambiguous). 27 characters × 12 positions ≈ 1.5 × 10^17.
+ * ambiguous). 30 characters × 12 positions ≈ 5.3 × 10^17.
  */
 const CROCKFORD_ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
 
 function generateInviteCode(length: number = 12): string {
-  const bytes = randomBytes(length);
   let out = '';
   for (let i = 0; i < length; i++) {
-    out += CROCKFORD_ALPHABET[bytes[i]! % CROCKFORD_ALPHABET.length];
+    // randomInt draws uniformly; `byte % 30` would favour the first six
+    // characters (256 is not a multiple of 30).
+    out += CROCKFORD_ALPHABET[randomInt(CROCKFORD_ALPHABET.length)];
   }
   return out;
 }
@@ -314,6 +315,8 @@ export async function redeemInvite(
       .select({ id: roles.id })
       .from(roles)
       .where(and(eq(roles.serverId, invite.server_id), eq(roles.name, EVERYONE_ROLE_NAME)))
+      // Role names are not unique: the real @everyone is the lowest, oldest.
+      .orderBy(asc(roles.position), asc(roles.createdAt))
       .limit(1);
     const everyoneId = everyoneRows[0]?.id;
     if (!everyoneId) {

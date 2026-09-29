@@ -3,6 +3,7 @@ import { isOfficialDeployment } from '@/lib/deployment-mode';
 import { getDb } from '@/lib/db';
 import { listPublicRegistryInstances } from '@lobbyforge/db';
 import { getTranslator } from '@/lib/i18n/server';
+import { container, eyebrow } from '@/app/(marketing)/_components/styles';
 import DiscoveryGrid from './DiscoveryGrid';
 
 export const dynamic = 'force-dynamic';
@@ -46,5 +47,17 @@ export default async function DiscoverPage({
       })
     : instances;
 
-  return <DiscoveryGrid instances={filtered} region={region} query={query} />;
+  const t = await getTranslator();
+  return (
+    <div className={`${container} pb-20 pt-12 sm:pt-16 lg:pb-24`}>
+      <header className="mb-10 flex max-w-[720px] flex-col gap-3.5">
+        <p className={`${eyebrow} text-primary`}>{t('pages.discoverInstance.directory')}</p>
+        <h1 className="text-balance font-display text-[36px] font-bold leading-[1.08] tracking-[-0.02em] text-text-primary sm:text-[50px]">
+          {t('discovery.title')}
+        </h1>
+        <p className="text-pretty text-lg leading-[1.6] text-text-secondary">{t('discovery.subtitle')}</p>
+      </header>
+      <DiscoveryGrid instances={filtered} region={region} query={query} />
+    </div>
+  );
 }

@@ -1,11 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { hushlePlugin, type HushleState } from '../index';
 import {
   migrateHushleState,
   HUSHLE_STATE_VERSION,
   HUSHLE_DEFAULT_DIFFICULTY_DISTRIBUTION,
+  HUSHLE_TIME_UP_GRACE_MS,
 } from '../state';
-import { hushleNextExplainerForTeam } from '../actions';
+import { hushleExplainerQueue, hushleNextExplainerForTeam } from '../actions';
 import { createTestHarness } from '@lobbyforge/plugin-sdk/testing';
 
 describe('@lobbyforge/hushle', () => {
@@ -52,7 +53,9 @@ describe('@lobbyforge/hushle', () => {
     expect(harness.getState().teams[0]?.name).toBe('Takım A');
     expect(harness.getState().phase).toBe('team_setup');
     expect(harness.getState().floaterPlayerId).toBeNull();
-    expect(harness.getState().currentExplainerIndex).toBe(0);
+    // v3: no turn played yet; every team's rotation starts at its first player.
+    expect(harness.getState().turnNumber).toBe(0);
+    expect(harness.getState().teams.map((t) => t.nextExplainerSlot)).toEqual([0, 0]);
 
     // Host starts the first turn for Takım A with p1 as explainer.
     const firstTeam = harness.getState().teams[0]!;
@@ -70,10 +73,17 @@ describe('@lobbyforge/hushle', () => {
     expect(['easy', 'medium', 'hard']).toContain(harness.getState().currentCard?.difficulty);
     expect(harness.getState().timer.paused).toBe(false);
     expect(harness.getState().usedCardIds.length).toBe(1);
+    expect(harness.getState().turnNumber).toBe(1);
+    // The turn's deadline is in state: start + the 30 s picked above.
+    const { startedAt, endsAt } = harness.getState().timer;
+    expect(Date.parse(endsAt!) - Date.parse(startedAt!)).toBe(30_000);
 
     // Host scores a correct guess.
     await harness.performAction('p1', { type: 'correct-guess' });
     const afterCorrect = harness.getState();
+    // One clock per turn: scoring a card does not restart it.
+    expect(afterCorrect.timer.startedAt).toBe(startedAt);
+    expect(afterCorrect.timer.endsAt).toBe(endsAt);
     expect(afterCorrect.teams[0]?.score).toBe(1);
     expect(afterCorrect.teams[0]?.correctCount).toBe(1);
     // A new card is drawn automatically after a correct guess.
@@ -128,6 +138,25 @@ describe('@lobbyforge/hushle', () => {
     expect(stateBefore.currentCard).not.toBeNull();
   });
 
+  it('refuses to seat one player on two teams', async () => {
+    const harness = createTestHarness<HushleState, Parameters<typeof hushlePlugin.handleAction>[2]>({
+      plugin: hushlePlugin,
+      players: ['p1', 'p2', 'p3', 'p4'],
+    });
+    await harness.startGame();
+    await harness.performAction('p1', { type: 'start-game', packId: 'hushle-en-basic', createdBy: 'p1' });
+    const before = harness.getState();
+    // p2 would guess for A while watching B's cards.
+    await harness.performAction('p1', {
+      type: 'set-teams',
+      teams: [
+        { name: 'A', playerIds: ['p1', 'p2'] },
+        { name: 'B', playerIds: ['p3', 'p2'] },
+      ],
+    });
+    expect(harness.getState().teams).toEqual(before.teams);
+  });
+
   it('rotates to the next team on end-turn', async () => {
     const harness = createTestHarness<HushleState, Parameters<typeof hushlePlugin.handleAction>[2]>({
       plugin: hushlePlugin,
@@ -154,13 +183,73 @@ describe('@lobbyforge/hushle', () => {
 
     await harness.performAction('p1', { type: 'end-turn' });
     expect(harness.getState().currentTeamId).toBe(teamB.id);
-    // M20a — with teamSize=2 and an even rotation index, the next
-    // team picks player at index (0+1)%2 = 1 = p4. The M17 test
-    // expected p3 because the reducer used `playerIds[0]`; the M20a
-    // rotation picks via the `currentExplainerIndex` modulo team size.
+    // Team B's own rotation starts at its first player. (The M20a reducer
+    // picked p4 here: one shared index, taken modulo the team size, so
+    // team B only ever got odd indexes and p3 never explained.)
+    expect(harness.getState().currentExplainerId).toBe('p3');
+    expect(harness.getState().turnNumber).toBe(2);
+  });
+
+  it('gives every player of two teams of two a turn in four turns', async () => {
+    const harness = createTestHarness<HushleState, Parameters<typeof hushlePlugin.handleAction>[2]>({
+      plugin: hushlePlugin,
+      players: ['p1', 'p2', 'p3', 'p4'],
+    });
+    await harness.startGame();
+    await harness.performAction('p1', { type: 'start-game', packId: 'hushle-en-basic', createdBy: 'p1' });
+    await harness.performAction('p1', {
+      type: 'set-teams',
+      teams: [
+        { name: 'A', playerIds: ['p1', 'p2'] },
+        { name: 'B', playerIds: ['p3', 'p4'] },
+      ],
+    });
+    const [teamA, teamB] = harness.getState().teams;
+    await harness.performAction('p1', { type: 'start-turn', teamId: teamA!.id, explainerId: 'p1' });
+    const turns = [[harness.getState().currentTeamId, harness.getState().currentExplainerId]];
+    for (let i = 0; i < 5; i += 1) {
+      await harness.performAction('p1', { type: 'end-turn' });
+      turns.push([harness.getState().currentTeamId, harness.getState().currentExplainerId]);
+    }
+    // Teams alternate; within each team the explainer rotates.
+    expect(turns).toEqual([
+      [teamA!.id, 'p1'],
+      [teamB!.id, 'p3'],
+      [teamA!.id, 'p2'],
+      [teamB!.id, 'p4'],
+      [teamA!.id, 'p1'],
+      [teamB!.id, 'p3'],
+    ]);
+    expect(harness.getState().turnNumber).toBe(6);
+  });
+
+  it('continues a team\'s rotation after an explainer the host picked by hand', async () => {
+    const harness = createTestHarness<HushleState, Parameters<typeof hushlePlugin.handleAction>[2]>({
+      plugin: hushlePlugin,
+      players: ['p1', 'p2', 'p3', 'p4', 'p5', 'p6'],
+    });
+    await harness.startGame();
+    await harness.performAction('p1', { type: 'start-game', packId: 'hushle-en-basic', teamSize: 3, createdBy: 'p1' });
+    await harness.performAction('p1', {
+      type: 'set-teams',
+      teams: [
+        { name: 'A', playerIds: ['p1', 'p2', 'p3'] },
+        { name: 'B', playerIds: ['p4', 'p5', 'p6'] },
+      ],
+    });
+    const teamA = harness.getState().teams[0]!;
+    // The host opens with p2 instead of p1…
+    await harness.performAction('p1', { type: 'start-turn', teamId: teamA.id, explainerId: 'p2' });
+    expect(harness.getState().currentExplainerId).toBe('p2');
+    // …and in B's turn hands it from p4 to p6 (say p4 stepped away).
+    await harness.performAction('p1', { type: 'end-turn' });
     expect(harness.getState().currentExplainerId).toBe('p4');
-    // The next call increments the rotation index again.
-    expect(harness.getState().currentExplainerIndex).toBe(1);
+    await harness.performAction('p1', { type: 'set-explainer', explainerId: 'p6' });
+    // Each team's rotation continues after whoever actually explained.
+    await harness.performAction('p1', { type: 'end-turn' });
+    expect(harness.getState().currentExplainerId).toBe('p3');
+    await harness.performAction('p1', { type: 'end-turn' });
+    expect(harness.getState().currentExplainerId).toBe('p4');
   });
 
   it('end-game blocks new turns but preserves scores', async () => {
@@ -273,7 +362,8 @@ describe('@lobbyforge/hushle', () => {
       expect(state.version).toBe(HUSHLE_STATE_VERSION);
       expect(state.phase).toBe('lobby');
       expect(state.floaterPlayerId).toBeNull();
-      expect(state.currentExplainerIndex).toBe(0);
+      expect(state.turnNumber).toBe(0);
+      expect(state.timer.endsAt).toBeNull();
       expect(state.usedCardIds).toEqual([]);
       expect(state.settings.teamSize).toBe(2);
       expect(state.settings.difficultyDistribution).toEqual(
@@ -369,12 +459,12 @@ describe('@lobbyforge/hushle', () => {
   });
 
   it('migrator is idempotent on already-current state', () => {
-    const v2 = {
+    const v3 = {
       version: HUSHLE_STATE_VERSION,
       phase: 'lobby',
       teams: [],
       floaterPlayerId: null,
-      currentExplainerIndex: 0,
+      turnNumber: 0,
       currentTeamId: null,
       currentExplainerId: null,
       currentCard: null,
@@ -389,15 +479,79 @@ describe('@lobbyforge/hushle', () => {
         teamSize: 2,
         difficultyDistribution: { easy: 0.6, medium: 0.3, hard: 0.1 },
       },
-      timer: { startedAt: null, durationSeconds: 60, paused: true },
+      timer: { startedAt: null, durationSeconds: 60, paused: true, endsAt: null },
       cardsPlayedThisTurn: 0,
       totalCardsPlayed: 0,
       createdBy: null,
       createdAt: null,
     };
-    const first = migrateHushleState(v2);
+    const first = migrateHushleState(v3);
     const second = migrateHushleState(first);
     expect(second).toEqual(first);
+    expect(first).toEqual(v3);
+  });
+
+  it('migrator upgrades a v2 game in progress: per-team rotation, turn number, deadline', () => {
+    // A v2 row mid-game: team A's second turn overall is running (shared
+    // index 2), p2 explaining, with a floater — the old single-index shape.
+    const v2 = {
+      version: 2,
+      phase: 'playing',
+      teams: [
+        { id: 'team-a', name: 'A', playerIds: ['p1', 'p2'], score: 1, correctCount: 1, passCount: 0, penaltyCount: 0 },
+        { id: 'team-b', name: 'B', playerIds: ['p3', 'p4'], score: 0, correctCount: 0, passCount: 0, penaltyCount: 0 },
+      ],
+      floaterPlayerId: 'p5',
+      currentExplainerIndex: 2,
+      currentTeamId: 'team-a',
+      currentExplainerId: 'p2',
+      currentCard: { id: 'c1', language: 'en', word: 'apple', forbiddenWords: ['fruit'], difficulty: 'easy' },
+      deck: [],
+      deckIndex: 0,
+      usedCardIds: ['c1'],
+      settings: {
+        turnDurationSeconds: 60,
+        cardsPerTurn: 15,
+        language: 'en',
+        packId: 'hushle-en-basic',
+        teamSize: 2,
+        difficultyDistribution: { easy: 0.6, medium: 0.3, hard: 0.1 },
+      },
+      timer: { startedAt: '2026-09-01T10:00:00.000Z', durationSeconds: 60, paused: false },
+      cardsPlayedThisTurn: 3,
+      totalCardsPlayed: 5,
+      createdBy: 'p1',
+      createdAt: '2026-09-01T09:55:00.000Z',
+    };
+    const migrated = migrateHushleState(v2);
+    expect(migrated.version).toBe(HUSHLE_STATE_VERSION);
+    expect('currentExplainerIndex' in migrated).toBe(false);
+    expect(migrated.turnNumber).toBe(3);
+    // Team A's rotation (p1, floater, p2) continues after p2; B starts afresh.
+    expect(hushleExplainerQueue(migrated, 'team-a')).toEqual(['p1', 'p5', 'p2']);
+    expect(hushleNextExplainerForTeam(migrated, 'team-a')).toBe('p1');
+    expect(hushleNextExplainerForTeam(migrated, 'team-b')).toBe('p3');
+    expect(migrated.timer.endsAt).toBe('2026-09-01T10:01:00.000Z');
+    // Everything else carries through.
+    expect(migrated.teams[0]!.score).toBe(1);
+    expect(migrated.currentCard?.word).toBe('apple');
+    expect(migrateHushleState(migrated)).toEqual(migrated);
+  });
+
+  it('migrator gives a v2 lobby or stopped clock no deadline', () => {
+    const migrated = migrateHushleState({
+      version: 2,
+      phase: 'team_setup',
+      teams: [{ id: 't', name: 'A', playerIds: ['p1'], score: 0, correctCount: 0, passCount: 0, penaltyCount: 0 }],
+      floaterPlayerId: null,
+      currentExplainerIndex: 0,
+      currentTeamId: null,
+      settings: { turnDurationSeconds: 45 },
+      timer: { startedAt: null, durationSeconds: 45, paused: true },
+    });
+    expect(migrated.turnNumber).toBe(0);
+    expect(migrated.timer).toEqual({ startedAt: null, durationSeconds: 45, paused: true, endsAt: null });
+    expect(migrated.teams[0]!.nextExplainerSlot).toBe(0);
   });
 
   it('migrator falls back to initial state on garbage', () => {
@@ -595,12 +749,11 @@ describe('@lobbyforge/hushle', () => {
       packId: 'hushle-en-basic',
       createdBy: 'p1',
     });
-    // 5 players: A=[p1,p2], B=[p3,p4], floater=p5.
-    // Across 4 turns (A, B, A, B), the explainers should be p1, p3, p2, p4
-    // — wait, that's the regular rotation with no floater involvement
-    // because both teams have 2 players. The 2v2 spec means the floater
-    // only matters when one team is short. Verify the standard 2v2 here
-    // and the floater-fills-empty-team case in the next test.
+    // 5 players: A=[p1,p2], B=[p3,p4], floater=p5. The floater has a slot
+    // in BOTH teams' rotations — (p1, p5, p2) and (p3, p4, p5) — so a round
+    // of six turns gives everyone one turn and the floater one for each
+    // team, three turns apart. (The M20a reducer went p1, p4, p1: the
+    // floater never explained and p2 and p3 never did either.)
     await harness.performAction('p1', {
       type: 'set-teams',
       teams: [
@@ -612,44 +765,173 @@ describe('@lobbyforge/hushle', () => {
     const teamA = harness.getState().teams[0]!;
     const teamB = harness.getState().teams[1]!;
     await harness.performAction('p1', { type: 'start-turn', teamId: teamA.id, explainerId: 'p1' });
-    expect(harness.getState().currentExplainerId).toBe('p1');
-    await harness.performAction('p1', { type: 'end-turn' });
-    expect(harness.getState().currentTeamId).toBe(teamB.id);
-    expect(harness.getState().currentExplainerId).toBe('p4'); // rotation index 1, team B[1] = p4
-    await harness.performAction('p1', { type: 'end-turn' });
-    expect(harness.getState().currentTeamId).toBe(teamA.id);
-    // Rotation index 2: teamA.playerIds[2 % 2] = teamA.playerIds[0] = p1
-    expect(harness.getState().currentExplainerId).toBe('p1');
+    const turns = [[harness.getState().currentTeamId, harness.getState().currentExplainerId]];
+    for (let i = 0; i < 6; i += 1) {
+      await harness.performAction('p1', { type: 'end-turn' });
+      turns.push([harness.getState().currentTeamId, harness.getState().currentExplainerId]);
+    }
+    expect(turns).toEqual([
+      [teamA.id, 'p1'],
+      [teamB.id, 'p3'],
+      [teamA.id, 'p5'],
+      [teamB.id, 'p4'],
+      [teamA.id, 'p2'],
+      [teamB.id, 'p5'],
+      [teamA.id, 'p1'],
+    ]);
   });
 
-  it('hushleNextExplainerForTeam picks floater when team has no players', () => {
-    expect(
-      hushleNextExplainerForTeam(
-        { currentExplainerIndex: 0, floaterPlayerId: 'p5' },
-        { playerIds: [] }
-      )
-    ).toBe('p5');
-    // 3 % 2 = 1, so the explainer picks the team member at index 1 = p2.
-    expect(
-      hushleNextExplainerForTeam(
-        { currentExplainerIndex: 3, floaterPlayerId: 'p5' },
-        { playerIds: ['p1', 'p2'] }
-      )
-    ).toBe('p2');
-    // 1 % 2 = 1 → p2.
-    expect(
-      hushleNextExplainerForTeam(
-        { currentExplainerIndex: 1, floaterPlayerId: 'p5' },
-        { playerIds: ['p1', 'p2'] }
-      )
-    ).toBe('p2');
-    // No floater, index 0, playerIds[0] = p1.
-    expect(
-      hushleNextExplainerForTeam(
-        { currentExplainerIndex: 0, floaterPlayerId: null },
-        { playerIds: ['p1', 'p2'] }
-      )
-    ).toBe('p1');
+  it('spreads the floater through larger teams too', () => {
+    // 7 players: two teams of three and a floater. Each rotation holds the
+    // floater once; their two turns never come back to back.
+    const state = {
+      floaterPlayerId: 'f',
+      teams: [
+        { id: 'a', playerIds: ['a1', 'a2', 'a3'] },
+        { id: 'b', playerIds: ['b1', 'b2', 'b3'] },
+      ],
+    } as unknown as HushleState;
+    const a = hushleExplainerQueue(state, 'a');
+    const b = hushleExplainerQueue(state, 'b');
+    expect(a).toEqual(['a1', 'f', 'a2', 'a3']);
+    expect(b).toEqual(['b1', 'b2', 'b3', 'f']);
+    // Teams alternate: the round is a1 b1 f b2 a2 b3 a3 f.
+    const round = a.flatMap((id, i) => [id, b[i]!]);
+    const floaterTurns = round.flatMap((id, i) => (id === 'f' ? [i] : []));
+    expect(floaterTurns).toHaveLength(2);
+    expect(floaterTurns[1]! - floaterTurns[0]!).toBeGreaterThan(1);
+    expect(round.length - floaterTurns[1]! + floaterTurns[0]!).toBeGreaterThan(1);
+  });
+
+  it('hushleNextExplainerForTeam reads the team\'s own rotation, floater included', () => {
+    const team = (id: string, playerIds: string[], nextExplainerSlot: number) =>
+      ({ id, name: id, playerIds, score: 0, correctCount: 0, passCount: 0, penaltyCount: 0, nextExplainerSlot });
+    // A team with no players of its own: the floater explains every time.
+    const empty = { floaterPlayerId: 'p5', teams: [team('a', ['p1'], 0), team('b', [], 3)] };
+    expect(hushleExplainerQueue(empty, 'b')).toEqual(['p5']);
+    expect(hushleNextExplainerForTeam(empty, 'b')).toBe('p5');
+    // The cursor picks the slot; it wraps round the rotation.
+    const game = { floaterPlayerId: 'p5', teams: [team('a', ['p1', 'p2'], 1), team('b', ['p3', 'p4'], 4)] };
+    expect(hushleNextExplainerForTeam(game, 'a')).toBe('p5');
+    expect(hushleNextExplainerForTeam(game, 'b')).toBe('p4');
+    // Without a floater, the rotation is the team's players.
+    const plain = { floaterPlayerId: null, teams: [team('a', ['p1', 'p2'], 0)] };
+    expect(hushleExplainerQueue(plain, 'a')).toEqual(['p1', 'p2']);
+    expect(hushleNextExplainerForTeam(plain, 'a')).toBe('p1');
+    // A team nobody can explain for, and an unknown team.
+    expect(hushleNextExplainerForTeam({ floaterPlayerId: null, teams: [team('a', [], 0)] }, 'a')).toBeNull();
+    expect(hushleNextExplainerForTeam(plain, 'nope')).toBeNull();
+  });
+
+  // ────────────────────────────────────────────────────────────────────
+  // v3 — one clock per turn
+  // ────────────────────────────────────────────────────────────────────
+
+  describe('the turn timer', () => {
+    const start = Date.parse('2026-09-29T12:00:00.000Z');
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(start);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    async function runningTurn() {
+      const harness = createTestHarness<HushleState, Parameters<typeof hushlePlugin.handleAction>[2]>({
+        plugin: hushlePlugin,
+        players: ['p1', 'p2', 'p3', 'p4'],
+      });
+      await harness.performAction('p1', {
+        type: 'start-game',
+        packId: 'hushle-en-basic',
+        turnDurationSeconds: 45,
+        cardsPerTurn: 100,
+        createdBy: 'p1',
+      });
+      await harness.performAction('p1', {
+        type: 'set-teams',
+        teams: [
+          { name: 'A', playerIds: ['p1', 'p2'] },
+          { name: 'B', playerIds: ['p3', 'p4'] },
+        ],
+      });
+      await harness.performAction('p1', { type: 'start-turn', teamId: harness.getState().teams[0]!.id, explainerId: 'p1' });
+      return harness;
+    }
+
+    it('starts with the turn and keeps its deadline through every card', async () => {
+      const harness = await runningTurn();
+      const timer = harness.getState().timer;
+      expect(timer).toEqual({
+        startedAt: '2026-09-29T12:00:00.000Z',
+        durationSeconds: 45,
+        paused: false,
+        endsAt: '2026-09-29T12:00:45.000Z',
+      });
+      vi.setSystemTime(start + 10_000);
+      await harness.performAction('p1', { type: 'correct-guess' });
+      vi.setSystemTime(start + 20_000);
+      await harness.performAction('p1', { type: 'pass' });
+      await harness.performAction('p1', { type: 'next-card' });
+      await harness.performAction('p3', { type: 'bust-forbidden', bustedBy: 'p3' });
+      expect(harness.getState().timer).toEqual(timer);
+      expect(harness.getState().totalCardsPlayed).toBe(3);
+    });
+
+    it('ends the turn\'s scoring when the time is up, after a short grace for a tap in flight', async () => {
+      const harness = await runningTurn();
+      // A tap sent at the buzzer still counts…
+      vi.setSystemTime(start + 45_000 + HUSHLE_TIME_UP_GRACE_MS);
+      await harness.performAction('p1', { type: 'correct-guess' });
+      expect(harness.getState().teams[0]!.score).toBe(1);
+      // …but past the grace, no card is scored, skipped, busted or swapped.
+      vi.setSystemTime(start + 45_000 + HUSHLE_TIME_UP_GRACE_MS + 1);
+      const over = JSON.stringify(harness.getState());
+      for (const action of [
+        { type: 'correct-guess' as const },
+        { type: 'pass' as const },
+        { type: 'penalty' as const },
+        { type: 'next-card' as const },
+      ]) {
+        await harness.performAction('p1', action);
+      }
+      await harness.performAction('p3', { type: 'bust-forbidden', bustedBy: 'p3' });
+      expect(JSON.stringify(harness.getState())).toBe(over);
+      // The host moves on: the next team's turn gets a fresh clock.
+      await harness.performAction('p1', { type: 'end-turn' });
+      const next = harness.getState();
+      expect(next.currentExplainerId).toBe('p3');
+      expect(next.timer.startedAt).toBe(new Date(start + 45_000 + HUSHLE_TIME_UP_GRACE_MS + 1).toISOString());
+      expect(Date.parse(next.timer.endsAt!) - Date.parse(next.timer.startedAt!)).toBe(45_000);
+    });
+
+    it('stops the clock between turns, where there is nothing to score', async () => {
+      const harness = createTestHarness<HushleState, Parameters<typeof hushlePlugin.handleAction>[2]>({
+        plugin: hushlePlugin,
+        players: ['p1', 'p2', 'p3', 'p4'],
+      });
+      await harness.performAction('p1', { type: 'start-game', packId: 'hushle-en-basic', cardsPerTurn: 2, createdBy: 'p1' });
+      await harness.performAction('p1', {
+        type: 'set-teams',
+        teams: [
+          { name: 'A', playerIds: ['p1', 'p2'] },
+          { name: 'B', playerIds: ['p3', 'p4'] },
+        ],
+      });
+      await harness.performAction('p1', { type: 'start-turn', teamId: harness.getState().teams[0]!.id, explainerId: 'p1' });
+      await harness.performAction('p1', { type: 'correct-guess' });
+      await harness.performAction('p1', { type: 'correct-guess' });
+      const between = harness.getState();
+      expect(between.phase).toBe('playing');
+      expect(between.currentCard).toBeNull();
+      expect(between.timer).toEqual({ startedAt: null, durationSeconds: 60, paused: true, endsAt: null });
+      await harness.performAction('p1', { type: 'correct-guess' });
+      await harness.performAction('p1', { type: 'next-card' });
+      expect(harness.getState()).toEqual(between);
+    });
   });
 
   // ────────────────────────────────────────────────────────────────────

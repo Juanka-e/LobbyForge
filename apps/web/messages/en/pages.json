@@ -15,7 +15,7 @@
   "pages.discoverInstance.notVerified": "Not verified",
   "pages.discoverInstance.openBrowser": "Open in browser",
   "pages.discoverInstance.openDesktop": "Open in LobbyForge desktop",
-  "pages.discoverInstance.signInNote": "You'll sign in on the community's own site — LobbyForge has no central account.",
+  "pages.discoverInstance.signInNote": "You'll sign in on the community's own site — your LobbyForge hub account doesn't sign you in there.",
   "pages.discoverInstance.stat.doctor": "doctor score",
   "pages.discoverInstance.stat.heartbeat": "last heartbeat",
   "pages.discoverInstance.stat.online": "online now",

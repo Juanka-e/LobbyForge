@@ -58,7 +58,12 @@ export function middleware(request: NextRequest) {
     "img-src 'self' data: blob:",
     "media-src 'self' blob:",
     `connect-src ${fullConnect}`,
-    "frame-src 'none'",
+    // Watch Party embeds YouTube's privacy-enhanced player (docs/WATCH_PARTY.md).
+    // Exactly ONE origin — no scheme wildcard, no youtube.com, no *.youtube…;
+    // nothing else may be framed. This grants framing only: no script, style
+    // or connection from that origin runs in our page — the player lives in
+    // its own origin and is driven over postMessage, checked both ways.
+    "frame-src https://www.youtube-nocookie.com",
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",

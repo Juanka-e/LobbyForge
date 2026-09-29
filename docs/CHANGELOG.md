@@ -2,6 +2,49 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - official hub, plugin UI kit, finished games and bots - 2026-09-29
+
+### Official hub
+- New landing to the "Calm Future" design (live-room hero, activities
+  showcase, community preview, install steps, a repo card with the live
+  GitHub star count), official sign up / sign in and a hub home at
+  `/home`. ADR-006 is amended: the hub account is optional and never
+  signs anyone into another instance.
+- Directory, instance details, marketplace, create-a-community and
+  connect use the hub chrome; `/discover/go` is reachable again (it
+  was served at `/go` and linked as a 404).
+
+### Plugins
+- `@lobbyforge/plugin-sdk/ui`: a theme-aware UI kit every official
+  panel is built on.
+- Quiz: built-in question packs (English, Turkish) injected on the
+  server, a deadline per question, speed and streak scoring, reveal,
+  leaderboard and podium.
+- Vampire Village: the full game — seven roles, night actions, day
+  votes, pack chat, deadlines, spectators — with per-viewer secrets in
+  the core projection.
+- Watch Party: YouTube playback in sync for the room; CSP `frame-src`
+  allows exactly `https://www.youtube-nocookie.com`.
+- Hushle: a new panel; every player now explains in turn, the floater
+  alternates between teams and the timer runs per turn (state v3,
+  migrated on read).
+- Poll and Dice Bot: new panels.
+- Hosting fixes: anyone who acts joins the activity's roster (before,
+  only its creator did), players are named by display name, the voice
+  channel's people are offered to panels, and the lobby finds a game
+  someone else started.
+
+### Bots
+- Bot tokens (shown once, hashed), permissions, Bot API v1, built-in
+  Welcome and Moderation bots, Community settings → Bots, BOT badges and
+  profiles, `createBotClient` in `@lobbyforge/bot-sdk`. See `docs/BOTS.md`.
+- Migration 0037 (bots runtime, additive) and 0038: members the lobby
+  auto-join had created without any role get `@everyone`.
+
+### Working with agents
+- `.claude/agents/` (plugin, frontend, bot, e2e, translator, reviewer)
+  and `docs/AGENT_TEAM.md`.
+
 ## [Unreleased] - beta readiness remediation - 2026-09-19
 
 Fixes for everything found by the 2026-09-19 beta-readiness review

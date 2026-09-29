@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { getEffectiveInstanceAccessSettings, getInstanceBootstrapStatus } from '@lobbyforge/db';
@@ -5,33 +6,37 @@ import { getDb } from '@/lib/db';
 import { getSessionSecret } from '@/lib/api-auth';
 import { readGuestSession } from '@/lib/guest-session';
 import { isOfficialDeployment } from '@/lib/deployment-mode';
+import { officialAuthDestination } from '@/lib/hub-routes';
 import { isGoogleOAuthConfigured } from '@/lib/oauth-google';
 import { getTranslator } from '@/lib/i18n/server';
 import LoginForm from './LoginForm';
+import { loginErrorKey } from './login-errors';
+import OfficialSignInPage from './_official/OfficialSignInPage';
 import { rich } from '@/lib/i18n/rich';
 
 export const dynamic = 'force-dynamic';
 
-/**
- * Message keys for the `?error=` codes the auth routes redirect with
- * (Google OAuth callback, session recording). Only KNOWN codes are
- * shown — the query value itself is never reflected into the page.
- */
-const LOGIN_ERROR_KEYS: Record<string, string> = {
-  registration_closed: 'auth.login.error.registrationClosed',
-  oauth_failed: 'auth.login.error.oauthFailed',
-  oauth_not_configured: 'auth.login.error.oauthNotConfigured',
-  state_mismatch: 'auth.login.error.stateMismatch',
-  missing_params: 'auth.login.error.missingParams',
-  session_unavailable: 'auth.login.error.sessionUnavailable',
-};
+export async function generateMetadata(): Promise<Metadata> {
+  // A self-hosted sign-in keeps the instance's own title (root layout).
+  if (!isOfficialDeployment()) return {};
+  const t = await getTranslator();
+  return { title: t('auth.official.signIn.metaTitle') };
+}
 
 export default async function LoginPage({
   searchParams,
 }: {
   searchParams: Promise<{ invite?: string; mode?: string; desktopLoginState?: string; error?: string }>;
 }) {
-  if (isOfficialDeployment()) redirect('/landing');
+  if (isOfficialDeployment()) {
+    // The official hub's own accounts: signed in already → the hub home.
+    const session = readGuestSession((await cookies()).toString(), getSessionSecret());
+    const destination = officialAuthDestination(Boolean(session?.uid));
+    if (destination) redirect(destination);
+    const { desktopLoginState, error } = await searchParams;
+    return <OfficialSignInPage errorCode={error} desktopLoginState={desktopLoginState} />;
+  }
+
   const setup = await getInstanceBootstrapStatus(getDb());
   if (!setup.bootstrapComplete) redirect('/setup');
 
@@ -47,7 +52,7 @@ export default async function LoginPage({
   // beta-review: the auth routes redirect here with ?error=… but the page
   // never showed it (e.g. a closed-registration Google sign-in looked like
   // a silent no-op).
-  const errorKey = errorCode && Object.hasOwn(LOGIN_ERROR_KEYS, errorCode) ? LOGIN_ERROR_KEYS[errorCode] : undefined;
+  const errorKey = loginErrorKey(errorCode);
   const errorMessage = errorKey ? t(errorKey) : null;
   const instanceName =
     setup.instanceName || process.env.LOBBYFORGE_INSTANCE_NAME?.trim() || 'LobbyForge Community';

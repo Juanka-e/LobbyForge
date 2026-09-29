@@ -15,13 +15,15 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "lint": "eslint \"src/**/*.ts\""
+    "lint": "eslint \"src/**/*.{ts,tsx}\""
   },
   "dependencies": {
     "@lobbyforge/plugin-sdk": "workspace:*"
   },
   "devDependencies": {
     "@lobbyforge/config": "workspace:*",
+    "@types/react": "^19.2.17",
+    "react": "^19.2.7",
     "typescript": "^5.4.5",
     "vitest": "^4.1.11"
   }

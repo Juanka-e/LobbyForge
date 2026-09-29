@@ -15,7 +15,7 @@
   "pages.discoverInstance.notVerified": "Doğrulanmamış",
   "pages.discoverInstance.openBrowser": "Tarayıcıda aç",
   "pages.discoverInstance.openDesktop": "LobbyForge masaüstü uygulamasında aç",
-  "pages.discoverInstance.signInNote": "Topluluğun kendi sitesinde giriş yaparsın — LobbyForge'da merkezi bir hesap yok.",
+  "pages.discoverInstance.signInNote": "Topluluğun kendi sitesinde giriş yaparsın — LobbyForge hub hesabın orada geçerli değil.",
   "pages.discoverInstance.stat.doctor": "tanılama puanı",
   "pages.discoverInstance.stat.heartbeat": "son sinyal",
   "pages.discoverInstance.stat.online": "şu an çevrimiçi",

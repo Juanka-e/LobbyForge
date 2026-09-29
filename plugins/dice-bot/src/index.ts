@@ -162,7 +162,8 @@ export const diceBotPlugin: GamePlugin<DiceState, DiceAction> = {
     },
   },
   actionPolicies: {
-    roll: { role: 'member', actorFields: ['playerId'] },
+    // Rolls are public and show who rolled, so rolling may name the roller.
+    roll: { role: 'member', actorFields: ['playerId'], joinsRoster: true },
     'reset-stats': { role: 'host', actorFields: ['hostId'] },
     'clear-history': { role: 'host', actorFields: ['hostId'] },
     'set-enabled': { role: 'host', actorFields: ['hostId'] },

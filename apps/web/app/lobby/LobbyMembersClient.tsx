@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { getRealtimeClient } from '@/lib/realtime-client';
 import { UserProfilePopover } from '@/components/modals/UserProfilePopover';
 import { MemberBlockButton } from './MemberBlockButton';
+import { BotAvatar, BotBadge, BotProfilePopover, type LobbyBot } from './BotIdentity';
 import { useLobbyVoice } from './LobbyVoiceProvider';
 import { useBlockList } from './BlockListProvider';
 import { useT } from '@/lib/i18n/client';
@@ -83,11 +84,16 @@ export function LobbyMembersClient({
   initialMembers,
   voiceChannelIds,
   currentUserId,
+  bots = [],
+  canManageServer = false,
 }: {
   serverId: string;
   initialMembers: Member[];
   voiceChannelIds: string[];
   currentUserId: string | null;
+  /** The server's enabled bots — their own group, always with the BOT badge. */
+  bots?: LobbyBot[];
+  canManageServer?: boolean;
 }) {
   const t = useT();
   const [members, setMembers] = useState<Member[]>(initialMembers);
@@ -99,6 +105,8 @@ export function LobbyMembersClient({
   // Shared popover state — only one popover can be open at a time.
   const [openUserId, setOpenUserId] = useState<string | null>(null);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
+  const [openBotId, setOpenBotId] = useState<string | null>(null);
+  const closeBotPopover = useCallback(() => setOpenBotId(null), []);
 
   // Polling fallback
   const refresh = useCallback(async () => {
@@ -181,8 +189,16 @@ export function LobbyMembersClient({
 
   function openPopover(m: Member, rect: DOMRect) {
     setAnchorRect(rect);
+    setOpenBotId(null);
     setOpenUserId(m.id);
   }
+
+  function toggleBotPopover(bot: LobbyBot, rect: DOMRect) {
+    setOpenUserId(null);
+    setAnchorRect(rect);
+    setOpenBotId((current) => (current === bot.id ? null : bot.id));
+  }
+  const openBot = bots.find((b) => b.id === openBotId);
 
   return (
     <>
@@ -194,8 +210,12 @@ export function LobbyMembersClient({
           <MemberSection key={role.id} label={`${role.name} - ${roleMembers.length}`} members={roleMembers} roleColor={role.color} roleIcon={role.icon} currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} onClosePopover={() => setOpenUserId(null)} />
         ))}
         <MemberSection label={t('lobby.roster.onlineGroup', { count: ungroupedOnline.length })} members={ungroupedOnline} currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} onClosePopover={() => setOpenUserId(null)} />
+        <BotSection bots={bots} openBotId={openBotId} onToggle={toggleBotPopover} />
         <MemberSection label={t('lobby.roster.offlineGroup', { count: offline.length })} members={offline} dimmed currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} onClosePopover={() => setOpenUserId(null)} />
       </aside>
+      {openBot ? (
+        <BotProfilePopover bot={openBot} anchorRect={anchorRect} onClose={closeBotPopover} canManage={canManageServer} />
+      ) : null}
       {openMember ? (
         <UserProfilePopover
           open={true}
@@ -238,6 +258,48 @@ export function LobbyMembersClient({
         />
       ) : null}
     </>
+  );
+}
+
+/** The server's bots: robot avatar, name and the BOT badge; click for the bot profile. */
+function BotSection({
+  bots,
+  openBotId,
+  onToggle,
+}: {
+  bots: LobbyBot[];
+  openBotId: string | null;
+  onToggle: (bot: LobbyBot, rect: DOMRect) => void;
+}) {
+  const t = useT();
+  if (bots.length === 0) return null;
+  return (
+    <div className="mb-6" data-testid="members-bots">
+      <h3 className="font-label-xs uppercase tracking-wider mb-2 flex items-center gap-2 text-text-secondary">
+        <span>{t('lobbyMain.bots.group', { count: bots.length })}</span>
+        <div className="h-[1px] flex-1 bg-border-subtle" />
+      </h3>
+      <ul className="space-y-1">
+        {bots.map((bot) => (
+          <li key={bot.id}>
+            <button
+              type="button"
+              data-user-popover-anchor
+              aria-expanded={openBotId === bot.id}
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggle(bot, event.currentTarget.getBoundingClientRect());
+              }}
+              className="flex w-full min-w-0 items-center gap-3 rounded-md px-2 py-1.5 text-left hover:bg-surface-container/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+            >
+              <BotAvatar size="sm" />
+              <span className="min-w-0 flex-1 truncate font-label-sm text-text-secondary">{bot.name}</span>
+              <BotBadge />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

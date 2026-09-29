@@ -1,8 +1,6 @@
 {
   "discovery.allLanguages": "All languages",
   "discovery.allRegions": "All regions",
-  "discovery.backToDirectory": "Back to the directory",
-  "discovery.backToLobby": "Back to lobby",
   "discovery.cancel": "Cancel",
   "discovery.clearFiltersHint": "Try clearing the filters above, or {link}.",
   "discovery.close": "Close",

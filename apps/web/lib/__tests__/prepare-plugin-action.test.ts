@@ -15,6 +15,7 @@ vi.mock('@lobbyforge/db', () => ({
   listServerLocalCards,
 }));
 
+import { quizPlugin } from '@lobbyforge/quiz';
 import { preparePluginAction } from '../prepare-plugin-action.js';
 
 const db = {} as DbClient;
@@ -124,5 +125,60 @@ describe('preparePluginAction', () => {
     });
     expect(result).toEqual({ ok: false, status: 404, error: 'Card pack not found' });
     expect(listCardsForPack).not.toHaveBeenCalled();
+  });
+});
+
+describe('preparePluginAction — quiz packs are hydrated on the server', () => {
+  const start = (fields: Record<string, unknown>) =>
+    preparePluginAction(db, { pluginId: 'quiz', serverId: 'server-1', action: { type: 'start', ...fields } });
+
+  it('loads a pack game’s questions server-side, keeping the settings', async () => {
+    const result = await start({ source: 'pack', packId: 'science', language: 'en', questionCount: 5, shuffle: false });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.action).toMatchObject({ type: 'start', source: 'pack', packId: 'science', language: 'en', questionCount: 5, shuffle: false });
+    const questions = result.action.questions as Array<{ id: string; question: string; options: string[]; correctIndex: number }>;
+    expect(questions).toHaveLength(24);
+    expect(questions[0]).toMatchObject({ id: 'sci-en-01', question: 'What is the chemical symbol for gold?', correctIndex: 1 });
+    // No database involved: the packs ship with the plugin's server entry.
+    expect(getCardPackById).not.toHaveBeenCalled();
+    expect(getCardPackBySlug).not.toHaveBeenCalled();
+  });
+
+  it('the hydrated action is what the plugin accepts — and it starts a pack game', async () => {
+    const result = await start({ source: 'pack', packId: 'general', language: 'tr', questionCount: 10 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(quizPlugin.validateAction?.(result.action)).toBeNull();
+    const lobby = quizPlugin.createInitialState({ actorUserId: 'host' } as never);
+    const playing = quizPlugin.handleAction(null as never, lobby, result.action as never);
+    expect(playing.phase).toBe('playing');
+    expect(playing.questionTotal).toBe(10);
+    expect(playing.deck.every((question) => question.id.startsWith('gen-tr-'))).toBe(true);
+  });
+
+  it('ignores questions a client sends for a pack game', async () => {
+    const forged = [{ question: 'Is the answer A?', options: ['A', 'B'], correctIndex: 0 }];
+    const result = await start({ source: 'pack', packId: 'general', language: 'en', questions: forged });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(JSON.stringify(result.action.questions)).not.toContain('Is the answer A?');
+    expect((result.action.questions as unknown[]).length).toBe(24);
+  });
+
+  it('answers 404 for a pack that does not exist', async () => {
+    expect(await start({ source: 'pack', packId: 'history', language: 'en' })).toEqual({
+      ok: false,
+      status: 404,
+      error: 'Question pack not found',
+    });
+    expect(await start({ source: 'pack', packId: 'general', language: 'de' })).toMatchObject({ ok: false, status: 404 });
+  });
+
+  it('passes pasted questions and every other quiz action through untouched', async () => {
+    const custom = { type: 'start', source: 'custom', questions: [{ question: 'Q?', options: ['a', 'b'], correctIndex: 1 }] };
+    expect(await preparePluginAction(db, { pluginId: 'quiz', serverId: 'server-1', action: custom })).toEqual({ ok: true, action: custom });
+    const answer = { type: 'answer', index: 2, playerId: 'u-1' };
+    expect(await preparePluginAction(db, { pluginId: 'quiz', serverId: 'server-1', action: answer })).toEqual({ ok: true, action: answer });
   });
 });

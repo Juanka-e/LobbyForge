@@ -1,37 +1,42 @@
-# Hushle — Aşama 4 / Taboo-style voice game
+# Hushle — Taboo-style voice game
 
-Hushle is the first fully-implemented game plugin in the LobbyForge
-catalog. It is a Taboo/Tabu-style word guessing game played in a live
-voice room: an explainer from the active team describes the current
-word without using the forbidden words; their teammates guess; the
-host scores correct / pass / penalty; the turn rotates to the next
-team; the team with the highest score at the end wins.
+Hushle is a Taboo/Tabu-style word game played in a live voice room. Each
+turn one player explains the word on a card without saying any of the
+forbidden words listed under it; their teammates guess out loud. The
+other team sees the card too and presses **BUST** when a forbidden word
+slips out. The host scores every card and moves the game from turn to
+turn; the team with the highest score when the game ends wins.
 
-This document covers the state machine, the reducer, the React panel,
-and the voice-room host integration. The SDK-level contract (manifest,
-action policies, registry adapter, test harness) is documented in
-[`docs/PLUGIN_SDK.md`](./PLUGIN_SDK.md); the HTTP routes that drive
-the panel are documented in [`docs/ACTIVITIES.md`](./ACTIVITIES.md).
+This page covers the rules as the reducer implements them, who sees what,
+the panel, and how the host app runs it. The SDK contract (manifest,
+action policies, test harness, the UI kit) is in
+[`docs/PLUGIN_SDK.md`](./PLUGIN_SDK.md); the HTTP routes are in
+[`docs/ACTIVITIES.md`](./ACTIVITIES.md).
 
 ## Quick start
 
-1. Open the voice room for any voice channel you own or moderate.
-2. Click the **Start activity** `<select>` and choose **Hushle**.
-3. Pick a language (English or Turkish) and a turn duration (15–300 s,
-   default 60). Click **Start game**.
-4. Build at least one team by typing a name and a comma-separated list
-   of user ids, then **Add team**. Repeat for as many teams as you want.
-5. Click **Start turn** to begin — the first team's first explainer
-   becomes the active player and the timer starts.
-6. While the explainer describes the word, you (the host) tap
-   **Correct**, **Pass**, **Penalty**, **Next card**, **End turn**, or
-   **End game**.
-7. When you click **End turn** the system rotates to the next team
-   and the first player in that team's `playerIds` becomes the new
-   explainer.
-8. When you click **End game** the panel switches to the final-score
-   view (sorted by `score` desc). The host gets a **New game** button
-   that re-enters the team-setup phase.
+1. In the lobby, join a voice channel and open **Play together** (the
+   Activities hub in the centre column). Click **Hushle** — you are the
+   host.
+2. **Lobby.** Pick a word pack (or, when the server lists no packs, the
+   card language), the turn timer, cards per turn, players per team and
+   the card difficulty mix. Click **Start Hushle**.
+3. **Team setup.** Everyone in the voice room is listed by name. **Split
+   into two teams** seats them at random (an odd one out becomes the
+   floater), or the host adds teams and seats people one by one. Click
+   **Start first turn** — the first team's first player explains.
+4. **A turn.** One clock for the whole turn: the explaining team gets as
+   many cards as they can before it runs out. The explainer and the other
+   team see the card; the explainer's teammates do not. The host presses
+   **Got it**, **Skip** or **Penalty** under the card; anyone on the other
+   team presses **BUST**. The host's tools also offer **Next card** (swap
+   without scoring), a different **Explainer**, **End turn** and **End
+   game**.
+5. The turn is over when its time is up (no more cards are scored) or
+   its cards are used up. The host clicks **Start next turn**: the other
+   team plays, and the next player in that team's rotation explains.
+6. **End game** shows the winner, the final scores and a recap. The host
+   can **Start new game** with the same pack and settings.
 
 ## State machine
 
@@ -41,149 +46,159 @@ type HushlePhase = 'lobby' | 'team_setup' | 'playing' | 'ended';
 
 ```
        start-game              start-turn
-lobby ─────────────► team_setup ────────► playing
+lobby ─────────────► team_setup ────────► playing ◄──► between turns
                           │                  │
-                          └──── end-game ────┴─────► ended
+                          └──── end-game ────┴─────► ended ── start-game ──► team_setup
 ```
 
-- **lobby** — created by `createHushleInitialState()`. Only
-  `start-game` is meaningful here; everything else is a no-op.
-- **team_setup** — entered via `start-game`. `set-teams` replaces the
-  full team list (the host builds the teams up by repeated `set-teams`
-  calls). `start-turn` moves into `playing`.
-- **playing** — entered via `start-turn`. `correct-guess` / `pass` /
-  `penalty` all draw the next card and bump `totalCardsPlayed`. `end-turn`
-  rotates `currentTeamId` + `currentExplainerId` to the next team.
-- **ended** — entered via `end-game` from any non-terminal phase.
-  `start-game` (the EndedView's "New game" button) re-enters
-  `team_setup` and keeps the existing scores wiped.
+- **lobby** — `createHushleInitialState()`. Only `start-game` means
+  anything here.
+- **team_setup** — `set-teams` replaces the whole roster (every edit
+  sends every team); `start-turn` begins play.
+- **playing** — a turn runs while `timer.startedAt` is set, until its
+  deadline `timer.endsAt`; after the deadline its scoring is over. When
+  the turn's `cardsPerTurn` are used up (or the deck runs out), the
+  reducer clears the card and the timer but stays in `playing`: that is
+  the **between turns** state. Either way, `end-turn` starts the next
+  team's turn.
+- **ended** — from any phase via `end-game`. Scores stay; `start-game`
+  goes back to team setup with a fresh deck and no teams.
 
-## State shape
+## State shape (version 3)
 
 ```ts
 type HushleState = {
-  version: number;                   // HUSHLE_STATE_VERSION (currently 1)
+  version: 3;                          // HUSHLE_STATE_VERSION
   phase: HushlePhase;
+  teams: Array<{
+    id; name; playerIds: string[]; score; correctCount; passCount; penaltyCount;
+    nextExplainerSlot: number;         // where this team's own explainer rotation stands
+  }>;
+  floaterPlayerId: string | null;      // one extra player for odd counts; in every team's rotation
+  turnNumber: number;                  // the current turn, 1 for the first; 0 before play
+  currentTeamId: string | null;
+  currentExplainerId: string | null;
+  currentCard: HushleCard | null;      // { id, language, word, forbiddenWords, difficulty, category? }
+  deck: HushleCard[];                  // SERVER ONLY — never sent to a client
+  deckIndex: number;                   // legacy, unused by the weighted draw
+  usedCardIds: string[];               // SERVER ONLY — the last one is the current card
   settings: {
-    language: 'en' | 'tr';
-    turnDurationSeconds: number;     // 15..300, default 60
-    cardsPerTurn: number;            // current: unused (M18 will cap the turn)
+    turnDurationSeconds: number;       // ≤ 300, default 60
+    cardsPerTurn: number;              // ≤ 100, default 15
+    language: string;                  // any language tag
+    packId: string | null;             // pack slug or UUID
+    teamSize: number;                  // ≤ 16, default 2
+    difficultyDistribution: { easy; medium; hard };  // weights, default 0.6 / 0.3 / 0.1
   };
-  teams: HushleTeam[];               // may be empty in lobby / team_setup
-  deck: HushleCard[];                // created on start-game from getDefaultDeck
-  deckIndex: number;                 // next card to draw
-  currentCard: HushleCard | null;    // active card (null in lobby / ended)
-  currentTeamId: string | null;      // active team
-  currentExplainerId: string | null; // active explainer
   timer: {
-    startedAt: string | null;        // ISO timestamp; null = not started
-    durationSeconds: number;         // mirrors settings.turnDurationSeconds
+    startedAt: string | null;          // when the running turn started; null between turns
+    durationSeconds: number;
     paused: boolean;
+    endsAt: string | null;             // the turn's deadline — every client counts down to it
   };
-  totalCardsPlayed: number;          // correct + pass + penalty counter
-  startedBy: string | null;          // user id who ran start-game
-};
-
-type HushleTeam = {
-  id: string;
-  name: string;
-  playerIds: string[];
-  score: number;            // correct - penalty
-  correctCount: number;
-  passCount: number;
-  penaltyCount: number;
-};
-
-type HushleCard = {
-  id: string;
-  language: 'en' | 'tr';
-  word: string;
-  forbiddenWords: string[]; // explainer may not say these
+  cardsPlayedThisTurn: number;
+  totalCardsPlayed: number;
+  createdBy: string | null;
+  createdAt: string | null;
 };
 ```
+
+`migrateHushleState` upgrades older rows on every read (see
+[State versioning](#state-versioning)).
 
 ## Reducer
 
-`plugins/hushle/src/actions.ts` exports `hushleReducer(state, action)`.
-Every action is a tagged union member:
+`plugins/hushle/src/actions.ts` — `hushleReducer(state, action)`, pure and
+defensive: an action that does not fit the phase returns the state
+unchanged.
 
-| Action type | Effect |
+| Action | Effect |
 |---|---|
-| `start-game` | set `phase='team_setup'`, build deck via `getDefaultDeck(language)`, reset `startedBy` / `totalCardsPlayed` |
-| `set-teams` | replace `teams` with the supplied `{ name, playerIds }[]`, regenerate `id`s for each row |
-| `start-turn` | set `phase='playing'`, draw the first card, start the timer (`startedAt = new Date().toISOString()`) |
-| `set-explainer` | change `currentExplainerId` for the active team (host-only control) |
-| `next-card` | draw the next deck card without scoring |
-| `correct-guess` | +1 `correctCount`, +1 `score`, draw next card, `totalCardsPlayed++` |
-| `pass` | +1 `passCount`, draw next card, `totalCardsPlayed++` |
-| `penalty` | +1 `penaltyCount`, -1 `score`, draw next card, `totalCardsPlayed++` |
-| `end-turn` | rotate `currentTeamId` to the next team (cyclical), assign `currentExplainerId` to that team's first player |
-| `end-game` | set `phase='ended'`, clear `currentCard`, stop the timer |
+| `start-game` | → `team_setup`. Deck: the pack's cards, injected by the host from `card_packs` (`apps/web/lib/prepare-plugin-action.ts`; client input is overwritten), else the bundled deck for the language. Settings are clamped; the difficulty weights are renormalised. |
+| `set-teams` | Replaces the roster. Empty names are dropped, names cut to 40 characters, each team trimmed to `teamSize`. The floater is kept only if they are on no team. Every team's rotation starts at its first player. |
+| `start-turn` | → `playing`: the given team, the given explainer (or the next in the team's rotation), a card drawn by difficulty weight, the turn's clock started. |
+| `set-explainer` | Hands the turn to someone else; the team's rotation then continues after them. |
+| `next-card` | A new card without scoring; counts toward the turn's cards. Refused once the time is up or between turns. |
+| `correct-guess` / `pass` / `penalty` | +1 / 0 / −1 for the explaining team, then the next card on the same clock — or, at the turn's card budget or an empty deck, the end of the turn. Refused once the time is up or between turns. |
+| `bust-forbidden` | The other team's buzzer: the same as `penalty`, accepted only when `bustedBy` (injected by the server from the session) sits on a team other than the explaining one. |
+| `end-turn` | The next team in order; the next player in its own rotation explains, and its turn starts at once on a fresh clock. |
+| `end-game` | → `ended`: the card and the timer are cleared, scores kept. |
 
-The reducer is **pure**: it never calls `dispatch`, never touches the
-DB, never logs. The host persists the post-reducer state via
-`setGameSessionState` in the `actions` route.
+Card draw: the reducer picks a difficulty tier by the weights, then an
+unused card of that tier, falling back to any unused card. A card is never
+drawn twice in a game.
+
+### Turns and the explainer rotation
+
+Teams play in seat order. Each team has its **own** rotation — its players
+in seat order — and each time the team plays, the next player in it
+explains. With two teams of two, four turns give all four players one turn
+each: A1, B1, A2, B2, A1, …
+
+An odd player count leaves one player as the **floater**. The floater sits
+on no team; instead they have a slot in **every** team's rotation, so in a
+full round they explain once for each team while everyone else explains
+once. Their slot is staggered from team to team — after the first player in
+the first team's rotation, half a round later in the second's — so their two
+turns fall apart, not back to back. With A = (a1, a2), B = (b1, b2) and a
+floater f, the round is a1, b1, f, b2, a2, f. A team with no players of its
+own is explained for by the floater every time.
+
+When the host names the explainer (`start-turn` with an `explainerId`, or
+`set-explainer` mid-turn), that team's rotation continues after whoever
+actually explained, so nobody is skipped. `src/rotation.ts` holds the
+rotation; the reducer, the state migration and the panel's "Next up" all
+read it.
+
+### The turn timer
+
+A turn has **one** clock. It starts with the turn — `timer.startedAt`, and
+the deadline `timer.endsAt` — and scoring a card does not restart it: the
+explaining team has the whole duration for as many cards as they manage.
+Every client counts down to the same `endsAt`. Once the deadline has passed
+(plus a 2 s grace, `HUSHLE_TIME_UP_GRACE_MS`, for a last-second tap already
+on its way), the turn's scoring is over: the reducer refuses Got it, Skip,
+Penalty, BUST and Next card until the host starts the next turn.
 
 ## Action policies
 
-All 10 actions are host-only:
-
 ```ts
 actionPolicies: {
-  'start-game':    { role: 'host' },
-  'set-teams':     { role: 'host' },
-  'start-turn':    { role: 'host' },
-  'set-explainer': { role: 'host' },
-  'next-card':     { role: 'host' },
-  'correct-guess': { role: 'host' },
-  'pass':          { role: 'host' },
-  'penalty':       { role: 'host' },
-  'end-turn':      { role: 'host' },
-  'end-game':      { role: 'host' },
+  'start-game': { role: 'host' }, 'set-teams': { role: 'host' }, 'start-turn': { role: 'host' },
+  'set-explainer': { role: 'host' }, 'next-card': { role: 'host' },
+  'correct-guess': { role: 'host' }, pass: { role: 'host' }, penalty: { role: 'host' },
+  'bust-forbidden': { role: 'member', actorFields: ['bustedBy'] },
+  'end-turn': { role: 'host' }, 'end-game': { role: 'host' },
 },
 ```
 
-The rationale: the host is the only person who can reliably hear whether
-the team guessed the word correctly. M18 will add a member-visible
-"Request skip" affordance that the host confirms.
+The host moderates: only they can hear whether a guess was right. BUST is
+the one player action — any server member may send it, the server fills
+`bustedBy` with the caller, and the reducer checks the team.
+
+## Who sees what
+
+The server projects the state for each viewer before it leaves
+(`packages/core/src/activity-projection.ts`, used by the web routes and
+the realtime gateway alike):
+
+- `deck` and `usedCardIds` never reach any client; they become
+  `deckSize`, `cardsRemaining` and `usedCardCount`.
+- `currentCard` reaches only the **explainer** and the players of the
+  **other teams**. The explainer's teammates, the floater, spectators and
+  a host who does not play get `null`.
+
+The panel never decides visibility; it shows what it was sent and words
+each viewer's job to match.
 
 ## Manifest
 
-```ts
-manifest: {
-  id: 'hushle',
-  name: 'Hushle',
-  version: '0.2.0',
-  type: 'game',
-  minAppVersion: '0.1.0',
-  permissions: [
-    PluginPermission.MANAGE_GAME_SESSION,
-    PluginPermission.MANAGE_SCORES,
-    PluginPermission.SEND_ROOM_MESSAGE,
-    PluginPermission.MANAGE_TIMER,
-  ],
-  locales: ['en', 'tr'],
-  entryClient: './renderClient.js',
-  catalog: {
-    category: 'game',
-    summary: 'Taboo-style word guessing built for live voice rooms.',
-    publisher: 'LobbyForge',
-    trustLevel: 'official',
-    playerConfig: {
-      minPlayers: 4,
-      maxPlayers: 12,
-      defaultMaxPlayers: 8,
-      supportsSpectators: true,
-      supportsQueue: true,
-      overflowPolicy: 'spectator',
-    },
-    requiresVoiceRoom: true,
-    externalAccountRequired: false,
-    compatibleAppVersion: '>=0.2.0',
-    tags: ['word-game', 'party', 'voice'],
-  },
-},
-```
+`id: 'hushle'`, `version: '0.3.0'`, `type: 'game'`, the four permissions
+(`MANAGE_GAME_SESSION`, `MANAGE_SCORES`, `SEND_ROOM_MESSAGE`,
+`MANAGE_TIMER`), `locales` from the files in `locales/`, and a catalogue
+entry for 4–12 players (default 8) with spectators, a queue and
+`requiresVoiceRoom`. The catalogue summary is `catalog.summary` in the
+locale files.
 
 ## Custom words & server-local cards (status)
 
@@ -202,16 +217,14 @@ Where words come from, and what is NOT wired yet (honest status, V4-009):
 
 ## Card decks
 
-`plugins/hushle/src/decks.ts` ships two MVP decks of 24 cards each
-(`getDefaultDeck(language)`). The deck counter is module-local and
-resets at the start of each call so every fresh game gets a stable,
-monotonically-ordered set of card ids.
+`plugins/hushle/src/decks.ts` ships two decks of 24 cards (English and
+Turkish), each card with a difficulty (14 easy, 7 medium, 3 hard) and a
+category slug (`food-drink`, `places`, `nature`, …). The panel translates
+the built-in category slugs and shows any other category as written.
 
 ### DB-backed packs (M18)
 
-M18 moved the card packs from in-code bundles to a DB-backed
-`card_packs` + `cards` schema. The structured seeds are exposed as
-`HUSHLE_BUILTIN_PACKS: BuiltInPackSeed[]`:
+The structured seeds are exposed as `HUSHLE_BUILTIN_PACKS`:
 
 ```ts
 import { HUSHLE_BUILTIN_PACKS } from '@lobbyforge/hushle';
@@ -232,111 +245,144 @@ imports don't pull `postgres` (Node.js-only) into the client
 bundle. The main `@lobbyforge/hushle` entry point stays
 client-safe.
 
-The `HushleAction.start-game` action now takes `packId: string`
-(required) plus an optional `language` fallback. The reducer
-resolves the language from the slug via `getLanguageForPackSlug`;
-for custom/community packs the M19 work will add a real DB lookup.
+`start-game` takes `packId` (a slug or a UUID); the host resolves the pack
+and injects its cards and language.
 
-The Hushle panel's lobby view accepts a `cardPacks` prop. When
-the host's `ActivityPanel` fetches `/api/servers/{id}/card-packs`
-and forwards the result, the lobby renders a pack dropdown
-(`Hushle — English (Basic) (24)`). When the fetch fails or the
-list is empty, the panel falls back to the legacy language
-dropdown.
+The panel's lobby receives the server's packs as `cardPacks` (the host
+fetches `/api/servers/{id}/card-packs` while the session is in its lobby
+phase) and shows one tile per pack. Without packs — the fetch failed or
+the list is empty — it offers the two built-in languages instead and
+starts `hushle-en-basic` or `hushle-tr-basic`.
 
 ### Future card pack work
 
-- **Community packs** (M19) — a `POST /api/servers/{id}/card-packs`
-  route for trusted users to upload a JSON pack; the
-  `cardPackInstalls` join table for per-server enablement.
-- **Per-pack categories / difficulty** — the schema already
-  supports a freeform `payload` JSONB so card shape can grow
-  without a migration. v0.3.0 will add typed `category` +
-  `difficulty` fields.
-- **Pack versioning** — M20+ work; the `slug` is currently the
-  stable identifier. If packs ever need to evolve, add
-  `version` to the schema and treat `(slug, version)` as the
-  unique key.
+- **Community packs** — a `POST /api/servers/{id}/card-packs` route for
+  trusted users to upload a JSON pack; per-server enablement.
+- **Pack versioning** — the `slug` is currently the stable identifier. If
+  packs ever need to evolve, add `version` to the schema and treat
+  `(slug, version)` as the unique key.
 
-## React panel
+## The panel
 
-`plugins/hushle/src/renderClient.tsx` exports `HushlePanel(props)`.
-The file is marked `"use client"` (Next.js requires this for any
-component using hooks) and uses inline styles so it renders correctly
-without the host's CSS.
+`plugins/hushle/src/renderClient.tsx` exports `HushlePanel`, built from
+the activity UI kit (`@lobbyforge/plugin-sdk/ui`) to the "Calm Future"
+design (the Hushle and Plugin UI artboards). The phase views live in
+`src/ui/`:
 
-Four phase views:
+| File | What it holds |
+|---|---|
+| `renderClient.tsx` | The root: locale, `ActivityShell`, Hushle's stylesheet, the phase switch, the "this turn" log. |
+| `ui/lobby.tsx` | Host settings, the no-packs language fallback, how to play, the waiting screen. |
+| `ui/setup.tsx` | The room's people to seat by name, the two-team split, teams and open seats, the add-team form, the floater. |
+| `ui/playing.tsx` | A running turn (card column, host scoring, BUST), the pause between turns, who-sees-the-card, this turn, host tools. |
+| `ui/ended.tsx` | Winner (or tie), final scores, recap, new game. |
+| `ui/card.tsx` | The card face and the hidden-card state. |
+| `ui/scoreboard.tsx` | The team board: scores, players and their job this turn, the floater. |
+| `ui/shared.tsx` | The header, the view props, the host tap lock, "(you)". |
+| `ui/model.ts` | Pure view logic: roles, timer, next-up preview, standings, settings, action builders, the turn log. |
+| `ui/labels.ts`, `ui/i18n.tsx` | Values to translated words; the translator context and `Intl` helpers. |
+| `ui/theme.ts`, `ui/parts.tsx` | Difficulty colours and team tones; small generic pieces the kit does not ship (text field, choice tile, empty seat, visually hidden text, icons). |
 
-| Phase | View | Purpose |
-|---|---|---|
-| `lobby` | `LobbyView` | language + turn-duration form, host-only Start button |
-| `team_setup` | `TeamSetupView` | team list (with delete), add-team form, host-only Start turn button |
-| `playing` | `PlayingView` | current team chip, timer chip, explainer label, card word (explainer + host only) or hidden-card placeholder, scores list, host-only action buttons |
-| `ended` | `EndedView` | final scores sorted desc, host-only "New game" button |
+### What each seat sees
 
-### Locale loader
+| Phase | Host | Explainer | Teammates | Other team | Floater | Spectator |
+|---|---|---|---|---|---|---|
+| Lobby | Settings, **Start Hushle** | — | — | — | — | Waiting, how to play |
+| Team setup | The room by name, **Split into two teams**, seat / unseat / floater, add a team, **Start first turn** | — | — | — | — | Teams, settings, who is not seated yet, waiting |
+| Turn | **Got it / Skip / Penalty** under the card (the card if the host is the explainer or on the other team), host tools, **End turn / End game** | The card; "the host scores each card" | "Listen to …" — no card | The card and **BUST** | "… is explaining" — no card | "… is explaining" — no card |
+| Time's up, or between turns | "Next up" and who explains, **Start next turn / End game** | Waiting | Waiting | Waiting | Waiting | Waiting |
+| Ended | Winner, scores, recap, **Start new game** | Winner, scores, recap | ← | ← | ← | ← |
 
-The panel bundles one `locales/<code>.json` per language (loaded through
-the generated `src/locales.generated.ts`). The active locale is read from
-the host's `data-lf-locale` attribute, falling back to `<html lang>`, and
-`{name}` placeholders are filled by the plugin SDK's `tFor`. See
-[TRANSLATING.md](TRANSLATING.md) for adding a language.
+A host who plays also has that seat's view. A host on the other team gets
+**BUST** instead of **Penalty** — both cost the explaining team a point
+and draw the next card, and two red buttons doing the same thing would
+only make them hesitate.
 
-### Timer countdown
+### Layout
 
-A `useNow(500ms)` hook ticks the clock; the panel computes the
-remaining seconds from `state.timer.startedAt`. The chip turns red
-when the remaining time is ≤ 10 seconds. The reducer is responsible
-for the canonical timer state; the panel is a pure renderer.
+- **Header** (every phase): the Hushle tile, who hosts and the deck count,
+  the phase ("Turn 3", "Turn over", …), the timer while a turn runs, and —
+  always in this spot — the host's controls for moving on: Start Hushle,
+  Start first turn, End turn / Start next turn, End game, Start new game.
+- **Body**: a two-column grid (`Grid min={340}`) that stacks when the
+  centre column is narrow — the card column (role line, card, the viewer's
+  buttons) and the information column (team board, who sees the card,
+  this turn, host tools).
 
-### Explainer vs. guesser UI
+### The card
 
-```tsx
-const isExplainer = state.currentExplainerId === actorUserId;
-const isHost = hostUserId !== null && actorUserId === hostUserId;
+A coloured top bar and border by difficulty — easy blue, medium purple,
+hard red — with the difficulty's name and one, two or three pips in the
+top-right, so colour is never the only cue. A category chip, the word in
+large type, and the forbidden words struck through in red under "Don't
+say". The word and the forbidden list carry `lang={card.language}`: the
+pack's language may not be the panel's (an English pack in a Turkish app),
+and the tag is what makes uppercasing ("şişe" → "ŞİŞE") and screen-reader
+pronunciation right. Viewers without the card get a card-shaped
+placeholder that says what to do instead ("Listen to Mira").
 
-{card ? (
-  isExplainer || isHost ? (
-    <CardWord card={card} />
-  ) : (
-    <CardHiddenPlaceholder />
-  )
-) : (
-  <NoCardPlaceholder />
-)}
-```
+### Guards against double taps
 
-The reducer never branches on `actorUserId`; visibility is a
-panel concern. The audit log still records who dispatched what.
+- **BUST** stays disabled after a press until a different card arrives
+  (a bust always rotates the card), keyed on the card id.
+- The host's **Got it / Skip / Penalty / Next card** lock after a press
+  until the next state arrives (keyed on a fingerprint of the card in
+  play), and unlock by themselves after 4 s if the move never landed.
+- The server also de-duplicates retries by `actionId`.
+
+### "This turn"
+
+The reducer keeps totals, not a history, so the panel keeps a short log by
+comparing each state with the one before: a counter of the explaining
+team moved (got it, skipped, bust — a host penalty and a bust are the same
+event), or a card was swapped without scoring. Words appear only for
+viewers who saw the card. The log lives in the viewer's browser; a reload
+starts it afresh and the scores stay the source of truth.
+
+### Settings the lobby offers
+
+Only options `start-game` already takes: the pack, `turnDurationSeconds`
+(30, 45, 60, 90, 120 s — the whole turn's clock), `cardsPerTurn` (5, 10,
+15, 20), `teamSize` (2–6)
+and `difficultyDistribution` through three presets — **Easier** (80 / 20 /
+0), **Mixed** (60 / 30 / 10, the reducer's default) and **Harder** (20 /
+40 / 40) — with the mix spelled out under the choice. **Start new game**
+on the end screen sends the finished game's settings again.
+
+### Accessibility and theming
+
+Real buttons with visible labels; the icon-only one (removing a player)
+has an `aria-label`, and a button whose spoken name says more than its
+text ("Add Sam to Ice") still contains that text; `aria-pressed` on
+choices; the BUST button is described by its hint; the timer is a
+`role="timer"` with a spoken label; scores have spoken text ("7 points");
+a polite live region announces each card's outcome. Every colour comes
+from the kit's `--lfui-*` variables or Hushle's own `--hushle-*`
+variables, with lighter-background text shades under `.lf-theme-light`.
 
 ## Voice-room integration
 
-The plugin renders through the existing `ActivityPanel` in
-`apps/web/app/room/[roomName]/page.tsx`:
+The lobby's Activities hub (`apps/web/app/lobby/LobbyActivityView.tsx`)
+and the room page mount the panel through `PluginSurface`, which gives it
+its own component instance and tags it with the plugin's language:
 
 ```tsx
-const plugin = getPlugin(activity.pluginId);
-const ui = plugin
-  ? plugin.client.renderClient({
-      state: activity.state,
-      dispatch: (action) =>
-        fetch(`/api/servers/${serverId}/activities/${sessionId}/actions`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(action),
-        }).then(() => revalidate()),
-      actorUserId,
-      hostUserId,
-      players: activity.players,
-    })
-  : null;
-return ui ?? <JsonStatePanel state={activity.state} />;
+<PluginSurface
+  pluginId="hushle"
+  render={plugin.renderClient}
+  props={{
+    state,                 // projected for this viewer
+    dispatch,              // POSTs to the actions route; the host's own move applies the response at once
+    actorUserId,
+    hostUserId,            // the session's creator
+    players,               // the people in the room: the voice channel and anyone who has acted
+    cardPacks,             // the server's packs, while in the lobby phase
+  }}
+/>
 ```
 
-The fallback `<JsonStatePanel>` (a free-form action input + raw JSON
-dump) is what users see when the plugin returns `null` (quiz) or when
-the registry can't resolve the plugin (plugin removed in a future
-release).
+Other players receive each new state over the realtime gateway, or by
+polling every 5 s when it is unavailable.
 
 ## Activity-route flow
 
@@ -354,102 +400,86 @@ reducer's action type.
 (host or `START_ACTIVITY` only); Hushle's `end-game` action does not
 call this route — the reducer transitions to `ended` itself and the
 session stays open so the panel can show the final-score view. The
-host clicks **End** in the room (the panel's outer chrome) to call the
-`end` route when the game is truly over.
+lobby's **End** control (outside the panel) calls the `end` route when
+the activity is truly over.
 
 ## Tests
 
-`plugins/hushle/src/__tests__/hushle.test.ts` — 12 vitest cases:
+`plugins/hushle/src/__tests__/`:
 
-1. **Full game flow** — start, set teams, play a turn (correct-guess,
-   pass, penalty), end. Asserts phase, score, counters, deck, and
-   `totalCardsPlayed` after each step.
-2. **Host-only enforcement** — verifies that all Hushle actions go
-   through the host; the reducer itself is permissive but the route
-   layer's `authorizePluginAction` against `actionPolicies` rejects
-   non-host actors. The test asserts the state machine remains
-   intact for an arbitrary action.
-3. **end-turn rotation** — sets up two teams, starts team A's turn,
-   ends the turn, and asserts `currentTeamId` + `currentExplainerId`
-   rotated to team B.
-4. **end-game preserves scores** — plays one correct-guess, ends the
-   game, asserts `phase = 'ended'` and the team's `score` is still 1.
-5. **`start-game` resolves language from the `packId` slug.**
-6. **`start-game` honors `language` override when the slug is unknown.**
-7. **Built-in packs include both en + tr decks (24 cards each).**
-8. **Initial state carries the current `HUSHLE_STATE_VERSION`.**
-9. **Migrator upgrades a pre-versioned v0 row to the current shape.**
-10. **Migrator is idempotent on already-current state.**
-11. **Migrator falls back to the initial state on garbage.**
-12. **Registry adapter preserves the plugin's `migrateState` function.**
+- `hushle.test.ts` (36) — the reducer: every action, teams and floater,
+  the per-team rotation (four turns for four players, the floater once
+  for each team, an explainer picked by hand), the turn clock and time's
+  up, weighted draw, BUST rules, migrations up to v3.
+- `panel-model.test.ts` (25) — the panel's pure logic: each viewer's role
+  against the projection, the deadline, the next-up preview checked
+  against what `end-turn` really does over a full round, standings,
+  settings round-tripped through the reducer, the two-team split,
+  `set-teams` payloads, the "this turn" log over real reducer transitions.
+- `panel.test.tsx` (40) — the panel mounted in a DOM: every phase and
+  seat, seating by name and splitting the room, time's up, the exact
+  action each button dispatches, the double-tap guards, Turkish rendering
+  and "no raw key anywhere". `harness.tsx` holds the
+  fixtures, a restatement of the server projection, and the DOM: the
+  package does not depend on react-dom or a DOM library, so the harness
+  borrows react-dom from `@lobbyforge/plugin-sdk` and happy-dom from
+  `apps/web` (adding both as devDependencies would let it use plain
+  imports).
+- `locales.test.ts` (8) — every key the panel uses exists, no key goes
+  unused, Turkish matches English's placeholders.
+- `render-client.test.tsx` (2) — `renderClient` returns an element.
 
-## State versioning (M19)
+`apps/web/e2e/activity-hushle.spec.ts` plays a short game through the
+real lobby UI with four browser contexts (see the file for how to run
+it); `compose-stack.spec.ts` covers the same rules through the API.
 
-`HushleState` carries a `version: number` field. The constant
-`HUSHLE_STATE_VERSION` is the current schema version (currently `1`).
-`createHushleInitialState()` sets it; the reducer only ever produces
-the current version.
+## State versioning
 
-`migrateHushleState(raw: unknown): HushleState` is the public
-migrator. It's exported from the plugin and wired through the SDK's
-`migrateState` field, so the host runs it on every read against
-`game_sessions.state`. The chain walks a pre-versioned row forward
-to the current shape; an invalid blob falls back to
-`createHushleInitialState()` so the host never crashes on a bad row.
+`HUSHLE_STATE_VERSION` is `3`. `migrateHushleState(raw)` is wired as the
+plugin's `migrateState`, so the host upgrades any persisted row on read:
+version 0 rows gain `version`; version 1 rows gain the floater,
+`usedCardIds`, `teamSize`, the difficulty weights and a difficulty on
+every card; version 2 rows trade the single `currentExplainerIndex` for a
+rotation cursor on every team and a `turnNumber`, and a running turn gets
+its deadline (`endsAt` = start + duration). A game in progress keeps its
+explaining team's rotation going after whoever explains now; the other
+teams start theirs afresh. Garbage falls back to the initial state. To
+change the shape: bump the constant, add a `migrateV3ToV4` step, and make
+the reducer produce the new version.
 
-When the plugin's state shape changes in a backwards-incompatible
-way, the author:
+## Locales
 
-1. Bumps `HUSHLE_STATE_VERSION`.
-2. Adds `migrateV1ToV2(state)` etc. to the chain in
-   `migrateHushleState`.
-3. Updates the reducer to produce the new version.
+`plugins/hushle/locales/<code>.json` — flat keys prefixed `hushle.`, plus
+`catalog.summary`. English and Turkish are complete. `pnpm i18n:sync`
+regenerates `src/locales.generated.ts`; `pnpm i18n:add <code>` scaffolds a
+new language. Keys are written out in full in the panel's files
+(`t('hushle.lobby.packLabel')`), because the locales test finds them by
+reading those files. Counts use plurals. See
+[TRANSLATING.md](TRANSLATING.md).
 
-The next read of any row persisted by an older build upgrades it
-automatically — no migration script, no `UPDATE` over the table.
+## Known gaps
 
-## Locales (M19)
+- **No pause.** `timer.paused` exists but no action sets it, so the panel
+  has no pause/resume control.
+- **No "ready".** Players have no ready state; the lobby and team setup
+  show who is seated instead.
+- **Seating mid-game.** `set-teams` works only before play, so someone who
+  joins the voice room during a game watches until the next one.
 
-The Hushle panel calls `loadPluginLocale(HUSHLE_PLUGIN_ID, { en, tr })`
-at module load, then resolves strings through the shared
-`@lobbyforge/plugin-sdk` locale helper (`tFor`, `pickBestLocale`,
-`detectLocale`). Adding a new language is:
-
-1. Drop `plugins/hushle/locales/{lang}.json`.
-2. Add it to the `loadPluginLocale` map in
-   `plugins/hushle/src/renderClient.tsx`.
-
-The shared helper handles the rest (region tags, fallback, insertion
-order). The bot SDK has the same surface so future bots pick up the
-pattern for free.
-
-## What's next for Hushle
-
-- **Custom + community card packs.** DB-backed `card_packs` /
-  `cards` tables so the host can pick a pack on game-start instead
-  of being locked to the bundled en/tr decks.
-- **Member-side "request skip" affordance.** The reducer stays
-  host-only but the panel shows a "request skip" button the host
-  can confirm.
-- **Per-turn card budget.** Use `settings.cardsPerTurn` to enforce
-  end-of-turn rotation automatically.
-- **Spectator view.** `supportsSpectators: true` is in the manifest
-  but the panel doesn't differentiate spectators from guessers yet.
-- **End-of-game chat announcement.** A `SEND_ROOM_MESSAGE` permission
-  is already declared; the host can wire the `messages.sendGameMessage`
-  sub-context in `M18` to post a winner announcement when `end-game`
-  fires.
+Fixed in state version 3: every player now explains in turn (each team
+has its own rotation), the floater explains for both teams, and the turn
+timer runs once per turn instead of restarting on every card.
 
 ## Reference
 
-- `plugins/hushle/src/state.ts` — types + `createHushleInitialState`.
-- `plugins/hushle/src/decks.ts` — bundled en + tr card packs.
-- `plugins/hushle/src/actions.ts` — pure reducer.
-- `plugins/hushle/src/renderClient.tsx` — React panel.
-- `plugins/hushle/src/index.ts` — `hushlePlugin` registry entry.
+- `plugins/hushle/src/state.ts` — types, `createHushleInitialState`, `migrateHushleState`.
+- `plugins/hushle/src/decks.ts` — the bundled English and Turkish decks.
+- `plugins/hushle/src/actions.ts` — the reducer, `hushleExplainerQueue` and `hushleNextExplainerForTeam`.
+- `plugins/hushle/src/rotation.ts` — the explainer rotation.
+- `plugins/hushle/src/renderClient.tsx` and `src/ui/` — the panel.
+- `plugins/hushle/src/index.ts` — the `hushlePlugin` registry entry.
 - `plugins/hushle/locales/{en,tr}.json` — UI strings.
-- `plugins/hushle/src/__tests__/hushle.test.ts` — 4 vitest cases.
-- `apps/web/lib/plugin-registry.ts` — `registerGamePlugin(hushlePlugin)`.
-- `apps/web/app/room/[roomName]/page.tsx` — `ActivityPanel` calls `renderClient`.
-- `apps/web/app/api/servers/[id]/activities/[sessionId]/route.ts` — read route joins player display names.
-- `projectdetails/12_HUSHLE_PLUGIN.md` — original product spec.
+- `packages/core/src/activity-projection.ts` — who sees the card.
+- `apps/web/lib/prepare-plugin-action.ts` — the pack → deck injection.
+- `apps/web/app/lobby/LobbyActivityView.tsx`, `apps/web/app/room/PluginSurface.tsx` — where the panel mounts.
+- `projectdetails/12_HUSHLE_PLUGIN.md` — the product spec.

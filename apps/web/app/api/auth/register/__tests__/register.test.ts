@@ -8,6 +8,7 @@ const getServerAccessPolicy = vi.fn();
 const hashPassword = vi.fn();
 const recordSession = vi.fn();
 const isOfficialDeployment = vi.fn();
+const createOfficialAccount = vi.fn();
 
 vi.mock('@lobbyforge/db', () => ({
   createLocalAccount,
@@ -19,6 +20,7 @@ vi.mock('@lobbyforge/db', () => ({
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __test: true }) }));
 vi.mock('@/lib/password', () => ({ hashPassword }));
 vi.mock('@/lib/deployment-mode', () => ({ isOfficialDeployment }));
+vi.mock('@/lib/official-account', () => ({ createOfficialAccount }));
 vi.mock('@/lib/session-tracker', () => ({ recordSession }));
 vi.mock('@/lib/api-auth', () => ({ getSessionSecret: () => 'x'.repeat(32) }));
 vi.mock('@/lib/guest-session', () => ({
@@ -43,6 +45,11 @@ beforeEach(() => {
   recordSession.mockReset();
   isOfficialDeployment.mockReset();
   isOfficialDeployment.mockReturnValue(false);
+  createOfficialAccount.mockReset();
+  createOfficialAccount.mockResolvedValue({
+    ok: true,
+    user: { id: 'official-user-id', email: validBody.email, displayName: validBody.displayName },
+  });
   getEffectiveInstanceAccessSettings.mockResolvedValue({ registrationMode: 'open' });
   getInstanceBootstrapStatus.mockResolvedValue({ bootstrapComplete: true, firstServerId: 'server-id' });
   getInviteMetadata.mockResolvedValue({ serverId: 'server-id', isExpired: false, isExhausted: false });
@@ -156,10 +163,48 @@ describe('POST /api/auth/register', () => {
     expect(response.status).toBe(409);
   });
 
-  it('does not expose local registration on official deployment', async () => {
-    isOfficialDeployment.mockReturnValue(true);
-    const response = await post(validBody);
-    expect(response.status).toBe(404);
-    expect(getEffectiveInstanceAccessSettings).not.toHaveBeenCalled();
+  describe('on the official hub', () => {
+    beforeEach(() => {
+      isOfficialDeployment.mockReturnValue(true);
+    });
+
+    it('creates an account that joins no community, and signs it in', async () => {
+      const response = await post(validBody);
+      expect(response.status).toBe(201);
+      expect(response.headers.get('set-cookie')).toContain('HttpOnly');
+      expect(await response.json()).toEqual({
+        user: { id: 'official-user-id', email: validBody.email, displayName: validBody.displayName },
+      });
+      expect(createOfficialAccount).toHaveBeenCalledWith(
+        { __test: true },
+        { email: validBody.email, displayName: validBody.displayName, passwordHash: 'scrypt$hash' }
+      );
+      expect(recordSession).toHaveBeenCalledWith('official-user-id', expect.stringMatching(/^g_/), expect.any(Request));
+      // No self-host community machinery: no policy, no first server, no membership.
+      expect(getEffectiveInstanceAccessSettings).not.toHaveBeenCalled();
+      expect(getInstanceBootstrapStatus).not.toHaveBeenCalled();
+      expect(createLocalAccount).not.toHaveBeenCalled();
+    });
+
+    it('returns conflict for an address that already has an account', async () => {
+      createOfficialAccount.mockResolvedValue({ ok: false, error: 'email_exists' });
+      const response = await post(validBody);
+      expect(response.status).toBe(409);
+      expect(response.headers.get('set-cookie')).toBeNull();
+    });
+
+    it('validates the payload the same way before hashing', async () => {
+      const response = await post({ ...validBody, password: 'too short' });
+      expect(response.status).toBe(400);
+      expect(hashPassword).not.toHaveBeenCalled();
+      expect(createOfficialAccount).not.toHaveBeenCalled();
+    });
+
+    it('does not redeem invite codes at sign-up', async () => {
+      const response = await post({ ...validBody, inviteCode: 'abcd2345efgh' });
+      expect(response.status).toBe(400);
+      expect(hashPassword).not.toHaveBeenCalled();
+      expect(createOfficialAccount).not.toHaveBeenCalled();
+    });
   });
 });

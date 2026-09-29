@@ -47,6 +47,8 @@ __pycache__/
 tmp/
 .tmp/
 data/
+# …but a data/ folder inside source code is code (e.g. Quiz's question packs).
+!**/src/**/data/
 uploads/
 
 # Docker overrides

@@ -76,165 +76,142 @@ export default function DiscoveryGrid({
     [instances, verifiedOnly, onlineOnly, language]
   );
 
+  // The page (and the hub chrome around it) owns the heading and the
+  // navigation; this is the directory itself: filters, results, reports.
   return (
-    <div className="min-h-dvh bg-background">
-      {/* Header */}
-      <header className="border-b border-border-subtle bg-surface/80 backdrop-blur-md sticky top-0 z-10">
-        <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+    <>
+      {/* Search + filters */}
+      <div className="flex flex-wrap items-center gap-3 mb-8">
+        <form className="flex-1 min-w-[240px]" method="get" action="/discover">
+          <div className="relative">
+            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-[18px]" aria-hidden>
+              search
+            </span>
+            <input
+              type="text"
+              name="q"
+              defaultValue={query}
+              placeholder={t('discovery.search')}
+              aria-label={t('discovery.search')}
+              className="w-full rounded-lg bg-surface-raised border border-border-subtle pl-10 pr-4 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary"
+            />
+          </div>
+          {region ? <input type="hidden" name="region" value={region} /> : null}
+        </form>
+        {/* Region filter */}
+        <details className="relative">
+          <summary className="cursor-pointer rounded-lg bg-surface-raised border border-border-subtle px-4 py-2.5 text-sm text-text-secondary hover:bg-surface-container list-none flex items-center gap-2">
+            <span className="material-symbols-outlined text-[18px]" aria-hidden>public</span>
+            {region ? regionLabel(region, t) : t('discovery.allRegions')}
+          </summary>
+          <div className="absolute right-0 mt-2 w-48 rounded-lg border border-border-subtle bg-surface-raised shadow-xl py-1 z-20">
             <Link
               href="/discover"
-              className="rounded-md p-1.5 text-text-secondary hover:bg-surface-container hover:text-text-primary transition-colors"
-              aria-label={t('discovery.backToDirectory')}
+              className="block px-4 py-2 text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary"
             >
-              <span className="material-symbols-outlined text-[20px]" aria-hidden>
-                arrow_back
-              </span>
+              {t('discovery.allRegions')}
             </Link>
-            <div>
-              <h1 className="text-lg font-semibold text-text-primary">{t('discovery.title')}</h1>
-              <p className="text-xs text-text-muted">{t('discovery.subtitle')}</p>
-            </div>
-          </div>
-          <Link href="/lobby" className="text-sm text-primary hover:underline">
-            {t('discovery.backToLobby')}
-          </Link>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-6xl px-6 py-8">
-        {/* Search + filters */}
-        <div className="flex flex-wrap items-center gap-3 mb-8">
-          <form className="flex-1 min-w-[240px]" method="get" action="/discover">
-            <div className="relative">
-              <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-[18px]">
-                search
-              </span>
-              <input
-                type="text"
-                name="q"
-                defaultValue={query}
-                placeholder={t('discovery.search')}
-                aria-label={t('discovery.search')}
-                className="w-full rounded-lg bg-surface-raised border border-border-subtle pl-10 pr-4 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary"
-              />
-            </div>
-            {region ? <input type="hidden" name="region" value={region} /> : null}
-          </form>
-          {/* Region filter */}
-          <details className="relative">
-            <summary className="cursor-pointer rounded-lg bg-surface-raised border border-border-subtle px-4 py-2.5 text-sm text-text-secondary hover:bg-surface-container list-none flex items-center gap-2">
-              <span className="material-symbols-outlined text-[18px]">public</span>
-              {region ? regionLabel(region, t) : t('discovery.allRegions')}
-            </summary>
-            <div className="absolute right-0 mt-2 w-48 rounded-lg border border-border-subtle bg-surface-raised shadow-xl py-1 z-20">
+            {REGIONS.map((r) => (
               <Link
-                href="/discover"
+                key={r.value}
+                href={`/discover?region=${encodeURIComponent(r.value)}`}
                 className="block px-4 py-2 text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary"
               >
-                {t('discovery.allRegions')}
+                {t(r.label)}
               </Link>
-              {REGIONS.map((r) => (
-                <Link
-                  key={r.value}
-                  href={`/discover?region=${encodeURIComponent(r.value)}`}
-                  className="block px-4 py-2 text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary"
-                >
-                  {t(r.label)}
-                </Link>
-              ))}
-            </div>
-          </details>
-        </div>
-
-        {/* Quick filters (client-side) */}
-        <div className="flex flex-wrap items-center gap-2 mb-8">
-          <button
-            type="button"
-            aria-pressed={verifiedOnly}
-            onClick={() => setVerifiedOnly((v) => !v)}
-            className={`rounded-full border px-4 py-1.5 text-xs transition-colors ${
-              verifiedOnly
-                ? 'border-primary/50 bg-primary/10 text-primary'
-                : 'border-border-subtle bg-surface-raised text-text-secondary hover:text-text-primary'
-            }`}
-          >
-            <span className="material-symbols-outlined text-[13px] align-middle mr-1" aria-hidden>
-              verified
-            </span>
-            {t('discovery.verifiedOnly')}
-          </button>
-          <button
-            type="button"
-            aria-pressed={onlineOnly}
-            onClick={() => setOnlineOnly((v) => !v)}
-            className={`rounded-full border px-4 py-1.5 text-xs transition-colors ${
-              onlineOnly
-                ? 'border-ember/50 bg-ember/10 text-ember'
-                : 'border-border-subtle bg-surface-raised text-text-secondary hover:text-text-primary'
-            }`}
-          >
-            <span className="w-1.5 h-1.5 rounded-full bg-current inline-block mr-1.5" />
-            {t('discovery.onlineNow')}
-          </button>
-          {languages.length > 1 ? (
-            <label className="flex items-center gap-2 rounded-full border border-border-subtle bg-surface-raised px-4 py-1.5 text-xs text-text-secondary">
-              <span className="material-symbols-outlined text-[13px]">translate</span>
-              <select
-                value={language}
-                onChange={(e) => setLanguage(e.target.value)}
-                className="bg-transparent text-text-secondary outline-none cursor-pointer"
-                aria-label={t('discovery.filterLanguage')}
-              >
-                <option value="">{t('discovery.allLanguages')}</option>
-                {languages.map((lang) => (
-                  <option key={lang} value={lang}>
-                    {lang}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-        </div>
-
-        {/* Results count */}
-        <p className="text-sm text-text-muted mb-4">
-          {t('discovery.communitiesFound', { count: visible.length })}
-        </p>
-
-        {/* Grid */}
-        {visible.length === 0 ? (
-          <div className="rounded-2xl border border-border-subtle bg-surface p-12 text-center">
-            <span className="material-symbols-outlined text-5xl text-text-muted mb-3 block">explore_off</span>
-            <h2 className="text-base font-semibold text-text-primary">{t('discovery.noResults')}</h2>
-            <p className="mt-1 text-sm text-text-muted">
-              {query
-                ? t('discovery.noResultsQuery', { query })
-                : t('discovery.noListedYet')}
-            </p>
-            <p className="mt-3 text-sm text-text-muted">
-              {rich(t('discovery.clearFiltersHint'), { link: <Link href="/connect" className="text-primary hover:underline underline-offset-4">
-                  {t('discovery.connectByAddress')}
-                </Link> })}
-            </p>
-          </div>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {visible.map((inst) => (
-              <DirectoryCard
-                key={inst.instanceId}
-                instance={inst}
-                onReport={() => setReporting(inst)}
-              />
             ))}
           </div>
-        )}
-      </main>
+        </details>
+      </div>
+
+      {/* Quick filters (client-side) */}
+      <div className="flex flex-wrap items-center gap-2 mb-8">
+        <button
+          type="button"
+          aria-pressed={verifiedOnly}
+          onClick={() => setVerifiedOnly((v) => !v)}
+          className={`rounded-full border px-4 py-1.5 text-xs transition-colors ${
+            verifiedOnly
+              ? 'border-primary/50 bg-primary/10 text-primary'
+              : 'border-border-subtle bg-surface-raised text-text-secondary hover:text-text-primary'
+          }`}
+        >
+          <span className="material-symbols-outlined text-[13px] align-middle mr-1" aria-hidden>
+            verified
+          </span>
+          {t('discovery.verifiedOnly')}
+        </button>
+        <button
+          type="button"
+          aria-pressed={onlineOnly}
+          onClick={() => setOnlineOnly((v) => !v)}
+          className={`rounded-full border px-4 py-1.5 text-xs transition-colors ${
+            onlineOnly
+              ? 'border-ember/50 bg-ember/10 text-ember'
+              : 'border-border-subtle bg-surface-raised text-text-secondary hover:text-text-primary'
+          }`}
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-current inline-block mr-1.5" />
+          {t('discovery.onlineNow')}
+        </button>
+        {languages.length > 1 ? (
+          <label className="flex items-center gap-2 rounded-full border border-border-subtle bg-surface-raised px-4 py-1.5 text-xs text-text-secondary">
+            <span className="material-symbols-outlined text-[13px]" aria-hidden>translate</span>
+            <select
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              // Undo the forms plugin's boxed field: the pill is the control's frame.
+              className="cursor-pointer rounded border-0 bg-transparent py-0 pl-0.5 pr-7 text-xs text-text-secondary focus:ring-2 focus:ring-primary"
+              aria-label={t('discovery.filterLanguage')}
+            >
+              <option value="">{t('discovery.allLanguages')}</option>
+              {languages.map((lang) => (
+                <option key={lang} value={lang}>
+                  {lang}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+      </div>
+
+      {/* Results count */}
+      <p className="text-sm text-text-muted mb-4">
+        {t('discovery.communitiesFound', { count: visible.length })}
+      </p>
+
+      {/* Grid */}
+      {visible.length === 0 ? (
+        <div className="rounded-2xl border border-border-subtle bg-surface p-12 text-center">
+          <span className="material-symbols-outlined text-5xl text-text-muted mb-3 block" aria-hidden>explore_off</span>
+          <h2 className="text-base font-semibold text-text-primary">{t('discovery.noResults')}</h2>
+          <p className="mt-1 text-sm text-text-muted">
+            {query
+              ? t('discovery.noResultsQuery', { query })
+              : t('discovery.noListedYet')}
+          </p>
+          <p className="mt-3 text-sm text-text-muted">
+            {rich(t('discovery.clearFiltersHint'), { link: <Link href="/connect" className="text-primary hover:underline underline-offset-4">
+                {t('discovery.connectByAddress')}
+              </Link> })}
+          </p>
+        </div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {visible.map((inst) => (
+            <DirectoryCard
+              key={inst.instanceId}
+              instance={inst}
+              onReport={() => setReporting(inst)}
+            />
+          ))}
+        </div>
+      )}
 
       {reporting ? (
         <ReportDialog instance={reporting} onClose={() => setReporting(null)} />
       ) : null}
-    </div>
+    </>
   );
 }
 

@@ -34,6 +34,8 @@ LobbyForge implements defense-in-depth:
 - **Admin auth**: owner session or constant-time emergency token (≥32 chars).
 - **CSRF protection**: Fetch Metadata headers + Origin validation on all mutations.
 - **CSP**: strict `script-src 'self'`, `object-src 'none'`, `frame-ancestors 'none'`.
+  `frame-src` allows exactly one origin, `https://www.youtube-nocookie.com` —
+  the Watch Party player (framing only, sandboxed; see `docs/WATCH_PARTY.md`).
 - **Request body limits**: per-route caps (default 1 MiB).
 - **Rate limiting**: Redis-backed (fails closed), per-route limits.
 - **Update signatures**: Ed25519-signed manifests required for self-host updates.

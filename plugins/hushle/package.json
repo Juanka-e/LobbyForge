@@ -28,7 +28,10 @@
   "devDependencies": {
     "@lobbyforge/config": "workspace:*",
     "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "happy-dom": "^20.8.9",
     "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "typescript": "^5.4.5",
     "vitest": "^4.1.11"
   }

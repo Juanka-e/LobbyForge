@@ -1,20 +1,18 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
+import { isAppHeaderHidden } from '@/lib/hub-chrome';
 import { useT } from '@/lib/i18n/client';
 
-export default function GlobalHeader() {
+/**
+ * The app's plain top bar. It steps aside wherever a page draws its own
+ * chrome — the hub pages, the lobby, settings, sign-in; see
+ * lib/hub-chrome.ts for the list and why.
+ */
+export default function GlobalHeader({ official = false }: { official?: boolean }) {
   const t = useT();
   const pathname = usePathname();
-  if (
-    pathname === '/landing' ||
-    pathname === '/login' ||
-    pathname === '/setup' ||
-    pathname.startsWith('/lobby') ||
-    pathname.startsWith('/admin') ||
-    pathname.startsWith('/settings') ||
-    pathname.startsWith('/servers/')
-  ) return null;
+  if (isAppHeaderHidden(pathname, official)) return null;
 
   return (
     <header className="h-14 border-b border-border-subtle px-6 flex items-center gap-5 bg-surface">

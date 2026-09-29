@@ -16,9 +16,14 @@
  *   playing) and spectators get null.
  *   beta-review: `usedCardIds` (stable DB card ids — the LAST entry is
  *   the CURRENT card) is replaced by `usedCardCount` for every viewer.
- * - Quiz: correctIndex is stripped from every question unless the phase
- *   is 'reveal' or 'ended'. beta-review: until then each viewer only
- *   sees their OWN entry of `currentAnswers` (+ `answeredCount`).
+ * - Quiz: `deck` (every question of the game WITH its answer) is never
+ *   sent to any viewer, the host included — viewers get the open question
+ *   as `current` (no answer) plus `questionTotal`. `answers` (who picked
+ *   what) is never sent either, not even at the reveal: each viewer gets
+ *   `answeredCount` and their OWN `myAnswer`; the reveal publishes
+ *   per-option counts only (`reveal.counts`). Legacy (pre-v2) sessions:
+ *   correctIndex is stripped from `questions` and other players'
+ *   `currentAnswers` are hidden until 'reveal' / 'ended'.
  * - Poll (beta-review S11): `ballotBox` (who voted, in vote order) is
  *   replaced by `ballotCount` + the viewer's own `hasVoted`. Diffing
  *   successive revisions of the box against the option counts revealed
@@ -75,6 +80,8 @@ export function projectActivityState(
   if (pluginId === 'quiz') {
     const phase = s.phase as string | undefined;
     const revealed = phase === 'reveal' || phase === 'ended';
+    // Legacy (pre-v2) shape — sessions persisted by an older build keep
+    // these rules until their next action migrates them.
     if (!revealed && Array.isArray(s.questions)) {
       s.questions = (s.questions as Array<Record<string, unknown>>).map((q) => {
         const safe = { ...q };
@@ -92,6 +99,32 @@ export function projectActivityState(
           ? { [viewerUserId]: answers[viewerUserId] }
           : {};
     }
+
+    // v2: the deck is every question of the game WITH its answer. It never
+    // leaves the server — not even for the host, who may be playing a pack.
+    delete s.deck;
+    // v2: who picked what is never published, not even at the reveal (that
+    // shows counts per option). Each viewer gets the number of answers and
+    // their OWN choice.
+    if ('answers' in s) {
+      const answers = isPlainRecord(s.answers) ? s.answers : {};
+      const own =
+        viewerUserId != null && Object.prototype.hasOwnProperty.call(answers, viewerUserId)
+          ? answers[viewerUserId]
+          : undefined;
+      s.answeredCount = Object.keys(answers).length;
+      s.myAnswer = isPlainRecord(own) && typeof own.choice === 'number' ? own.choice : null;
+      delete s.answers;
+    }
+    // Defence in depth: while a question is open, nothing public may carry
+    // its answer — the reducer never puts it there, this makes sure.
+    if (!revealed) {
+      if (isPlainRecord(s.current) && 'correctIndex' in s.current) {
+        const { correctIndex: _hidden, ...open } = s.current;
+        s.current = open;
+      }
+      if (s.reveal != null) s.reveal = null;
+    }
   }
 
   if (pluginId === 'poll') {
@@ -102,6 +135,12 @@ export function projectActivityState(
     delete s.ballotBox;
     s.ballotCount = new Set(ballotBox.map(String)).size;
     s.hasVoted = viewerUserId != null && ballotBox.some((id) => String(id) === viewerUserId);
+  }
+
+  if (pluginId === 'vampire-village') {
+    // Roles, night choices, private results and the pack chat all live
+    // under `state.secret`; see projectVampireVillage below.
+    projectVampireVillage(s, viewerUserId);
   }
 
   return s;
@@ -127,4 +166,72 @@ function isOpposingTeamPlayer(
     const playerIds = Array.isArray(team.playerIds) ? (team.playerIds as unknown[]) : [];
     return playerIds.some((pid) => String(pid) === viewerUserId);
   });
+}
+
+/**
+ * Vampire Village: every secret lives under `state.secret` — the roles,
+ * tonight's choices, private results (the seer's inspections, the
+ * doctor's patient…), role resources, the pack chat and the night
+ * history. While the game runs the whole block is removed, and the
+ * viewer gets only their own slice as `me`:
+ *  - their role, their private notes and their resources;
+ *  - while alive: their own choice tonight; a living vampire also gets
+ *    the pack — fellow vampires, the pack's current bite votes, the chat.
+ * The dead and spectators get no pack and no choices (spectators: no
+ * `me` at all). A living player's role never rides on a public row; the
+ * role of the dead is public by design (`players[].death.role`). Once
+ * the game has ended everything is public.
+ */
+function projectVampireVillage(s: Record<string, unknown>, viewerUserId: string | undefined): void {
+  const secret = isPlainRecord(s.secret) ? s.secret : {};
+  delete s.secret;
+  if (Array.isArray(s.players)) {
+    s.players = s.players.map((row) => {
+      if (!isPlainRecord(row) || !('role' in row)) return row;
+      const { role: _role, ...rest } = row;
+      return rest;
+    });
+  }
+
+  const roles = isPlainRecord(secret.roles) ? secret.roles : {};
+  const role =
+    viewerUserId != null && Object.prototype.hasOwnProperty.call(roles, viewerUserId) && typeof roles[viewerUserId] === 'string'
+      ? (roles[viewerUserId] as string)
+      : null;
+
+  if (role === null || viewerUserId == null) {
+    s.me = null;
+  } else {
+    const players = Array.isArray(s.players) ? s.players : [];
+    const alive = players.some((p) => isPlainRecord(p) && p.id === viewerUserId && p.alive === true);
+    const own = (bag: unknown): unknown =>
+      isPlainRecord(bag) && Object.prototype.hasOwnProperty.call(bag, viewerUserId) ? bag[viewerUserId] : undefined;
+    const night = isPlainRecord(secret.night) ? secret.night : {};
+    const notes = own(secret.notes);
+    const resources = own(secret.resources);
+    const choice = own(night);
+
+    let pack: Record<string, unknown> | null = null;
+    if (alive && role === 'vampire') {
+      const members = Object.keys(roles).filter((id) => roles[id] === 'vampire');
+      const votes: Record<string, string> = {};
+      for (const id of members) {
+        const bite = night[id];
+        if (isPlainRecord(bite) && bite.kind === 'bite' && typeof bite.targetId === 'string') votes[id] = bite.targetId;
+      }
+      pack = { members, votes, chat: Array.isArray(secret.packChat) ? secret.packChat : [] };
+    }
+
+    s.me = {
+      id: viewerUserId,
+      role,
+      alive,
+      notes: Array.isArray(notes) ? notes : [],
+      resources: isPlainRecord(resources) ? resources : {},
+      choice: alive && isPlainRecord(choice) ? choice : null,
+      pack,
+    };
+  }
+
+  if (s.phase === 'ended') s.secret = secret;
 }

@@ -10,7 +10,7 @@ import {
   getInstanceSetupStatus,
   listServersForUser,
   listActivelyBannedServerIds,
-  ensureServerMembership,
+  ensureServerMembershipDetailed,
   seedDefaultRoles,
 } from '@lobbyforge/db';
 import { redirect } from 'next/navigation';
@@ -24,6 +24,8 @@ import {
   getBlockedUserIds,
   listPluginInstallsForServer,
   listDmChannelsForUser,
+  listBotsForServer,
+  type BotRow,
   type ChannelRow,
   type ChannelType,
   type MemberSummary,
@@ -52,6 +54,10 @@ import { formatMessageTimestamp } from '@/lib/chat-time';
 import { getTranslator } from '@/lib/i18n/server';
 import type { Translator } from '@/lib/i18n/core';
 import { pluginSummary } from '@/lib/plugin-catalog-text';
+import { notifyMemberJoined } from '@/lib/bots/welcome';
+import { readMessageBot } from '@/lib/bots/message-meta';
+import { botTrustLevel, isBuiltInType } from '@/lib/bots/catalog';
+import type { LobbyBot } from './BotIdentity';
 
 export const dynamic = 'force-dynamic';
 
@@ -107,6 +113,8 @@ interface ChatMessage {
   attachment?: { name: string; size: string };
   blocked?: boolean;
   pinned?: boolean;
+  /** Set when a bot wrote the message — rendered with the BOT badge. */
+  bot?: { id: string | null; name: string; type: string } | null;
 }
 interface LobbyData {
   serverName: string;
@@ -144,6 +152,8 @@ interface LobbyData {
    * behind the admin panel left members unable to see what is available.
    */
   installedApps: InstalledApp[];
+  /** The server's enabled bots — listed in the members panel with the BOT badge. */
+  bots: LobbyBot[];
 }
 
 export interface InstalledApp {
@@ -324,6 +334,19 @@ function buildMessages(
         blocked: true,
       } satisfies ChatMessage;
     }
+    const bot = readMessageBot(m);
+    if (bot) {
+      return {
+        id: m.id,
+        authorId: null,
+        author: bot.name || t('lobbyMain.chat.unknownBot'),
+        timestamp: formatMessageTimestamp(m.createdAt, t),
+        createdAt: m.createdAt.toISOString(),
+        body: m.content,
+        pinned: typeof m.metadata.$pinnedAt === 'string',
+        bot,
+      } satisfies ChatMessage;
+    }
     const author = m.userId ? authors.get(m.userId) : null;
     const displayName = author?.displayName ?? t('lobbyMain.chat.deletedUser');
     return {
@@ -415,12 +438,14 @@ async function loadLiveData(
     ? getUserPresenceInChannel(activeVoiceChannel.id).catch(() => [])
     : Promise.resolve([]);
   const serverPresenceP = getUserPresenceInServer(serverId).catch(() => []);
+  const botsP = listBotsForServer(db, serverId).catch(() => [] as BotRow[]);
 
-  const [memberSummaries, messageRows, rawVoicePresence, rawServerPresence] = await Promise.all([
+  const [memberSummaries, messageRows, rawVoicePresence, rawServerPresence, botRows] = await Promise.all([
     memberSummariesP,
     messagesP,
     voicePresenceP,
     serverPresenceP,
+    botsP,
   ]);
 
   // Resolve author display names for the visible message window.
@@ -545,6 +570,19 @@ async function loadLiveData(
     canMuteMembers,
     canManageServer,
     installedApps,
+    bots: botRows.filter((bot) => bot.enabled).map(toLobbyBot),
+  };
+}
+
+function toLobbyBot(bot: BotRow): LobbyBot {
+  return {
+    id: bot.id,
+    name: bot.name,
+    type: bot.type,
+    builtIn: isBuiltInType(bot.type),
+    trustLevel: botTrustLevel(bot.type),
+    permissions: bot.permissions,
+    installedBy: bot.createdByName,
   };
 }
 
@@ -602,12 +640,17 @@ export default async function LobbyPage({
         // beta-review (S2): refuses (null) when the user is banned from
         // the first server — the old unconditional call silently re-joined
         // banned users on open instances.
-        const joined = await ensureServerMembership(db, setupStatus.firstServerId, userId);
+        const joined = await ensureServerMembershipDetailed(db, setupStatus.firstServerId, userId);
         if (!joined) {
           throw new Error('User is banned from the default server; auto-join refused.');
         }
         if (setupStatus.ownerUserId === userId) {
           await seedDefaultRoles(db, setupStatus.firstServerId, userId);
+        }
+        // Bots milestone: a real join (not a returning member) is greeted
+        // by the Welcome Bot before the channel is loaded below.
+        if (joined.created) {
+          await notifyMemberJoined({ serverId: setupStatus.firstServerId, userId });
         }
         servers = await listServersForUser(db, userId, { limit: 50 });
       }
@@ -671,6 +714,7 @@ export default async function LobbyPage({
     canMuteMembers: false,
     canManageServer: false,
     installedApps: [],
+    bots: [],
   };
 
   // A /dm/<id> deep link redirects here; open that conversation in the
@@ -782,6 +826,8 @@ function LobbyShell({
           initialMembers={data.members}
           voiceChannelIds={data.voiceChannels.map((c) => c.id)}
           currentUserId={data.currentUserId}
+          bots={data.bots}
+          canManageServer={data.canManageServer}
         />
       ) : (
         <MembersPanel data={data} />

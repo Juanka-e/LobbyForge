@@ -200,7 +200,14 @@ async function handleStream(
                 const projectedMsg = projectActivityState(fresh.state, row.pluginId, session.uid);
                 controller.enqueue(
                   encoder.encode(
-                    sse('state', { status: msg.status, state: projectedMsg, at: msg.at, revision: msg.revision })
+                    sse('state', {
+                      status: msg.status,
+                      state: projectedMsg,
+                      at: msg.at,
+                      revision: msg.revision,
+                      // Public counts and the roster-changed hint only — never identities.
+                      publicSummary: msg.publicSummary,
+                    })
                   )
                 );
               } catch {

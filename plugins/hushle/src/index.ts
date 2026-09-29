@@ -32,8 +32,9 @@ export {
   HUSHLE_DEFAULT_CARDS_PER_TURN,
   HUSHLE_DEFAULT_TEAM_SIZE,
   HUSHLE_DEFAULT_DIFFICULTY_DISTRIBUTION,
+  HUSHLE_TIME_UP_GRACE_MS,
 } from './state';
-export { hushleNextExplainerForTeam } from './actions';
+export { hushleExplainerQueue, hushleNextExplainerForTeam } from './actions';
 export { HUSHLE_PLUGIN_ID } from './plugin-id';
 export {
   HUSHLE_BUILTIN_PACKS,

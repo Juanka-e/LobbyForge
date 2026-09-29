@@ -186,6 +186,13 @@ export const messages = pgTable('messages', {
   id: uuid('id').primaryKey().defaultRandom(),
   channelId: uuid('channel_id').notNull().references(() => channels.id, { onDelete: 'cascade' }),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+  /**
+   * 0037: the bot that posted this message (user_id is then NULL). Set
+   * only by the server — the Bot API and the built-in bots — never from
+   * a client payload. SET NULL on bot delete keeps the conversation; the
+   * `metadata.bot` snapshot still names the bot.
+   */
+  botId: uuid('bot_id').references((): AnyPgColumn => bots.id, { onDelete: 'set null' }),
   content: text('content').notNull(),
   metadata: jsonb('metadata').default({}).notNull(),
   replyToId: uuid('reply_to_id').references((): AnyPgColumn => messages.id, { onDelete: 'set null' }),
@@ -195,6 +202,7 @@ export const messages = pgTable('messages', {
 }, (table) => ({
   channelCreatedIdx: index('idx_messages_channel_created').on(table.channelId, table.createdAt),
   replyIdx: index('idx_messages_reply').on(table.replyToId).where(sql`reply_to_id IS NOT NULL`),
+  botIdx: index('idx_messages_bot').on(table.botId).where(sql`bot_id IS NOT NULL`),
 }));
 
 // PLUGINS ENABLED TABLE
@@ -270,17 +278,40 @@ export const pluginEvents = pgTable('plugin_events', {
   sessionCreatedIdx: index('idx_plugin_events_session_created').on(table.sessionId, table.createdAt),
 }));
 
-// BOTS TABLE
+// BOTS TABLE — a bot identity that belongs to ONE server.
+//   type 'custom'      → driven from outside through the Bot API with a token
+//   type 'welcome'     → built-in, runs inside the app (greets new members)
+//   type 'moderation'  → built-in, runs inside the app (filters messages)
+// Note: the partial unique index `bots_server_builtin_type_unique`
+// (one welcome + one moderation bot per server) lives in the migration
+// SQL only (0037) — the table builder cannot express a partial unique
+// index, same as `game_sessions_channel_open_unique`.
 export const bots = pgTable('bots', {
   id: uuid('id').primaryKey().defaultRandom(),
   serverId: uuid('server_id').notNull().references(() => servers.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
   type: text('type').notNull(),
+  /**
+   * `sha256$<hex>` of the whole token — the token itself is shown once
+   * and never stored. NULL = no token (built-in bot, or revoked).
+   */
   tokenHash: text('token_hash'),
-  permissions: jsonb('permissions').default({}).notNull(),
+  /** When the current token was issued; NULL while there is none. */
+  tokenIssuedAt: timestamp('token_issued_at', { withTimezone: true }),
+  /** JSON array of bot permission ids (`@lobbyforge/bot-sdk` BotPermission). */
+  permissions: jsonb('permissions').default([]).notNull(),
+  /** Per-type configuration (welcome channel + template, moderation rules). */
+  settings: jsonb('settings').default({}).notNull(),
   enabled: boolean('enabled').default(true).notNull(),
+  /** Who installed the bot ("installed by" on the bot profile). */
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  /** Last authenticated API call or built-in action (throttled writes). */
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-});
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  serverIdx: index('idx_bots_server').on(table.serverId),
+}));
 
 // Version ledger for trusted, host-executed component data migrations.
 // Community packages never receive raw SQL access through this table.

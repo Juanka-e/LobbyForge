@@ -12,6 +12,8 @@ import {
   gameSessions,
   instanceSettings,
   userIdentityLinks,
+  bots,
+  messages,
 } from '../schema.js';
 
 describe('Database Schema Definitions', () => {
@@ -80,5 +82,22 @@ describe('Database Schema Definitions', () => {
   it('should expose game_sessions.team_size and difficulty_distribution as nullable plugin-defined knobs', () => {
     expect(gameSessions.teamSize.notNull).toBe(false);
     expect(gameSessions.difficultyDistribution.notNull).toBe(false);
+  });
+
+  it('stores bot tokens only as a hash and keeps bot settings per bot (0037)', () => {
+    expect(getTableName(bots)).toBe('bots');
+    expect('token' in bots).toBe(false);
+    expect(bots.tokenHash.notNull).toBe(false);
+    expect(bots.tokenIssuedAt.notNull).toBe(false);
+    expect(bots.permissions.notNull).toBe(true);
+    expect(bots.permissions.default).toEqual([]);
+    expect(bots.settings.notNull).toBe(true);
+    expect(bots.createdBy.notNull).toBe(false);
+    expect(bots.updatedAt.notNull).toBe(true);
+  });
+
+  it('lets a message be authored by a bot instead of a user (0037)', () => {
+    expect(messages.userId.notNull).toBe(false);
+    expect(messages.botId.notNull).toBe(false);
   });
 });

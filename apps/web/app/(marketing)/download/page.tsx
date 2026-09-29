@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import { getTranslator } from '@/lib/i18n/server';
 import { rich } from '@/lib/i18n/rich';
+import { LOBBYFORGE_REPO } from '@/lib/github-repo';
+import { container } from '../_components/styles';
 
 /**
  * Download page — desktop installers. Honest about beta status (ADR-005:
@@ -8,7 +10,7 @@ import { rich } from '@/lib/i18n/rich';
  * fully functional on its own — the desktop shell is an opt-in extra.
  */
 
-const REPO = 'https://github.com/Juanka-e/LobbyForge';
+const REPO = LOBBYFORGE_REPO.url;
 const RELEASES = `${REPO}/releases`;
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -44,7 +46,7 @@ export default async function DownloadPage() {
   const linkClass =
     'text-primary underline decoration-primary/40 underline-offset-4 hover:decoration-primary';
   return (
-    <section className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop w-full">
+    <section className={`${container} pb-20 pt-12 sm:pt-16 lg:pb-[120px] lg:pt-24`}>
       <div className="max-w-2xl flex flex-col gap-4 mb-12">
         <p className="font-label-xs text-label-xs text-ember tracking-[0.2em] uppercase">
           <span className="align-middle mr-2 inline-block size-2 rounded-full bg-ember" />

@@ -42,6 +42,28 @@ describe('global web security policy', () => {
     expect(middleware).toContain("form-action 'self'");
   });
 
+  it('frames exactly one origin: the Watch Party player, YouTube’s privacy-enhanced embed', async () => {
+    // Pinned: no wildcard, no youtube.com, no second origin. The plugin
+    // builds its iframe from the same constant, so the two cannot drift.
+    const { YOUTUBE_EMBED_ORIGIN } = await import('@lobbyforge/watch-party');
+    const frameSources = [...middleware.matchAll(/"frame-src ([^"]*)"/g)].map((m) => m[1]);
+    expect(frameSources).toEqual(['https://www.youtube-nocookie.com']);
+    expect(YOUTUBE_EMBED_ORIGIN).toBe(frameSources[0]);
+    expect(middleware).not.toMatch(/child-src/);
+  });
+
+  it('sends that frame-src on real responses, next to the anti-framing rules', async () => {
+    const { NextRequest } = await import('next/server');
+    const { middleware: run } = await import('../../middleware');
+    const response = run(new NextRequest('http://localhost:3000/lobby'));
+    const directives = (response.headers.get('Content-Security-Policy') ?? '').split(';').map((d) => d.trim());
+    expect(directives).toContain('frame-src https://www.youtube-nocookie.com');
+    expect(directives).toContain("frame-ancestors 'none'");
+    expect(directives).toContain("object-src 'none'");
+    expect(directives.find((d) => d.startsWith('script-src'))).not.toMatch(/youtube/);
+    expect(response.headers.get('X-Frame-Options')).toBe('DENY');
+  });
+
   it('uses nonce-based script-src (no unsafe-inline for scripts)', () => {
     expect(middleware).toContain("'nonce-");
     // script-src must not have 'unsafe-inline' — it uses nonce instead.

@@ -6,10 +6,11 @@ implemented; this document is the scope contract for that sprint.
 
 ## The architectural rule (ADR-006)
 
-The Official Hub and self-host instance auth are NEVER mixed. The Hub
-has no login/register. Identity is instance-local; self-hosting has no
-central account dependency. The future LobbyForge ID is an optional
-identity provider only — see ADR-006.
+The Official Hub and self-host instance auth are NEVER mixed. Identity
+on a self-hosted community is instance-local; self-hosting has no
+central account dependency. Since 2026-09-28 the Hub offers an OPTIONAL
+account (sign up / sign in / hub home) for hub conveniences — it never
+signs anyone into another instance. See ADR-006 and its amendment.
 
 ## Surface map
 
@@ -120,7 +121,8 @@ LobbyForge Official
 Shared design system, different behavior: Hub = marketing surface
 (hero, screenshots, directory, download, docs). Instance = the
 app shell (servers, channels, voice, DMs, activities). Login/register
-share components; the Hub having no login keeps it unambiguous.
+share components; the hub account's pages say plainly that it is not a
+login for other communities, which keeps the two unambiguous.
 
 ## Sprint scope (beta minimum — 6 items)
 

@@ -198,6 +198,15 @@ async function handlePatch(req: Request, ctx: { params: Promise<{ id: string; ro
         { status: 400 }
       );
     }
+    // …and no other role may take its name: a second "@everyone" would be
+    // mistaken for the default role by anything that looks it up by name.
+    if (
+      body.name !== undefined &&
+      access.role.name !== EVERYONE_ROLE_NAME &&
+      body.name.trim().toLowerCase() === EVERYONE_ROLE_NAME
+    ) {
+      return NextResponse.json({ error: 'That role name is reserved' }, { status: 400 });
+    }
 
     if (body.permissions !== undefined) {
       const unknown = body.permissions.filter((p) => !KNOWN_PERMISSIONS.has(p));

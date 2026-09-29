@@ -1,119 +1,132 @@
-import type { GamePlugin } from '@lobbyforge/plugin-sdk';
-import { PluginPermission } from '@lobbyforge/plugin-sdk';
+import { createElement } from 'react';
+import type { GamePlugin, GamePluginActionPolicy } from '@lobbyforge/plugin-sdk';
+import { CATALOG_SUMMARY_KEY, PluginPermission, loadPluginLocale } from '@lobbyforge/plugin-sdk';
+import { LOCALE_TABLES, SHIPPED_LOCALES } from './locales.generated';
+import { VAMPIRE_VILLAGE_PLUGIN_ID } from './plugin-id';
+import { reduceVillage } from './reducer';
+import { VampireVillagePanel, type VampireVillagePanelProps } from './renderClient';
+import { MAX_PLAYERS, MIN_PLAYERS, createVillageInitialState, migrateVillageState } from './state';
+import type { VillageAction, VillageState } from './state';
+import { validateVillageAction } from './validate';
 
-export type VillagePhase = 'setup' | 'day' | 'night' | 'ended';
-export type VillageRole = 'villager' | 'werewolf' | 'seer' | 'doctor';
+// Also registered by the panel, but that is a 'use client' module the
+// server never evaluates — the host reads `catalog.summary` server-side.
+loadPluginLocale(VAMPIRE_VILLAGE_PLUGIN_ID, LOCALE_TABLES);
 
-export interface VillagePlayer {
-  id: string;
-  name: string;
-  role: VillageRole | null;
-  alive: boolean;
-}
+export { VAMPIRE_VILLAGE_PLUGIN_ID } from './plugin-id';
+export {
+  CHAT_KEEP,
+  CHAT_MAX_LENGTH,
+  CHAT_PER_PHASE,
+  DEFAULT_VILLAGE_SETTINGS,
+  MAX_PLAYERS,
+  MIN_PLAYERS,
+  NAME_MAX_LENGTH,
+  PACK_CHAT_KEEP,
+  PACK_CHAT_PER_PHASE,
+  PLAYER_COLORS,
+  SETTING_LIMITS,
+  VV_STATE_VERSION,
+  createVillageInitialState,
+  migrateVillageState,
+} from './state';
+export type {
+  VillageAction,
+  VillageChatMessage,
+  VillageColor,
+  VillageDeath,
+  VillageDeathCause,
+  VillageEndReason,
+  VillageLogEntry,
+  VillageNightChoice,
+  VillageNightRecord,
+  VillageNote,
+  VillageOutcome,
+  VillagePhase,
+  VillagePlayer,
+  VillageResources,
+  VillageRole,
+  VillageSecret,
+  VillageSettings,
+  VillageSpectator,
+  VillageState,
+  VillageTeam,
+  VillageWinner,
+} from './state';
+export type { NightTask, VillageMe, VillagePack, VillageView } from './view';
+export { majorityNeeded, rolesForPlayerCount, teamOf, vampireCountFor } from './rules';
+export { reduceVillage, type ReducerDeps } from './reducer';
+export { validateVillageAction } from './validate';
+export { VampireVillagePanel, type VampireVillagePanelProps } from './renderClient';
 
-export interface VampireState {
-  phase: VillagePhase;
-  round: number;
-  players: VillagePlayer[];
-  votes: Record<string, string>;
-  lastEliminatedId: string | null;
-}
+/** Acting as oneself: any server member, with the id stamped by the host from the session. */
+const AS_SELF: GamePluginActionPolicy = { role: 'member', actorFields: ['playerId'] };
+const HOST: GamePluginActionPolicy = { role: 'host' };
 
-export type VampireAction =
-  | { type: 'assign-roles'; roles: Record<string, VillageRole> }
-  | { type: 'start-night' }
-  | { type: 'start-day' }
-  | { type: 'vote'; voterId: string; targetId: string }
-  | { type: 'resolve-day'; eliminatedId: string }
-  | { type: 'end' };
-
-export const vampireVillagePlugin: GamePlugin<VampireState, VampireAction> = {
+export const vampireVillagePlugin: GamePlugin<VillageState, VillageAction> = {
   manifest: {
-    id: 'vampire-village',
+    id: VAMPIRE_VILLAGE_PLUGIN_ID,
     name: 'Vampire Village',
-    version: '0.1.0',
+    version: '0.2.0',
     type: 'game',
     minAppVersion: '0.1.0',
-    permissions: [
-      PluginPermission.MANAGE_GAME_SESSION,
-      PluginPermission.MANAGE_SCORES,
-      PluginPermission.SEND_ROOM_MESSAGE,
-      PluginPermission.MANAGE_TIMER,
-      PluginPermission.SEND_DATA_CHANNEL_EVENT,
-    ],
-    // English only: this plugin ships no locales/ tables yet, so it
-    // must not advertise other languages in the catalogue.
-    locales: ['en'],
-    entryClient: './client.js',
+    permissions: [PluginPermission.MANAGE_GAME_SESSION, PluginPermission.MANAGE_TIMER],
+    // Derived from locales/*.json, so the catalogue can never claim a
+    // language the plugin does not actually ship.
+    locales: SHIPPED_LOCALES,
+    entryClient: './renderClient.js',
     catalog: {
       category: 'game',
-      summary: 'Social deduction with night/day phases and hidden roles.',
+      // Translated in locales/*.json; the host shows the viewer's language.
+      summary: LOCALE_TABLES.en[CATALOG_SUMMARY_KEY],
       publisher: 'LobbyForge',
       trustLevel: 'official',
       playerConfig: {
-        minPlayers: 5,
-        maxPlayers: 18,
-        defaultMaxPlayers: 10,
+        minPlayers: MIN_PLAYERS,
+        maxPlayers: MAX_PLAYERS,
+        defaultMaxPlayers: MAX_PLAYERS,
         supportsSpectators: true,
-        supportsQueue: true,
+        supportsQueue: false,
         overflowPolicy: 'spectator',
       },
       requiresVoiceRoom: true,
       externalAccountRequired: false,
-      compatibleAppVersion: '>=0.1.0',
-      tags: ['social-deduction', 'roles', 'voice'],
+      compatibleAppVersion: '>=0.2.0',
+      tags: ['social-deduction', 'hidden-roles', 'voice'],
     },
   },
+  /**
+   * Player actions are `member` + `actorFields`: the reducer keeps its own
+   * roster and checks seat, life, role and phase itself (a seat is taken
+   * with `join`, not by being in the session's player table). Everything
+   * that runs the table is the host's (or a START_ACTIVITY moderator's).
+   */
   actionPolicies: {
-    'assign-roles': { role: 'host' },
-    'start-night': { role: 'host' },
-    'start-day': { role: 'host' },
-    vote: { role: 'player', actorFields: ['voterId'] },
-    'resolve-day': { role: 'host' },
-    end: { role: 'host' },
+    join: { ...AS_SELF, joinsRoster: true },
+    leave: AS_SELF,
+    'set-ready': AS_SELF,
+    timeout: AS_SELF,
+    'night-target': AS_SELF,
+    'night-shield': AS_SELF,
+    vote: AS_SELF,
+    chat: AS_SELF,
+    'pack-chat': AS_SELF,
+    configure: HOST,
+    start: HOST,
+    kick: HOST,
+    advance: HOST,
+    pause: HOST,
+    resume: HOST,
+    extend: HOST,
+    'play-again': HOST,
+    'end-game': HOST,
   },
-  createInitialState: (ctx) => ({
-    phase: 'setup',
-    round: 0,
-    players: ctx.players.list().map((id) => ({
-      id,
-      name: ctx.players.get(id)?.name ?? id,
-      role: null,
-      alive: true,
-    })),
-    votes: {},
-    lastEliminatedId: null,
-  }),
-  handleAction: (_ctx, state, action) => {
-    switch (action.type) {
-      case 'assign-roles':
-        return {
-          ...state,
-          players: state.players.map((p) => ({
-            ...p,
-            role: action.roles[p.id] ?? null,
-          })),
-        };
-      case 'start-night':
-        return { ...state, phase: 'night', round: state.round + 1, votes: {} };
-      case 'start-day':
-        return { ...state, phase: 'day' };
-      case 'vote':
-        return { ...state, votes: { ...state.votes, [action.voterId]: action.targetId } };
-      case 'resolve-day':
-        return {
-          ...state,
-          phase: 'day',
-          lastEliminatedId: action.eliminatedId,
-          players: state.players.map((p) =>
-            p.id === action.eliminatedId ? { ...p, alive: false } : p
-          ),
-        };
-      case 'end':
-        return { ...state, phase: 'ended' };
-      default:
-        return state;
-    }
-  },
-  renderClient: () => null,
+  createInitialState: () => createVillageInitialState(),
+  validateAction: validateVillageAction,
+  // The reducer refuses anything malformed (it re-runs validateAction) and
+  // reads the server clock and CSPRNG through its default dependencies.
+  handleAction: (_ctx, state, action) => reduceVillage(migrateVillageState(state), action),
+  migrateState: (raw: unknown) => migrateVillageState(raw),
+  // An ELEMENT, not a call: the panel must own its hooks (see Hushle's note).
+  renderClient: (props: unknown) => createElement(VampireVillagePanel, props as VampireVillagePanelProps),
 };

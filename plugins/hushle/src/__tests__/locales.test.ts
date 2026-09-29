@@ -34,12 +34,20 @@ const onDisk = readdirSync(join(ROOT, 'locales'))
   .sort();
 const english = strings(load('en'));
 
+/** The panel: its root component and the phase views it renders from `src/ui/`. */
+const panelSources = [
+  join(ROOT, 'src', 'renderClient.tsx'),
+  ...readdirSync(join(ROOT, 'src', 'ui'))
+    .filter((file) => /\.tsx?$/.test(file))
+    .map((file) => join(ROOT, 'src', 'ui', file)),
+];
+
 /** Every `t('hushle.…')` key the panel renders. */
 const used = [
   ...new Set(
-    [...readFileSync(join(ROOT, 'src', 'renderClient.tsx'), 'utf8').matchAll(
-      /\bt\(\s*'(hushle\.[^']+)'/g
-    )].map((match) => match[1]!)
+    panelSources.flatMap((path) =>
+      [...readFileSync(path, 'utf8').matchAll(/\bt\(\s*'(hushle\.[^']+)'/g)].map((match) => match[1]!)
+    )
   ),
 ].sort();
 

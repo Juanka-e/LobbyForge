@@ -13,11 +13,15 @@ export interface HushleHowToPlayModalProps {
   };
 }
 
-/** Hushle's usual table, used when the caller passes no metadata. */
-const DEFAULT_PLAYERS = { min: 3, max: 12 };
+/** Hushle's table (its catalogue entry: 4–12 players), used when the caller passes no metadata. */
+const DEFAULT_PLAYERS = { min: 4, max: 12 };
 const DEFAULT_MINUTES = { min: 10, max: 30 };
 
-/** Message keys, resolved with `t()` where they render. */
+/**
+ * The rules as the game plays them: two teams taking turns, one timer per
+ * turn, the host scoring each card, and the other team's BUST. Message
+ * keys, resolved with `t()` where they render.
+ */
 const STEPS: { titleKey: string; descriptionKey: string }[] = [
   {
     titleKey: 'shell.howToPlay.steps.join.title',
@@ -30,6 +34,10 @@ const STEPS: { titleKey: string; descriptionKey: string }[] = [
   {
     titleKey: 'shell.howToPlay.steps.guess.title',
     descriptionKey: 'shell.howToPlay.steps.guess.description',
+  },
+  {
+    titleKey: 'shell.howToPlay.steps.bust.title',
+    descriptionKey: 'shell.howToPlay.steps.bust.description',
   },
 ];
 
@@ -81,7 +89,7 @@ export function HushleHowToPlayModal({
           <MetadataChip icon="groups" label={players} />
           <MetadataChip icon="timer" label={duration} />
           <MetadataChip icon="mic" label={t('shell.howToPlay.voiceRequired')} />
-          <MetadataChip icon="check_circle" label={t('shell.howToPlay.installed')} tone="primary" />
+          <MetadataChip icon="verified" label={t('shell.howToPlay.official')} tone="primary" />
         </div>
 
         <div>

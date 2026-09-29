@@ -25,12 +25,19 @@ import {
   listPluginData,
   listPlayersForSession,
   setPluginData,
+  users,
 } from '@lobbyforge/db';
+import { inArray } from 'drizzle-orm';
 
 export interface BuildPluginContextInput {
   db: DbClient;
   sessionId: string;
   actorUserId: string;
+  /**
+   * A user joining the roster with this action: listed in `ctx.players`
+   * while it runs, before the host has written them to the roster.
+   */
+  pendingPlayerId?: string;
   /** Faz E: scopes ctx.storage to (serverId, pluginId). */
   serverId?: string;
   pluginId?: string;
@@ -49,11 +56,32 @@ export async function buildHttpPluginContext(
   // we cache a snapshot of the active players at the start of the
   // call (and again at the end, if the plugin's handleAction adds
   // anyone — which the host persists in a follow-up query).
-  const playersSnapshot: Array<{ userId: string; characterName: string | null }> = [];
+  const playersSnapshot: Array<{ userId: string; name: string }> = [];
   try {
-    const rows = await listPlayersForSession(input.db, input.sessionId);
+    const rows: Array<{ userId: string; characterName: string | null }> = await listPlayersForSession(
+      input.db,
+      input.sessionId
+    );
+    if (input.pendingPlayerId && !rows.some((r) => r.userId === input.pendingPlayerId)) {
+      rows.push({ userId: input.pendingPlayerId, characterName: null });
+    }
+    // A player is named by their in-game character when they chose one,
+    // else by their display name — never by a raw user id when a name exists.
+    const ids = rows.map((r) => r.userId);
+    const names = new Map<string, string>();
+    if (ids.length > 0) {
+      try {
+        const found = await input.db
+          .select({ id: users.id, displayName: users.displayName })
+          .from(users)
+          .where(inArray(users.id, ids));
+        for (const u of found) names.set(u.id, u.displayName);
+      } catch {
+        // Names are cosmetic: fall back to ids rather than fail the action.
+      }
+    }
     for (const r of rows) {
-      playersSnapshot.push({ userId: r.userId, characterName: r.characterName });
+      playersSnapshot.push({ userId: r.userId, name: r.characterName ?? names.get(r.userId) ?? r.userId });
     }
   } catch {
     // If the session doesn't exist yet, the snapshot is empty.
@@ -63,7 +91,7 @@ export async function buildHttpPluginContext(
     get: (playerId: string) => {
       const row = playersSnapshot.find((p) => p.userId === playerId);
       if (!row) return undefined;
-      return { id: row.userId, name: row.characterName ?? row.userId };
+      return { id: row.userId, name: row.name };
     },
   };
 

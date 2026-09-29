@@ -102,6 +102,10 @@ export function useActivitySession({
           prev ? { ...prev, status: event.status as string, state: event.state as Record<string, unknown> } : prev
         );
       }
+      // Someone new acted: the event carries no identities, so re-read the
+      // session for the player list (with names) the panel shows.
+      const summary = (raw as { publicSummary?: { rosterChanged?: unknown } }).publicSummary;
+      if (summary?.rosterChanged === true) void fetchOnce();
     };
 
     void fetchOnce();
