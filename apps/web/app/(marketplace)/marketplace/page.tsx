@@ -182,7 +182,7 @@ function BuiltInActivities({ t }: { t: Translator }) {
             <li
               key={plugin.id}
               id={plugin.id}
-              className="flex scroll-mt-28 flex-col gap-3 rounded-[22px] border border-border-subtle/70 bg-surface p-5"
+              className="flex scroll-mt-28 flex-col gap-3 rounded-[22px] border border-border-subtle/70 bg-surface p-5 target:border-primary target:ring-2 target:ring-primary/40"
             >
               <div className="flex items-center justify-between gap-3">
                 <ActivityMark pluginId={plugin.id} name={plugin.name} />

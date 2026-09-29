@@ -23,10 +23,11 @@ describe('MarketplaceGrid empty states', () => {
     expect(screen.getByRole('link', { name: 'Clear filters' })).toHaveAttribute('href', '/marketplace');
   });
 
-  it('points an empty catalogue at the built-in apps and the publishing guide', () => {
+  it('tells an empty catalogue how plugins arrive and points at the publishing guide', () => {
     render(<MarketplaceGrid plugins={[]} />);
     expect(screen.getByRole('heading', { name: 'No community plugins yet' })).toBeInTheDocument();
-    expect(screen.getByText(/turn them on under Apps/)).toBeInTheDocument();
+    // The built-in activities have their own section above this one.
+    expect(screen.getByText(/once they pass review/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Read the plugin publishing guide' })).toHaveAttribute(
       'href',
       expect.stringContaining('PLUGIN_PUBLISHING.md')

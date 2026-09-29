@@ -88,12 +88,27 @@ test.describe('official hub', () => {
     await expect(page.getByRole('link', { name: 'Sign in', exact: true })).toHaveAttribute('href', '/login');
     await expect(page.getByRole('link', { name: 'Get started' }).first()).toHaveAttribute('href', '/register');
 
-    // Every showcased activity leads to the marketplace.
-    for (const name of ['Hushle', 'Quiz', 'Vampire Village', 'Watch Party', 'Poll', 'Dice Bot']) {
-      await expect(page.getByRole('link', { name, exact: true })).toHaveAttribute('href', '/marketplace');
+    // Every showcased activity leads to its own card in the marketplace.
+    const showcased = {
+      Hushle: 'hushle',
+      Quiz: 'quiz',
+      'Vampire Village': 'vampire-village',
+      'Watch Party': 'watch-party',
+      Poll: 'poll',
+      'Dice Bot': 'dice-bot',
+    };
+    for (const [name, id] of Object.entries(showcased)) {
+      await expect(page.getByRole('link', { name, exact: true })).toHaveAttribute('href', `/marketplace#${id}`);
     }
     await expect(page.getByRole('heading', { name: 'Yours in an afternoon.' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Built in the open.' })).toBeVisible();
+
+    // …and following one lands on that card, in view.
+    await page.getByRole('link', { name: 'Watch Party', exact: true }).click();
+    await expect(page).toHaveURL(/\/marketplace#watch-party$/);
+    const card = page.locator('li#watch-party');
+    await expect(card.getByRole('heading', { level: 3, name: 'Watch Party' })).toBeVisible();
+    await expect(card).toBeInViewport();
   });
 
   test('on a phone the menu button opens the navigation and Escape closes it', async () => {
