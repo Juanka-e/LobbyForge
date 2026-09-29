@@ -22,8 +22,11 @@ export const runtime = 'nodejs';
 
 const KNOWN_PERMISSIONS = new Set<string>(Object.values(CorePermission));
 
+/** `@everyone` is the default role's name; a second one would be mistaken for it. */
+const isReservedRoleName = (name: string) => name.trim().toLowerCase() === '@everyone';
+
 const CreateRoleSchema = z.object({
-  name: z.string().min(1).max(64),
+  name: z.string().min(1).max(64).refine((name) => !isReservedRoleName(name), 'That role name is reserved'),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   icon: z.string().refine(isValidRoleIcon, 'Icon must be a supported Material name or a single emoji').nullable().optional(),
   displaySeparately: z.boolean().optional(),

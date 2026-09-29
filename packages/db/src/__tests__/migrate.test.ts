@@ -89,8 +89,12 @@ describe('db:migrate', () => {
     // Only members with no display role AND no role rows; idempotent.
     expect(sql).toContain('m."role_id" IS NULL');
     expect(sql).toContain('NOT EXISTS (SELECT 1 FROM "membership_roles"');
-    expect(sql).toContain(`r."name" = '@everyone'`);
+    expect(sql).toContain(`WHERE "name" = '@everyone'`);
     expect(sql).toContain('ON CONFLICT DO NOTHING');
+    // A moderator's deliberate lock-out (roles set to none) is not undone.
+    expect(sql).toContain(`a."action" = 'member.set_roles'`);
+    // One role per server even if someone named another role @everyone.
+    expect(sql).toContain('DISTINCT ON ("server_id")');
   });
 
   it('adds identity links without recreating previously migrated tables', () => {

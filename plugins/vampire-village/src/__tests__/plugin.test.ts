@@ -80,7 +80,10 @@ describe('action policies', () => {
   });
 
   it('lets any member act as themselves — the host stamps playerId from the session', () => {
-    for (const type of ['join', 'leave', 'set-ready', 'timeout', 'night-target', 'night-shield', 'vote', 'chat', 'pack-chat']) {
+    // Only joining puts a player on the public roster — never a night
+    // action or a vote, whose author must stay hidden.
+    expect(policies.join).toEqual({ role: 'member', actorFields: ['playerId'], joinsRoster: true });
+    for (const type of ['leave', 'set-ready', 'timeout', 'night-target', 'night-shield', 'vote', 'chat', 'pack-chat']) {
       expect(policies[type], type).toEqual({ role: 'member', actorFields: ['playerId'] });
     }
   });

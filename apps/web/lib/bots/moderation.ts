@@ -22,7 +22,7 @@
  */
 import { createHash } from 'node:crypto';
 import { CorePermission, hasPermission } from '@lobbyforge/core';
-import { getUserById, getUserPermissions, logAction, type BotRow } from '@lobbyforge/db';
+import { getUserById, getUserPermissions, isChannelOpenToBots, logAction, type BotRow } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { distributedRateLimit } from '@/lib/security-headers';
 import { getBuiltInBot } from './cache';
@@ -117,6 +117,9 @@ async function isStaff(input: ModerateInput): Promise<boolean> {
 }
 
 async function recordBlock(bot: BotRow, input: ModerateInput, violation: ContentViolation): Promise<void> {
+  // The audit log is read by everyone with VIEW_AUDIT_LOG, who may not see
+  // a role-gated channel: its words stay out (the hash still identifies it).
+  const openChannel = await isChannelOpenToBots(getDb(), input.channelId).catch(() => false);
   await logAction(getDb(), {
     serverId: input.serverId,
     actorUserId: null,
@@ -130,7 +133,7 @@ async function recordBlock(bot: BotRow, input: ModerateInput, violation: Content
       detail: violation.detail,
       channelId: input.channelId,
       kind: input.kind ?? 'create',
-      excerpt: excerptOf(input.content),
+      excerpt: openChannel ? excerptOf(input.content) : null,
       contentSha256: sha256(input.content),
     },
   }).catch((err) => console.error('[audit] bot.moderation.block failed:', (err as Error).message));

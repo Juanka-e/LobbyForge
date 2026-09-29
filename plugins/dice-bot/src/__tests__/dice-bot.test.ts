@@ -141,7 +141,8 @@ describe('dice bot — helpers + manifest', () => {
   it('manifest and policies follow the SDK contract', () => {
     expect(diceBotPlugin.manifest.id).toBe('dice-bot');
     expect(diceBotPlugin.manifest.type).toBe('utility');
-    expect(diceBotPlugin.actionPolicies?.roll).toEqual({ role: 'member', actorFields: ['playerId'] });
+    // Rolls are public, so rolling may name the roller on the roster.
+    expect(diceBotPlugin.actionPolicies?.roll).toEqual({ role: 'member', actorFields: ['playerId'], joinsRoster: true });
     expect(diceBotPlugin.actionPolicies?.['reset-stats']).toEqual({ role: 'host', actorFields: ['hostId'] });
     // Every host-only action must be gated, or a member could clear the
     // room's scoreboard.

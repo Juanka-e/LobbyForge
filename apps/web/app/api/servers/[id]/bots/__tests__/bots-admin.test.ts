@@ -367,6 +367,15 @@ describe('PUT /api/servers/{id}/bots/builtin/{type}', () => {
     expect(ensureBuiltInBot).not.toHaveBeenCalled();
   });
 
+  it('lets only someone who may remove messages switch on the Moderation Bot', async () => {
+    // MANAGER can manage the server but not messages.
+    const { PUT } = await import('../builtin/[type]/route.js');
+    const res = await PUT(req('PUT', '/x', MANAGER, { enabled: true }), builtinCtx('moderation'));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'missing_permission' });
+    expect(ensureBuiltInBot).not.toHaveBeenCalled();
+  });
+
   it('sets up the welcome bot with its fixed permissions and the translated default name', async () => {
     ensureBuiltInBot.mockImplementation(async (_db: unknown, input: Record<string, unknown>) => ({
       bot: welcomeRow(input.settings as Record<string, unknown>, { name: input.name, enabled: input.enabled }),

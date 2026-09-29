@@ -18,7 +18,8 @@ export const TEMPLATE_MAX_LENGTH = 500;
 
 /** `@everyone` / `@here` — a bot may never ping the whole server. */
 export function containsMassMention(text: string): boolean {
-  return /(^|[^\p{L}\p{N}_])@(everyone|here)(?![\p{L}\p{N}_])/iu.test(text);
+  // NFKC first: a fullwidth `＠everyone` is still @everyone to a reader.
+  return /(^|[^\p{L}\p{N}_])@(everyone|here)(?![\p{L}\p{N}_])/iu.test(text.normalize('NFKC'));
 }
 
 const templateSchema = z

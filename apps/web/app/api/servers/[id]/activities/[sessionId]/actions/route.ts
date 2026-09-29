@@ -320,20 +320,20 @@ async function handlePost(
       return NextResponse.json({ error: prepared.error }, { status: prepared.status });
     }
 
-    // The roster is everyone who has acted in this activity. Only the
-    // creator used to be added, so `player` policies admitted one person
-    // and every panel could name only them. Whoever the policy just
-    // authorised joins here (idempotent) — BEFORE the context snapshot,
-    // so the reducer's `ctx.players` includes the actor too.
-    let rosterChanged = false;
-    try {
-      const roster = await listPlayersForSession(getDb(), sessionId);
-      if (!roster.some((p) => p.userId === session.uid)) {
-        await addPlayerToSession(getDb(), sessionId, session.uid);
-        rosterChanged = true;
+    // The roster is the activity's list of players, shown to every viewer.
+    // Joining it is opt-in per action (`joinsRoster`): a join, a public dice
+    // roll — never an anonymous vote, which it would name. The actor is
+    // offered to the reducer as a player while the action runs, and only
+    // written to the roster once the action has changed state and saved.
+    const joinsRoster = plugin.actionPolicies?.[String(prepared.action.type)]?.joinsRoster === true;
+    let joiningPlayer = false;
+    if (joinsRoster) {
+      try {
+        const roster = await listPlayersForSession(getDb(), sessionId);
+        joiningPlayer = !roster.some((p) => p.userId === session.uid);
+      } catch (err) {
+        console.warn('[activity-action] roster read failed:', (err as Error).message);
       }
-    } catch (err) {
-      console.warn('[activity-action] roster update failed:', (err as Error).message);
     }
 
     const ctx2 = await buildHttpPluginContext({
@@ -342,6 +342,7 @@ async function handlePost(
       actorUserId: session.uid,
       serverId,
       pluginId: row.pluginId,
+      pendingPlayerId: joiningPlayer ? session.uid : undefined,
     });
     // State versioning: upgrade the persisted row to the plugin's
     // current shape before running the reducer. The reducer only
@@ -360,6 +361,8 @@ async function handlePost(
     let currentState = migratedState;
     let currentRev = expectedRevision;
     let committedState: Record<string, unknown> | null = null;
+    // Reducers return the SAME object for a refused or no-op action.
+    let stateChanged = false;
 
     for (let attempt = 0; attempt < MAX_CAS_RETRIES; attempt++) {
       // Run the reducer against the CURRENT state on every attempt.
@@ -367,6 +370,7 @@ async function handlePost(
       casResult = await setGameSessionStateCAS(getDb(), sessionId, currentRev, attemptState) as typeof casResult;
       if (casResult.ok) {
         committedState = attemptState;
+        stateChanged = attemptState !== currentState;
         committed = true;
         break;
       }
@@ -405,6 +409,16 @@ async function handlePost(
     const deckSize = Array.isArray((committedState as { deck?: unknown }).deck)
       ? ((committedState as { deck?: unknown[] }).deck as unknown[]).length
       : undefined;
+    let rosterChanged = false;
+    if (joiningPlayer && stateChanged) {
+      try {
+        await addPlayerToSession(getDb(), sessionId, session.uid);
+        rosterChanged = true;
+      } catch (err) {
+        console.warn('[activity-action] roster update failed:', (err as Error).message);
+      }
+    }
+
     // `rosterChanged` tells subscribers to re-read the player list (names
     // included) — the bus itself never carries identities.
     const publicSummary: Record<string, unknown> = {};

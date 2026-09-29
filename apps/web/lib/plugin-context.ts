@@ -33,6 +33,11 @@ export interface BuildPluginContextInput {
   db: DbClient;
   sessionId: string;
   actorUserId: string;
+  /**
+   * A user joining the roster with this action: listed in `ctx.players`
+   * while it runs, before the host has written them to the roster.
+   */
+  pendingPlayerId?: string;
   /** Faz E: scopes ctx.storage to (serverId, pluginId). */
   serverId?: string;
   pluginId?: string;
@@ -53,7 +58,13 @@ export async function buildHttpPluginContext(
   // anyone — which the host persists in a follow-up query).
   const playersSnapshot: Array<{ userId: string; name: string }> = [];
   try {
-    const rows = await listPlayersForSession(input.db, input.sessionId);
+    const rows: Array<{ userId: string; characterName: string | null }> = await listPlayersForSession(
+      input.db,
+      input.sessionId
+    );
+    if (input.pendingPlayerId && !rows.some((r) => r.userId === input.pendingPlayerId)) {
+      rows.push({ userId: input.pendingPlayerId, characterName: null });
+    }
     // A player is named by their in-game character when they chose one,
     // else by their display name — never by a raw user id when a name exists.
     const ids = rows.map((r) => r.userId);

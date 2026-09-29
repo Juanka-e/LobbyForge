@@ -148,7 +148,7 @@ export const quizPlugin: GamePlugin<QuizState, QuizAction> = {
     next: { role: 'host' },
     end: { role: 'host' },
     // Any member plays or watches; the host injects WHO from the session.
-    join: { role: 'member', actorFields: ['playerId'] },
+    join: { role: 'member', actorFields: ['playerId'], joinsRoster: true },
     leave: { role: 'member', actorFields: ['playerId'] },
     answer: { role: 'member', actorFields: ['playerId'] },
     // Anyone may call time — the reducer checks the server clock.

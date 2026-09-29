@@ -166,13 +166,17 @@ type GamePluginActionPolicy = {
   `START_ACTIVITY` can also perform it for moderation/admin control.
 - `member`: any server member can perform the action.
 - `player`: the user must be an active player in `game_session_players`.
-  The host adds everyone whose action it authorises to that roster
-  (idempotently, before the reducer runs), so `player` means "has taken
-  part already" — give your join/ready action the `member` policy and
-  gate the rest on it. The roster is also what fills `ctx.players` (named
-  by character name, then display name) and the panel's `players` prop;
-  in the lobby, the people in the voice channel are added to `players`
-  as well, so a host can seat them by name.
+  An action joins the actor to that roster when its policy says
+  `joinsRoster: true` AND the action changes state (a refused join —
+  the reducer returned the same state object — adds no one). Opt in for
+  join/ready actions and for public actions whose author is shown anyway
+  (a dice roll); never for an anonymous one — the roster is visible to
+  every viewer, so a poll vote that joined it would name the voter.
+  While a joining action runs, `ctx.players` already includes the actor.
+  The roster fills `ctx.players` (named by character name, then display
+  name) and the panel's `players` prop; in the lobby, the people in the
+  voice channel are added to `players` as well, so a host can seat them
+  by name.
 - `actorFields`: fields overwritten by the host with `ctx.actorUserId`.
   Use this for `playerId`, `voterId`, `hostId`, and similar identity fields.
 

@@ -138,6 +138,25 @@ describe('@lobbyforge/hushle', () => {
     expect(stateBefore.currentCard).not.toBeNull();
   });
 
+  it('refuses to seat one player on two teams', async () => {
+    const harness = createTestHarness<HushleState, Parameters<typeof hushlePlugin.handleAction>[2]>({
+      plugin: hushlePlugin,
+      players: ['p1', 'p2', 'p3', 'p4'],
+    });
+    await harness.startGame();
+    await harness.performAction('p1', { type: 'start-game', packId: 'hushle-en-basic', createdBy: 'p1' });
+    const before = harness.getState();
+    // p2 would guess for A while watching B's cards.
+    await harness.performAction('p1', {
+      type: 'set-teams',
+      teams: [
+        { name: 'A', playerIds: ['p1', 'p2'] },
+        { name: 'B', playerIds: ['p3', 'p2'] },
+      ],
+    });
+    expect(harness.getState().teams).toEqual(before.teams);
+  });
+
   it('rotates to the next team on end-turn', async () => {
     const harness = createTestHarness<HushleState, Parameters<typeof hushlePlugin.handleAction>[2]>({
       plugin: hushlePlugin,

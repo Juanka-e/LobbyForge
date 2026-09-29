@@ -198,6 +198,12 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
       );
     }
 
+    // A bot's (or the system's) words are not anyone's to rewrite: an edited
+    // Welcome Bot message would still carry the BOT badge and its trust
+    // level. Moderators may delete or pin it, never change its text.
+    if (body.content !== undefined && (access.message.botId || !access.message.userId)) {
+      return NextResponse.json({ error: 'Bot messages cannot be edited', code: 'bot_message_readonly' }, { status: 403 });
+    }
     if (body.content !== undefined && !(await canMutateMessage(serverId, access.isAuthor, session.uid))) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }

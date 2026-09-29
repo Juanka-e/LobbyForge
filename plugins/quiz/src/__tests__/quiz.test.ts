@@ -54,7 +54,8 @@ describe('@lobbyforge/quiz — plugin contract', () => {
       reveal: { role: 'host' },
       next: { role: 'host' },
       end: { role: 'host' },
-      join: { role: 'member', actorFields: ['playerId'] },
+      // Joining names the player on the public roster; answering never does.
+      join: { role: 'member', actorFields: ['playerId'], joinsRoster: true },
       leave: { role: 'member', actorFields: ['playerId'] },
       answer: { role: 'member', actorFields: ['playerId'] },
       'time-up': { role: 'member' },

@@ -118,6 +118,49 @@ describe('mentions', () => {
     expect(countMentions('mail a@b.com')).toBe(0);
     expect(countMentions('@ @ @')).toBe(0);
   });
+
+  it('counts mentions packed together with punctuation, as the lobby pings them', () => {
+    expect(countMentions('hi,@alice,@bob,(@carol)')).toBe(3);
+  });
+});
+
+describe('ways around the word filter', () => {
+  const rules = compileBlockedWords(['spam']);
+
+  it('sees through invisible characters beyond the Basic Multilingual Plane', () => {
+    expect(findBlockedWord('sp\u{E0100}am', rules)).toBe('spam'); // variation selector supplement
+    expect(findBlockedWord('sp\u{E0041}am', rules)).toBe('spam'); // tag character
+    expect(findBlockedWord('sp⠀am', rules)).toBe('spam'); // braille blank
+  });
+
+  it('ignores combining marks stacked on letters', () => {
+    // Strike-through marks never compose into a letter, so they go.
+    expect(findBlockedWord('s̶p̶a̶m̶', rules)).toBe('spam');
+    // A mark that composes is a real letter (á, like ö or ş) and stays one.
+    expect(findBlockedWord('spám', rules)).toBeNull();
+  });
+
+  it('folds look-alike letters in a word that mixes scripts', () => {
+    expect(findBlockedWord('spаm', rules)).toBe('spam'); // Cyrillic a
+    expect(findBlockedWord('ѕpam', rules)).toBe('spam'); // Cyrillic dze
+  });
+
+  it('leaves a word written wholly in Cyrillic alone', () => {
+    // "сор" (litter) is not the English "cop".
+    expect(findBlockedWord('сор', compileBlockedWords(['cop']))).toBeNull();
+  });
+
+  it('joins letters spelled out one by one', () => {
+    expect(findBlockedWord('s.p.a.m', rules)).toBe('spam');
+    expect(findBlockedWord('s p a m please', rules)).toBe('spam');
+    // Two letters apart are not a word being hidden.
+    expect(findBlockedWord('a b', compileBlockedWords(['ab']))).toBeNull();
+  });
+
+  it('keeps Turkish letters distinct', () => {
+    expect(findBlockedWord('göt', compileBlockedWords(['got']))).toBeNull();
+    expect(findBlockedWord('ş', compileBlockedWords(['s']))).toBeNull();
+  });
 });
 
 describe('evaluateContentRules', () => {

@@ -27,5 +27,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS "bots_server_builtin_type_unique" ON "bots" US
 -- NULL keeps the conversation when a bot is deleted; the message's
 -- metadata.bot snapshot still names the bot that wrote it.
 ALTER TABLE "messages" ADD COLUMN IF NOT EXISTS "bot_id" uuid;--> statement-breakpoint
-ALTER TABLE "messages" ADD CONSTRAINT "messages_bot_id_bots_id_fk" FOREIGN KEY ("bot_id") REFERENCES "bots"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+-- NOT VALID, then VALIDATE: adding the key takes only a brief lock, and the
+-- scan of existing rows (all NULL here) runs without blocking writes.
+ALTER TABLE "messages" ADD CONSTRAINT "messages_bot_id_bots_id_fk" FOREIGN KEY ("bot_id") REFERENCES "bots"("id") ON DELETE set null ON UPDATE no action NOT VALID;--> statement-breakpoint
+ALTER TABLE "messages" VALIDATE CONSTRAINT "messages_bot_id_bots_id_fk";--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_messages_bot" ON "messages" USING btree ("bot_id") WHERE bot_id IS NOT NULL;

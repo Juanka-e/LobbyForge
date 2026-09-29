@@ -102,7 +102,7 @@ export const vampireVillagePlugin: GamePlugin<VillageState, VillageAction> = {
    * that runs the table is the host's (or a START_ACTIVITY moderator's).
    */
   actionPolicies: {
-    join: AS_SELF,
+    join: { ...AS_SELF, joinsRoster: true },
     leave: AS_SELF,
     'set-ready': AS_SELF,
     timeout: AS_SELF,

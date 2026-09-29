@@ -84,7 +84,12 @@ export type { WatchPartyPanelClientProps, WatchPartyPanelProps } from './renderC
 const actionPolicies: Record<string, GamePluginActionPolicy> = Object.fromEntries(
   WATCH_PARTY_ACTION_TYPES.map((type) => [
     type,
-    { role: type === 'take-host' ? 'host' : 'member', actorFields: ['actorId'] } satisfies GamePluginActionPolicy,
+    {
+      role: type === 'take-host' ? 'host' : 'member',
+      actorFields: ['actorId'],
+      // Joining puts the viewer on the watching list, by name.
+      ...(type === 'join' ? { joinsRoster: true } : {}),
+    } satisfies GamePluginActionPolicy,
   ])
 );
 

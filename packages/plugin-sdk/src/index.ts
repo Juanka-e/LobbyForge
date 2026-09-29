@@ -135,6 +135,15 @@ export interface GamePluginContext<TState = unknown> {
 export interface GamePluginActionPolicy {
   role: 'host' | 'member' | 'player';
   actorFields?: string[];
+  /**
+   * The actor joins the session roster (`game_session_players`) when this
+   * action succeeds — i.e. changes state. Opt in for a join/ready action and
+   * for public actions whose author is shown anyway (a dice roll); leave it
+   * off for anything whose author must stay private: the roster is visible
+   * to every viewer, so joining it on an anonymous vote would name the voter.
+   * While the action runs, `ctx.players` already includes the actor.
+   */
+  joinsRoster?: boolean;
 }
 
 // Main Interface GamePlugin

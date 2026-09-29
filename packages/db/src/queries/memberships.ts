@@ -142,6 +142,8 @@ export async function ensureServerMembershipDetailed(
     .select({ id: roles.id })
     .from(roles)
     .where(and(eq(roles.serverId, serverId), eq(roles.name, EVERYONE_ROLE_NAME)))
+    // Role names are not unique: the real @everyone is the lowest, oldest.
+    .orderBy(asc(roles.position), asc(roles.createdAt))
     .limit(1);
 
   const [created] = await db

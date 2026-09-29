@@ -203,6 +203,24 @@ describe('Moderation Bot on PATCH .../messages/{id}', () => {
   });
 });
 
+describe('bot messages cannot be rewritten', () => {
+  it('refuses to change the text of a bot message, even for the owner', async () => {
+    getMessageById.mockResolvedValue(messageRow({ userId: null, botId: 'bot-welcome', metadata: { bot: { id: 'bot-welcome' } } }));
+    const { PATCH } = await import('../[messageId]/route.js');
+    const res = await PATCH(
+      new Request('https://chat.example.test/x', {
+        method: 'PATCH',
+        headers: { cookie: cookie(OWNER), 'content-type': 'application/json' },
+        body: JSON.stringify({ content: 'Server is moving: sign in at evil.example' }),
+      }),
+      itemCtx
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'bot_message_readonly' });
+    expect(updateMessage).not.toHaveBeenCalled();
+  });
+});
+
 describe('bot messages in GET .../messages', () => {
   it('names the bot and never passes it off as a user', async () => {
     listMessagesForChannel.mockResolvedValue([

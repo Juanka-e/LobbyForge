@@ -24,9 +24,16 @@ const publishActivityStateChange = vi.fn();
 // action through to the next state.
 const fakePlugin = {
   manifest: { id: 'fake', name: 'Fake', version: '0.1.0', type: 'game' as const, minAppVersion: '0.1.0', permissions: [], locales: ['en'], entryClient: './client.js' },
+  // `inc` is anonymous (like a poll vote); `join` puts the actor on the roster.
+  actionPolicies: {
+    inc: { role: 'member' as const },
+    join: { role: 'member' as const, joinsRoster: true },
+  },
   createInitialState: () => ({ count: 0 }),
-  handleAction: (_ctx: unknown, state: { count: number }, action: { type: string; amount?: number }) => {
+  handleAction: (_ctx: unknown, state: { count: number; full?: boolean }, action: { type: string; amount?: number }) => {
     if (action.type === 'inc') return { count: state.count + (action.amount ?? 1) };
+    // A full table refuses the join: the SAME state comes back.
+    if (action.type === 'join') return state.full ? state : { ...state, count: state.count + 1 };
     return state;
   },
   renderClient: () => null,
@@ -477,52 +484,62 @@ describe('POST /api/servers/{id}/activities/{sessionId}/actions', () => {
     expect(setGameSessionStateCAS).toHaveBeenCalled();
   });
 
-  it('adds a first-time actor to the roster and tells subscribers to re-read it', async () => {
+  function actionRequest(body: Record<string, unknown>) {
+    return new Request(`https://example.test/api/servers/${SERVER_ID}/activities/${SESSION_ID}/actions`, {
+      method: 'POST',
+      headers: { cookie: makeSessionCookie() },
+      body: JSON.stringify(body),
+    });
+  }
+
+  function primeAction(state: Record<string, unknown>) {
     getServerById.mockResolvedValue(mockServer(OWNER_ID));
     isServerMember.mockResolvedValue(true);
-    getGameSessionById.mockResolvedValue(mockSession({ state: { count: 0 } }));
+    getGameSessionById.mockResolvedValue(mockSession({ state }));
+    setGameSessionStateCAS.mockResolvedValue({ ok: true, row: { ...mockSession({ state }), revision: 1 } });
     listPlayersForSession.mockResolvedValue([{ userId: 'someone-else', characterName: null }]);
-    setGameSessionStateCAS.mockResolvedValue({ ok: true, row: { ...mockSession({ state: { count: 1 } }), revision: 1 } });
     addPlayerToSession.mockClear();
     publishActivityStateChange.mockClear();
+  }
+
+  const published = () =>
+    (publishActivityStateChange.mock.calls[0]?.[0] as { publicSummary?: Record<string, unknown> } | undefined)?.publicSummary;
+
+  it('puts a first-time actor on the roster when a joining action succeeds', async () => {
+    primeAction({ count: 0 });
     const { POST } = await loadActionRoute();
-    const res = await POST(
-      new Request(`https://example.test/api/servers/${SERVER_ID}/activities/${SESSION_ID}/actions`, {
-        method: 'POST',
-        headers: { cookie: makeSessionCookie() },
-        body: JSON.stringify({ type: 'inc', amount: 1 }),
-      }),
-      { params: Promise.resolve({ id: SERVER_ID, sessionId: SESSION_ID }) }
-    );
+    const res = await POST(actionRequest({ type: 'join' }), { params: Promise.resolve({ id: SERVER_ID, sessionId: SESSION_ID }) });
     expect(res.status).toBe(200);
     expect(addPlayerToSession).toHaveBeenCalledTimes(1);
-    expect(publishActivityStateChange).toHaveBeenCalledWith(
-      expect.objectContaining({ publicSummary: expect.objectContaining({ rosterChanged: true }) })
-    );
+    expect(published()?.rosterChanged).toBe(true);
+  });
+
+  it('never puts the author of an anonymous action on the roster', async () => {
+    // A poll vote must not name its voter: the roster is public.
+    primeAction({ count: 0 });
+    const { POST } = await loadActionRoute();
+    const res = await POST(actionRequest({ type: 'inc', amount: 1 }), { params: Promise.resolve({ id: SERVER_ID, sessionId: SESSION_ID }) });
+    expect(res.status).toBe(200);
+    expect(addPlayerToSession).not.toHaveBeenCalled();
+    expect(published()?.rosterChanged).toBeUndefined();
+  });
+
+  it('keeps a refused join off the roster', async () => {
+    primeAction({ count: 0, full: true });
+    const { POST } = await loadActionRoute();
+    const res = await POST(actionRequest({ type: 'join' }), { params: Promise.resolve({ id: SERVER_ID, sessionId: SESSION_ID }) });
+    expect(res.status).toBe(200);
+    expect(addPlayerToSession).not.toHaveBeenCalled();
+    expect(published()?.rosterChanged).toBeUndefined();
   });
 
   it('leaves the roster alone for someone already in it', async () => {
-    getServerById.mockResolvedValue(mockServer(OWNER_ID));
-    isServerMember.mockResolvedValue(true);
-    getGameSessionById.mockResolvedValue(mockSession({ state: { count: 0 } }));
-    setGameSessionStateCAS.mockResolvedValue({ ok: true, row: { ...mockSession({ state: { count: 1 } }), revision: 1 } });
+    primeAction({ count: 0 });
+    listPlayersForSession.mockResolvedValue([{ userId: '00000000-0000-0000-0000-000000000001', characterName: null }]);
     const { POST } = await loadActionRoute();
-    // makeSessionCookie() signs in as this user id.
-    listPlayersForSession.mockImplementation(async () => [{ userId: '00000000-0000-0000-0000-000000000001', characterName: null }]);
-    addPlayerToSession.mockClear();
-    publishActivityStateChange.mockClear();
-    const res = await POST(
-      new Request(`https://example.test/api/servers/${SERVER_ID}/activities/${SESSION_ID}/actions`, {
-        method: 'POST',
-        headers: { cookie: makeSessionCookie() },
-        body: JSON.stringify({ type: 'inc', amount: 1 }),
-      }),
-      { params: Promise.resolve({ id: SERVER_ID, sessionId: SESSION_ID }) }
-    );
+    const res = await POST(actionRequest({ type: 'join' }), { params: Promise.resolve({ id: SERVER_ID, sessionId: SESSION_ID }) });
     expect(res.status).toBe(200);
     expect(addPlayerToSession).not.toHaveBeenCalled();
-    const published = publishActivityStateChange.mock.calls[0]?.[0] as { publicSummary?: Record<string, unknown> };
-    expect(published.publicSummary?.rosterChanged).toBeUndefined();
   });
 });
 

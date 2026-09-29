@@ -327,7 +327,14 @@ export function hushleReducer(state: HushleState, action: HushleAction): HushleS
       // validate against a falsified player list.
       const floater = action.floaterPlayerId ?? null;
       const allRequestedPlayers = new Set<string>();
-      for (const t of action.teams) for (const id of t.playerIds) allRequestedPlayers.add(id);
+      for (const t of action.teams) {
+        for (const id of t.playerIds) {
+          // A player on two teams would see every card while guessing:
+          // refuse the whole seating rather than guess which team was meant.
+          if (allRequestedPlayers.has(id)) return state;
+          allRequestedPlayers.add(id);
+        }
+      }
       const validatedFloater = floater && !allRequestedPlayers.has(floater) ? floater : null;
       const teams: HushleTeam[] = action.teams
         .filter((t) => t.name.trim().length > 0)

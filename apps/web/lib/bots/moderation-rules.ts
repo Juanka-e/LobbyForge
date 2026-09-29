@@ -24,23 +24,78 @@ export interface ContentViolation {
   detail: string;
 }
 
+/**
+ * Characters that render as nothing (or as blank space nobody reads as a
+ * letter): soft hyphen, joiners and bidi controls, fillers, variation
+ * selectors, the braille blank and the Unicode tag block. Written as
+ * escapes with the `u` flag so the astral ranges (U+E0000…) are covered.
+ */
 const INVISIBLE =
-  /[­͏؜ᅟᅠ឴឵᠋-᠏​-‏‪-‮⁠-⁯ㅤ︀-️﻿ﾠ]/g;
+  /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u202A-\u202E\u2060-\u206F\u2800\u3164\uFE00-\uFE0F\uFEFF\uFFA0\u{1D173}-\u{1D17A}\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/gu;
+
+/** Combining marks left over after NFKC composed what it could. */
+const STRAY_MARKS = /[\p{Mn}\p{Me}]/gu;
 
 /** Strip what a reader cannot see, and fold compatibility forms. */
 function cleanText(text: string): string {
-  return text.normalize('NFKC').replace(INVISIBLE, '');
+  // Marks are removed AFTER composition: `ş` is one letter by then and
+  // stays `ş`; what remains is decoration stacked on a letter (zalgo) or
+  // a mark used as a separator — both ways around a word filter.
+  return text.normalize('NFKC').replace(INVISIBLE, '').replace(STRAY_MARKS, '');
 }
 
 export function normalizeForModeration(text: string): string {
   return cleanText(text)
     .replace(/[İIı]/g, 'i')
-    .toLowerCase()
-    .replace(/̇/g, '');
+    .toLowerCase();
+}
+
+/**
+ * Cyrillic and Greek letters that look like Latin ones. A word that MIXES
+ * scripts (`spаm` with a Cyrillic `а`) is folded to Latin before matching —
+ * that mix is an evasion; a word written wholly in Cyrillic is left alone,
+ * so Russian text is not misread as English.
+ */
+const CONFUSABLES: Record<string, string> = {
+  а: 'a', в: 'b', е: 'e', ё: 'e', к: 'k', м: 'm', н: 'h', о: 'o', р: 'p', с: 'c', т: 't', у: 'y', х: 'x',
+  ѕ: 's', і: 'i', ї: 'i', ј: 'j', ԁ: 'd', ԛ: 'q', ԝ: 'w', ӏ: 'l', ɡ: 'g',
+  α: 'a', β: 'b', ε: 'e', ι: 'i', κ: 'k', ν: 'v', ο: 'o', ρ: 'p', τ: 't', υ: 'u', χ: 'x',
+};
+
+function foldMixedScript(token: string): string {
+  if (!/[a-z]/.test(token)) return token;
+  let folded = '';
+  let changed = false;
+  for (const char of token) {
+    const latin = CONFUSABLES[char];
+    folded += latin ?? char;
+    if (latin) changed = true;
+  }
+  return changed ? folded : token;
 }
 
 function tokenize(normalized: string): string[] {
-  return normalized.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  return normalized.split(/[^\p{L}\p{N}]+/u).filter(Boolean).map(foldMixedScript);
+}
+
+/**
+ * The words of a message as a filter should see them: plus, for every run
+ * of three or more single letters (`s.p.a.m`, `s p a m`), the run joined.
+ */
+function contentTokens(content: string): string[] {
+  const tokens = tokenize(normalizeForModeration(content));
+  const joined: string[] = [];
+  let run: string[] = [];
+  const flush = () => {
+    if (run.length >= 3) joined.push(run.join(''));
+    run = [];
+  };
+  for (const token of tokens) {
+    if ([...token].length === 1) run.push(token);
+    else flush();
+  }
+  flush();
+  return joined.length > 0 ? [...tokens, ...joined] : tokens;
 }
 
 // ---------------------------------------------------------------------------
@@ -79,7 +134,7 @@ function tokenMatches(token: string, expected: string, lead: boolean, trail: boo
 /** The first blocked-word entry the content hits, or null. */
 export function findBlockedWord(content: string, rules: readonly WordRule[]): string | null {
   if (rules.length === 0) return null;
-  const tokens = tokenize(normalizeForModeration(content));
+  const tokens = contentTokens(content);
   if (tokens.length === 0) return null;
   const present = new Set(tokens);
   for (const rule of rules) {
@@ -161,9 +216,12 @@ export function isHostAllowed(host: string, allowedDomains: readonly string[]): 
 // Mentions
 // ---------------------------------------------------------------------------
 
-/** `@name`, `@everyone` and `@here` at the start of a word each count once. */
+/**
+ * Every `@name`, `@everyone` and `@here` counts once — wherever it sits, as
+ * the lobby notifies on any `@name` in the text (`hi,@a,@b` pings two).
+ */
 export function countMentions(content: string): number {
-  return (cleanText(content).match(/(?:^|\s)@(?=[\p{L}\p{N}_])/gu) ?? []).length;
+  return (cleanText(content).match(/(?<![\p{L}\p{N}_])@(?=[\p{L}\p{N}_])/gu) ?? []).length;
 }
 
 // ---------------------------------------------------------------------------

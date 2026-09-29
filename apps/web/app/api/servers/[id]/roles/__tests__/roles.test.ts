@@ -220,6 +220,19 @@ describe('POST /api/servers/{id}/roles', () => {
     expect(res.status).toBe(400);
   });
 
+  it('refuses a second role named @everyone', async () => {
+    getServerById.mockResolvedValue(mockServer());
+    getUserPermissions.mockResolvedValue(['administrator']);
+    const { POST } = await loadListRoute();
+    const req = new Request(`https://example.test/api/servers/${SERVER_ID}/roles`, {
+      method: 'POST',
+      headers: { cookie: makeSessionCookie() },
+      body: JSON.stringify({ name: ' @Everyone ', permissions: [] }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ id: SERVER_ID }) });
+    expect(res.status).toBe(400);
+  });
+
   it('rejects unknown permission strings with 400', async () => {
     getServerById.mockResolvedValue(mockServer());
     getUserPermissions.mockResolvedValue(['administrator']);
@@ -329,6 +342,28 @@ describe('PATCH /api/servers/{id}/roles/{roleId}', () => {
     expect(res.status).toBe(400);
     const json = (await res.json()) as { error: string };
     expect(json.error).toMatch(/@everyone/);
+  });
+
+  it('refuses to rename another role to @everyone', async () => {
+    getServerById.mockResolvedValue(mockServer());
+    getRoleById.mockResolvedValue({
+      id: 'role-mod',
+      serverId: SERVER_ID,
+      name: 'Moderator',
+      color: null,
+      position: 2,
+      permissions: [],
+      createdAt: new Date('2026-06-10T00:00:00Z'),
+    });
+    getUserPermissions.mockResolvedValue(['administrator']);
+    const { PATCH } = await loadItemRoute();
+    const req = new Request(`https://example.test/api/servers/${SERVER_ID}/roles/role-mod`, {
+      method: 'PATCH',
+      headers: { cookie: makeSessionCookie() },
+      body: JSON.stringify({ name: '@everyone' }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ id: SERVER_ID, roleId: 'role-mod' }) });
+    expect(res.status).toBe(400);
   });
 
   it('renames a role when the caller is the owner', async () => {

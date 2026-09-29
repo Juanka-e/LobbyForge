@@ -134,7 +134,6 @@ async function handleGet(
             name: userById.get(p.userId) ?? null,
             status: p.status,
             score: p.score,
-            joinedAt: p.joinedAt.toISOString(),
           })),
         },
       },
