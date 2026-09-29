@@ -1,5 +1,9 @@
 import { test, expect } from '@playwright/test';
 
+// A production-mode stack's CSRF guard refuses a POST without an Origin
+// ("Missing request origin", 403) — send the app's own, as a browser would.
+test.use({ extraHTTPHeaders: { Origin: process.env.LF_E2E_BASE_URL ?? 'http://localhost:19520' } });
+
 test.describe('Voice and Presence Integration', () => {
   test('two browser contexts receive distinct sessions and cannot mint tokens outside membership', async ({ browser }) => {
     const userAContext = await browser.newContext();

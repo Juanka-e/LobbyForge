@@ -46,7 +46,9 @@ test.describe('official hub', () => {
   };
 
   test.beforeAll(async ({ playwright }) => {
-    browser = await playwright.chromium.launch();
+    // `args` must be explicit: under the test runner a bare launch() inherits
+    // the config's launchOptions, --disable-web-security included (see above).
+    browser = await playwright.chromium.launch({ args: [] });
     // The landing page exists only on the official hub.
     const probe = await playwright.request.newContext({ baseURL: baseUrl });
     const landing = await probe.get('/landing', { maxRedirects: 0 });

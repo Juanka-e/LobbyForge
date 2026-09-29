@@ -207,7 +207,9 @@ test.describe('Hushle through the lobby UI', () => {
     const gallery = host.page
       .getByRole('main')
       .filter({ has: host.page.getByRole('heading', { name: 'Start something together' }) });
-    await gallery.getByRole('button', { name: /Hushle/ }).click();
+    // The launch card, not the sidebar's "Hushle" chip (the lobby's outer
+    // <main> holds both): only the card says "Start".
+    await gallery.getByRole('button', { name: /Hushle/ }).filter({ hasText: 'Start' }).click();
 
     // ── Lobby: the default pack, five cards a turn, and the longest turn
     // timer (one clock per turn — this leaves room for slow realtime).
@@ -272,8 +274,9 @@ test.describe('Hushle through the lobby UI', () => {
     // ── Juno catches a forbidden word: Ice loses a point, Mira gets a new card.
     await bust(juno.page).click();
     await expect(card(mira.page).locator('.hushle-word')).not.toHaveText(firstWord, SYNC);
-    await expect(panel(juno.page).getByText('Bust', { exact: true })).toBeVisible(SYNC);
-    await expect(hostPanel.getByText('Bust', { exact: true })).toBeVisible(SYNC);
+    // In "This turn" (a word-less viewer also hears "Bust" from a hidden live region).
+    await expect(panel(juno.page).getByRole('listitem').filter({ hasText: 'Bust' })).toBeVisible(SYNC);
+    await expect(hostPanel.getByRole('listitem').filter({ hasText: 'Bust' })).toBeVisible(SYNC);
 
     // ── The host scores the rest of the turn; its fifth card ends it.
     // (A host button stays disabled until its move lands — no double scoring.)

@@ -78,7 +78,9 @@ test.describe('Bots: welcome, moderation and the Bot API', () => {
     // Own browser WITHOUT the config's --disable-web-security: that flag
     // makes Chromium drop the Origin header, which the app's CSRF guard
     // rejects — and saving bot settings and posting in chat are POSTs.
-    ownBrowser = await playwright.chromium.launch();
+    // `args` must be explicit: under the test runner a bare launch() inherits
+    // the config's launchOptions, that flag included.
+    ownBrowser = await playwright.chromium.launch({ args: [] });
     ownerCtx = await newUserContext(ownBrowser);
     memberCtx = await newUserContext(ownBrowser);
 
