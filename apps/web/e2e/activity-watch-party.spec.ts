@@ -49,9 +49,17 @@ const VIDEO_A = 'M7lc1UVf-VE';
 const VIDEO_B = 'aqz-KE-bpKQ';
 const EMBED = 'https://www.youtube-nocookie.com/embed/';
 
-/** `^<embed url of id>?…` — the URL's dots are literal, not "any character". */
-const embedSrc = (videoId: string, rest = '') =>
-  new RegExp(`^${`${EMBED}${videoId}`.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\?${rest}`);
+/**
+ * Waits until the frame's `src` starts with the embed URL of `videoId`
+ * (plus `?` and `rest`) — a plain prefix check, so the URL is never read as
+ * a pattern whose dots match any character.
+ */
+async function expectEmbed(frame: Locator, videoId: string, rest = ''): Promise<void> {
+  const prefix = `${EMBED}${videoId}?${rest}`;
+  await expect
+    .poll(async () => ((await frame.getAttribute('src')) ?? '').startsWith(prefix), { timeout: 15_000 })
+    .toBe(true);
+}
 
 test.skip(!baseUrl, 'Runs only against the compose stack (set LF_E2E_BASE_URL).');
 test.describe.configure({ mode: 'serial' });
@@ -244,9 +252,7 @@ test.describe('Watch Party with two people, through the lobby', () => {
     await hostLink.fill(`https://youtu.be/${VIDEO_A}?t=5`);
     await hostPanel.getByRole('button', { name: 'Load video', exact: true }).click();
     const hostFrame = hostPanel.locator('iframe');
-    await expect(hostFrame).toHaveAttribute('src', embedSrc(VIDEO_A, 'enablejsapi=1&origin='), {
-      timeout: 15_000,
-    });
+    await expectEmbed(hostFrame, VIDEO_A, 'enablejsapi=1&origin=');
     await expect(hostFrame).toHaveAttribute('sandbox', /allow-scripts/);
     await expect(hostFrame).not.toHaveAttribute('sandbox', /allow-top-navigation/);
     await expect(hostPanel.getByText('Paused', { exact: true })).toBeVisible();
@@ -255,9 +261,7 @@ test.describe('Watch Party with two people, through the lobby', () => {
     // ── The guest opens the running party: same video, no host controls.
     await openActivities(guest);
     const guestPanel = guest.getByRole('region', { name: 'Watch Party', exact: true });
-    await expect(guestPanel.locator('iframe')).toHaveAttribute('src', embedSrc(VIDEO_A), {
-      timeout: 15_000,
-    });
+    await expectEmbed(guestPanel.locator('iframe'), VIDEO_A);
     await joinPlaybackIfAsked(guestPanel);
     await expect(guestPanel.getByRole('button', { name: 'Play for everyone' })).toHaveCount(0);
     await expect(guestPanel.getByText(`${ownerName} is hosting, so only they can play, pause and seek.`)).toBeVisible();
@@ -342,9 +346,7 @@ test.describe('Watch Party with two people, through the lobby', () => {
     // The new host moves on to the queued video, for everyone.
     await guestPanel.getByRole('button', { name: 'Play next', exact: true }).click();
     for (const panel of [hostPanel, guestPanel]) {
-      await expect(panel.locator('iframe')).toHaveAttribute('src', embedSrc(VIDEO_B), {
-        timeout: 15_000,
-      });
+      await expectEmbed(panel.locator('iframe'), VIDEO_B);
       await expect(panel.getByText('Nothing queued yet.')).toBeVisible();
     }
 
