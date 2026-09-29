@@ -271,7 +271,7 @@ export function LobbyActivityView({
               </span>
               <span className="flex items-center gap-1.5 font-label-xs text-[11px] text-text-secondary">
                 <span className="material-symbols-outlined text-[14px]">group</span>
-                {t('lobbyMain.activities.playerCount', { count: detail.players.length })}
+                {t('lobbyMain.activities.playerCount', { count: panelPlayers.length })}
               </span>
               <div className="ml-auto flex items-center gap-2">
                 {detail.createdBy && currentUserId === detail.createdBy ? (

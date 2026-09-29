@@ -315,7 +315,6 @@ function DesktopCard({ t }: { t: Translator }) {
 /** The activities that ship with LobbyForge (compiled in), in the reader's language. */
 function MarketplacePicks({ t }: { t: Translator }) {
   const picks = listPluginSummaries()
-    .slice(0, 4)
     .map((plugin) => ({
       id: plugin.id,
       name: plugin.name,

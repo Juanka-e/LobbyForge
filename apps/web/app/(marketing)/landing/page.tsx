@@ -168,7 +168,7 @@ function Activities({ t }: { t: Translator }) {
           return (
             <li key={activity.id}>
               <Link
-                href="/marketplace"
+                href={`/marketplace#${activity.id}`}
                 aria-labelledby={`${id}-name`}
                 aria-describedby={players ? `${id}-players ${id}-body` : `${id}-body`}
                 className={`flex h-full flex-col gap-2.5 rounded-[18px] border border-border-subtle/70 bg-surface p-4 transition-colors hover:border-border-strong sm:gap-4 sm:rounded-[22px] sm:p-6 ${focusRing}`}

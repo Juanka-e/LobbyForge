@@ -64,6 +64,9 @@
     /* The live-activities amber, as ink and as a fill behind on-ember. */
     --lf-ember: #e7b86a;
     --lf-on-ember: #2a1b00;
+    /* Status ink: "on", "saved", "online" — and "delete", "revoke", errors. */
+    --lf-success: #7ccfa6;
+    --lf-danger: #e98282;
   }
 
   .lf-theme-dim {
@@ -104,6 +107,9 @@
     /* 5.9:1 on white, and white on it: ink and fill both read. */
     --lf-ember: #8a5a00;
     --lf-on-ember: #ffffff;
+    /* 5.2:1 and 6.5:1 on white. */
+    --lf-success: #1e7a52;
+    --lf-danger: #b42318;
   }
 
   html,

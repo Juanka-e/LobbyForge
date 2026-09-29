@@ -107,8 +107,10 @@ const config: Config = {
         'text-primary': themed('--lf-text-primary', '#F4F7FB'),
         'text-secondary': themed('--lf-text-secondary', '#B7C0CC'),
         'text-muted': themed('--lf-text-muted', '#7F8A99'),
-        success: '#7CCFA6',
-        danger: '#E98282',
+        // Themed like `ember`: the pale dark-theme shades are about 1.9:1 on
+        // white, so the light theme swaps in darker ink (see globals.css).
+        success: themed('--lf-success', '#7CCFA6'),
+        danger: themed('--lf-danger', '#E98282'),
       },
       borderRadius: {
         DEFAULT: '0.25rem',

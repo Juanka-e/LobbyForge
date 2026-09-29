@@ -7,6 +7,10 @@ import type { Translator } from '@/lib/i18n/core';
 import { getTranslator } from '@/lib/i18n/server';
 import { container, eyebrow, focusRing } from '@/app/(marketing)/_components/styles';
 import MarketplaceGrid from './MarketplaceGrid';
+import ActivityMark from '@/app/(marketing)/_components/ActivityMark';
+import { playerRange } from '@/lib/hub-format';
+import { listPluginSummaries } from '@/lib/plugin-registry';
+import { pluginSummary } from '@/lib/plugin-catalog-text';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -64,6 +68,8 @@ export default async function MarketplacePage({
           </h1>
           <p className="text-pretty text-lg leading-[1.6] text-text-secondary">{t('hub.marketplace.subtitle')}</p>
         </header>
+        <BuiltInActivities t={t} />
+        <h2 className="mb-5 mt-14 text-xl font-semibold text-text-primary">{t('hub.marketplace.community.title')}</h2>
         {catalog}
       </div>
     );
@@ -146,5 +152,53 @@ function Controls({ t, category, query }: { t: Translator; category: string | nu
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * The activities every community already has. The community catalogue
+ * below starts empty on a young hub, and the landing's activity cards
+ * link here (`#<plugin id>`), so they must land on something real.
+ */
+function BuiltInActivities({ t }: { t: Translator }) {
+  const plugins = listPluginSummaries();
+  return (
+    <section aria-labelledby="marketplace-built-in" className="flex flex-col gap-5">
+      <div className="flex max-w-[720px] flex-col gap-2">
+        <h2 id="marketplace-built-in" className="text-xl font-semibold text-text-primary">
+          {t('hub.marketplace.builtIn.title')}
+        </h2>
+        <p className="text-[15px] leading-[1.6] text-text-secondary">{t('hub.marketplace.builtIn.body')}</p>
+      </div>
+      <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {plugins.map((plugin) => {
+          const range = playerRange(plugin.catalog?.playerConfig);
+          const players = range
+            ? range.kind === 'range'
+              ? t('hub.marketplace.playerRange', { min: range.min, max: range.max })
+              : t('hub.landing.activities.upTo', { max: range.max })
+            : null;
+          return (
+            <li
+              key={plugin.id}
+              id={plugin.id}
+              className="flex scroll-mt-28 flex-col gap-3 rounded-[22px] border border-border-subtle/70 bg-surface p-5"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <ActivityMark pluginId={plugin.id} name={plugin.name} />
+                <span className="rounded-full bg-surface-raised px-2.5 py-1 text-xs font-medium text-text-secondary">
+                  {t('hub.marketplace.builtIn.badge')}
+                </span>
+              </div>
+              <h3 className="text-lg font-semibold text-text-primary">{plugin.name}</h3>
+              <p className="text-[15px] leading-[1.55] text-text-secondary">
+                {pluginSummary(plugin.id, t.locale, plugin.catalog?.summary ?? null)}
+              </p>
+              {players ? <p className="mt-auto text-xs text-text-muted">{players}</p> : null}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
