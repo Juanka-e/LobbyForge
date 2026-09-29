@@ -49,6 +49,10 @@ const VIDEO_A = 'M7lc1UVf-VE';
 const VIDEO_B = 'aqz-KE-bpKQ';
 const EMBED = 'https://www.youtube-nocookie.com/embed/';
 
+/** `^<embed url of id>?…` — the URL's dots are literal, not "any character". */
+const embedSrc = (videoId: string, rest = '') =>
+  new RegExp(`^${`${EMBED}${videoId}`.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\?${rest}`);
+
 test.skip(!baseUrl, 'Runs only against the compose stack (set LF_E2E_BASE_URL).');
 test.describe.configure({ mode: 'serial' });
 
@@ -240,7 +244,7 @@ test.describe('Watch Party with two people, through the lobby', () => {
     await hostLink.fill(`https://youtu.be/${VIDEO_A}?t=5`);
     await hostPanel.getByRole('button', { name: 'Load video', exact: true }).click();
     const hostFrame = hostPanel.locator('iframe');
-    await expect(hostFrame).toHaveAttribute('src', new RegExp(`^${EMBED}${VIDEO_A}\\?enablejsapi=1&origin=`), {
+    await expect(hostFrame).toHaveAttribute('src', embedSrc(VIDEO_A, 'enablejsapi=1&origin='), {
       timeout: 15_000,
     });
     await expect(hostFrame).toHaveAttribute('sandbox', /allow-scripts/);
@@ -251,7 +255,7 @@ test.describe('Watch Party with two people, through the lobby', () => {
     // ── The guest opens the running party: same video, no host controls.
     await openActivities(guest);
     const guestPanel = guest.getByRole('region', { name: 'Watch Party', exact: true });
-    await expect(guestPanel.locator('iframe')).toHaveAttribute('src', new RegExp(`^${EMBED}${VIDEO_A}\\?`), {
+    await expect(guestPanel.locator('iframe')).toHaveAttribute('src', embedSrc(VIDEO_A), {
       timeout: 15_000,
     });
     await joinPlaybackIfAsked(guestPanel);
@@ -338,7 +342,7 @@ test.describe('Watch Party with two people, through the lobby', () => {
     // The new host moves on to the queued video, for everyone.
     await guestPanel.getByRole('button', { name: 'Play next', exact: true }).click();
     for (const panel of [hostPanel, guestPanel]) {
-      await expect(panel.locator('iframe')).toHaveAttribute('src', new RegExp(`^${EMBED}${VIDEO_B}\\?`), {
+      await expect(panel.locator('iframe')).toHaveAttribute('src', embedSrc(VIDEO_B), {
         timeout: 15_000,
       });
       await expect(panel.getByText('Nothing queued yet.')).toBeVisible();
