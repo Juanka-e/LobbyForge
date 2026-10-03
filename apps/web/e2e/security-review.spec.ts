@@ -63,6 +63,11 @@ const RUN = Date.now().toString(36);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TIMED_OUT = 'You are timed out in this server';
 
+/** Escape every RegExp metacharacter (backslash included) in a literal. */
+function escapeRegExp(literal: string): string {
+  return literal.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+}
+
 test.skip(!baseUrl, 'Runs only against the compose stack (set LF_E2E_BASE_URL).');
 // In order, one worker; a failure does not skip the tests after it. The
 // timeout leaves room for waiting out a rate-limit window (up to ~76 s).
@@ -773,7 +778,7 @@ test.describe('security review 2026-10 — regressions on the real stack', () =>
         return res.text();
       };
       const linkedVersion = async () => {
-        const version = new RegExp(`${avatarPath.replace(/[/]/g, '\\/')}\\?v=([0-9a-f]+)`).exec(await lobbyHtml())?.[1];
+        const version = new RegExp(`${escapeRegExp(avatarPath)}\\?v=([0-9a-f]+)`).exec(await lobbyHtml())?.[1];
         expect(version, 'the lobby links the avatar with a version').toBeTruthy();
         return version!;
       };
@@ -802,7 +807,7 @@ test.describe('security review 2026-10 — regressions on the real stack', () =>
       // The member list links the image; no data URL rides along.
       const html = await lobbyHtml();
       expect(html).toContain(pictured.name);
-      expect(html).toMatch(new RegExp(`${avatarPath.replace(/[/]/g, '\\/')}\\?v=[0-9a-f]{6,32}`));
+      expect(html).toMatch(new RegExp(`${escapeRegExp(avatarPath)}\\?v=[0-9a-f]{6,32}`));
       expect(html).not.toContain('data:image');
 
       // "Profile visibility: nobody" — the viewer keeps the name, loses the picture.
