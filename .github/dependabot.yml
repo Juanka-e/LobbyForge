@@ -21,10 +21,14 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 3
 
+  # Workflows pin actions to full commit SHAs (tag in a trailing comment);
+  # this ecosystem bumps the SHA and the comment together. Weekly, so a
+  # security fix in a pinned action is not stuck for a month.
+  # dtolnay/rust-toolchain has no version tags — bump that pin by hand.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "monthly"
+      interval: "weekly"
     open-pull-requests-limit: 3
   - package-ecosystem: "docker-compose"
     directory: "/infra/docker"
