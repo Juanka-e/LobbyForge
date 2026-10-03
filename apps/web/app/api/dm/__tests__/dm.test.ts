@@ -48,8 +48,8 @@ beforeEach(() => {
 describe('GET /api/dm', () => {
   it('returns the DM channel list excluding blocked users', async () => {
     listDmChannelsForUser.mockResolvedValue([
-      { id: 'ch-1', otherUserId: OTHER_UID, otherUserDisplayName: 'Bob', otherUserAvatarUrl: null, lastMessageAt: new Date() },
-      { id: 'ch-2', otherUserId: '00000000-0000-0000-0000-0000000000DD', otherUserDisplayName: 'Blocked', otherUserAvatarUrl: null, lastMessageAt: new Date() },
+      { id: 'ch-1', otherUserId: OTHER_UID, otherUserDisplayName: 'Bob', otherUserAvatarRef: null, otherUserProfileVisibility: 'server_members', sharesServerWithOtherUser: true, lastMessageAt: new Date() },
+      { id: 'ch-2', otherUserId: '00000000-0000-0000-0000-0000000000DD', otherUserDisplayName: 'Blocked', otherUserAvatarRef: null, otherUserProfileVisibility: 'server_members', sharesServerWithOtherUser: true, lastMessageAt: new Date() },
     ]);
     getBlockedUserIds.mockResolvedValue(new Set(['00000000-0000-0000-0000-0000000000DD']));
     const { GET } = await import('../route.js');
@@ -58,6 +58,23 @@ describe('GET /api/dm', () => {
     const json = (await res.json()) as { channels: Array<{ otherUserId: string }> };
     expect(json.channels).toHaveLength(1);
     expect(json.channels[0].otherUserId).toBe(OTHER_UID);
+  });
+
+  it('security-review FILE-001 / AUTHZ-005: links avatars by URL, per profile visibility', async () => {
+    listDmChannelsForUser.mockResolvedValue([
+      { id: 'ch-1', otherUserId: OTHER_UID, otherUserDisplayName: 'Bob', otherUserAvatarRef: '0123456789ab', otherUserProfileVisibility: 'server_members', sharesServerWithOtherUser: true, lastMessageAt: new Date() },
+      { id: 'ch-3', otherUserId: '00000000-0000-0000-0000-0000000000EE', otherUserDisplayName: 'Hidden', otherUserAvatarRef: 'abcdefabcdef', otherUserProfileVisibility: 'nobody', sharesServerWithOtherUser: true, lastMessageAt: new Date() },
+    ]);
+    const { GET } = await import('../route.js');
+    const res = await GET(new Request('https://example.test/api/dm'), {});
+    const text = await res.text();
+    expect(text).not.toContain('data:');
+    const json = JSON.parse(text) as { channels: Array<{ otherUserDisplayName: string; otherUserAvatarUrl: string | null }> };
+    expect(json.channels).toEqual([
+      expect.objectContaining({ otherUserDisplayName: 'Bob', otherUserAvatarUrl: `/api/users/${OTHER_UID}/avatar?v=0123456789ab` }),
+      expect.objectContaining({ otherUserDisplayName: 'Hidden', otherUserAvatarUrl: null }),
+    ]);
+    expect(json.channels[0]).not.toHaveProperty('otherUserProfileVisibility');
   });
 
   it('returns 401 when no session', async () => {

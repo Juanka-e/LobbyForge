@@ -6,6 +6,7 @@ const replaceUserPasswordHash = vi.fn();
 const verifyPassword = vi.fn();
 const hashPassword = vi.fn();
 const revokeOtherSessions = vi.fn();
+const revokeDesktopHandoffCodes = vi.fn();
 
 vi.mock('@lobbyforge/db', () => ({ getUserCredentialsById, replaceUserPasswordHash }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __test: true }) }));
@@ -16,6 +17,7 @@ vi.mock('@/lib/password', () => ({
 }));
 vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));
 vi.mock('@/lib/session-tracker', () => ({ revokeOtherSessions }));
+vi.mock('@/lib/desktop-handoff-codes', () => ({ revokeDesktopHandoffCodes }));
 
 const secret = 'x'.repeat(32);
 const userId = '00000000-0000-0000-0000-000000000001';
@@ -27,6 +29,8 @@ beforeEach(() => {
   verifyPassword.mockReset();
   hashPassword.mockReset();
   revokeOtherSessions.mockReset();
+  revokeDesktopHandoffCodes.mockReset();
+  revokeDesktopHandoffCodes.mockResolvedValue(0);
 });
 
 async function post(body: unknown, authenticated = true) {
@@ -94,6 +98,83 @@ describe('POST /api/auth/password', () => {
     replaceUserPasswordHash.mockResolvedValue(false);
     const response = await post({ currentPassword: 'old password', newPassword: 'new password long' });
     expect(response.status).toBe(409);
+  });
+});
+
+// security-review AUTH-001: a password change must also void outstanding
+// desktop handoff codes, and must not report plain success when the other
+// sessions survived it.
+describe('POST /api/auth/password — security-review AUTH-001', () => {
+  function validChange() {
+    getUserCredentialsById.mockResolvedValue(credentials());
+    verifyPassword.mockResolvedValue(true);
+    hashPassword.mockResolvedValue('new-hash');
+    replaceUserPasswordHash.mockResolvedValue(true);
+  }
+
+  it('clears the outstanding desktop handoff codes after a successful change', async () => {
+    validChange();
+    revokeOtherSessions.mockResolvedValue(0);
+    revokeDesktopHandoffCodes.mockResolvedValue(2);
+    const response = await post({ currentPassword: 'old password', newPassword: 'new password long' });
+    expect(response.status).toBe(200);
+    expect(revokeDesktopHandoffCodes).toHaveBeenCalledWith(userId);
+  });
+
+  it('does not touch handoff codes when the change is refused', async () => {
+    getUserCredentialsById.mockResolvedValue(credentials());
+    verifyPassword.mockResolvedValue(false);
+    const response = await post({ currentPassword: 'wrong password', newPassword: 'new password long' });
+    expect(response.status).toBe(403);
+    expect(revokeDesktopHandoffCodes).not.toHaveBeenCalled();
+  });
+
+  it('a failed handoff-code cleanup only logs (the credential fingerprint still voids them)', async () => {
+    validChange();
+    revokeOtherSessions.mockResolvedValue(0);
+    revokeDesktopHandoffCodes.mockRejectedValue(new Error('redis down'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const response = await post({ currentPassword: 'old password', newPassword: 'new password long' });
+      expect(response.status).toBe(200);
+      expect(errorSpy).toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  // AUTH-001 follow-up: the password WAS changed, so an error status made
+  // the dialog report failure (in English) and invited a retry with the old
+  // password. It is a success carrying a warning the client translates.
+  it.each(['production', 'test'])(
+    'a failed session revocation is a success with a warning, never a silent one (NODE_ENV=%s)',
+    async (nodeEnv) => {
+      vi.stubEnv('NODE_ENV', nodeEnv);
+      validChange();
+      revokeOtherSessions.mockRejectedValue(new Error('redis down'));
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      try {
+        const response = await post({ currentPassword: 'old password', newPassword: 'new password long' });
+        expect(response.status).toBe(200);
+        expect(response.headers.get('cache-control')).toBe('no-store');
+        await expect(response.json()).resolves.toEqual({ status: 'changed', warning: 'sessions_not_revoked' });
+        // The operator still learns about it.
+        expect(errorSpy).toHaveBeenCalledWith('[auth/password] failed to revoke other sessions', 'redis down');
+      } finally {
+        errorSpy.mockRestore();
+        vi.unstubAllEnvs();
+      }
+    }
+  );
+
+  it('a successful revocation carries no warning', async () => {
+    validChange();
+    revokeOtherSessions.mockResolvedValue(3);
+    const response = await post({ currentPassword: 'old password', newPassword: 'new password long' });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body).toEqual({ status: 'changed' });
+    expect(body).not.toHaveProperty('warning');
   });
 });
 

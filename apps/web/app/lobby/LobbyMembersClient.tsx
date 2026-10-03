@@ -8,6 +8,7 @@ import { BotAvatar, BotBadge, BotProfilePopover, type LobbyBot } from './BotIden
 import { useLobbyVoice } from './LobbyVoiceProvider';
 import { useBlockList } from './BlockListProvider';
 import { useT } from '@/lib/i18n/client';
+import { userImageUrl } from '@/lib/user-image-url';
 import {
   PRESENCE_DOT_CLASS,
   PRESENCE_LABEL_KEYS,
@@ -32,8 +33,10 @@ interface Member {
   roleName?: string | null;
   roleColor?: string | null;
   isGuest?: boolean;
+  /** Short image URL from the server (security-review FILE-001) — never a data URL. */
   avatarUrl?: string | null;
-  bannerUrl?: string | null;
+  /** Banner reference; turned into a URL only when the popover opens. */
+  bannerRef?: string | null;
   statusText?: string | null;
   bio?: string | null;
   roles?: Array<{ id: string; name: string; color: string | null; icon: string | null; position: number; displaySeparately: boolean }>;
@@ -225,7 +228,9 @@ export function LobbyMembersClient({
             userId: openMember.id,
             displayName: openMember.name,
             avatarUrl: openMember.avatarUrl ?? null,
-            bannerUrl: openMember.bannerUrl ?? null,
+            // security-review FILE-001: the banner is fetched only now, for
+            // the one profile being looked at — never part of the list.
+            bannerUrl: userImageUrl(openMember.id, 'banner', openMember.bannerRef),
             isGuest: openMember.isGuest ?? false,
             roleName: openMember.roleName,
             roleColor: openMember.roleColor,

@@ -12,7 +12,7 @@
  * wrapper keeps method, header, and coarse rate-limit concerns central.
  */
 import { NextResponse } from 'next/server';
-import { clearCookieHeader } from '@lobbyforge/core';
+import { GUEST_COOKIE_NAME, clearCookieHeader } from '@lobbyforge/core';
 import { maintenanceResponseForRequest } from '@/lib/maintenance-guard';
 
 const SECURITY_HEADER_NAMES = [
@@ -137,6 +137,32 @@ export async function enforceBodyLimit(
   // Buffered (fully-read) body — no duplex requirement. The cast works
   // around TS's lib dom RequestInit lacking the undici duplex field.
   return new Request(req, { body: buffered } as RequestInit);
+}
+
+/** How many cookies in a Cookie header carry exactly this name. */
+export function countCookies(cookieHeader: string | null, name: string): number {
+  if (!cookieHeader) return 0;
+  let count = 0;
+  for (const part of cookieHeader.split(';')) {
+    const trimmed = part.trim();
+    const eq = trimmed.indexOf('=');
+    if (eq > 0 && trimmed.slice(0, eq) === name) count += 1;
+  }
+  return count;
+}
+
+/**
+ * security-review AUTH-002: the app never sets more than one session
+ * cookie (host-only, Path=/), but a request can carry two — and readers
+ * disagree on which one counts: `readCookie` (this wrapper's revocation
+ * check, `requireMaterializedSession`) takes the FIRST, Next's
+ * `cookies()` the LAST. `lf_guest=<valid>; lf_guest=<revoked>` passed the
+ * revocation check with one session and was authorized with the other.
+ * There is no honest reason to send two, so the request is refused.
+ */
+function duplicateSessionCookieResponse(req: Request): NextResponse | null {
+  if (countCookies(req.headers.get('cookie'), GUEST_COOKIE_NAME) <= 1) return null;
+  return NextResponse.json({ error: 'Duplicate session cookie' }, { status: 400 });
 }
 
 async function revokedSessionResponse(req: Request): Promise<NextResponse | null> {
@@ -345,6 +371,10 @@ export function withApiSecurity<TContext = unknown>(
     const guarded = await enforceBodyLimit(req, options.maxBodyBytes);
     if (guarded instanceof NextResponse) return applySecurityHeaders(guarded);
     const boundedReq = guarded;
+    // security-review AUTH-002: before (and regardless of) the revocation
+    // bypass — sign-in routes read the cookie too.
+    const duplicateCookie = duplicateSessionCookieResponse(req);
+    if (duplicateCookie) return applySecurityHeaders(duplicateCookie);
     if (options.sessionRevocation !== 'bypass') {
       const revoked = await revokedSessionResponse(req);
       if (revoked) return applySecurityHeaders(revoked);

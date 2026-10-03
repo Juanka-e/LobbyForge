@@ -1,7 +1,7 @@
 ﻿import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import { getDb } from '@/lib/db';
-import { readGuestSession } from '@/lib/guest-session';
+import { getActiveSession } from '@/lib/active-session';
 import { getSessionSecret } from '@/lib/api-auth';
 import { isOfficialDeployment } from '@/lib/deployment-mode';
 import {
@@ -21,6 +21,7 @@ import {
   listMemberSummariesForServer,
   listMessagesForChannel,
   getUserById,
+  listUserDisplayNames,
   getBlockedUserIds,
   listPluginInstallsForServer,
   listDmChannelsForUser,
@@ -54,6 +55,7 @@ import { formatMessageTimestamp } from '@/lib/chat-time';
 import { getTranslator } from '@/lib/i18n/server';
 import type { Translator } from '@/lib/i18n/core';
 import { pluginSummary } from '@/lib/plugin-catalog-text';
+import { projectDmChannel, projectMemberProfile } from '@/lib/profile-privacy';
 import { notifyMemberJoined } from '@/lib/bots/welcome';
 import { readMessageBot } from '@/lib/bots/message-meta';
 import { botTrustLevel, isBuiltInType } from '@/lib/bots/catalog';
@@ -98,8 +100,10 @@ interface Member {
   bio?: string | null;
   roles?: Array<{ id: string; name: string; color: string | null; icon: string | null; position: number; displaySeparately: boolean }>;
   isGuest?: boolean;
+  /** Short image URL (security-review FILE-001) — never a data URL. */
   avatarUrl?: string | null;
-  bannerUrl?: string | null;
+  /** Banner reference; the profile popover builds the URL when it opens. */
+  bannerRef?: string | null;
 }
 interface ChatMessage {
   id: string;
@@ -240,7 +244,8 @@ function toCategory(type: ChannelType): ChannelCategory {
 function buildMembers(
   summaries: MemberSummary[],
   serverPresence: Array<{ userId: string; channelId: string; status?: string }>,
-  voiceChannelIds: Set<string>
+  voiceChannelIds: Set<string>,
+  viewerUserId: string
 ): Member[] {
   const presenceByUser = new Map<string, { channelId: string; status?: string }>();
   for (const p of serverPresence) presenceByUser.set(p.userId, p);
@@ -264,12 +269,12 @@ function buildMembers(
         roleName: highestRole?.name ?? (s.roleName === '@everyone' ? null : s.roleName),
         roleColor: highestRole?.color ?? s.roleColor,
         roleIcon: highestRole?.icon ?? s.roleIcon,
-        statusText: s.statusText,
-        bio: s.bio,
         roles: s.roles,
         isGuest: s.isGuest,
-        avatarUrl: s.avatarUrl,
-        bannerUrl: s.bannerUrl,
+        // security-review FILE-001 / AUTHZ-005: short avatar URL + banner
+        // reference (never data URLs), and avatar / banner / bio / status
+        // only when the member's profile visibility allows this viewer.
+        ...projectMemberProfile(s, viewerUserId),
       } satisfies Member;
     })
     .sort((a, b) => {
@@ -314,7 +319,7 @@ function buildVoiceUsersByChannel(
 
 function buildMessages(
   rows: MessageRow[],
-  authors: Map<string, { displayName: string; avatarUrl: string | null }>,
+  authors: Map<string, { displayName: string }>,
   currentUserId: string | null,
   blockedIds: Set<string>,
   t: Translator
@@ -450,16 +455,20 @@ async function loadLiveData(
 
   // Resolve author display names for the visible message window.
   const authorIds = Array.from(new Set(messageRows.map((m) => m.userId).filter(Boolean))) as string[];
-  const authorMap = new Map<string, { displayName: string; avatarUrl: string | null }>();
+  // security-review FILE-001: names only — message rows never carried an
+  // avatar, and a data URL must not ride along into the render.
+  const authorMap = new Map<string, { displayName: string }>();
   for (const member of memberSummaries) {
-    authorMap.set(member.userId, { displayName: member.displayName, avatarUrl: member.avatarUrl });
+    authorMap.set(member.userId, { displayName: member.displayName });
   }
-  if (authorIds.length > 0) {
-    const missingAuthorIds = authorIds.filter((id) => !authorMap.has(id));
-    const users = await Promise.all(missingAuthorIds.map((id) => getUserById(db, id)));
-    users.forEach((u, i) => {
-      if (u) authorMap.set(missingAuthorIds[i], { displayName: u.displayName, avatarUrl: u.avatarUrl });
-    });
+  const missingAuthorIds = authorIds.filter((id) => !authorMap.has(id));
+  if (missingAuthorIds.length > 0) {
+    // Authors who left (or were never listed): ONE query selecting id +
+    // display name. security-review FILE-001: this used to be a full-row
+    // getUserById per author, which pulled each author's avatar and banner
+    // data URLs (up to ~14 MB a user) from Postgres on every lobby load.
+    const names = await listUserDisplayNames(db, missingAuthorIds);
+    for (const [id, displayName] of names) authorMap.set(id, { displayName });
   }
 
   // Mark the current user as "online" in Redis so they appear in the
@@ -491,7 +500,7 @@ async function loadLiveData(
   const rosterPresence = projectedServer.flatMap((entry) =>
     entry.channelId ? [{ userId: entry.userId, channelId: entry.channelId, status: entry.status }] : []
   );
-  const members = buildMembers(memberSummaries, memberPresence, voiceChannelIds);
+  const members = buildMembers(memberSummaries, memberPresence, voiceChannelIds, currentUserId);
   const voiceUsers = buildVoiceUsers(
     projectedVoice.filter((entry) => !!entry.channelId).map((entry) => ({ userId: entry.userId, status: entry.status })),
     memberSummaries,
@@ -603,7 +612,9 @@ export default async function LobbyPage({
   }
 
   const cookieStore = await cookies();
-  const session = readGuestSession(cookieStore.toString(), getSessionSecret());
+  // security-review AUTH-002: a revoked session renders as signed out
+  // (→ /login), not as the lobby with its channels and messages.
+  const session = await getActiveSession(cookieStore.toString(), getSessionSecret());
   const userId = session?.uid ?? null;
   const isOfficial = isOfficialDeployment();
   const demoAllowed = isLobbyDemoAllowed({
@@ -622,6 +633,7 @@ export default async function LobbyPage({
     : process.env.LOBBYFORGE_INSTANCE_NAME?.trim() || 'LobbyForge Community';
   let liveData: LobbyData | null = null;
   let liveDataFailed = false;
+  let joinRefused = false;
   const joinedServerList: Array<{ id: string; name: string }> = [];
   if (hasUser) {
     try {
@@ -642,7 +654,10 @@ export default async function LobbyPage({
         // banned users on open instances.
         const joined = await ensureServerMembershipDetailed(db, setupStatus.firstServerId, userId);
         if (!joined) {
-          throw new Error('User is banned from the default server; auto-join refused.');
+          // Banned, or (security-review AUTHZ-004) the server's access
+          // policy requires approval — either way nothing was created.
+          joinRefused = true;
+          throw new Error('Auto-join refused: banned from the default server or approval required.');
         }
         if (setupStatus.ownerUserId === userId) {
           await seedDefaultRoles(db, setupStatus.firstServerId, userId);
@@ -687,7 +702,11 @@ export default async function LobbyPage({
   }
 
   if (!demoAllowed && (liveDataFailed || !liveData)) {
-    return <LobbyUnavailable reason={liveDataFailed ? 'data_unavailable' : 'server_missing'} />;
+    return (
+      <LobbyUnavailable
+        reason={joinRefused ? 'join_refused' : liveDataFailed ? 'data_unavailable' : 'server_missing'}
+      />
+    );
   }
 
   const t = await getTranslator();
@@ -723,8 +742,10 @@ export default async function LobbyPage({
   const requestedDm = (await searchParams).dm;
   let initialDm: { channelId: string; name: string; avatarUrl: string | null } | null = null;
   if (requestedDm && userId) {
+    // security-review FILE-001 / AUTHZ-005: same projection as GET /api/dm.
     const conversation = await listDmChannelsForUser(getDb(), userId)
       .then((list) => list.find((c) => c.id === requestedDm) ?? null)
+      .then((found) => (found ? projectDmChannel(found, userId) : null))
       .catch(() => null);
     if (conversation) {
       initialDm = {
@@ -746,7 +767,7 @@ export default async function LobbyPage({
   );
 }
 
-async function LobbyUnavailable({ reason }: { reason: 'data_unavailable' | 'server_missing' }) {
+async function LobbyUnavailable({ reason }: { reason: 'data_unavailable' | 'server_missing' | 'join_refused' }) {
   const t = await getTranslator();
   return (
     <div className="grid h-dvh w-full place-items-center bg-background p-6">
@@ -754,14 +775,18 @@ async function LobbyUnavailable({ reason }: { reason: 'data_unavailable' | 'serv
         <span className="material-symbols-outlined text-4xl text-danger" aria-hidden>cloud_off</span>
         <h1 className="mt-4 text-xl font-semibold text-text-primary">{t('lobby.unavailable.title')}</h1>
         <p className="mt-2 text-sm leading-relaxed text-text-secondary">
-          {reason === 'data_unavailable'
-            ? t('lobby.unavailable.dataUnavailable')
-            : t('lobby.unavailable.serverMissing')}
+          {reason === 'join_refused'
+            ? t('lobby.unavailable.joinRefused')
+            : reason === 'data_unavailable'
+              ? t('lobby.unavailable.dataUnavailable')
+              : t('lobby.unavailable.serverMissing')}
         </p>
-        <Link href="/admin/health" className="mt-5 inline-flex items-center gap-2 rounded-md border border-border-strong px-4 py-2 text-sm text-text-secondary hover:bg-surface-container">
-          <span className="material-symbols-outlined text-lg" aria-hidden>health_and_safety</span>
-          {t('lobby.unavailable.openHealth')}
-        </Link>
+        {reason !== 'join_refused' && (
+          <Link href="/admin/health" className="mt-5 inline-flex items-center gap-2 rounded-md border border-border-strong px-4 py-2 text-sm text-text-secondary hover:bg-surface-container">
+            <span className="material-symbols-outlined text-lg" aria-hidden>health_and_safety</span>
+            {t('lobby.unavailable.openHealth')}
+          </Link>
+        )}
       </section>
     </div>
   );

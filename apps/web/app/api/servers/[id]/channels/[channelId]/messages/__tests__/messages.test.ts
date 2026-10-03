@@ -432,7 +432,7 @@ describe('PATCH /api/servers/{id}/channels/{channelId}/messages/{messageId}', ()
     );
   });
 
-  it('allows the server owner to edit a message they did not author', async () => {
+  it('security-review AUTHZ-003: not even the server owner may rewrite a message they did not author', async () => {
     // Caller is owner; message author is someone else.
     getServerById.mockResolvedValue({
       id: SERVER_ID,
@@ -464,9 +464,9 @@ describe('PATCH /api/servers/{id}/channels/{channelId}/messages/{messageId}', ()
     const res = await PATCH(req, {
       params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID, messageId: MESSAGE_ID }),
     });
-    expect(res.status).toBe(200);
-    const json = (await res.json()) as { message: { content: string } };
-    expect(json.message.content).toBe('mod-edited');
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe('not_message_author');
+    expect(updateMessage).not.toHaveBeenCalled();
   });
 
   it('rejects arbitrary client metadata on message updates', async () => {
@@ -569,6 +569,103 @@ describe('DELETE /api/servers/{id}/channels/{channelId}/messages/{messageId}', (
     const json = (await res.json()) as { ok: boolean };
     expect(json.ok).toBe(true);
     expect(softDeleteMessage).toHaveBeenCalledWith(expect.anything(), MESSAGE_ID);
+  });
+});
+
+// security-review AUTHZ-003: MANAGE_MESSAGES could rewrite anyone's text
+// (the message kept the original author). Moderators keep delete + pin.
+describe('security-review AUTHZ-003: message text is author-only', () => {
+  const OTHER_AUTHOR = '00000000-0000-0000-0000-000000000088';
+  const itemUrl = `https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}/messages/${MESSAGE_ID}`;
+  const params = () => ({
+    params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID, messageId: MESSAGE_ID }),
+  });
+
+  function moderatorSetup(authorId: string = OTHER_AUTHOR) {
+    getServerById.mockResolvedValue({
+      id: SERVER_ID,
+      name: 'A',
+      slug: null,
+      ownerUserId: '00000000-0000-0000-0000-000000000099',
+      iconUrl: null,
+      defaultLocale: 'en',
+      isPublic: false,
+      createdAt: new Date('2026-06-09T00:00:00Z'),
+      deletedAt: null,
+    });
+    isServerMember.mockResolvedValue(true);
+    getUserPermissions.mockResolvedValue(['send_messages', 'read_message_history', 'manage_messages']);
+    mockChannelAlive();
+    getMessageById.mockResolvedValue(mockMessageRow({ userId: authorId }));
+    updateMessage.mockImplementation(async (_db, _id, patch) => mockMessageRow({ userId: authorId, ...patch }));
+  }
+
+  it('a non-author with MANAGE_MESSAGES gets 403 on a content edit', async () => {
+    moderatorSetup();
+    const { PATCH } = await loadItemRoute();
+    const res = await PATCH(
+      new Request(itemUrl, { method: 'PATCH', headers: { cookie: makeSessionCookie() }, body: JSON.stringify({ content: 'I give my admin to X' }) }),
+      params()
+    );
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe('not_message_author');
+    expect(updateMessage).not.toHaveBeenCalled();
+  });
+
+  it('...and cannot smuggle a content edit in with a pin', async () => {
+    moderatorSetup();
+    const { PATCH } = await loadItemRoute();
+    const res = await PATCH(
+      new Request(itemUrl, { method: 'PATCH', headers: { cookie: makeSessionCookie() }, body: JSON.stringify({ content: 'rewritten', pinned: true }) }),
+      params()
+    );
+    expect(res.status).toBe(403);
+    expect(updateMessage).not.toHaveBeenCalled();
+  });
+
+  it('the same moderator may still pin it (200)', async () => {
+    moderatorSetup();
+    const { PATCH } = await loadItemRoute();
+    const res = await PATCH(
+      new Request(itemUrl, { method: 'PATCH', headers: { cookie: makeSessionCookie() }, body: JSON.stringify({ pinned: true }) }),
+      params()
+    );
+    expect(res.status).toBe(200);
+    expect(updateMessage).toHaveBeenCalledWith(expect.anything(), MESSAGE_ID, {
+      metadata: expect.objectContaining({ $pinnedBy: USER_ID }),
+    });
+  });
+
+  it('the same moderator may still delete it (200)', async () => {
+    moderatorSetup();
+    const { DELETE } = await loadItemRoute();
+    const res = await DELETE(new Request(itemUrl, { method: 'DELETE', headers: { cookie: makeSessionCookie() } }), params());
+    expect(res.status).toBe(200);
+    expect(softDeleteMessage).toHaveBeenCalledWith(expect.anything(), MESSAGE_ID);
+  });
+
+  it('an author who lost SEND_MESSAGES cannot edit their own message', async () => {
+    moderatorSetup(USER_ID);
+    getUserPermissions.mockResolvedValue(['read_message_history']);
+    const { PATCH } = await loadItemRoute();
+    const res = await PATCH(
+      new Request(itemUrl, { method: 'PATCH', headers: { cookie: makeSessionCookie() }, body: JSON.stringify({ content: 'edited' }) }),
+      params()
+    );
+    expect(res.status).toBe(403);
+    expect(updateMessage).not.toHaveBeenCalled();
+  });
+
+  it('an author with SEND_MESSAGES can edit their own message', async () => {
+    moderatorSetup(USER_ID);
+    getUserPermissions.mockResolvedValue(['send_messages', 'read_message_history']);
+    const { PATCH } = await loadItemRoute();
+    const res = await PATCH(
+      new Request(itemUrl, { method: 'PATCH', headers: { cookie: makeSessionCookie() }, body: JSON.stringify({ content: 'edited' }) }),
+      params()
+    );
+    expect(res.status).toBe(200);
+    expect(updateMessage).toHaveBeenCalledWith(expect.anything(), MESSAGE_ID, { content: 'edited' });
   });
 });
 

@@ -4,6 +4,7 @@ import { findOrCreateDmChannel, listDmChannelsForUser, getBlockedUserIds } from 
 import { requireMaterializedSession } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
 import { withApiSecurity } from '@/lib/security-headers';
+import { projectDmChannel } from '@/lib/profile-privacy';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -23,9 +24,11 @@ async function handleGet(req: Request): Promise<NextResponse> {
       listDmChannelsForUser(db, uid),
       getBlockedUserIds(db, uid),
     ]);
-    const filtered = channels.filter(
-      (c) => !blockedIds.has(c.otherUserId)
-    );
+    // security-review FILE-001 / AUTHZ-005: a short avatar URL (never the
+    // data URL), and only when the other user's profile visibility allows it.
+    const filtered = channels
+      .filter((c) => !blockedIds.has(c.otherUserId))
+      .map((c) => projectDmChannel(c, uid));
     return NextResponse.json(
       { channels: filtered },
       { headers: { 'Cache-Control': 'no-store' } }

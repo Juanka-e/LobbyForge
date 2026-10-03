@@ -97,6 +97,60 @@ describe('db:migrate', () => {
     expect(sql).toContain('DISTINCT ON ("server_id")');
   });
 
+  it('keeps moderation state outside the membership, additively (0040, security-review AUTHZ-002)', () => {
+    const sql = readFileSync(
+      join(__dirname, '..', '..', 'drizzle', '0040_server_member_sanctions.sql'),
+      'utf8'
+    );
+    // Expand-only: one new table, nothing dropped, altered or deleted.
+    expect(sql.match(/CREATE TABLE/g)).toHaveLength(1);
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS "server_member_sanctions"');
+    expect(sql).not.toMatch(/DROP |ALTER TABLE|DELETE FROM|^UPDATE /m);
+    expect(sql).toContain('PRIMARY KEY ("server_id", "user_id")');
+    // Outlives the membership: keyed to servers/users, never to memberships.
+    expect(sql).not.toMatch(/REFERENCES "memberships"/);
+    expect(sql).toContain('REFERENCES "servers"("id") ON DELETE cascade');
+    expect(sql).toContain('REFERENCES "users"("id") ON DELETE cascade');
+    // Backfill of the sanctions in force today; idempotent.
+    expect(sql).toMatch(/INSERT INTO "server_member_sanctions"[\s\S]*FROM "memberships" m/);
+    expect(sql).toContain('m."timed_out_until" IS NOT NULL OR m."voice_muted" = true');
+    expect(sql).toContain('ON CONFLICT ("server_id", "user_id") DO NOTHING');
+    const statements = sql
+      .split('--> statement-breakpoint')
+      .map((part) => part.replace(/^\s*--.*$/gm, '').trim())
+      .filter(Boolean);
+    expect(statements).toHaveLength(2);
+    expect(statements.every((statement) => statement.split(';').filter((s) => s.trim()).length === 1)).toBe(true);
+  });
+
+  it('adds explicit user image versions, additively and idempotently (0041, security-review FILE-001)', () => {
+    const drizzleDir = join(__dirname, '..', '..', 'drizzle');
+    const sql = readFileSync(join(drizzleDir, '0041_user_image_versions.sql'), 'utf8');
+    // Expand-only: two new columns, nothing created, dropped, rewritten or backfilled.
+    expect(sql).not.toMatch(/CREATE |DROP |DELETE FROM|^UPDATE |ALTER COLUMN/m);
+    expect(sql).toContain('ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "avatar_version" integer DEFAULT 0 NOT NULL');
+    expect(sql).toContain('ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "banner_version" integer DEFAULT 0 NOT NULL');
+    const statements = sql
+      .split('--> statement-breakpoint')
+      .map((part) => part.replace(/^\s*--.*$/gm, '').trim())
+      .filter(Boolean);
+    expect(statements).toHaveLength(2);
+    expect(statements.every((statement) => statement.split(';').filter((s) => s.trim()).length === 1)).toBe(true);
+
+    // The snapshot chains from 0040 and records both columns on users.
+    const prev = JSON.parse(readFileSync(join(drizzleDir, 'meta', '0040_snapshot.json'), 'utf8')) as { id: string };
+    const snapshot = JSON.parse(readFileSync(join(drizzleDir, 'meta', '0041_snapshot.json'), 'utf8')) as {
+      id: string;
+      prevId: string;
+      tables: Record<string, { columns: Record<string, { type: string; notNull: boolean; default?: unknown }> }>;
+    };
+    expect(snapshot.prevId).toBe(prev.id);
+    expect(snapshot.id).not.toBe(prev.id);
+    for (const column of ['avatar_version', 'banner_version']) {
+      expect(snapshot.tables['public.users']!.columns[column]).toMatchObject({ type: 'integer', notNull: true, default: 0 });
+    }
+  });
+
   it('adds identity links without recreating previously migrated tables', () => {
     const sql = readFileSync(
       join(__dirname, '..', '..', 'drizzle', '0018_user_identity_links.sql'),

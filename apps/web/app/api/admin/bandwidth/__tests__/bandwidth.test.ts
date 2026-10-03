@@ -5,18 +5,16 @@ const getInstanceSetupStatus = vi.fn();
 const listServersForUser = vi.fn();
 const getServerBandwidthTotals = vi.fn();
 const clearBandwidthAlert = vi.fn();
+const nextCookies = vi.fn();
 
 vi.mock('@/lib/admin-auth', () => ({
   isInstanceAdminAllowed,
   ADMIN_TOKEN_COOKIE: 'lf_admin_token',
 }));
 
-vi.mock('next/headers', () => ({
-  cookies: vi.fn().mockResolvedValue({
-    toString: () => '',
-    get: () => undefined,
-  }),
-}));
+// security-review AUTH-002: the route must NOT read next/headers cookies
+// (it keeps the last duplicate cookie); this spy proves it is never used.
+vi.mock('next/headers', () => ({ cookies: nextCookies }));
 
 vi.mock('@lobbyforge/db', () => ({
   getInstanceSetupStatus,
@@ -49,6 +47,8 @@ beforeEach(() => {
   listServersForUser.mockReset();
   getServerBandwidthTotals.mockReset();
   clearBandwidthAlert.mockReset();
+  nextCookies.mockReset();
+  nextCookies.mockResolvedValue({ toString: () => '', get: () => undefined });
   // Default: admin allowed.
   isInstanceAdminAllowed.mockResolvedValue(true);
   // clearBandwidthAlert is called with .catch() in the route — must return a Promise.
@@ -149,5 +149,48 @@ describe('POST /api/admin/bandwidth', () => {
       {}
     );
     expect(res.status).toBe(403);
+  });
+});
+
+// security-review AUTH-002: `Cookie: lf_guest=<valid>; lf_guest=<revoked>` —
+// next/headers kept the last duplicate while withApiSecurity's revocation
+// check read the first. The route now authorizes from the request header
+// itself, the same one the wrapper checked.
+describe('/api/admin/bandwidth — security-review AUTH-002 cookie source', () => {
+  const COOKIE = 'lf_guest=first.sig; lf_admin_token=operator-token; lf_guest=second.sig';
+
+  it('GET authorizes with the request Cookie header, not next/headers', async () => {
+    getInstanceSetupStatus.mockResolvedValue({ ownerUserId: null });
+    const { GET } = await loadRoute();
+    const res = await GET(
+      new Request('https://example.test/api/admin/bandwidth', { headers: { cookie: COOKIE } }),
+      {}
+    );
+    expect(res.status).toBe(200);
+    expect(isInstanceAdminAllowed).toHaveBeenCalledWith(COOKIE, 'operator-token');
+    expect(nextCookies).not.toHaveBeenCalled();
+  });
+
+  it('POST authorizes with the request Cookie header, not next/headers', async () => {
+    const { POST } = await loadRoute();
+    const res = await POST(
+      new Request('https://example.test/api/admin/bandwidth', {
+        method: 'POST',
+        headers: { cookie: COOKIE },
+        body: JSON.stringify({ action: 'acknowledge-alert', serverId: SERVER_ID }),
+      }),
+      {}
+    );
+    expect(res.status).toBe(200);
+    expect(isInstanceAdminAllowed).toHaveBeenCalledWith(COOKIE, 'operator-token');
+    expect(nextCookies).not.toHaveBeenCalled();
+  });
+
+  it('a request without cookies is checked as anonymous', async () => {
+    isInstanceAdminAllowed.mockResolvedValue(false);
+    const { GET } = await loadRoute();
+    const res = await GET(new Request('https://example.test/api/admin/bandwidth'), {});
+    expect(res.status).toBe(403);
+    expect(isInstanceAdminAllowed).toHaveBeenCalledWith(null, null);
   });
 });

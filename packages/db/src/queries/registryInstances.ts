@@ -100,6 +100,69 @@ export async function listPublicRegistryInstances(
   return rows as RegistryInstanceRow[];
 }
 
+/**
+ * security-review HUB-003: the listing's freshness rule as a predicate, for
+ * the pages that load ONE entry by id (detail, leave-site). They checked
+ * only isListed/isBlocked, so an entry whose operator went away — and
+ * whose domain may since have changed hands — kept a verified badge and
+ * an outbound link there. No heartbeat at all counts as stale.
+ */
+export function isRegistryInstanceStale(
+  lastHeartbeatAt: Date | string | null | undefined,
+  now: number = Date.now()
+): boolean {
+  if (!lastHeartbeatAt) return true;
+  const at = new Date(lastHeartbeatAt).getTime();
+  if (!Number.isFinite(at)) return true;
+  return now - at > HEARTBEAT_STALE_MS;
+}
+
+/** HUB-003: may the public directory show this entry and link out to it? */
+export function isRegistryInstancePubliclyVisible(
+  row: Pick<RegistryInstanceRow, 'isListed' | 'isBlocked' | 'lastHeartbeatAt'>,
+  now: number = Date.now()
+): boolean {
+  return row.isListed && !row.isBlocked && !isRegistryInstanceStale(row.lastHeartbeatAt, now);
+}
+
+/**
+ * Where an entry stands, for directory moderators. One value, most
+ * important first: blocked, then pending (not listed — new, or sent back
+ * to review), then stale (listed but no recent heartbeat, so hidden from
+ * the public), else listed (public).
+ */
+export type RegistryInstanceStatus = 'blocked' | 'pending' | 'stale' | 'listed';
+
+export function registryInstanceStatus(
+  row: Pick<RegistryInstanceRow, 'isListed' | 'isBlocked' | 'lastHeartbeatAt'>,
+  now: number = Date.now()
+): RegistryInstanceStatus {
+  if (row.isBlocked) return 'blocked';
+  if (!row.isListed) return 'pending';
+  if (isRegistryInstanceStale(row.lastHeartbeatAt, now)) return 'stale';
+  return 'listed';
+}
+
+/**
+ * security-review HUB-003: every directory entry — pending, stale and
+ * blocked included — for the admin moderation dashboard. The dashboard
+ * used the PUBLIC listing, so the entries that most need a moderator
+ * (waiting for review, gone quiet, blocked) were exactly the ones it could
+ * not see. Newest first.
+ */
+export async function listRegistryInstancesForModeration(
+  db: DbClient,
+  options: { limit?: number } = {}
+): Promise<RegistryInstanceRow[]> {
+  const limit = Math.min(Math.max(options.limit ?? 200, 1), 500);
+  const rows = await db
+    .select()
+    .from(registryInstances)
+    .orderBy(desc(registryInstances.createdAt))
+    .limit(limit);
+  return rows as RegistryInstanceRow[];
+}
+
 /** Find a single registry instance by its instance id. */
 export async function getRegistryInstanceByInstanceId(
   db: DbClient,
@@ -136,6 +199,11 @@ export interface UpsertRegistryInstanceInput {
  * Rows created before the owner column existed (owner NULL) are claimed by
  * the first updater — the legitimate operator registers before an attacker
  * in practice, and admins can still moderate via setRegistryInstanceListing.
+ *
+ * An update never moves the domain or the key (change-domain / rotate-key
+ * own those), and a change to any displayed field (name, description,
+ * region, languages, tags, features) resets isListed and isVerified —
+ * security-review HUB-002.
  */
 export async function upsertRegistryInstance(
   db: DbClient,
@@ -167,6 +235,14 @@ export async function upsertRegistryInstance(
     publicKey: input.publicKey,
     ownerUserId: input.actorUserId,
   };
+  // security-review HUB-002: changing what the directory SHOWS about a
+  // reviewed entry sends it back to review, the way a domain move does
+  // (changeRegistryInstanceDomain). Otherwise the owner's hub session
+  // alone could rename a listed, verified entry to "LobbyForge Official
+  // Support" with a phishing description. Compared inside the statement
+  // (old row vs `excluded`), so a concurrent update cannot slip past it;
+  // re-registering with the same fields keeps the listing.
+  const displayChanged = sql`(${registryInstances.name}, ${registryInstances.description}, ${registryInstances.region}, ${registryInstances.languages}, ${registryInstances.tags}, ${registryInstances.features}) IS DISTINCT FROM (excluded.name, excluded.description, excluded.region, excluded.languages, excluded.tags, excluded.features)`;
   // 11th-audit: the ownership decision is INSIDE the atomic statement.
   // The old SELECT-then-upsert let a concurrent second registrant
   // rewrite the winner's metadata via the conflict branch. Now the
@@ -191,6 +267,8 @@ export async function upsertRegistryInstance(
         languages: values.languages,
         tags: values.tags,
         features: values.features,
+        isListed: sql`CASE WHEN ${displayChanged} THEN false ELSE ${registryInstances.isListed} END`,
+        isVerified: sql`CASE WHEN ${displayChanged} THEN false ELSE ${registryInstances.isVerified} END`,
       },
       setWhere: sql`${registryInstances.ownerUserId} = excluded.owner_user_id`,
     })

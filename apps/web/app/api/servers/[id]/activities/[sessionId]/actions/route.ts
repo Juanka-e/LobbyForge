@@ -11,6 +11,7 @@ import {
   setGameSessionStateCAS,
 } from '@lobbyforge/db';
 import { CorePermission, hasPermission } from '@lobbyforge/core';
+import { shouldAuditAction, type GamePluginActionPolicy } from '@lobbyforge/plugin-sdk';
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { getPluginServer } from '@/lib/plugin-server-registry';
@@ -45,6 +46,21 @@ const ActionSchema = z.object({
   // meaningful for its own action union.
 });
 
+/**
+ * The plugin's policy for an action type, host-only by default. Own
+ * properties only: a plain index let `type: "constructor"` resolve to
+ * Object.prototype's function — no `role`, so neither the host nor the
+ * player check applied.
+ */
+function actionPolicyFor(
+  plugin: NonNullable<ReturnType<typeof getPluginServer>>,
+  actionType: string
+): GamePluginActionPolicy {
+  const policies = plugin.actionPolicies;
+  if (policies && Object.hasOwn(policies, actionType)) return policies[actionType]!;
+  return { role: 'host' };
+}
+
 async function authorizePluginAction(input: {
   serverId: string;
   sessionId: string;
@@ -57,7 +73,7 @@ async function authorizePluginAction(input: {
   sessionStatus: string;
 }): Promise<{ ok: true; action: Record<string, unknown> } | { ok: false; response: NextResponse }> {
   const actionType = String(input.action.type);
-  const policy = input.plugin.actionPolicies?.[actionType] ?? { role: 'host' as const };
+  const policy = actionPolicyFor(input.plugin, actionType);
 
   // LF-014: Reject actions on ended sessions.
   // beta-review: read the ROW status. The old check read
@@ -325,7 +341,7 @@ async function handlePost(
     // roll — never an anonymous vote, which it would name. The actor is
     // offered to the reducer as a player while the action runs, and only
     // written to the roster once the action has changed state and saved.
-    const joinsRoster = plugin.actionPolicies?.[String(prepared.action.type)]?.joinsRoster === true;
+    const joinsRoster = actionPolicyFor(plugin, String(prepared.action.type)).joinsRoster === true;
     let joiningPlayer = false;
     if (joinsRoster) {
       try {
@@ -431,14 +447,23 @@ async function handlePost(
       revision: (casResult.row as { revision?: number })?.revision,
       publicSummary: Object.keys(publicSummary).length > 0 ? publicSummary : undefined,
     });
-    void logAction(getDb(), {
-      serverId,
-      actorUserId: session.uid,
-      action: 'activity.action',
-      targetType: 'session',
-      targetId: sessionId,
-      metadata: { pluginId: row.pluginId, actionType: parseResult.data.type },
-    }).catch((err) => console.error('[audit] activity.action failed:', (err as Error).message));
+    // security-review PLUG-001: audit only actions that changed state AND
+    // whose policy asks for it — host actions by default, never gameplay.
+    // VIEW_AUDIT_LOG holders read every row, so "u1 sent pack-chat" named a
+    // vampire, a night-* row a night role, and `vote` rows lined up with
+    // the poll counts named anonymous voters; refused actions were logged
+    // too. Same policy lookup (and host default) as authorizePluginAction.
+    const auditPolicy = actionPolicyFor(plugin, String(parseResult.data.type));
+    if (stateChanged && shouldAuditAction(auditPolicy)) {
+      void logAction(getDb(), {
+        serverId,
+        actorUserId: session.uid,
+        action: 'activity.action',
+        targetType: 'session',
+        targetId: sessionId,
+        metadata: { pluginId: row.pluginId, actionType: parseResult.data.type },
+      }).catch((err) => console.error('[audit] activity.action failed:', (err as Error).message));
+    }
 
     // LF-001: EVERYONE gets the projection — including the host. Anti-cheat.
     const viewerState = projectActivityState(committedState, row.pluginId, session.uid);

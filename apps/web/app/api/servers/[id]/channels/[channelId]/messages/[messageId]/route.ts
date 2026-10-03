@@ -14,6 +14,7 @@ import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
 import { authorizeChannelMessageAccess } from '@/lib/message-authorization';
+import { authorizeServerPermission } from '@/lib/permissions';
 import { moderateMessage, moderationBlockedBody } from '@/lib/bots/moderation';
 import { readMessageBot } from '@/lib/bots/message-meta';
 
@@ -124,8 +125,10 @@ async function loadAndAuthorize(
 }
 
 /**
- * Mutation gate for PATCH / DELETE. The caller may proceed if they are
- * the author OR if they have MANAGE_MESSAGES on the server.
+ * Mutation gate for DELETE. The caller may proceed if they are the
+ * author OR if they have MANAGE_MESSAGES on the server. Content edits do
+ * NOT use it — they are author-only (security-review AUTHZ-003); pinning
+ * has its own owner/MANAGE_MESSAGES check in PATCH.
  */
 async function canMutateMessage(
   serverId: string,
@@ -204,8 +207,23 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
     if (body.content !== undefined && (access.message.botId || !access.message.userId)) {
       return NextResponse.json({ error: 'Bot messages cannot be edited', code: 'bot_message_readonly' }, { status: 403 });
     }
-    if (body.content !== undefined && !(await canMutateMessage(serverId, access.isAuthor, session.uid))) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    if (body.content !== undefined) {
+      // security-review AUTHZ-003: only the AUTHOR may change a message's
+      // text. MANAGE_MESSAGES (and the owner) used to pass here, so a
+      // moderator could put words in anyone's mouth — the message still
+      // shows the original author, with only an "edited" mark. Moderators
+      // keep delete and pin.
+      if (!access.isAuthor) {
+        return NextResponse.json(
+          { error: 'Only the author can edit this message', code: 'not_message_author' },
+          { status: 403 }
+        );
+      }
+      // An edit is a form of sending: an author whose SEND_MESSAGES was
+      // revoked must not keep rewriting their old messages (the timeout
+      // gate above covers MODERATE_MEMBERS timeouts).
+      const sendAuth = await authorizeServerPermission(session.uid, serverId, CorePermission.SEND_MESSAGES);
+      if (!sendAuth.ok) return sendAuth.response;
     }
     // Bots milestone: an edit cannot slip past the Moderation Bot — its
     // content rules run on the new text (the counting rules only count

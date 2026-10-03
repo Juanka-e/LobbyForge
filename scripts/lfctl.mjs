@@ -48,7 +48,8 @@ Usage:
   node scripts/lfctl.mjs backup restore --file <dump> --to <database-url> [--allow-unverified] [--json]
   node scripts/lfctl.mjs setup token [--json]
   node scripts/lfctl.mjs directory keygen [--out <dir>] [--json]
-  node scripts/lfctl.mjs directory heartbeat --url <directory-origin> --instance-id <id> --key-file <pem>
+  node scripts/lfctl.mjs directory proof --instance-id <directory-id> --url <https-origin> --key-file <pem> [--json]
+  node scripts/lfctl.mjs directory heartbeat --url <directory-origin> --instance-id <directory-id> --key-file <pem>
       [--online-users N] [--public-rooms N] [--stats-version V] [--doctor-score N]
       [--once | --interval <seconds>] [--json]
 
@@ -612,6 +613,37 @@ function printPlan(plan) {
   console.log('Auto-apply: gated on --yes + strictly verified backup (safety gates enforced).');
 }
 
+// ── Directory instance id (security-review HUB-001) ──────────────────
+// Twin of apps/web/lib/directory-verification.ts. Each install has its
+// own random directory id (instance_settings.directory_instance_id, a
+// UUID v4 — shown as `instanceId` by GET /api/admin/directory/config).
+// `self-host` / `default` are the same on every install and the official
+// directory refuses them.
+const DIRECTORY_INSTANCE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const RESERVED_DIRECTORY_INSTANCE_IDS = new Set(['self-host', 'default']);
+
+function assertDirectoryInstanceId(instanceId) {
+  const where = "this instance's directory id is `instanceId` in GET /api/admin/directory/config";
+  if (RESERVED_DIRECTORY_INSTANCE_IDS.has(String(instanceId).trim().toLowerCase())) {
+    throw new Error(`--instance-id ${instanceId} is shared by every LobbyForge install and cannot be registered; ${where}`);
+  }
+  if (!DIRECTORY_INSTANCE_ID_PATTERN.test(String(instanceId))) {
+    throw new Error(`--instance-id must be a UUID; ${where}`);
+  }
+}
+
+/** The directory proves the domain as an origin (no path, no trailing slash). */
+function directoryOrigin(raw) {
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`--url ${raw} is not a URL`);
+  }
+  if (url.protocol !== 'https:') throw new Error('--url must use https://');
+  return url.origin;
+}
+
 // ── Directory heartbeat signing (LF-SEC-007) ─────────────────────────
 // Self-contained twin of apps/web/lib/directory-heartbeat.ts (lfctl runs
 // from a plain checkout with no build step). The canonical payload must
@@ -714,6 +746,8 @@ async function main() {
       if (!options.instanceId) throw new Error('directory proof requires --instance-id <id>');
       if (!options.url) throw new Error('directory proof requires --url <domain>');
       if (!options.keyFile) throw new Error('directory proof requires --key-file <pem>');
+      assertDirectoryInstanceId(options.instanceId);
+      const domainOrigin = directoryOrigin(options.url);
       const privateKeyPem = await fs.readFile(options.keyFile, 'utf8');
       const publicKeyPem = await fs.readFile(options.keyFile.replace('private', 'public'), 'utf8');
       const publicKeyB64 = createPublicKey(publicKeyPem)
@@ -722,12 +756,12 @@ async function main() {
       const canonical = JSON.stringify({
         verify: 1,
         instanceId: options.instanceId,
-        domain: options.url,
+        domain: domainOrigin,
         publicKey: publicKeyB64,
       });
       const proof = sign(null, Buffer.from(canonical, 'utf8'), createPrivateKey(privateKeyPem)).toString('base64');
       if (options.json) {
-        console.log(JSON.stringify({ proof, instanceId: options.instanceId, domain: options.url }, null, 2));
+        console.log(JSON.stringify({ proof, instanceId: options.instanceId, domain: domainOrigin, publicKey: publicKeyB64 }, null, 2));
       } else {
         console.log('Directory verification proof:');
         console.log(proof);
@@ -741,6 +775,7 @@ async function main() {
       if (!options.url) throw new Error('directory heartbeat requires --url <directory-origin>');
       if (!options.instanceId) throw new Error('directory heartbeat requires --instance-id <id>');
       if (!options.keyFile) throw new Error('directory heartbeat requires --key-file <pem>');
+      assertDirectoryInstanceId(options.instanceId);
       const privateKeyPem = await fs.readFile(options.keyFile, 'utf8');
       const stats = {};
       if (options.onlineUsers !== undefined) stats.onlineUsers = options.onlineUsers;

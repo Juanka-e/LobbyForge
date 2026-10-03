@@ -249,6 +249,7 @@
   "adminSettings.roles.deleted": "Role deleted.",
   "adminSettings.roles.edit": "Edit role",
   "adminSettings.roles.empty": "No roles configured. Default @everyone is created automatically.",
+  "adminSettings.roles.gatesChannels": "{count, plural, one {Only this role can see {channels}. Change that channel's access first, then delete the role.} other {Only this role can see {channels}. Change those channels' access first, then delete the role.}}",
   "adminSettings.roles.group.activities": "Activities",
   "adminSettings.roles.group.general": "General",
   "adminSettings.roles.group.members": "Members",

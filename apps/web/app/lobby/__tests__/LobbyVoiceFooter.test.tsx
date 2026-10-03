@@ -160,6 +160,77 @@ describe('LobbyVoiceFooter', () => {
     expect(screen.getByTitle('Bağlantıyı kes')).toBeInTheDocument();
   });
 
+  // security-review AUTHZ-006 follow-up: a timeout grants canPublish:false,
+  // so the mic, camera and screen share cannot be turned on at all.
+  it('a timed-out member sees "Timed out" and cannot turn on the mic, camera or screen share', () => {
+    const toggleMic = vi.fn();
+    renderFooter(
+      makeVoice({
+        connectionState: ConnectionState.Connected,
+        activeChannelId: 'ch-1',
+        serverMuted: true,
+        publishBlocked: true,
+        publishBlockedReason: 'timeout',
+        toggleMic,
+      })
+    );
+    expect(screen.getByText('Timed out')).toBeInTheDocument();
+    const blocked = screen.getAllByTitle('Unavailable while you are timed out');
+    // Screen share, camera and mic.
+    expect(blocked).toHaveLength(3);
+    for (const button of blocked) expect(button).toBeDisabled();
+    fireEvent.click(blocked[2]);
+    expect(toggleMic).not.toHaveBeenCalled();
+    expect(screen.getByTitle('Disconnect')).not.toBeDisabled();
+  });
+
+  it('a camera that is still on can be switched off while publishing is blocked', () => {
+    renderFooter(
+      makeVoice({
+        connectionState: ConnectionState.Connected,
+        activeChannelId: 'ch-1',
+        serverMuted: true,
+        publishBlocked: true,
+        publishBlockedReason: 'timeout',
+        cameraEnabled: true,
+      })
+    );
+    expect(screen.getByTitle('Turn off camera')).not.toBeDisabled();
+  });
+
+  it('a server-muted member keeps camera and screen share, and the mic explains the mute', () => {
+    renderFooter(
+      makeVoice({
+        connectionState: ConnectionState.Connected,
+        activeChannelId: 'ch-1',
+        serverMuted: true,
+        publishBlocked: false,
+        publishBlockedReason: 'server_mute',
+      })
+    );
+    expect(screen.getByText('Server muted')).toBeInTheDocument();
+    // Still clickable: the click surfaces the "a moderator muted you" notice.
+    expect(screen.getByTitle('Muted by a moderator')).not.toBeDisabled();
+    expect(screen.getByTitle('Turn on camera')).not.toBeDisabled();
+    expect(screen.getByTitle('Share your screen')).not.toBeDisabled();
+  });
+
+  it('words the timeout in the active language', () => {
+    renderFooter(
+      makeVoice({
+        connectionState: ConnectionState.Connected,
+        activeChannelId: 'ch-1',
+        serverMuted: true,
+        publishBlocked: true,
+        publishBlockedReason: 'timeout',
+      }),
+      { serverName: 'Community', hasUser: true },
+      'tr'
+    );
+    expect(screen.getByText('Zaman aşımındasın')).toBeInTheDocument();
+    expect(screen.getAllByTitle('Zaman aşımındayken kullanılamaz')).toHaveLength(3);
+  });
+
   it('links to /settings/voice-video for the settings shortcut', () => {
     renderFooter(makeVoice());
     const link = screen.getByRole('link');

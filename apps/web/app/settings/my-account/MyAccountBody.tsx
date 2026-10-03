@@ -2,15 +2,19 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { UserRow } from '@lobbyforge/db';
+import type { UserRowWithoutImages } from '@lobbyforge/db';
 import { ChangePasswordModal } from '@/components/modals/ChangePasswordModal';
 import { useT } from '@/lib/i18n/client';
+import { rich } from '@/lib/i18n/rich';
+
+/** What the page says after the dialog closed on a successful change. */
+type PasswordNotice = 'changed' | 'sessionsNotRevoked';
 
 export default function MyAccountBody({
   user,
   signedIn,
 }: {
-  user: UserRow | null;
+  user: UserRowWithoutImages | null;
   signedIn: boolean;
 }) {
   const t = useT();
@@ -18,6 +22,7 @@ export default function MyAccountBody({
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
+  const [passwordNotice, setPasswordNotice] = useState<PasswordNotice | null>(null);
 
   async function changePassword(input: { currentPassword: string; newPassword: string }) {
     const response = await fetch('/api/auth/password', {
@@ -26,8 +31,13 @@ export default function MyAccountBody({
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(input),
     });
-    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    const body = (await response.json().catch(() => ({}))) as { error?: string; warning?: string };
     if (!response.ok) throw new Error(body.error ?? t('settings.account.security.changeFailed'));
+    // security-review AUTH-001 follow-up: the password is changed even when
+    // the other sessions could not be signed out. That is a success with a
+    // warning — shown in the viewer's language — never a failure that
+    // invites a retry with the now-old password.
+    setPasswordNotice(body.warning === 'sessions_not_revoked' ? 'sessionsNotRevoked' : 'changed');
   }
 
   async function signOut() {
@@ -85,9 +95,41 @@ export default function MyAccountBody({
             label={t('settings.account.security.password')}
             value={t(user.isGuest ? 'settings.account.security.passwordGuest' : 'settings.account.security.passwordSet')}
             action={user.isGuest ? undefined : t('settings.account.security.change')}
-            onAction={user.isGuest ? undefined : () => setPasswordOpen(true)}
+            onAction={
+              user.isGuest
+                ? undefined
+                : () => {
+                    setPasswordNotice(null);
+                    setPasswordOpen(true);
+                  }
+            }
             badge={user.isGuest ? t('settings.account.security.unavailable') : undefined}
           />
+          {passwordNotice === 'changed' ? (
+            <p role="status" className="flex items-start gap-2 text-sm text-text-primary">
+              <span className="material-symbols-outlined text-[18px] text-success" aria-hidden>check_circle</span>
+              <span>{t('settings.account.security.changed')}</span>
+            </p>
+          ) : passwordNotice === 'sessionsNotRevoked' ? (
+            <p
+              role="alert"
+              className="flex items-start gap-2 rounded-lg border border-border-subtle bg-surface-container-low p-3 text-sm text-text-primary"
+            >
+              <span className="material-symbols-outlined text-[18px] text-danger" aria-hidden>warning</span>
+              <span>
+                {rich(t('settings.account.security.changedSessionsNotRevoked'), {
+                  link: (
+                    <a
+                      href="/settings/active-sessions"
+                      className="font-medium text-primary underline underline-offset-2 hover:text-text-primary"
+                    >
+                      {t('settings.nav.user.sessions')}
+                    </a>
+                  ),
+                })}
+              </span>
+            </p>
+          ) : null}
         </Section>
 
         <Section title={t('settings.account.session.title')}>

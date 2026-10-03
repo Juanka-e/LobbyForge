@@ -20,7 +20,7 @@ import {
   CorePermission,
   type CorePermission as CorePermissionT,
 } from '@lobbyforge/core';
-import { membershipRoles, memberships, roles, servers } from '../schema.js';
+import { channelRoleOverrides, channels, membershipRoles, memberships, roles, servers } from '../schema.js';
 import { activeBanOnMembershipSql } from './bans.js';
 
 export interface RoleRow {
@@ -318,14 +318,83 @@ export async function updateRole(
 }
 
 /**
+ * security-review AUTHZ-001: thrown by `deleteRole` when the role is the
+ * LAST visibility override of one or more channels. Deleting it would
+ * cascade the override away, and a channel with no overrides is visible
+ * to everyone — a MANAGE_ROLES holder without MANAGE_CHANNELS (or the
+ * owner, by accident) would turn a private channel public. The caller
+ * must change those channels' visibility first. `channels` lists them so
+ * the UI can say which.
+ */
+export class RoleGatesChannelsError extends Error {
+  readonly code = 'role_gates_channels' as const;
+  constructor(readonly channels: Array<{ id: string; name: string }>) {
+    super(`deleteRole: the role is the only visibility override of ${channels.length} channel(s)`);
+    this.name = 'RoleGatesChannelsError';
+  }
+}
+
+/**
+ * The channels among `overrides` whose ONLY override is `roleId`, in
+ * first-seen order. `overrides` is every override row of every channel
+ * the role gates.
+ */
+function channelsGatedOnlyBy(
+  roleId: string,
+  overrides: Array<{ channelId: string; roleId: string; channelName: string }>
+): Array<{ id: string; name: string }> {
+  const byChannel = new Map<string, { name: string; onlyThisRole: boolean }>();
+  for (const row of overrides) {
+    const entry = byChannel.get(row.channelId) ?? { name: row.channelName, onlyThisRole: true };
+    if (row.roleId !== roleId) entry.onlyThisRole = false;
+    byChannel.set(row.channelId, entry);
+  }
+  return [...byChannel.entries()]
+    .filter(([, entry]) => entry.onlyThisRole)
+    .map(([id, entry]) => ({ id, name: entry.name }));
+}
+
+/**
  * Delete a role. The route layer is responsible for rejecting the
  * deletion of `@everyone` (it's structural, not a real role assignment).
+ *
+ * Throws `RoleGatesChannelsError` (and deletes nothing) when the role is
+ * the last visibility override of a channel — security-review AUTHZ-001.
  */
 export async function deleteRole(db: DbClient, roleId: string): Promise<void> {
   await db.transaction(async (tx) => {
-    const existing = await tx.select({ id: roles.id }).from(roles).where(eq(roles.id, roleId)).limit(1);
+    // FOR UPDATE: a concurrent channel-visibility save that inserts an
+    // override for this role (an FK reference) waits for us, and two
+    // concurrent role deletes cannot each see the other's override as
+    // "still there" (the override rows are locked below).
+    const existing = await tx
+      .select({ id: roles.id })
+      .from(roles)
+      .where(eq(roles.id, roleId))
+      .limit(1)
+      .for('update');
     if (existing.length === 0) {
       throw new Error(`deleteRole: role ${roleId} not found`);
+    }
+    // security-review AUTHZ-001: every override of every channel this role
+    // gates, locked; refuse when the role is a channel's last one.
+    const gatedChannelIds = tx
+      .select({ channelId: channelRoleOverrides.channelId })
+      .from(channelRoleOverrides)
+      .where(eq(channelRoleOverrides.roleId, roleId));
+    const overrides = await tx
+      .select({
+        channelId: channelRoleOverrides.channelId,
+        roleId: channelRoleOverrides.roleId,
+        channelName: channels.name,
+      })
+      .from(channelRoleOverrides)
+      .innerJoin(channels, eq(channels.id, channelRoleOverrides.channelId))
+      .where(inArray(channelRoleOverrides.channelId, gatedChannelIds))
+      .for('update', { of: channelRoleOverrides });
+    const stranded = channelsGatedOnlyBy(roleId, overrides);
+    if (stranded.length > 0) {
+      throw new RoleGatesChannelsError(stranded);
     }
     await tx.update(memberships).set({ roleId: null }).where(eq(memberships.roleId, roleId));
     await tx.delete(roles).where(eq(roles.id, roleId));

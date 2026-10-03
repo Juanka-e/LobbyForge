@@ -69,6 +69,18 @@ services:
     command: ["--dev", "--bind", "0.0.0.0", "--node-ip", "127.0.0.1", "--port", "19580", "--udp-port", "19582"]
     environment:
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-devsecret_please_change}"
+      # security-review AUTHZ-006 follow-up: LiveKit posts its room events
+      # to the web app, which removes a participant who publishes a track
+      # whose kind does not match its source (audio labelled camera, …).
+      # LIVEKIT_CONFIG is a YAML config body (no config file in dev); the
+      # CLI flags above still apply on top of it. api_key must name a key
+      # from LIVEKIT_KEYS. `web` is the compose service name (the e2e
+      # override keeps it).
+      LIVEKIT_CONFIG: |
+        webhook:
+          api_key: "${LIVEKIT_API_KEY:-devkey}"
+          urls:
+            - http://web:3000/api/livekit/webhook
     ports:
       - "19580:19580"     # HTTP signaling
       - "19582:19582/udp" # RTC media (ICE/TCP is not published locally)

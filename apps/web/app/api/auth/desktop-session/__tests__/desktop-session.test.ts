@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -8,22 +9,31 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  *    burned code 401; unknown code 401
  */
 
-const { redisGet, redisSet, redisDel, redisGetdel } = vi.hoisted(() => ({
+const { redisGet, redisSet, redisDel, redisGetdel, redisSadd, redisExpire } = vi.hoisted(() => ({
   redisGet: vi.fn(),
   redisSet: vi.fn(),
   redisDel: vi.fn(),
   redisGetdel: vi.fn(),
+  redisSadd: vi.fn(),
+  redisExpire: vi.fn(),
 }));
 
 vi.mock('@/lib/redis', () => ({
-  redis: { get: redisGet, set: redisSet, del: redisDel, getdel: redisGetdel },
+  redis: {
+    get: redisGet,
+    set: redisSet,
+    del: redisDel,
+    getdel: redisGetdel,
+    sadd: redisSadd,
+    expire: redisExpire,
+  },
 }));
 
-const { getUserCredentialsByEmail, getUserById } = vi.hoisted(() => ({
+const { getUserCredentialsByEmail, getUserCredentialsById } = vi.hoisted(() => ({
   getUserCredentialsByEmail: vi.fn(),
-  getUserById: vi.fn(),
+  getUserCredentialsById: vi.fn(),
 }));
-vi.mock('@lobbyforge/db', () => ({ getUserCredentialsByEmail, getUserById }));
+vi.mock('@lobbyforge/db', () => ({ getUserCredentialsByEmail, getUserCredentialsById }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
 
 const { verifyPassword } = vi.hoisted(() => ({ verifyPassword: vi.fn() }));
@@ -40,18 +50,37 @@ const { recordSession } = vi.hoisted(() => ({ recordSession: vi.fn() }));
 vi.mock('@/lib/session-tracker', () => ({ recordSession }));
 
 const envSnapshot = { ...process.env };
+const PASSWORD_HASH = 'scrypt$real';
 
 beforeEach(() => {
   process.env.LOBBYFORGE_SESSION_SECRET = 'x'.repeat(32);
-  for (const fn of [redisGet, redisSet, redisDel, redisGetdel, getUserCredentialsByEmail, getUserById, verifyPassword, recordSession]) {
+  for (const fn of [
+    redisGet, redisSet, redisDel, redisGetdel, redisSadd, redisExpire,
+    getUserCredentialsByEmail, getUserCredentialsById, verifyPassword, recordSession,
+  ]) {
     fn.mockReset();
   }
   recordSession.mockResolvedValue(undefined);
   redisSet.mockResolvedValue('OK');
   redisDel.mockResolvedValue(1);
   redisGetdel.mockResolvedValue(null);
-  getUserById.mockResolvedValue({ id: 'u-1', displayName: 'Owner', deletedAt: null });
+  redisSadd.mockResolvedValue(1);
+  redisExpire.mockResolvedValue(1);
+  getUserCredentialsById.mockResolvedValue({
+    id: 'u-1', email: 'o@x.test', displayName: 'Owner', passwordHash: PASSWORD_HASH, isGuest: false, deletedAt: null,
+  });
 });
+
+/** A stored handoff record, minted under the account's current password unless told otherwise. */
+function handoffRecord(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    userId: 'u-1',
+    state: 's'.repeat(32),
+    used: false,
+    credential: createHash('sha256').update(PASSWORD_HASH).digest('hex'),
+    ...overrides,
+  });
+}
 
 async function start(body: unknown): Promise<Response> {
   const { POST } = await import('../route.js');
@@ -115,7 +144,7 @@ describe('POST /api/auth/desktop-session/complete', () => {
   const STATE = 's'.repeat(32);
 
   it('atomically consumes (GETDEL) and sets a session cookie', async () => {
-    redisGetdel.mockResolvedValue(JSON.stringify({ userId: 'u-1', state: STATE, used: false }));
+    redisGetdel.mockResolvedValue(handoffRecord());
     const res = await complete({ code: CODE, state: STATE });
     expect(res.status).toBe(200);
     expect(redisGetdel).toHaveBeenCalledWith(`lf:desktop-handoff:${CODE}`);
@@ -124,7 +153,7 @@ describe('POST /api/auth/desktop-session/complete', () => {
   });
 
   it('LF-SEC-008: 401 for a WRONG state — and the code stays burned', async () => {
-    redisGetdel.mockResolvedValue(JSON.stringify({ userId: 'u-1', state: STATE, used: false }));
+    redisGetdel.mockResolvedValue(handoffRecord());
     const res = await complete({ code: CODE, state: 'x'.repeat(32) });
     expect(res.status).toBe(401);
     // No re-set of the record — the GETDEL already consumed it.
@@ -141,7 +170,7 @@ describe('POST /api/auth/desktop-session/complete', () => {
   });
 
   it('LF-SEC-008: PARALLEL completion — exactly one wins (atomic GETDEL)', async () => {
-    const record = JSON.stringify({ userId: 'u-1', state: STATE, used: false });
+    const record = handoffRecord();
     // First caller gets the record; the concurrent second gets null —
     // exactly what Redis GETDEL guarantees.
     redisGetdel.mockResolvedValueOnce(record).mockResolvedValueOnce(null);
@@ -160,8 +189,8 @@ describe('POST /api/auth/desktop-session/complete', () => {
   });
 
   it('401 when the account no longer exists (code stays burned)', async () => {
-    redisGetdel.mockResolvedValue(JSON.stringify({ userId: 'gone', state: STATE, used: false }));
-    getUserById.mockResolvedValue(null);
+    redisGetdel.mockResolvedValue(handoffRecord({ userId: 'gone' }));
+    getUserCredentialsById.mockResolvedValue(null);
     const res = await complete({ code: CODE, state: STATE });
     expect(res.status).toBe(401);
     expect(redisSet).not.toHaveBeenCalled();
@@ -180,7 +209,7 @@ describe('POST /api/auth/desktop-session/complete — beta-review S7 session tra
   const STATE = 's'.repeat(32);
 
   it('records the minted session under the cookie gid', async () => {
-    redisGetdel.mockResolvedValue(JSON.stringify({ userId: 'u-1', state: STATE, used: false }));
+    redisGetdel.mockResolvedValue(handoffRecord());
     const res = await complete({ code: CODE, state: STATE });
     expect(res.status).toBe(200);
     const { readGuestSession } = await import('@/lib/guest-session');
@@ -191,7 +220,7 @@ describe('POST /api/auth/desktop-session/complete — beta-review S7 session tra
 
   it('outside production a tracking failure only logs', async () => {
     recordSession.mockRejectedValue(new Error('redis down'));
-    redisGetdel.mockResolvedValue(JSON.stringify({ userId: 'u-1', state: STATE, used: false }));
+    redisGetdel.mockResolvedValue(handoffRecord());
     const res = await complete({ code: CODE, state: STATE });
     expect(res.status).toBe(200);
   });
@@ -202,7 +231,7 @@ describe('POST /api/auth/desktop-session/complete — beta-review S7 session tra
     env.NODE_ENV = 'production';
     try {
       recordSession.mockRejectedValue(new Error('redis down'));
-      redisGetdel.mockResolvedValue(JSON.stringify({ userId: 'u-1', state: STATE, used: false }));
+      redisGetdel.mockResolvedValue(handoffRecord());
       const res = await complete({ code: CODE, state: STATE });
       expect(res.status).toBe(503);
       expect(res.headers.get('set-cookie')).toBeNull();
@@ -216,5 +245,61 @@ describe('POST /api/auth/desktop-session/complete — beta-review S7 session tra
     const res = await complete({ code: CODE, state: STATE });
     expect(res.status).toBe(401);
     expect(recordSession).not.toHaveBeenCalled();
+  });
+});
+
+// security-review AUTH-001: a handoff code is bound to the password it was
+// minted under, and indexed per user so a password change can delete it.
+describe('desktop session handoff — security-review AUTH-001 credential binding', () => {
+  const CODE = 'c'.repeat(48);
+  const STATE = 's'.repeat(32);
+
+  it('stores a fingerprint of the password hash (never the hash) and indexes the code per user', async () => {
+    getUserCredentialsByEmail.mockResolvedValue({
+      id: 'u-1', email: 'o@x.test', displayName: 'Owner', passwordHash: PASSWORD_HASH, deletedAt: null,
+    });
+    verifyPassword.mockResolvedValue(true);
+    const res = await start({ email: 'o@x.test', password: 'pw' });
+    expect(res.status).toBe(200);
+    const { code } = (await res.json()) as { code: string };
+
+    const stored = JSON.parse(redisSet.mock.calls[0]?.[1] as string) as Record<string, unknown>;
+    expect(stored.credential).toBe(createHash('sha256').update(PASSWORD_HASH).digest('hex'));
+    expect(JSON.stringify(stored)).not.toContain(PASSWORD_HASH);
+    expect(redisSadd).toHaveBeenCalledWith('lf:desktop-handoff:user:u-1', code);
+    expect(redisExpire).toHaveBeenCalledWith('lf:desktop-handoff:user:u-1', 300);
+  });
+
+  it('401 when the password changed after the code was minted — no cookie, no session', async () => {
+    redisGetdel.mockResolvedValue(handoffRecord());
+    getUserCredentialsById.mockResolvedValue({
+      id: 'u-1', email: 'o@x.test', displayName: 'Owner', passwordHash: 'scrypt$new', isGuest: false, deletedAt: null,
+    });
+    const res = await complete({ code: CODE, state: STATE });
+    expect(res.status).toBe(401);
+    expect(res.headers.get('set-cookie')).toBeNull();
+    expect(recordSession).not.toHaveBeenCalled();
+  });
+
+  it('401 for a record without a credential fingerprint (minted before this fix)', async () => {
+    redisGetdel.mockResolvedValue(JSON.stringify({ userId: 'u-1', state: STATE, used: false }));
+    const res = await complete({ code: CODE, state: STATE });
+    expect(res.status).toBe(401);
+    expect(recordSession).not.toHaveBeenCalled();
+  });
+
+  it('401 when the account no longer has a password', async () => {
+    redisGetdel.mockResolvedValue(handoffRecord());
+    getUserCredentialsById.mockResolvedValue({
+      id: 'u-1', email: 'o@x.test', displayName: 'Owner', passwordHash: null, isGuest: false, deletedAt: null,
+    });
+    const res = await complete({ code: CODE, state: STATE });
+    expect(res.status).toBe(401);
+  });
+
+  it('400 for a code outside the URL-safe alphabet (cannot address the per-user index)', async () => {
+    const res = await complete({ code: `user:${'0'.repeat(40)}`, state: STATE });
+    expect(res.status).toBe(400);
+    expect(redisGetdel).not.toHaveBeenCalled();
   });
 });

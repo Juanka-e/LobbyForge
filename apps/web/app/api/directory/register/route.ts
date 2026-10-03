@@ -1,11 +1,20 @@
 import { NextResponse } from 'next/server';
 import { createPublicKey, verify as edVerify } from 'node:crypto';
-import { ssrfSafeGet } from '@/lib/ssrf-safe-fetch';
 import { z } from 'zod';
-import { RegistryInstanceOwnedError, RegistryInstanceUnclaimableError, upsertRegistryInstance } from '@lobbyforge/db';
+import {
+  getRegistryInstanceByInstanceId,
+  RegistryInstanceOwnedError,
+  RegistryInstanceUnclaimableError,
+  upsertRegistryInstance,
+} from '@lobbyforge/db';
 import { normalizeRegistryInstanceUrl } from '@lobbyforge/registry';
 import { requireMaterializedSession } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
+import {
+  directoryInstanceIdError,
+  directoryWritesUnavailable,
+  fetchVerificationDocument,
+} from '@/lib/directory-verification';
 import { withApiSecurity } from '@/lib/security-headers';
 
 export const dynamic = 'force-dynamic';
@@ -53,9 +62,23 @@ function parsePublicKeyPemOrDer(stored: string): ReturnType<typeof createPublicK
   }
 }
 
+/** Are two encodings (PEM / base64 DER) the same key? Compared on the SPKI DER bytes. */
+function isSamePublicKey(
+  a: ReturnType<typeof createPublicKey>,
+  b: ReturnType<typeof createPublicKey>
+): boolean {
+  try {
+    const da = a.export({ type: 'spki', format: 'der' });
+    const db = b.export({ type: 'spki', format: 'der' });
+    return da.length === db.length && da.equals(db);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * 12th-audit domain proof: fetch the instance's verification document
- * over the SSRF-safe client and verify it against the submitted key.
+ * over the SSRF-safe client and verify it against the given key.
  * The instance operator serves:
  *   GET /.well-known/lobbyforge-verification →
  *   { instanceId, publicKey, proof }
@@ -70,26 +93,11 @@ async function verifyDomainOwnership(input: {
   const pubKey = parsePublicKeyPemOrDer(input.publicKey);
   if (!pubKey) return { ok: false, error: 'publicKey is not a usable key', status: 400 };
 
-  const wellKnown = `${input.domain.replace(/\/$/, '')}/.well-known/lobbyforge-verification`;
-  let res: Awaited<ReturnType<typeof ssrfSafeGet>>;
-  try {
-    res = await ssrfSafeGet(wellKnown);
-  } catch (err) {
-    return {
-      ok: false,
-      error: `Could not verify the domain (fetch failed: ${(err as Error).message}). The instance must serve ${wellKnown}.`,
-      status: 400,
-    };
-  }
-  if (!res.ok) {
-    return { ok: false, error: `Verification endpoint returned HTTP ${res.status}`, status: 400 };
-  }
-  let doc: { instanceId?: unknown; publicKey?: unknown; proof?: unknown };
-  try {
-    doc = JSON.parse(res.body);
-  } catch {
-    return { ok: false, error: 'Verification document is not valid JSON', status: 400 };
-  }
+  // security-review FILE-002: one generic message for every fetch failure;
+  // the detail (DNS, blocked address, TLS, HTTP status) is logged only.
+  const fetched = await fetchVerificationDocument(input.domain, 'directory/register');
+  if (!fetched.ok) return { ok: false, error: fetched.error, status: 400 };
+  const doc = fetched.doc;
   if (doc.instanceId !== input.instanceId) {
     return { ok: false, error: 'Verification document instanceId mismatch', status: 400 };
   }
@@ -127,9 +135,13 @@ async function verifyDomainOwnership(input: {
  * instance owner who controls registration). The domain is validated as an
  * HTTPS origin; new registrations start unlisted and unverified — an admin
  * must approve (set isListed + isVerified) before the instance appears
- * publicly.
+ * publicly. Updating a listed entry's displayed fields sends it back to
+ * review (security-review HUB-002).
  */
 async function handlePost(req: Request): Promise<NextResponse> {
+  const unavailable = directoryWritesUnavailable();
+  if (unavailable) return unavailable;
+
   const sessionResult = requireMaterializedSession(req);
   if (!sessionResult.ok) return sessionResult.response;
 
@@ -140,12 +152,62 @@ async function handlePost(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
+  // security-review HUB-001: only a per-install directory id can be
+  // registered. `self-host` / `default` are the same on every install —
+  // the first account to claim one would own it for everybody.
+  const instanceIdError = directoryInstanceIdError(body.instanceId);
+  if (instanceIdError) {
+    return NextResponse.json({ error: instanceIdError }, { status: 400 });
+  }
+
   // Validate the domain as a real HTTPS origin (rejects private IPs, etc.).
   let normalizedDomain: string;
   try {
     normalizedDomain = normalizeRegistryInstanceUrl(body.domain);
   } catch {
     return NextResponse.json({ error: 'Domain must be a valid HTTPS origin' }, { status: 400 });
+  }
+
+  // security-review HUB-002: an EXISTING entry is proven with what the
+  // directory already holds — its stored key signs the challenge and its
+  // stored domain serves the document. The request's own key and domain
+  // only ever prove themselves; the domain and key move through
+  // change-domain / rotate-key, which prove the stored key too.
+  let existing: Awaited<ReturnType<typeof getRegistryInstanceByInstanceId>>;
+  try {
+    existing = await getRegistryInstanceByInstanceId(getDb(), body.instanceId);
+  } catch (err) {
+    console.error('[directory/register] instance lookup failed:', (err as Error).message);
+    return NextResponse.json({ error: 'Failed to register instance' }, { status: 500 });
+  }
+  let verificationKey = body.publicKey;
+  let verificationDomain = normalizedDomain;
+  if (existing) {
+    if (existing.ownerUserId === null) {
+      return NextResponse.json({ error: new RegistryInstanceUnclaimableError().message }, { status: 403 });
+    }
+    if (existing.ownerUserId !== sessionResult.session.uid) {
+      return NextResponse.json({ error: 'This instance is registered by another user' }, { status: 403 });
+    }
+    if (existing.domain !== normalizedDomain) {
+      return NextResponse.json(
+        { error: 'This instance is registered with a different domain. Move it with POST /api/directory/change-domain.' },
+        { status: 409 }
+      );
+    }
+    const storedKey = parsePublicKeyPemOrDer(existing.publicKey);
+    const requestKey = parsePublicKeyPemOrDer(body.publicKey);
+    if (!storedKey) {
+      return NextResponse.json({ error: 'Stored key is not usable — use admin recovery' }, { status: 500 });
+    }
+    if (!requestKey || !isSamePublicKey(storedKey, requestKey)) {
+      return NextResponse.json(
+        { error: 'This instance is registered with a different key. Rotate it with POST /api/directory/rotate-key.' },
+        { status: 409 }
+      );
+    }
+    verificationKey = existing.publicKey;
+    verificationDomain = existing.domain;
   }
 
   // 15th-audit: ACCOUNT-BOUND challenge — the nonce is stored against
@@ -165,9 +227,9 @@ async function handlePost(req: Request): Promise<NextResponse> {
       register: 1,
       nonce,
       instanceId: body.instanceId,
-      domain: normalizedDomain,
+      domain: verificationDomain,
     });
-    const nonceKey = parsePublicKeyPemOrDer(body.publicKey);
+    const nonceKey = parsePublicKeyPemOrDer(verificationKey);
     if (!nonceKey) {
       return NextResponse.json({ error: 'publicKey is not a usable key' }, { status: 400 });
     }
@@ -195,8 +257,8 @@ async function handlePost(req: Request): Promise<NextResponse> {
   // real operator can serve the document.
   const domainProof = await verifyDomainOwnership({
     instanceId: body.instanceId,
-    domain: normalizedDomain,
-    publicKey: body.publicKey,
+    domain: verificationDomain,
+    publicKey: verificationKey,
   });
   if (!domainProof.ok) {
     return NextResponse.json({ error: domainProof.error }, { status: domainProof.status });
@@ -207,13 +269,13 @@ async function handlePost(req: Request): Promise<NextResponse> {
     const instance = await upsertRegistryInstance(db, {
       instanceId: body.instanceId,
       name: body.name,
-      domain: normalizedDomain,
+      domain: verificationDomain,
       description: body.description ?? null,
       region: body.region ?? null,
       languages: body.languages ?? [],
       tags: body.tags ?? [],
       features: body.features ?? [],
-      publicKey: body.publicKey,
+      publicKey: verificationKey,
       // SEC-007: only the first registrant may update the entry.
       actorUserId: sessionResult.session.uid,
     });

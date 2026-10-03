@@ -250,7 +250,10 @@ describe('ensureServerMembershipDetailed', () => {
     const { db, chains } = recordingDb([
       [], // isCurrentlyBanned
       [], // getServerMember
+      [{ ownerUserId: 'owner-1' }], // approval check: server owner (AUTHZ-004)
+      [], // approval check: no access policy row
       [{ id: 'role-everyone' }], // @everyone lookup
+      [], // no stored sanction (AUTHZ-002)
       [{ id: 'm-1', serverId: 'srv-1', userId: 'u-1', roleId: null }], // insert membership
       [], // insert membership_roles
     ]);

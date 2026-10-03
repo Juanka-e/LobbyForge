@@ -34,6 +34,17 @@ export function LobbyVoiceFooter({ serverName, hasUser, displayName }: LobbyVoic
     : connected
       ? t('lobby.voice.connected')
       : t('lobby.voice.ready');
+  // security-review AUTHZ-006 follow-up: a timeout (canPublish:false)
+  // withholds the mic, camera and screen share. Turning one ON is
+  // disabled with the reason as its label; switching a still-live one OFF
+  // stays possible.
+  const timedOut = voice.publishBlockedReason === 'timeout';
+  const publishBlocked = connected && voice.publishBlocked === true;
+  const blockedTitle = timedOut ? t('lobby.voice.blockedTimedOut') : t('lobby.voice.publishUnavailable');
+  const screenShareBlocked = publishBlocked && !voice.screenShareEnabled;
+  const cameraBlocked = publishBlocked && !voice.cameraEnabled;
+  const micBlocked = publishBlocked && !voice.micEnabled;
+  const micModeratedTitle = timedOut ? t('lobby.voice.blockedTimedOut') : t('lobby.voice.micMutedByMod');
 
   return (
     <div className="mt-auto border-t border-border-subtle bg-surface-raised flex flex-col">
@@ -69,12 +80,12 @@ export function LobbyVoiceFooter({ serverName, hasUser, displayName }: LobbyVoic
           <div className="flex items-center gap-0.5">
             <button
               type="button"
-              disabled={!connected}
+              disabled={!connected || screenShareBlocked}
               onClick={() => void voice.toggleScreenShare()}
-              title={voice.screenShareEnabled ? t('lobby.voice.screenShareStop') : t('lobby.voice.screenShareStart')}
-              aria-label={voice.screenShareEnabled ? t('lobby.voice.screenShareStop') : t('lobby.voice.screenShareStart')}
+              title={screenShareBlocked ? blockedTitle : voice.screenShareEnabled ? t('lobby.voice.screenShareStop') : t('lobby.voice.screenShareStart')}
+              aria-label={screenShareBlocked ? blockedTitle : voice.screenShareEnabled ? t('lobby.voice.screenShareStop') : t('lobby.voice.screenShareStart')}
               className={
-                connected
+                connected && !screenShareBlocked
                   ? voice.screenShareEnabled
                     ? 'p-1.5 rounded bg-tertiary/20 text-tertiary hover:bg-tertiary/30 transition-colors'
                     : 'p-1.5 rounded hover:bg-surface-container text-text-secondary hover:text-text-primary transition-colors'
@@ -85,12 +96,12 @@ export function LobbyVoiceFooter({ serverName, hasUser, displayName }: LobbyVoic
             </button>
             <button
               type="button"
-              disabled={!connected}
+              disabled={!connected || cameraBlocked}
               onClick={() => void voice.toggleCamera()}
-              title={voice.cameraEnabled ? t('lobby.voice.cameraOff') : t('lobby.voice.cameraOn')}
-              aria-label={voice.cameraEnabled ? t('lobby.voice.cameraOff') : t('lobby.voice.cameraOn')}
+              title={cameraBlocked ? blockedTitle : voice.cameraEnabled ? t('lobby.voice.cameraOff') : t('lobby.voice.cameraOn')}
+              aria-label={cameraBlocked ? blockedTitle : voice.cameraEnabled ? t('lobby.voice.cameraOff') : t('lobby.voice.cameraOn')}
               className={
-                connected
+                connected && !cameraBlocked
                   ? voice.cameraEnabled
                     ? 'p-1.5 rounded bg-primary/20 text-primary hover:bg-primary/30 transition-colors'
                     : 'p-1.5 rounded hover:bg-surface-container text-text-secondary hover:text-text-primary transition-colors'
@@ -136,7 +147,9 @@ export function LobbyVoiceFooter({ serverName, hasUser, displayName }: LobbyVoic
             voiceLabel={
               connected
                 ? voice.serverMuted
-                  ? t('lobby.voice.serverMuted')
+                  ? timedOut
+                    ? t('lobby.voice.timedOut')
+                    : t('lobby.voice.serverMuted')
                   : voice.micEnabled
                     ? t('lobby.voice.unmuted')
                     : t('lobby.voice.muted')
@@ -146,15 +159,17 @@ export function LobbyVoiceFooter({ serverName, hasUser, displayName }: LobbyVoic
           <div className="flex items-center gap-0.5">
             <button
               type="button"
-              disabled={!connected}
+              disabled={!connected || micBlocked}
               onClick={() => void voice.toggleMic()}
-              title={voice.serverMuted ? t('lobby.voice.micMutedByMod') : voice.micEnabled ? t('lobby.voice.micMute') : t('lobby.voice.micUnmute')}
-              aria-label={voice.serverMuted ? t('lobby.voice.micMutedByMod') : voice.micEnabled ? t('lobby.voice.micMuteAria') : t('lobby.voice.micUnmuteAria')}
+              title={voice.serverMuted ? micModeratedTitle : voice.micEnabled ? t('lobby.voice.micMute') : t('lobby.voice.micUnmute')}
+              aria-label={voice.serverMuted ? micModeratedTitle : voice.micEnabled ? t('lobby.voice.micMuteAria') : t('lobby.voice.micUnmuteAria')}
               className={
                 connected
-                  ? voice.micEnabled
-                    ? 'p-1.5 rounded hover:bg-surface-container text-text-secondary hover:text-text-primary transition-colors'
-                    : 'p-1.5 rounded bg-danger/20 text-danger hover:bg-danger/30 transition-colors'
+                  ? micBlocked
+                    ? 'p-1.5 rounded bg-danger/20 text-danger opacity-60 cursor-not-allowed'
+                    : voice.micEnabled
+                      ? 'p-1.5 rounded hover:bg-surface-container text-text-secondary hover:text-text-primary transition-colors'
+                      : 'p-1.5 rounded bg-danger/20 text-danger hover:bg-danger/30 transition-colors'
                   : 'p-1.5 rounded text-text-secondary opacity-30 cursor-not-allowed'
               }
             >

@@ -33,6 +33,8 @@ type Guest = { gid: string; uid: string | null; name: string };
 type RedeemResponse = {
   membership?: { serverId: string; userId: string; roleId: string };
   error?: string;
+  /** `approval_required` (403): the server holds newcomers for approval. */
+  code?: string;
 };
 
 type Status =
@@ -164,6 +166,12 @@ export default function JoinPage({ params }: { params: Promise<{ code: string }>
       }
       if (!res.ok) {
         const detail = (await res.json().catch(() => ({}))) as RedeemResponse;
+        // security-review AUTHZ-004: the server's access policy requires
+        // moderator approval (no queue yet), so the invite cannot be used.
+        if (res.status === 403 && detail.code === 'approval_required') {
+          setStatus({ kind: 'error', message: t('auth.join.approvalRequired') });
+          return;
+        }
         throw new Error(`redeem → ${res.status} ${detail.error ?? ''}`);
       }
       const data = (await res.json()) as RedeemResponse;

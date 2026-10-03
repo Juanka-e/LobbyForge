@@ -22,7 +22,7 @@
  */
 import { createHash } from 'node:crypto';
 import { CorePermission, hasPermission } from '@lobbyforge/core';
-import { getUserById, getUserPermissions, isChannelOpenToBots, logAction, type BotRow } from '@lobbyforge/db';
+import { getUserPermissions, isChannelOpenToBots, listUserDisplayNames, logAction, type BotRow } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { distributedRateLimit } from '@/lib/security-headers';
 import { getBuiltInBot } from './cache';
@@ -146,9 +146,11 @@ async function postNotice(bot: BotRow, settings: ModerationSettings, input: Mode
     { windowMs: NOTICE_WINDOW_MS, maxRequests: 1 }
   );
   if (!gate.allowed) return;
-  const member = await getUserById(getDb(), input.userId);
+  // security-review FILE-001: the name only — a full user row would carry
+  // the member's avatar and banner data URLs (up to ~14 MB) for one word.
+  const names = await listUserDisplayNames(getDb(), [input.userId]);
   const template = settings.noticeTemplate ?? defaultBotText('bots.moderation.defaultNotice');
-  const content = renderBotTemplate(template, { user: member?.displayName ?? '' });
+  const content = renderBotTemplate(template, { user: names.get(input.userId) ?? '' });
   if (!content) return;
   const posted = await postBotMessage({ bot, channelId: input.channelId, content });
   if (!posted.ok) console.warn(`[bots] moderation notice not posted: ${posted.code}`);

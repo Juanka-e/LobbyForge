@@ -7,8 +7,8 @@ import {
 } from '@lobbyforge/db';
 import { requireMaterializedSession } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
+import { directoryWritesUnavailable, fetchVerificationDocument } from '@/lib/directory-verification';
 import { withApiSecurity } from '@/lib/security-headers';
-import { ssrfSafeGet } from '@/lib/ssrf-safe-fetch';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -76,6 +76,10 @@ function parsePublicKeyPemOrDer(stored: string): ReturnType<typeof createPublicK
 }
 
 async function handlePost(req: Request): Promise<NextResponse> {
+  // security-review FILE-002: the directory is served by the official hub only.
+  const unavailable = directoryWritesUnavailable();
+  if (unavailable) return unavailable;
+
   const sessionResult = requireMaterializedSession(req);
   if (!sessionResult.ok) return sessionResult.response;
 
@@ -139,25 +143,14 @@ async function handlePost(req: Request): Promise<NextResponse> {
     }
 
     // (3) New-domain well-known proof (server-side, SSRF-safe).
-    const wellKnown = `${normalizedDomain.replace(/\/$/, '')}/.well-known/lobbyforge-verification`;
-    let docRes: Awaited<ReturnType<typeof ssrfSafeGet>>;
-    try {
-      docRes = await ssrfSafeGet(wellKnown);
-    } catch (err) {
-      return NextResponse.json(
-        { error: `Could not verify the new domain (${(err as Error).message})` },
-        { status: 400 }
-      );
+    // security-review FILE-002: one generic message for every fetch
+    // failure; the detail (DNS, blocked address, TLS, HTTP status) is
+    // logged only — it used to describe the hub's internal network.
+    const fetched = await fetchVerificationDocument(normalizedDomain, 'directory/change-domain');
+    if (!fetched.ok) {
+      return NextResponse.json({ error: fetched.error }, { status: 400 });
     }
-    if (!docRes.ok) {
-      return NextResponse.json({ error: `Verification endpoint returned HTTP ${docRes.status}` }, { status: 400 });
-    }
-    let doc: { instanceId?: unknown; publicKey?: unknown; proof?: unknown };
-    try {
-      doc = JSON.parse(docRes.body);
-    } catch {
-      return NextResponse.json({ error: 'Verification document is not valid JSON' }, { status: 400 });
-    }
+    const doc = fetched.doc;
     if (doc.instanceId !== body.instanceId || typeof doc.publicKey !== 'string' || typeof doc.proof !== 'string') {
       return NextResponse.json({ error: 'Verification document mismatch' }, { status: 400 });
     }

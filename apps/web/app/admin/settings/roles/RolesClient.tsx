@@ -21,6 +21,9 @@ interface ApiRoleResponse {
   roles?: Array<Omit<RoleView, 'memberCount'>>;
   role?: Omit<RoleView, 'memberCount'>;
   error?: string;
+  /** `role_gates_channels` (409): the role is the last gate of `channels`. */
+  code?: string;
+  channels?: Array<{ id: string; name: string }>;
 }
 
 /**
@@ -241,6 +244,18 @@ export default function RolesClient({
         { method: 'DELETE' }
       );
       const data = (await response.json().catch(() => ({}))) as ApiRoleResponse;
+      // security-review AUTHZ-001: the server refuses to delete a channel's
+      // last gating role (the channel would turn public). Name the channels
+      // so the admin knows whose visibility to change first.
+      if (response.status === 409 && data.code === 'role_gates_channels') {
+        const names = (data.channels ?? []).map((channel) => `#${channel.name}`);
+        throw new Error(
+          t('adminSettings.roles.gatesChannels', {
+            count: names.length,
+            channels: new Intl.ListFormat(t.locale, { type: 'conjunction' }).format(names),
+          })
+        );
+      }
       if (!response.ok) throw new Error(data.error ?? t('adminSettings.roles.deleteFailed'));
       setRoles((current) => current.filter((item) => item.id !== role.id));
       setMessage({ tone: 'success', text: t('adminSettings.roles.deleted') });

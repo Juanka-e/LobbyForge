@@ -12,7 +12,7 @@ import {
 import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
 import { getSessionSecret } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
-import { readGuestSession } from '@/lib/guest-session';
+import { getActiveSession } from '@/lib/active-session';
 import type { Translator } from '@/lib/i18n/core';
 import { getTranslator } from '@/lib/i18n/server';
 import InstanceLogoCard from './InstanceLogoCard';
@@ -68,7 +68,7 @@ export default async function CommunitySettingsOverviewPage() {
   const setup = await getInstanceSetupStatus(getDb());
   const db = getDb();
   const sessionCookie = cookieStore.toString();
-  const session = readGuestSession(sessionCookie, getSessionSecret());
+  const session = await getActiveSession(sessionCookie, getSessionSecret());
   const userId = session?.uid ?? setup.ownerUserId ?? null;
 
   let stats: Stats | null = null;

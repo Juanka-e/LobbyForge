@@ -41,6 +41,7 @@ import { PluginSurface } from '../PluginSurface';
 import { useActivitySession } from '../useActivitySession';
 import { rich } from '@/lib/i18n/rich';
 import { pluginSummary } from '@/lib/plugin-catalog-text';
+import { hasAllowedAudioPublication, isRemotePublicationAllowed } from '@/lib/voice-track-policy';
 
 type Guest = { gid: string; uid: string | null; name: string };
 type Token = {
@@ -78,6 +79,16 @@ function parseParticipantMetadata(raw: string | undefined): ParticipantUiMetadat
   } catch {
     return {};
   }
+}
+
+/**
+ * LiveKit derives "speaking" from every AUDIO track, mislabelled ones
+ * included (AUTHZ-006 follow-up): a remote participant only shows as
+ * speaking with audio published under an audio source.
+ */
+function isAudiblySpeaking(participant: Participant): boolean {
+  return participant.isSpeaking
+    && (participant.isLocal || hasAllowedAudioPublication(participant.audioTrackPublications.values()));
 }
 
 function isBotParticipant(participant: Participant): boolean {
@@ -206,7 +217,18 @@ function RoomView({ roomName }: { roomName: string }) {
         room.on(RoomEvent.ParticipantConnected, () => collectParticipants(room));
         room.on(RoomEvent.ParticipantDisconnected, () => collectParticipants(room));
         room.on(RoomEvent.ActiveSpeakersChanged, () => collectParticipants(room));
+        // security-review AUTHZ-006 follow-up: LiveKit only checks the
+        // SOURCE a track claims, so a server-muted member could publish
+        // their microphone as Camera / ScreenShare. A track whose kind does
+        // not match its source is unsubscribed and never played.
+        room.on(RoomEvent.TrackPublished, (publication: RemoteTrackPublication) => {
+          if (!isRemotePublicationAllowed(publication)) publication.setSubscribed(false);
+        });
         room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack, publication: RemoteTrackPublication) => {
+          if (!isRemotePublicationAllowed(publication, track)) {
+            publication.setSubscribed(false);
+            return;
+          }
           if (track.kind !== Track.Kind.Audio) return;
           if (deafenedRef.current) publication.setEnabled(false);
           const element = track.attach();
@@ -235,6 +257,12 @@ function RoomView({ roomName }: { roomName: string }) {
         if (cancelled) {
           await room.disconnect();
           return;
+        }
+        // Tracks already in the room at join (no TrackPublished for those).
+        for (const participant of room.remoteParticipants.values()) {
+          for (const publication of participant.trackPublications.values()) {
+            if (!isRemotePublicationAllowed(publication)) publication.setSubscribed(false);
+          }
         }
         collectParticipants(room);
         setAudioBlocked(!room.canPlaybackAudio);
@@ -466,7 +494,7 @@ function RoomView({ roomName }: { roomName: string }) {
                 </>
               ) : null}
               {' — '}
-              {p.isSpeaking ? t('room.speaking') : t('room.silent')}
+              {isAudiblySpeaking(p) ? t('room.speaking') : t('room.silent')}
             </li>
             );
           })}

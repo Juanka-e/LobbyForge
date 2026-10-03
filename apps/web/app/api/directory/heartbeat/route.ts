@@ -6,6 +6,7 @@ import {
 } from '@lobbyforge/db';
 import { redis } from '@/lib/redis';
 import { getDb } from '@/lib/db';
+import { directoryWritesUnavailable } from '@/lib/directory-verification';
 import { withMachineApiSecurity } from '@/lib/security-headers';
 
 export const dynamic = 'force-dynamic';
@@ -86,6 +87,10 @@ async function loadPublicKey(stored: string): Promise<import('node:crypto').KeyO
 }
 
 async function handlePost(req: Request): Promise<NextResponse> {
+  // security-review FILE-002: the directory is served by the official hub only.
+  const unavailable = directoryWritesUnavailable();
+  if (unavailable) return unavailable;
+
   let body: HeartbeatBody;
   try {
     body = HeartbeatSchema.parse(await req.json());

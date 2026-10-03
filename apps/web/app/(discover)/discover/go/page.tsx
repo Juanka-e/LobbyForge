@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { getRegistryInstanceByInstanceId } from '@lobbyforge/db';
+import { getRegistryInstanceByInstanceId, isRegistryInstancePubliclyVisible } from '@lobbyforge/db';
 import { buttonOutline, buttonPrimary, container, textLink } from '@/app/(marketing)/_components/styles';
 import { getDb } from '@/lib/db';
 import { isOfficialDeployment } from '@/lib/deployment-mode';
@@ -21,7 +21,8 @@ export const runtime = 'nodejs';
  * This page exists so that:
  * 1. The user explicitly confirms they're leaving the official host.
  * 2. Browsers show the target URL (no sneaky redirects).
- * 3. We can check isVerified + isBlocked server-side before linking.
+ * 3. We can check isVerified + isBlocked + heartbeat freshness
+ *    server-side before linking.
  *
  * It lives under /discover (the static `go` segment wins over
  * `[instanceId]`), where the directory's links, robots.txt and the docs
@@ -46,7 +47,10 @@ export default async function GoPage({
     // ignore — render not-found
   }
 
-  if (!instance || !instance.isListed || instance.isBlocked) {
+  // security-review HUB-003: a stale entry (no recent heartbeat — the
+  // domain may have changed hands) gets the unavailable state, never an
+  // outbound link or a verified badge.
+  if (!instance || !isRegistryInstancePubliclyVisible(instance)) {
     return (
       <div className={`${container} flex justify-center pb-24 pt-16 sm:pt-24`}>
         <div className="max-w-md text-center">

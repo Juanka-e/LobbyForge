@@ -4,6 +4,7 @@ import { blockUser, findDmChannelByPair, listBlockedUsers } from '@lobbyforge/db
 import { getDb } from '@/lib/db';
 import { requireMaterializedSession } from '@/lib/api-auth';
 import { withApiSecurity } from '@/lib/security-headers';
+import { projectBlockedUser } from '@/lib/profile-privacy';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -19,7 +20,9 @@ export const runtime = 'nodejs';
 async function handleGet(req: Request): Promise<NextResponse> {
   const session = requireMaterializedSession(req);
   if (!session.ok) return session.response;
-  const blocks = await listBlockedUsers(getDb(), session.session.uid);
+  // security-review FILE-001 / AUTHZ-005: the lobby loads this list on
+  // every visit — short avatar URLs only, per the blocked user's visibility.
+  const blocks = (await listBlockedUsers(getDb(), session.session.uid)).map(projectBlockedUser);
   return NextResponse.json({ blocks }, { headers: { 'Cache-Control': 'no-store' } });
 }
 

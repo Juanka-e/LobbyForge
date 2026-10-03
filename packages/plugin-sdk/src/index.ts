@@ -144,6 +144,28 @@ export interface GamePluginActionPolicy {
    * While the action runs, `ctx.players` already includes the actor.
    */
   joinsRoster?: boolean;
+  /**
+   * Write an `activity.action` row to the server's audit log (actor, plugin
+   * and action type) when this action changes state. Defaults to true for
+   * `host` actions — running the table is moderation worth a trail — and to
+   * false for `member` / `player` actions: those are gameplay, and the audit
+   * log is readable by every VIEW_AUDIT_LOG holder, so "who sent which
+   * action type, when" would hand out hidden roles (a night action names a
+   * night role) and anonymous votes (security-review PLUG-001). Set it to
+   * true only for an action whose author and type are public anyway; set
+   * it to false for a host action that reveals a secret by its type alone.
+   * Refused actions (state unchanged) are never audited.
+   */
+  audit?: boolean;
+}
+
+/**
+ * Should the host write an audit row for this action? The `audit` flag
+ * when the policy sets it, else true for `host` and false for gameplay
+ * (`member` / `player`) — see `GamePluginActionPolicy.audit`.
+ */
+export function shouldAuditAction(policy: Pick<GamePluginActionPolicy, 'role' | 'audit'>): boolean {
+  return policy.audit ?? policy.role === 'host';
 }
 
 // Main Interface GamePlugin

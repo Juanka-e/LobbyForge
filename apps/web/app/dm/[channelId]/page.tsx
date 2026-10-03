@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { isDmChannelParticipant } from '@lobbyforge/db';
 import { getSessionSecret } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
-import { readGuestSession } from '@/lib/guest-session';
+import { getActiveSession } from '@/lib/active-session';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -25,7 +25,7 @@ export default async function DmPage({
 }) {
   const { channelId } = await params;
   const cookieStore = await cookies();
-  const session = readGuestSession(cookieStore.toString(), getSessionSecret());
+  const session = await getActiveSession(cookieStore.toString(), getSessionSecret());
   if (!session?.uid) redirect('/login');
 
   const isParticipant = await isDmChannelParticipant(getDb(), channelId, session.uid);

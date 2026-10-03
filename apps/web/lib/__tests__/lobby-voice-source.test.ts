@@ -52,6 +52,23 @@ describe('lobby voice client integration', () => {
     expect(source).toContain('publication.setSubscribed(false)');
   });
 
+  it('never subscribes to or plays a remote track whose kind does not match its source (AUTHZ-006 follow-up)', () => {
+    expect(source).toContain("from '@/lib/voice-track-policy'");
+    // TrackPublished + the initial pass both go through applyDefaultSubscription.
+    expect(source).toMatch(
+      /applyDefaultSubscription = \(publication: RemoteTrackPublication\) => \{[\s\S]{0,400}if \(!isRemotePublicationAllowed\(publication\)\) \{\s*publication\.setSubscribed\(false\);\s*return;/
+    );
+    // TrackSubscribed re-checks against the media that arrived, before attaching.
+    expect(source).toMatch(
+      /RoomEvent\.TrackSubscribed, \(track, publication, participant\) => \{[\s\S]{0,200}if \(!isRemotePublicationAllowed\(publication, track\)\) \{\s*publication\.setSubscribed\(false\);\s*return;/
+    );
+    expect(source).toContain('if (!isTrackKindAllowedForSource(track.kind, track.source)) return;');
+    // Opting into a screen share skips an audio track labelled ScreenShare.
+    expect(source).toMatch(/Track\.Source\.ScreenShareAudio\) &&[\s\S]{0,120}isRemotePublicationAllowed\(publication\)/);
+    // Speaking indicators need real audio under an audio source.
+    expect(source).toContain('hasAllowedAudioPublication(p.audioTrackPublications.values())');
+  });
+
   it('synchronizes camera and screen-share state from actual local track lifecycle events', () => {
     expect(source).toContain('RoomEvent.LocalTrackPublished');
     expect(source).toContain('RoomEvent.LocalTrackUnpublished');

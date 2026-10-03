@@ -13,6 +13,8 @@ import { randomInt } from 'node:crypto';
 import type { DbClient } from '../client.js';
 import { invites, membershipRoles, memberships, roles, serverBans, servers } from '../schema.js';
 import { EVERYONE_ROLE_NAME } from './roles.js';
+import { getMemberSanction, membershipValuesFromSanction } from './memberSanctions.js';
+import { isNewMemberApprovalRequired } from './serverAccessPolicies.js';
 
 export interface InviteRow {
   id: string;
@@ -208,6 +210,7 @@ export async function revokeInvite(db: DbClient, inviteId: string): Promise<bool
  *   - `not_found` → 404
  *   - `expired` / `exhausted` → 410
  *   - `already_member` → 409
+ *   - `approval_required` → 403 (security-review AUTHZ-004)
  */
 export type RedeemInviteError =
   | 'not_found'
@@ -215,7 +218,8 @@ export type RedeemInviteError =
   | 'exhausted'
   | 'already_member'
   | 'no_everyone_role'
-  | 'banned';
+  | 'banned'
+  | 'approval_required';
 
 export type RedeemInviteResult =
   | { ok: true; membershipId: string; serverId: string; roleId: string }
@@ -308,6 +312,14 @@ export async function redeemInvite(
       return { ok: false as const, error: 'exhausted' as RedeemInviteError };
     }
 
+    // security-review AUTHZ-004: the server's access policy can hold
+    // newcomers for moderator approval. There is no approval queue, so the
+    // redeem is refused — registration already refused it; an invite must
+    // not be the way around the policy.
+    if (await isNewMemberApprovalRequired(tx as unknown as DbClient, invite.server_id, userId)) {
+      return { ok: false as const, error: 'approval_required' as RedeemInviteError };
+    }
+
     // 5. Look up the server's @everyone role. The M13 seed runs on
     //    `createServer`; if the role is missing something is very wrong,
     //    so we surface the error to the route layer.
@@ -323,13 +335,17 @@ export async function redeemInvite(
       return { ok: false as const, error: 'no_everyone_role' as RedeemInviteError };
     }
 
-    // 6. Insert the membership.
+    // 6. Insert the membership. security-review AUTHZ-002: a returning
+    //    member starts with the timeout / server mute they left with —
+    //    leave + redeem used to hand them a clean row.
+    const sanction = await getMemberSanction(tx as unknown as DbClient, invite.server_id, userId);
     const [member] = await tx
       .insert(memberships)
       .values({
         serverId: invite.server_id,
         userId,
         roleId: everyoneId,
+        ...membershipValuesFromSanction(sanction),
       })
       .returning({ id: memberships.id });
     if (!member) {

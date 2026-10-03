@@ -16,7 +16,9 @@ export const runtime = 'nodejs';
  *
  * The proof is Ed25519(privateKey, canonical payload {verify, instanceId,
  * domain, publicKey}) — the instance operator generates it during
- * lfctl directory setup and stores it alongside the keypair.
+ * lfctl directory setup and stores it alongside the keypair. `instanceId`
+ * is this install's random directory id (security-review HUB-001; shown by
+ * GET /api/admin/directory/config).
  */
 async function handleGet(): Promise<NextResponse> {
   try {
@@ -53,7 +55,9 @@ async function handleGet(): Promise<NextResponse> {
     }
     return NextResponse.json(
       {
-        instanceId: config.instanceId,
+        // security-review HUB-001: the install's own directory id — never
+        // the settings singleton key, which every install shares.
+        instanceId: config.directoryInstanceId,
         publicKey: config.publicKey,
         proof,
       },

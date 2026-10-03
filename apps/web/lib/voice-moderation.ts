@@ -40,24 +40,51 @@ export interface PublishPolicyInput {
   voiceMuted: boolean;
 }
 
-/** The sources a member may publish right now. */
+/**
+ * The sources a member may publish right now.
+ *
+ * security-review AUTHZ-006: a server mute used to remove only the
+ * microphone, so the member could keep talking through screen-share
+ * audio ("share system audio", or a client that labels its mic track as
+ * screen audio). Now:
+ *   - server mute → no microphone AND no screen-share audio (camera and
+ *     silent screen share stay — the mute is about sound);
+ *   - timeout → nothing at all: a timed-out member listens, never
+ *     broadcasts (no mic, camera, screen share or screen audio).
+ * The token route and the live sync below both use this function, so a
+ * rejoin and an already-connected participant get the same grant.
+ */
 export function buildAllowedPublishSources(
   policy: PublishPolicyInput,
   requested?: PublishSource[]
 ): PublishSource[] {
   const allowed = new Set<PublishSource>();
-  if (hasPermission(policy.memberPermissions, CorePermission.SPEAK) && !policy.timedOut && !policy.voiceMuted) {
-    allowed.add('microphone');
-  }
-  if (policy.allowCamera && hasPermission(policy.memberPermissions, CorePermission.STREAM)) {
-    allowed.add('camera');
-  }
-  if (policy.allowScreenShare && hasPermission(policy.memberPermissions, CorePermission.STREAM)) {
-    allowed.add('screen-share');
-    allowed.add('screen-share-audio');
+  if (!policy.timedOut) {
+    const canStream = hasPermission(policy.memberPermissions, CorePermission.STREAM);
+    if (hasPermission(policy.memberPermissions, CorePermission.SPEAK) && !policy.voiceMuted) {
+      allowed.add('microphone');
+    }
+    if (policy.allowCamera && canStream) {
+      allowed.add('camera');
+    }
+    if (policy.allowScreenShare && canStream) {
+      allowed.add('screen-share');
+      if (!policy.voiceMuted) allowed.add('screen-share-audio');
+    }
   }
   if (!requested) return Array.from(allowed);
   return requested.filter((source) => allowed.has(source));
+}
+
+/**
+ * The LiveKit `canPublish` flag for a source list. LiveKit reads an EMPTY
+ * `canPublishSources` as "no restriction" (every source allowed), so a
+ * member allowed nothing — a timed-out member, or a client that asked for
+ * `canPublishSources: []` — must get `canPublish: false`, never
+ * `canPublish: true` with an empty list (security-review AUTHZ-006).
+ */
+export function canPublishAnySource(sources: readonly PublishSource[]): boolean {
+  return sources.length > 0;
 }
 
 const WIRE_SOURCE: Record<PublishSource, TrackSource> = {
@@ -70,6 +97,19 @@ const WIRE_SOURCE: Record<PublishSource, TrackSource> = {
 /** The participant's published MICROPHONE track, if any (not camera / screen audio). */
 export function findMicrophoneTrack(participant: ParticipantInfo) {
   return participant.tracks.find((t) => t.source === TrackSource.MICROPHONE);
+}
+
+/**
+ * The participant's published, still-unmuted tracks whose source is no
+ * longer in `allowed` — what a moderation change must silence right away
+ * (a new grant does not stop a track that is already flowing).
+ */
+export function findRevokedTracks(participant: ParticipantInfo, allowed: readonly PublishSource[]) {
+  const allowedWire = new Set(allowed.map((s) => WIRE_SOURCE[s]));
+  const moderated = new Set(Object.values(WIRE_SOURCE));
+  return participant.tracks.filter(
+    (t) => moderated.has(t.source) && !allowedWire.has(t.source) && !t.muted
+  );
 }
 
 function isNotFound(err: unknown): boolean {
@@ -131,16 +171,19 @@ export async function syncMemberVoiceAccess(serverId: string, userId: string): P
         continue;
       }
 
-      if (!sources.includes('microphone')) {
-        const mic = findMicrophoneTrack(participant);
-        if (mic && !mic.muted) await lk.mutePublishedTrack(room, userId, mic.sid, true);
+      // Silence every revoked source that is live right now — the mic for
+      // a server mute, plus screen-share audio (security-review AUTHZ-006),
+      // and for a timeout the camera and screen share too.
+      for (const track of findRevokedTracks(participant, sources)) {
+        await lk.mutePublishedTrack(room, userId, track.sid, true);
       }
       // Permissions are replaced atomically — carry the existing flags
-      // and only swap the publish-source list.
+      // and only swap the publish-source list. An empty list must come
+      // with canPublish:false (LiveKit treats [] as "anything").
       await lk.updateParticipant(room, userId, {
         permission: {
           ...participant.permission,
-          canPublish: true,
+          canPublish: canPublishAnySource(sources),
           canSubscribe: true,
           canPublishSources: sources.map((s) => WIRE_SOURCE[s]),
         },

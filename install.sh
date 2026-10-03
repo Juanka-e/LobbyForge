@@ -288,7 +288,11 @@ echo ""
 # `sed -i` destroyed the placeholder on first run and left nginx/LiveKit
 # stuck on the previous domain.
 echo -e "${BOLD}Rendering nginx + LiveKit + TURN configs (LF-010-R)...${NC}"
-if TURN_EXTERNAL_IP="$TURN_EXTERNAL_IP" bash "$SCRIPT_DIR/scripts/render-configs.sh" "$DOMAIN" "$TURN_SECRET" "$SCRIPT_DIR/infra" "$STAGE_DIR/infra"; then
+# security-review AUTHZ-006 follow-up: LiveKit's webhook (track_published
+# -> the web app removes a participant whose track kind does not match
+# its source) must name one of LiveKit's keys — this install's key, which
+# a re-run reuses from .env.prod.
+if TURN_EXTERNAL_IP="$TURN_EXTERNAL_IP" LIVEKIT_WEBHOOK_API_KEY="$LK_API_KEY" bash "$SCRIPT_DIR/scripts/render-configs.sh" "$DOMAIN" "$TURN_SECRET" "$SCRIPT_DIR/infra" "$STAGE_DIR/infra"; then
   echo -e "${GREEN}✓ Nginx, LiveKit and coturn TURN configs staged.${NC}"
 else
   echo -e "${RED}✗ Failed to render configs from templates.${NC}"

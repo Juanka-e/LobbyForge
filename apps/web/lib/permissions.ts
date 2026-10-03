@@ -15,7 +15,7 @@
 import { NextResponse } from 'next/server';
 import { CorePermission, hasPermission, type CorePermission as CorePermissionT } from '@lobbyforge/core';
 import { getDb } from '@/lib/db';
-import { canMemberAccessChannel, getUserPermissions } from '@lobbyforge/db';
+import { canMemberAccessChannel, getUserPermissions, isServerMember } from '@lobbyforge/db';
 
 export type AuthorizeResult =
   | { ok: true; permissions: string[] }
@@ -61,8 +61,9 @@ export { CorePermission, hasPermission };
 /**
  * Role-gated channel visibility (0028): can this member access the
  * channel? Owner and MANAGE_CHANNELS (administrator short-circuits it)
- * always pass; everyone else needs an empty override set or a listed
- * role. Use in every channel-scoped content route.
+ * always pass; everyone else must be a member of the server AND find an
+ * empty override set or a listed role. Use in every channel-scoped
+ * content route.
  */
 export async function authorizeChannelVisibility(
   userId: string,
@@ -74,6 +75,16 @@ export async function authorizeChannelVisibility(
   const permissions = await getUserPermissions(getDb(), userId, serverId);
   if (hasPermission(permissions, CorePermission.MANAGE_CHANNELS)) {
     return { ok: true };
+  }
+  // security-review PLUG-002: refuse non-members here, centrally.
+  // canMemberAccessChannel answers true for ANYONE on a channel without
+  // overrides, so a caller that skipped its own membership check (the
+  // activity end route did) let a kicked or banned user through. A
+  // non-member (or banned member) always gets [] from getUserPermissions;
+  // [] can also be a member whose roles grant nothing, so membership is
+  // confirmed before refusing — that query only runs in the [] case.
+  if (permissions.length === 0 && !(await isServerMember(getDb(), userId, serverId))) {
+    return { ok: false, response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
   }
   const allowed = await canMemberAccessChannel(getDb(), serverId, channelId, userId);
   if (!allowed) {

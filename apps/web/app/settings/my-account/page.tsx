@@ -2,7 +2,7 @@
 import { getUserById } from '@lobbyforge/db';
 import { getSessionSecret } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
-import { readGuestSession } from '@/lib/guest-session';
+import { getActiveSession } from '@/lib/active-session';
 import SettingsShell from '@/app/SettingsShell';
 import { getTranslator } from '@/lib/i18n/server';
 import MyAccountBody from './MyAccountBody';
@@ -17,7 +17,7 @@ export async function generateMetadata() {
 
 export default async function MyAccountPage() {
   const cookieStore = await cookies();
-  const session = readGuestSession(cookieStore.toString(), getSessionSecret());
+  const session = await getActiveSession(cookieStore.toString(), getSessionSecret());
   const userId = session?.uid ?? null;
 
   let user: Awaited<ReturnType<typeof getUserById>> = null;

@@ -2,7 +2,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { isOfficialDeployment } from '@/lib/deployment-mode';
 import { getSessionSecret } from '@/lib/api-auth';
-import { readGuestSession } from '@/lib/guest-session';
+import { getActiveSession } from '@/lib/active-session';
 import { rootDestination } from '@/lib/hub-routes';
 
 /**
@@ -11,6 +11,6 @@ import { rootDestination } from '@/lib/hub-routes';
  */
 export default async function HomePage() {
   const cookieStore = await cookies();
-  const session = readGuestSession(cookieStore.toString(), getSessionSecret());
+  const session = await getActiveSession(cookieStore.toString(), getSessionSecret());
   redirect(rootDestination({ official: isOfficialDeployment(), signedIn: Boolean(session?.uid) }));
 }

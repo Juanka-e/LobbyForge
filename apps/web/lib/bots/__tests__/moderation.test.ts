@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const getBuiltInBotForServer = vi.fn();
 const getUserPermissions = vi.fn();
-const getUserById = vi.fn();
+const listUserDisplayNames = vi.fn();
 const logAction = vi.fn();
 const getChannelById = vi.fn();
 const isChannelOpenToBots = vi.fn();
@@ -13,7 +13,6 @@ vi.mock('@lobbyforge/db', () => ({
   BOT_MESSAGE_CHANNEL_TYPES: ['text', 'announcement'],
   getBuiltInBotForServer,
   getUserPermissions,
-  getUserById,
   logAction,
   getChannelById,
   isChannelOpenToBots,
@@ -21,7 +20,7 @@ vi.mock('@lobbyforge/db', () => ({
   touchBotLastUsed,
   listBotAccessibleChannels: vi.fn(),
   listMessagesForChannel: vi.fn(),
-  listUserDisplayNames: vi.fn(),
+  listUserDisplayNames,
 }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
 const publishChatMessage = vi.fn();
@@ -63,13 +62,13 @@ function input(content: string, extra: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.resetModules();
-  for (const fn of [getBuiltInBotForServer, getUserPermissions, getUserById, logAction, getChannelById, isChannelOpenToBots, createMessage, touchBotLastUsed, publishChatMessage]) {
+  for (const fn of [getBuiltInBotForServer, getUserPermissions, listUserDisplayNames, logAction, getChannelById, isChannelOpenToBots, createMessage, touchBotLastUsed, publishChatMessage]) {
     fn.mockReset();
   }
   logAction.mockResolvedValue(undefined);
   touchBotLastUsed.mockResolvedValue(undefined);
   getUserPermissions.mockResolvedValue(['send_messages', 'read_message_history']);
-  getUserById.mockResolvedValue({ id: MEMBER, displayName: 'Mallory' });
+  listUserDisplayNames.mockResolvedValue(new Map([[MEMBER, 'Mallory']]));
   getChannelById.mockResolvedValue({ id: CHANNEL, serverId: SERVER, type: 'text', name: 'general' });
   isChannelOpenToBots.mockResolvedValue(true);
   createMessage.mockImplementation(async (_db: unknown, row: Record<string, unknown>) => ({
@@ -223,6 +222,9 @@ describe('moderateMessage', () => {
       })
     );
     expect(publishChatMessage).toHaveBeenCalledTimes(1);
+    // security-review FILE-001: the notice reads the member's name only,
+    // never a full user row (which carries the image data URLs).
+    expect(listUserDisplayNames).toHaveBeenCalledWith(expect.anything(), [MEMBER]);
   });
 
   it('uses the translated default notice when the admin wrote none', async () => {

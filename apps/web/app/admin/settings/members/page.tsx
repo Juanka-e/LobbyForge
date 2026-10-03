@@ -10,10 +10,11 @@ import {
 import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
 import { getSessionSecret } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
-import { readGuestSession } from '@/lib/guest-session';
+import { getActiveSession } from '@/lib/active-session';
 import { getTranslator } from '@/lib/i18n/server';
 import SettingsShell from '@/app/SettingsShell';
 import MembersClient, { type MemberView } from './MembersClient';
+import { projectMemberProfile } from '@/lib/profile-privacy';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -40,7 +41,7 @@ export default async function MembersSettingsPage() {
 
   const setup = await getInstanceSetupStatus(getDb());
   const db = getDb();
-  const session = readGuestSession(cookieStore.toString(), getSessionSecret());
+  const session = await getActiveSession(cookieStore.toString(), getSessionSecret());
   const userId = session?.uid ?? setup.ownerUserId ?? null;
 
   let members: MemberView[] = [];
@@ -74,7 +75,10 @@ export default async function MembersSettingsPage() {
           displayName: row.displayName,
           globalDisplayName: row.globalDisplayName,
           nickname: row.nickname,
-          avatarUrl: row.avatarUrl,
+          // security-review FILE-001 / AUTHZ-005: short image URL, and only
+          // when the member's profile visibility allows it — admins get no
+          // bypass (same as presence privacy); the name always shows.
+          avatarUrl: projectMemberProfile(row, userId).avatarUrl,
           isGuest: row.isGuest,
           roleName: row.roleName,
           roleColor: row.roleColor,

@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, integer, boolean, jsonb, varchar, customType, index, bigint, unique, uniqueIndex, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, integer, boolean, jsonb, varchar, customType, index, bigint, unique, uniqueIndex, primaryKey, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
 // Custom INET type wrapper
@@ -16,6 +16,13 @@ export const users = pgTable('users', {
   displayName: text('display_name').notNull(),
   avatarUrl: text('avatar_url'),
   bannerUrl: text('banner_url'),
+  // security-review FILE-001 (0041): bumped by every write of avatar_url /
+  // banner_url and nothing else. The image route's cache token
+  // (`userImageRefSql`) is built from these, so a profile edit (status,
+  // bio — both bump updated_at) no longer forces every viewer to
+  // re-download a multi-MB image.
+  avatarVersion: integer('avatar_version').default(0).notNull(),
+  bannerVersion: integer('banner_version').default(0).notNull(),
   locale: text('locale').default('en').notNull(),
   isGuest: boolean('is_guest').default(false).notNull(),
   // Stable per-guest identifier (e.g. "g_<32hex>"). Unique so a returning
@@ -179,6 +186,24 @@ export const membershipRoles = pgTable('membership_roles', {
   ),
   membershipIdx: index('idx_membership_roles_membership').on(table.membershipId),
   roleIdx: index('idx_membership_roles_role').on(table.roleId),
+}));
+
+// SERVER MEMBER SANCTIONS (0040) — security-review AUTHZ-002.
+// The moderation state of a (server, user) pair, kept OUTSIDE the
+// membership row: leaving deletes the membership and a rejoin used to
+// create a clean one, so a timeout or a server mute was lifted by leaving
+// and redeeming an invite. Every write of memberships.timed_out_until /
+// voice_muted is mirrored here, and every path that (re)creates a
+// membership copies this row into the new one. No FK to memberships on
+// purpose — the row must outlive the membership.
+export const serverMemberSanctions = pgTable('server_member_sanctions', {
+  serverId: uuid('server_id').notNull().references(() => servers.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  timedOutUntil: timestamp('timed_out_until', { withTimezone: true }),
+  voiceMuted: boolean('voice_muted').notNull().default(false),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  pk: primaryKey({ name: 'server_member_sanctions_server_id_user_id_pk', columns: [table.serverId, table.userId] }),
 }));
 
 // MESSAGES TABLE
@@ -352,6 +377,11 @@ export const instanceSettings = pgTable('instance_settings', {
   // .well-known endpoint serves this; lfctl directory proof generates
   // it, the admin configure endpoint stores it.
   directoryProof: text('directory_proof'),
+  // security-review HUB-001 (0039): this install's identity in the
+  // official directory — random per install. `instanceId` above is the
+  // settings singleton key ('self-host' everywhere) and must never be
+  // published as a directory id.
+  directoryInstanceId: text('directory_instance_id').default(sql`gen_random_uuid()::text`).notNull(),
   registrationMode: text('registration_mode').default('invite_only').notNull(),
   guestAccessEnabled: boolean('guest_access_enabled').default(true).notNull(),
   seoIndexingEnabled: boolean('seo_indexing_enabled').default(false).notNull(),

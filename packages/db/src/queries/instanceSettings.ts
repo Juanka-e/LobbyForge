@@ -503,22 +503,44 @@ export async function getOrCreateOwnerUser(
  * endpoint reads these fields to serve the registration proof document
  * the official registry fetches.
  */
-export async function getDirectoryVerificationConfig(
-  db: DbClient
-): Promise<{
-  instanceId: string;
+export interface DirectoryVerificationConfig {
+  /**
+   * security-review HUB-001: this install's identity in the official
+   * directory (random per install, migration 0039) — the id the instance
+   * registers under and the one its proof signs. Never the settings
+   * singleton key, which is the same on every install.
+   */
+  directoryInstanceId: string;
   domain: string | null;
   publicKey: string | null;
   isPublicDirectoryEnabled: boolean;
   directoryProof: string | null;
-} | null> {
+}
+
+/**
+ * security-review HUB-001: the directory config could not be saved because
+ * the instance settings row does not exist yet (setup has not run). The
+ * old setter silently updated nothing and the admin route said `ok`.
+ */
+export class DirectoryConfigNotInitializedError extends Error {
+  constructor() {
+    super('Instance settings are not initialised — finish /setup before configuring the directory');
+    this.name = 'DirectoryConfigNotInitializedError';
+  }
+}
+
+export async function getDirectoryVerificationConfig(
+  db: DbClient
+): Promise<DirectoryVerificationConfig | null> {
   // 18th-audit: explicit singleton WHERE — the table is a singleton by
   // design, but a second row shouldn't silently change which config
   // the .well-known endpoint serves.
-  const DEFAULT_INSTANCE_ID = 'default';
+  // security-review HUB-001: the singleton row is DEFAULT_INSTANCE_ID; a
+  // local `'default'` used to shadow it, so this read a row that never
+  // exists and `.well-known` 404'd on every install.
   const [row] = await db
     .select({
-      instanceId: instanceSettings.instanceId,
+      directoryInstanceId: instanceSettings.directoryInstanceId,
       domain: instanceSettings.domain,
       publicKey: instanceSettings.publicKey,
       isPublicDirectoryEnabled: instanceSettings.isPublicDirectoryEnabled,
@@ -530,7 +552,13 @@ export async function getDirectoryVerificationConfig(
   return row ?? null;
 }
 
-/** 18th-audit: owner-only directory verification configuration. */
+/**
+ * 18th-audit: owner-only directory verification configuration. Returns
+ * the install's directory id (the id the stored proof must sign).
+ * security-review HUB-001: writes the real singleton row and throws
+ * DirectoryConfigNotInitializedError when there is none, instead of
+ * silently updating zero rows.
+ */
 export async function setDirectoryVerificationConfig(
   db: DbClient,
   input: {
@@ -539,16 +567,20 @@ export async function setDirectoryVerificationConfig(
     directoryProof: string;
     isPublicDirectoryEnabled: boolean;
   }
-): Promise<void> {
-  await db
+): Promise<{ directoryInstanceId: string }> {
+  const [updated] = await db
     .update(instanceSettings)
     .set({
       domain: input.domain,
       publicKey: input.publicKey,
       directoryProof: input.directoryProof,
       isPublicDirectoryEnabled: input.isPublicDirectoryEnabled,
+      updatedAt: new Date(),
     })
-    .where(eq(instanceSettings.instanceId, 'default'));
+    .where(eq(instanceSettings.instanceId, DEFAULT_INSTANCE_ID))
+    .returning({ directoryInstanceId: instanceSettings.directoryInstanceId });
+  if (!updated) throw new DirectoryConfigNotInitializedError();
+  return updated;
 }
 
 export async function setInstanceLogoUrl(

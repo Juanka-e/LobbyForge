@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getUserCredentialsById, replaceUserPasswordHash } from '@lobbyforge/db';
 import { requireMaterializedSession } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
+import { revokeDesktopHandoffCodes } from '@/lib/desktop-handoff-codes';
 import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from '@/lib/password';
 import { withApiSecurity } from '@/lib/security-headers';
 import { revokeOtherSessions } from '@/lib/session-tracker';
@@ -60,9 +61,29 @@ async function handlePost(req: Request): Promise<NextResponse> {
     );
   }
 
-  await revokeOtherSessions(credentials.id, session.session.gid).catch((error) => {
-    console.error('[auth/password] failed to revoke other sessions', (error as Error).message);
+  // security-review AUTH-001: desktop handoff codes minted under the old
+  // password are already void (completion checks the credential
+  // fingerprint); deleting them here is the second, best-effort guard.
+  await revokeDesktopHandoffCodes(credentials.id).catch((error) => {
+    console.error('[auth/password] failed to clear desktop handoff codes', (error as Error).message);
   });
+
+  try {
+    await revokeOtherSessions(credentials.id, session.session.gid);
+  } catch (error) {
+    console.error('[auth/password] failed to revoke other sessions', (error as Error).message);
+    // security-review AUTH-001: the point of changing a password is often
+    // to throw someone out, so plain success while their session lives on
+    // would mislead. But the password WAS changed: an error status (the
+    // 503 this used to be) made the dialog report failure — in English,
+    // whatever the user's language — and invited a retry with the old
+    // password. It is a success with a machine-readable warning that the
+    // client words in the viewer's language (every environment alike).
+    return NextResponse.json(
+      { status: 'changed', warning: 'sessions_not_revoked' },
+      { headers: { 'Cache-Control': 'no-store' } }
+    );
+  }
 
   return NextResponse.json(
     { status: 'changed' },

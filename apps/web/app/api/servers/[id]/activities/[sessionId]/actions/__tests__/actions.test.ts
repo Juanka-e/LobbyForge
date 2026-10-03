@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildGuestSessionCookie, type GuestIdentity } from '@/lib/guest-session';
 
 /**
@@ -17,6 +17,7 @@ const dbFns = {
   listPlayersForSession: vi.fn(),
   logAction: vi.fn(),
   setGameSessionStateCAS: vi.fn(),
+  canMemberAccessChannel: vi.fn(),
 };
 
 vi.mock('@lobbyforge/db', () => dbFns);
@@ -86,9 +87,12 @@ const validatedPlugin = {
     return typeof a.playerId === 'string' && a.playerId.length > 0 ? null : 'vote requires a playerId string.';
   }),
 };
+// Plugins registered by a describe block (e.g. the REAL policy tables of
+// Vampire Village and Poll for the PLUG-001 audit tests).
+const extraPlugins = vi.hoisted(() => new Map<string, unknown>());
 vi.mock('@/lib/plugin-server-registry', () => ({
   getPluginServer: (id: string) =>
-    id === 'fake' ? fakePlugin : id === 'validated' ? validatedPlugin : null,
+    id === 'fake' ? fakePlugin : id === 'validated' ? validatedPlugin : extraPlugins.get(id) ?? null,
 }));
 
 const claimActionId = vi.fn();
@@ -302,4 +306,118 @@ describe('POST activity actions — beta-review validateAction sees injected act
       expect.objectContaining({ playerId: 'u-host' })
     );
   });
+});
+
+// security-review PLUG-001: the audit log is readable by every
+// VIEW_AUDIT_LOG holder, so gameplay actions must not land there — a
+// `pack-chat` row named a vampire, `night-*` rows named night roles, and
+// `vote` rows lined up with the poll counts named anonymous voters.
+describe('POST activity actions — security-review PLUG-001 audit rows', () => {
+  const MEMBER = 'u-p3';
+
+  beforeAll(async () => {
+    const { vampireVillagePlugin } = await import('@lobbyforge/vampire-village');
+    const { pollPlugin } = await import('@lobbyforge/poll');
+    // The plugins' REAL action-policy tables; the reducer is the mocked
+    // callHandleAction, so no game state is needed.
+    for (const [id, policies] of [
+      ['vampire-village', vampireVillagePlugin.actionPolicies],
+      ['poll', pollPlugin.actionPolicies],
+    ] as const) {
+      extraPlugins.set(id, {
+        ...fakePlugin,
+        manifest: { ...fakePlugin.manifest, id },
+        actionPolicies: policies,
+      });
+    }
+  });
+
+  beforeEach(() => {
+    // A plain member (not the owner, not the host) on a visible channel.
+    dbFns.isServerMember.mockResolvedValue(true);
+    dbFns.getUserPermissions.mockResolvedValue(['view_channels']);
+    dbFns.canMemberAccessChannel.mockResolvedValue(true);
+  });
+
+  function useSession(pluginId: string): void {
+    dbFns.getGameSessionById.mockResolvedValue({ ...SESSION_ROW, pluginId, channelId: 'ch-1', state: { phase: 'night' } });
+  }
+
+  it.each([
+    ['vampire-village', { type: 'pack-chat', text: 'bite the baker' }],
+    ['vampire-village', { type: 'night-target', targetId: 'u-host' }],
+    ['vampire-village', { type: 'night-shield', raise: true }],
+    ['vampire-village', { type: 'vote', targetId: 'u-host' }],
+    ['poll', { type: 'vote', optionId: 'opt-1' }],
+  ])('%s %o changes state but writes NO audit row', async (pluginId, body) => {
+    useSession(pluginId);
+    const res = await post(body, MEMBER);
+    expect(res.status).toBe(200);
+    expect(dbFns.setGameSessionStateCAS).toHaveBeenCalledTimes(1);
+    expect(dbFns.logAction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['vampire-village', 'start'],
+    ['vampire-village', 'kick'],
+    ['poll', 'close-poll'],
+  ])('%s host action %s that changes state is still audited', async (pluginId, type) => {
+    useSession(pluginId);
+    const res = await post({ type });
+    expect(res.status).toBe(200);
+    expect(dbFns.logAction).toHaveBeenCalledTimes(1);
+    expect(dbFns.logAction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        actorUserId: 'u-host',
+        action: 'activity.action',
+        targetId: 'sess-1',
+        metadata: { pluginId, actionType: type },
+      })
+    );
+  });
+
+  it('a REFUSED host action (reducer returned the same state) writes nothing', async () => {
+    useSession('vampire-village');
+    const { callHandleAction } = (await import('@/lib/plugin-context')) as unknown as {
+      callHandleAction: { mockImplementationOnce: (fn: (...a: unknown[]) => unknown) => void };
+    };
+    callHandleAction.mockImplementationOnce(async (_p: unknown, _c: unknown, state: unknown) => state);
+    const res = await post({ type: 'start' });
+    expect(res.status).toBe(200);
+    expect(dbFns.logAction).not.toHaveBeenCalled();
+  });
+
+  it('an explicit `audit` flag overrides the role default', async () => {
+    extraPlugins.set('flagged', {
+      ...fakePlugin,
+      manifest: { ...fakePlugin.manifest, id: 'flagged' },
+      actionPolicies: {
+        roll: { role: 'member', audit: true },
+        reveal: { role: 'host', audit: false },
+      },
+    });
+    useSession('flagged');
+    expect((await post({ type: 'roll' }, MEMBER)).status).toBe(200);
+    expect(dbFns.logAction).toHaveBeenCalledTimes(1);
+    expect((await post({ type: 'reveal' })).status).toBe(200);
+    expect(dbFns.logAction).toHaveBeenCalledTimes(1);
+  });
+});
+
+// An action type that names an Object.prototype member must not resolve
+// to an inherited "policy" (no `role` → neither the host nor the player
+// check ran). It falls back to host-only like any unknown type.
+describe('POST activity actions — inherited property names are not policies', () => {
+  it.each(['constructor', 'toString', '__proto__', 'hasOwnProperty'])(
+    'a non-host member sending type %s is refused (host default)',
+    async (type) => {
+      dbFns.isServerMember.mockResolvedValue(true);
+      dbFns.getUserPermissions.mockResolvedValue(['view_channels']);
+      dbFns.canMemberAccessChannel.mockResolvedValue(true);
+      const res = await post({ type }, 'u-p3');
+      expect(res.status).toBe(403);
+      expect(dbFns.setGameSessionStateCAS).not.toHaveBeenCalled();
+    }
+  );
 });
