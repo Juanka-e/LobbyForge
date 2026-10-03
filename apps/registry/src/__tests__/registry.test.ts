@@ -42,6 +42,16 @@ describe('@lobbyforge/registry', () => {
     expect(() => normalizeRegistryInstanceUrl('https://community.example/admin')).toThrow(/origin/);
   });
 
+  // security-review FILE-002: single-label names only resolve inside a
+  // private network (Docker service names), never as a public origin.
+  it('rejects single-label hostnames', () => {
+    for (const url of ['https://postgres', 'https://redis:6379', 'https://web/', 'https://postgres.', 'https://intranet:8443']) {
+      expect(() => normalizeRegistryInstanceUrl(url), url).toThrow(/fully qualified/);
+    }
+    expect(normalizeRegistryInstanceUrl('https://community.example.com:8443')).toBe('https://community.example.com:8443');
+    expect(normalizeRegistryInstanceUrl('https://community.example.')).toBe('https://community.example.');
+  });
+
   it('allows explicit loopback HTTP only for local development', () => {
     expect(normalizeRegistryInstanceUrl('http://localhost:3000', { allowLoopbackHttp: true }))
       .toBe('http://localhost:3000');

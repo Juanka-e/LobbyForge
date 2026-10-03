@@ -43,6 +43,7 @@ const ACTION_LABEL_KEYS: Record<string, string> = {
   'server.banner.clear': 'admin.audit.action.server.banner.clear',
   'server.banner.update': 'admin.audit.action.server.banner.update',
   'voice.mute': 'admin.audit.action.voice.mute',
+  'voice.track_rejected': 'admin.audit.action.voice.track_rejected',
   'voice.unmute': 'admin.audit.action.voice.unmute',
 };
 

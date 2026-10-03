@@ -66,6 +66,35 @@ describe('buildAllowedPublishSources', () => {
     expect(buildAllowedPublishSources({ ...base, timedOut: false, voiceMuted: true })).not.toContain('microphone');
     expect(buildAllowedPublishSources({ ...base, timedOut: true, voiceMuted: false })).not.toContain('microphone');
   });
+
+  // security-review AUTHZ-006: a muted member kept talking through
+  // screen-share audio; a timed-out member could still broadcast video.
+  it('server mute also drops screen-share audio, but keeps camera and silent screen share', async () => {
+    const { buildAllowedPublishSources } = await load();
+    const base = { allowCamera: true, allowScreenShare: true, memberPermissions: ['speak', 'stream'] };
+    expect(buildAllowedPublishSources({ ...base, timedOut: false, voiceMuted: false })).toEqual([
+      'microphone',
+      'camera',
+      'screen-share',
+      'screen-share-audio',
+    ]);
+    expect(buildAllowedPublishSources({ ...base, timedOut: false, voiceMuted: true })).toEqual(['camera', 'screen-share']);
+  });
+
+  it('a timeout allows no source at all (listen-only), whatever the client asks for', async () => {
+    const { buildAllowedPublishSources, canPublishAnySource } = await load();
+    const base = { allowCamera: true, allowScreenShare: true, memberPermissions: ['speak', 'stream'] };
+    const sources = buildAllowedPublishSources({ ...base, timedOut: true, voiceMuted: false }, [
+      'microphone',
+      'camera',
+      'screen-share',
+      'screen-share-audio',
+    ]);
+    expect(sources).toEqual([]);
+    // LiveKit reads [] as "no restriction" — the grant must be canPublish:false.
+    expect(canPublishAnySource(sources)).toBe(false);
+    expect(canPublishAnySource(['camera'])).toBe(true);
+  });
 });
 
 describe('syncMemberVoiceAccess', () => {
@@ -80,6 +109,48 @@ describe('syncMemberVoiceAccess', () => {
       USER,
       expect.objectContaining({
         permission: expect.objectContaining({ canPublishSources: [1] }), // camera only
+      })
+    );
+    expect(lk.removeParticipant).not.toHaveBeenCalled();
+  });
+
+  it('server mute (security-review AUTHZ-006): also mutes a live screen-share AUDIO track, not the screen video', async () => {
+    db.isMemberVoiceMuted.mockResolvedValue(true);
+    db.getEffectiveServerVoiceSettings.mockResolvedValue({ allowCamera: true, allowScreenShare: true });
+    lk.getParticipant.mockResolvedValue({
+      permission: { canSubscribe: true, canPublish: true, canPublishData: true, canPublishSources: [2, 1, 3, 4] },
+      tracks: [
+        { sid: 'mic', source: 2, muted: false },
+        { sid: 'screen', source: 3, muted: false },
+        { sid: 'screen-audio', source: 4, muted: false },
+      ],
+    });
+    const { syncMemberVoiceAccess } = await load();
+    await syncMemberVoiceAccess(SERVER, USER);
+    expect(lk.mutePublishedTrack).toHaveBeenCalledWith('room-srv-voice1', USER, 'mic', true);
+    expect(lk.mutePublishedTrack).toHaveBeenCalledWith('room-srv-voice1', USER, 'screen-audio', true);
+    expect(lk.mutePublishedTrack).not.toHaveBeenCalledWith('room-srv-voice1', USER, 'screen', true);
+    expect(lk.updateParticipant).toHaveBeenCalledWith(
+      'room-srv-voice1',
+      USER,
+      expect.objectContaining({
+        permission: expect.objectContaining({ canPublish: true, canPublishSources: [1, 3] }), // camera + screen
+      })
+    );
+  });
+
+  it('timeout (security-review AUTHZ-006): silences every live track and grants canPublish:false', async () => {
+    db.getActiveMemberTimeout.mockResolvedValue(new Date(Date.now() + 60_000));
+    const { syncMemberVoiceAccess } = await load();
+    await syncMemberVoiceAccess(SERVER, USER);
+    expect(lk.mutePublishedTrack).toHaveBeenCalledWith('room-srv-voice1', USER, 'mic', true);
+    expect(lk.mutePublishedTrack).toHaveBeenCalledWith('room-srv-voice1', USER, 'cam', true);
+    expect(lk.updateParticipant).toHaveBeenCalledWith(
+      'room-srv-voice1',
+      USER,
+      expect.objectContaining({
+        // Never canPublish:true with [] — LiveKit would read it as "anything".
+        permission: expect.objectContaining({ canPublish: false, canSubscribe: true, canPublishSources: [] }),
       })
     );
     expect(lk.removeParticipant).not.toHaveBeenCalled();

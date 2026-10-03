@@ -1,5 +1,10 @@
 import { expect, test } from '@playwright/test';
 
+// The config's --disable-web-security makes Chromium drop the Origin header,
+// and a production image's CSRF guard refuses the guest sign-in POST without
+// it ("Missing request origin"). This spec needs no other browser flag.
+test.use({ launchOptions: { args: [] } });
+
 test('settings is a single full-screen modal that closes to the lobby', async ({ page }) => {
   await page.goto('/login');
   await page.getByLabel('Guest display name').fill('Settings Tester');

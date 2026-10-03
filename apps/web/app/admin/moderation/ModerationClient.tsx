@@ -20,6 +20,8 @@ interface RegistryInstance {
   isVerified: boolean;
   isListed: boolean;
   isBlocked: boolean;
+  /** Where the entry stands (security-review HUB-003); blocked has its own badge. */
+  status?: 'blocked' | 'pending' | 'stale' | 'listed';
   onlineUsers: number;
   lastHeartbeatAt: string | null;
 }
@@ -41,6 +43,13 @@ const REASON_LABEL_KEYS: Record<string, string> = {
   abuse: 'admin.moderation.reason.abuse',
   malware: 'admin.moderation.reason.malware',
   other: 'admin.moderation.reason.other',
+};
+
+/** Directory entry status badges; `blocked` keeps its own red badge. */
+const INSTANCE_STATUS_BADGES: Record<string, { key: string; className: string }> = {
+  pending: { key: 'admin.moderation.status.pending', className: 'bg-warning/10 text-warning' },
+  stale: { key: 'admin.moderation.status.stale', className: 'bg-surface-container text-text-muted' },
+  listed: { key: 'admin.moderation.status.listed', className: 'bg-success/10 text-success' },
 };
 
 const REPORT_STATUS_LABEL_KEYS: Record<string, string> = {
@@ -265,6 +274,10 @@ export default function ModerationClient() {
                     {inst.isBlocked ? (
                       <span className="rounded-full bg-danger/10 px-2 py-0.5 text-[10px] text-danger">
                         {t('admin.moderation.blocked')}
+                      </span>
+                    ) : inst.status && INSTANCE_STATUS_BADGES[inst.status] ? (
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] ${INSTANCE_STATUS_BADGES[inst.status]!.className}`}>
+                        {t(INSTANCE_STATUS_BADGES[inst.status]!.key)}
                       </span>
                     ) : null}
                   </div>

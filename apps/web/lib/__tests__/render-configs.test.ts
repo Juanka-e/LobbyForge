@@ -52,8 +52,17 @@ function setupInfraFixture(): string {
   return dir;
 }
 
-function runRender(domain: string, secret = TURN_SECRET, infraRoot = workdir): string {
-  return execFileSync('bash', [RENDER_SCRIPT, domain, secret, infraRoot], { encoding: 'utf8' });
+function runRender(
+  domain: string,
+  secret = TURN_SECRET,
+  infraRoot = workdir,
+  env: Record<string, string> = {}
+): string {
+  return execFileSync('bash', [RENDER_SCRIPT, domain, secret, infraRoot], {
+    encoding: 'utf8',
+    // The webhook key is opt-in per call — never inherited from the shell.
+    env: { ...process.env, LIVEKIT_WEBHOOK_API_KEY: '', ...env },
+  });
 }
 
 function read(part: 'nginx' | 'livekit' | 'turn', generated = true): string {
@@ -193,5 +202,44 @@ describe('scripts/render-configs.sh — LF-019 + VOICE-001 TURN wiring', () => {
     expect(() => runRender('ok.example.com', 'short')).toThrow();
     // Previous render output untouched.
     expect(read('turn')).toContain(TURN_SECRET);
+  });
+});
+
+describe('scripts/render-configs.sh — LiveKit webhook (AUTHZ-006 follow-up)', () => {
+  const WEBHOOK_URL = 'http://web:3000/api/livekit/webhook';
+
+  it('without LIVEKIT_WEBHOOK_API_KEY, renders the webhook block commented out (old flows unchanged)', () => {
+    runRender('hook.example.com');
+    const livekit = read('livekit');
+    expect(livekit).not.toContain('@LIVEKIT_WEBHOOK');
+    expect(livekit).toMatch(/^webhook:\n  # api_key: disabled[^\n]*\n  # urls: \[[^\n]*\]$/m);
+    // No live (uncommented) webhook keys anywhere.
+    expect(livekit).not.toMatch(/^\s*api_key:/m);
+    expect(livekit).not.toMatch(/^\s*urls:/m);
+  });
+
+  it('with LIVEKIT_WEBHOOK_API_KEY, names that key and posts to the web service', () => {
+    runRender('hook.example.com', TURN_SECRET, workdir, { LIVEKIT_WEBHOOK_API_KEY: 'devkey_0123456789abcdef' });
+    const livekit = read('livekit');
+    expect(livekit).not.toContain('@LIVEKIT_WEBHOOK');
+    expect(livekit).toContain(
+      `\nwebhook:\n  api_key: devkey_0123456789abcdef\n  urls: ["${WEBHOOK_URL}"]\n`
+    );
+    // Exactly one live api_key / urls entry — the webhook block's.
+    expect(livekit.match(/^\s*api_key:/gm)).toHaveLength(1);
+    expect(livekit.match(/^\s*urls:/gm)).toHaveLength(1);
+  });
+
+  it('rejects a key that could inject YAML, before writing anything', () => {
+    runRender('hook.example.com', TURN_SECRET, workdir, { LIVEKIT_WEBHOOK_API_KEY: 'goodkey' });
+    for (const bad of ['bad key', 'key: x', 'key\nurls: []', 'key"', 'a'.repeat(129)]) {
+      expect(() => runRender('hook.example.com', TURN_SECRET, workdir, { LIVEKIT_WEBHOOK_API_KEY: bad })).toThrow();
+    }
+    expect(read('livekit')).toContain('  api_key: goodkey\n');
+  });
+
+  it('nginx refuses the webhook path at the public edge', () => {
+    const nginx = read('nginx');
+    expect(nginx).toMatch(/location \^~ \/api\/livekit\/webhook \{\s*return 404;\s*\}/);
   });
 });

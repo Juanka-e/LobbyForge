@@ -70,6 +70,16 @@ export function normalizeRegistryInstanceUrl(
   if (isPrivateHost(url.hostname) && !loopbackDevUrl) {
     throw new Error('Private network instance URLs cannot be publicly registered');
   }
+  // security-review FILE-002: a public instance has a dotted DNS name (or
+  // a bracketed IPv6 literal). A single label — `postgres`, `redis`, `web`
+  // — only resolves inside a private network (Docker service names,
+  // search domains), so it is never a registrable public origin. A trailing
+  // root dot (`postgres.`) is still one label. The explicit local-dev
+  // loopback allowance (`http://localhost`) is unchanged.
+  const host = url.hostname.replace(/\.$/, '');
+  if (!loopbackDevUrl && !host.startsWith('[') && !host.includes('.')) {
+    throw new Error('Instance URL must use a fully qualified domain name');
+  }
   return url.origin;
 }
 

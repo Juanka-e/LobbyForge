@@ -3,7 +3,8 @@ import { z } from 'zod';
 import {
   listInstanceReports,
   listPendingSubmissions,
-  listPublicRegistryInstances,
+  listRegistryInstancesForModeration,
+  registryInstanceStatus,
   setInstanceReportStatus,
   setRegistryInstanceListing,
 } from '@lobbyforge/db';
@@ -18,7 +19,8 @@ export const runtime = 'nodejs';
 /**
  * GET /api/admin/moderation — the admin moderation dashboard data.
  * Returns pending plugin submissions + all registry instances (for
- * block/unlist moderation). Admin-only.
+ * block/unlist moderation) — pending, stale and blocked ones included,
+ * each with its `status`. Admin-only.
  */
 async function handleGet(req: Request): Promise<NextResponse> {
   const denied = await requireAdminHealthToken(req);
@@ -26,9 +28,12 @@ async function handleGet(req: Request): Promise<NextResponse> {
 
   try {
     const db = getDb();
+    const now = Date.now();
     const [pendingPlugins, registryInstances, reports] = await Promise.all([
       listPendingSubmissions(db, { limit: 50 }),
-      listPublicRegistryInstances(db, { limit: 200 }),
+      // security-review HUB-003: EVERY entry — the public listing hid the
+      // pending, stale and blocked ones a moderator most needs to see.
+      listRegistryInstancesForModeration(db, { limit: 200 }),
       listInstanceReports(db, { limit: 100 }),
     ]);
     return NextResponse.json(
@@ -49,6 +54,7 @@ async function handleGet(req: Request): Promise<NextResponse> {
           isVerified: i.isVerified,
           isListed: i.isListed,
           isBlocked: i.isBlocked,
+          status: registryInstanceStatus(i, now),
           onlineUsers: i.onlineUsers,
           lastHeartbeatAt: i.lastHeartbeatAt?.toISOString() ?? null,
         })),

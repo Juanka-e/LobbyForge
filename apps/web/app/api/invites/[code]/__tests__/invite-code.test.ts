@@ -126,6 +126,23 @@ describe('POST /api/invites/[code]/redeem', () => {
     }
   });
 
+  // security-review AUTHZ-004: an approval-required access policy (no
+  // approval queue exists) must not be bypassed with an invite.
+  it('returns 403 approval_required when the server requires approval, and logs no join', async () => {
+    redeemInvite.mockResolvedValue({ ok: false, error: 'approval_required' });
+    const { POST } = await import('../redeem/route.js');
+    const res = await POST(
+      new Request(`https://example.test/api/invites/${CODE}/redeem`, {
+        method: 'POST',
+        headers: { cookie: makeCookie() },
+      }),
+      { params: Promise.resolve({ code: CODE }) }
+    );
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe('approval_required');
+    expect(logAction).not.toHaveBeenCalled();
+  });
+
   it('returns 401 when no cookie is present', async () => {
     const { POST } = await import('../redeem/route.js');
     const res = await POST(

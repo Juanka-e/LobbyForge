@@ -10,6 +10,7 @@ const createInvite = vi.fn();
 const getInviteById = vi.fn();
 const revokeInvite = vi.fn();
 const logAction = vi.fn();
+const getActiveMemberTimeout = vi.fn();
 
 vi.mock('@/lib/permissions', () => ({
   CorePermission: { CREATE_INVITE: 'create_invite', MANAGE_SERVER: 'manage_server' },
@@ -23,6 +24,7 @@ vi.mock('@lobbyforge/db', () => ({
   getInviteById,
   revokeInvite,
   logAction,
+  getActiveMemberTimeout,
 }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
 vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));
@@ -44,6 +46,7 @@ beforeEach(() => {
   revokeInvite.mockReset();
   logAction.mockReset();
   logAction.mockResolvedValue(undefined);
+  getActiveMemberTimeout.mockReset().mockResolvedValue(null);
   // Defaults: caller is the owner (so the GET list path skips membership/perm check).
   getServerById.mockResolvedValue({ ownerUserId: UID });
   authorizeServerPermission.mockResolvedValue({ ok: true, permissions: ['create_invite'] });
@@ -180,6 +183,26 @@ describe('POST /api/servers/[id]/invites', () => {
       serverCtx()
     );
     expect(res.status).toBe(400);
+  });
+
+  // security-review AUTHZ-002: creating an invite was step one of the
+  // leave-and-rejoin timeout escape.
+  it('returns 403 (timeout shape) for a timed-out member and creates nothing', async () => {
+    const until = new Date(Date.now() + 60 * 60 * 1000);
+    getActiveMemberTimeout.mockResolvedValue(until);
+    const { POST } = await import('../route.js');
+    const res = await POST(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/invites`, {
+        method: 'POST',
+        headers: { cookie: makeCookie() },
+        body: JSON.stringify({}),
+      }),
+      serverCtx()
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: 'You are timed out in this server', until: until.toISOString() });
+    expect(getActiveMemberTimeout).toHaveBeenCalledWith({ __mockDb: true }, SERVER_ID, UID);
+    expect(createInvite).not.toHaveBeenCalled();
   });
 });
 

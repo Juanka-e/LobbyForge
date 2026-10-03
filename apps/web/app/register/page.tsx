@@ -3,7 +3,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { getSessionSecret } from '@/lib/api-auth';
 import { isOfficialDeployment } from '@/lib/deployment-mode';
-import { readGuestSession } from '@/lib/guest-session';
+import { getActiveSession } from '@/lib/active-session';
 import { officialAuthDestination } from '@/lib/hub-routes';
 import { getTranslator } from '@/lib/i18n/server';
 import OfficialSignUpPage from '../login/_official/OfficialSignUpPage';
@@ -32,7 +32,7 @@ export default async function RegisterPage({
   searchParams: Promise<{ invite?: string }>;
 }) {
   if (isOfficialDeployment()) {
-    const session = readGuestSession((await cookies()).toString(), getSessionSecret());
+    const session = await getActiveSession((await cookies()).toString(), getSessionSecret());
     const destination = officialAuthDestination(Boolean(session?.uid));
     if (destination) redirect(destination);
     return <OfficialSignUpPage />;

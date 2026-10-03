@@ -200,6 +200,11 @@ deleteRole(db, roleId)
   // Hard delete. Best-effort clears the `roleId` on memberships that
   // pointed at the role. The FK on `memberships.roleId` is `ON DELETE
   // SET NULL` (per the schema) so this is redundant but defensive.
+  // Throws RoleGatesChannelsError (code `role_gates_channels`, with the
+  // channels) and deletes nothing when the role is a channel's LAST
+  // visibility override — the cascade would make that channel public
+  // (security-review AUTHZ-001). DELETE /roles/{id} answers 409 with
+  // `{ code: 'role_gates_channels', channels: [{ id, name }] }`.
 
 getUserPermissions(db, userId, serverId)
   // Returns the union of permissions. Owner shortcut returns

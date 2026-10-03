@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { randomBytes } from 'node:crypto';
 import { redis } from '@/lib/redis';
 import { requireMaterializedSession } from '@/lib/api-auth';
+import { directoryInstanceIdError, directoryWritesUnavailable } from '@/lib/directory-verification';
 import { withApiSecurity } from '@/lib/security-headers';
 
 export const dynamic = 'force-dynamic';
@@ -23,6 +24,10 @@ export const runtime = 'nodejs';
 const CHALLENGE_TTL_SECONDS = 600;
 
 async function handleGet(req: Request): Promise<NextResponse> {
+  // security-review FILE-002: the directory is served by the official hub only.
+  const unavailable = directoryWritesUnavailable();
+  if (unavailable) return unavailable;
+
   const sessionResult = requireMaterializedSession(req);
   if (!sessionResult.ok) return sessionResult.response;
 
@@ -31,6 +36,12 @@ async function handleGet(req: Request): Promise<NextResponse> {
   const rawDomain = url.searchParams.get('domain') ?? '';
   if (!instanceId || instanceId.length < 3 || instanceId.length > 128) {
     return NextResponse.json({ error: 'instanceId query parameter is required' }, { status: 400 });
+  }
+  // security-review HUB-001: refuse a shared or malformed id up front —
+  // register would refuse it anyway, after the operator signed a nonce.
+  const instanceIdError = directoryInstanceIdError(instanceId);
+  if (instanceIdError) {
+    return NextResponse.json({ error: instanceIdError }, { status: 400 });
   }
   if (!rawDomain || rawDomain.length < 3 || rawDomain.length > 253) {
     return NextResponse.json({ error: 'domain query parameter is required' }, { status: 400 });

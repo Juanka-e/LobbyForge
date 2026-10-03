@@ -13,12 +13,14 @@ vi.mock('@lobbyforge/db', () => {
   // The route does `instanceof RegistryInstanceOwnedError` — the mock must
   // expose the SAME class the test rejects with.
   class RegistryInstanceOwnedError extends Error {}
+  class RegistryInstanceUnclaimableError extends Error {}
   return {
     listPublicRegistryInstances,
     upsertRegistryInstance,
     heartbeatRegistryInstance,
     getRegistryInstanceByInstanceId,
     RegistryInstanceOwnedError,
+    RegistryInstanceUnclaimableError,
   };
 });
 vi.mock('@lobbyforge/registry', () => ({
@@ -49,6 +51,10 @@ vi.mock('@/lib/security-headers', () => ({
   withApiSecurity: (handler: unknown) => handler,
   withMachineApiSecurity: (handler: unknown) => handler,
 }));
+// security-review FILE-002: the directory write routes exist on the
+// official hub only.
+const deployment = vi.hoisted(() => ({ official: true }));
+vi.mock('@/lib/deployment-mode', () => ({ isOfficialDeployment: () => deployment.official }));
 
 
 
@@ -64,11 +70,12 @@ beforeEach(() => {
   ssrfSafeGet.mockReset().mockResolvedValue({
     ok: true,
     status: 200,
-    body: buildWellKnown('inst-2', regPublicKeyB64, docProof),
+    body: buildWellKnown(REG_ID, regPublicKeyB64, docProof),
   });
   heartbeatRegistryInstance.mockReset();
   getRegistryInstanceByInstanceId.mockReset();
   redisSet.mockReset().mockResolvedValue('OK');
+  deployment.official = true;
   requireMaterializedSession.mockReturnValue({
     ok: true,
     session: { uid: UID, gid: 'g_1', name: 'Owner', exp: 123 },
@@ -108,17 +115,19 @@ describe('GET /api/directory', () => {
 // Real Ed25519 keypair + a well-known document the (mocked) SSRF-safe
 // fetch serves: registration verifies the DOMAIN proof server-side.
 const keypair = generateKeyPairSync('ed25519');
+// security-review HUB-001: a directory id is the install's UUID v4.
+const REG_ID = '5f0c7a52-2d0e-4b8e-9a43-0c6f2f6f1d11';
 const regPublicKeyB64 = keypair.publicKey
   .export({ format: 'der', type: 'spki' })
   .toString('base64');
 const canonicalProof = JSON.stringify({
   verify: 1,
-  instanceId: 'inst-2',
+  instanceId: REG_ID,
   domain: 'https://my.example.dev',
   publicKey: regPublicKeyB64,
 });
 const REG_NONCE = 'reg-nonce-0123456789abcdef';
-const nonceCanonical = JSON.stringify({ register: 1, nonce: REG_NONCE, instanceId: 'inst-2', domain: 'https://my.example.dev' });
+const nonceCanonical = JSON.stringify({ register: 1, nonce: REG_NONCE, instanceId: REG_ID, domain: 'https://my.example.dev' });
 const nonceSignature = signEd25519(null, Buffer.from(nonceCanonical, 'utf8'), keypair.privateKey).toString('base64');
 const docProof = signEd25519(
   null,
@@ -128,7 +137,7 @@ const docProof = signEd25519(
 
 describe('POST /api/directory/register', () => {
   const validBody = {
-    instanceId: 'inst-2',
+    instanceId: REG_ID,
     name: 'My Community',
     domain: 'https://my.example.dev',
     publicKey: regPublicKeyB64,
@@ -138,7 +147,7 @@ describe('POST /api/directory/register', () => {
 
   it('registers a new instance (starts unlisted)', async () => {
     upsertRegistryInstance.mockResolvedValue({
-      instanceId: 'inst-2', name: 'My Community', domain: 'https://my.example.dev',
+      instanceId: REG_ID, name: 'My Community', domain: 'https://my.example.dev',
       isListed: false, isVerified: false, id: 'y',
     });
     const { POST } = await import('../register/route.js');
@@ -156,7 +165,7 @@ describe('POST /api/directory/register', () => {
 
   it('passes the acting user as the ownership claim (SEC-007)', async () => {
     upsertRegistryInstance.mockResolvedValue({
-      instanceId: 'inst-2', isListed: false, isVerified: false, id: 'y',
+      instanceId: REG_ID, isListed: false, isVerified: false, id: 'y',
     });
     const { POST } = await import('../register/route.js');
     await POST(
@@ -176,9 +185,9 @@ describe('POST /api/directory/register', () => {
     ssrfSafeGet.mockResolvedValueOnce({
       ok: true,
       status: 200,
-      body: buildWellKnown('inst-2', regPublicKeyB64, Buffer.alloc(64, 1).toString('base64')),
+      body: buildWellKnown(REG_ID, regPublicKeyB64, Buffer.alloc(64, 1).toString('base64')),
     });
-    upsertRegistryInstance.mockResolvedValue({ instanceId: 'inst-2', isListed: false, isVerified: false, id: 'y' });
+    upsertRegistryInstance.mockResolvedValue({ instanceId: REG_ID, isListed: false, isVerified: false, id: 'y' });
     const { POST } = await import('../register/route.js');
     const res = await POST(
       new Request('https://example.test/api/directory/register', {
@@ -418,5 +427,209 @@ describe('POST /api/directory/heartbeat — LF-SEC-007 signed contract', () => {
       {}
     );
     expect(res.status).toBe(404);
+  });
+});
+
+function registerRequest(body: unknown): Request {
+  return new Request('https://example.test/api/directory/register', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+const baseRegisterBody = {
+  instanceId: REG_ID,
+  name: 'My Community',
+  domain: 'https://my.example.dev',
+  publicKey: regPublicKeyB64,
+  registrationNonce: REG_NONCE,
+  nonceSignature,
+};
+
+// security-review HUB-001: the settings singleton key is `self-host` on
+// every install — whoever registered it first would own it for everybody.
+describe('directory instance ids — security-review HUB-001', () => {
+  it.each(['self-host', 'default', 'SELF-HOST', 'inst-2', '5F0C7A52-2D0E-4B8E-9A43-0C6F2F6F1D11', `${REG_ID}x`])(
+    'register refuses %s before touching the challenge or the domain',
+    async (instanceId) => {
+      const { POST } = await import('../register/route.js');
+      const res = await POST(registerRequest({ ...baseRegisterBody, instanceId }), {});
+      expect(res.status).toBe(400);
+      const json = (await res.json()) as { error: string };
+      expect(json.error).toMatch(/directory id|shared by every/);
+      expect(redisGetdel).not.toHaveBeenCalled();
+      expect(ssrfSafeGet).not.toHaveBeenCalled();
+      expect(upsertRegistryInstance).not.toHaveBeenCalled();
+    }
+  );
+
+  it('the challenge refuses a shared id too', async () => {
+    const { GET } = await import('../register/challenge/route.js');
+    const res = await GET(
+      new Request('https://example.test/api/directory/register/challenge?instanceId=self-host&domain=https://my.example.dev'),
+      {}
+    );
+    expect(res.status).toBe(400);
+    expect(redisSet).not.toHaveBeenCalled();
+  });
+
+  it('the challenge is issued for a real directory id', async () => {
+    const { GET } = await import('../register/challenge/route.js');
+    const res = await GET(
+      new Request(`https://example.test/api/directory/register/challenge?instanceId=${REG_ID}&domain=https://my.example.dev`),
+      {}
+    );
+    expect(res.status).toBe(200);
+    expect(redisSet).toHaveBeenCalledWith(
+      `lf:reg-challenge:${UID}:${REG_ID}:https://my.example.dev`,
+      expect.any(String),
+      'EX',
+      600,
+      'NX'
+    );
+  });
+
+  it('register compares the served document instanceId with the requested one', async () => {
+    ssrfSafeGet.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      body: buildWellKnown('6a1d2c3b-4e5f-4a6b-9c7d-8e9f0a1b2c3d', regPublicKeyB64, docProof),
+    });
+    const { POST } = await import('../register/route.js');
+    const res = await POST(registerRequest(baseRegisterBody), {});
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/instanceId mismatch/);
+    expect(upsertRegistryInstance).not.toHaveBeenCalled();
+  });
+});
+
+// security-review HUB-002: an existing entry is proven with the STORED
+// key and domain, never with whatever the request brings.
+describe('updating an existing entry — security-review HUB-002', () => {
+  const storedRow = {
+    instanceId: REG_ID,
+    name: 'My Community',
+    domain: 'https://my.example.dev',
+    ownerUserId: UID,
+    publicKey: regPublicKeyB64,
+    isListed: true,
+    isVerified: true,
+  };
+
+  it('accepts an update proven by the stored key and the stored domain', async () => {
+    getRegistryInstanceByInstanceId.mockResolvedValue(storedRow);
+    upsertRegistryInstance.mockResolvedValue({ ...storedRow, name: 'Renamed', isListed: false, isVerified: false });
+    const pem = keypair.publicKey.export({ format: 'pem', type: 'spki' }) as string;
+    const { POST } = await import('../register/route.js');
+    // Same key, other encoding: the stored string is what gets verified.
+    const res = await POST(registerRequest({ ...baseRegisterBody, name: 'Renamed', publicKey: pem }), {});
+    expect(res.status).toBe(201);
+    expect(ssrfSafeGet).toHaveBeenCalledWith('https://my.example.dev/.well-known/lobbyforge-verification');
+    expect(upsertRegistryInstance).toHaveBeenCalledWith(
+      { __mockDb: true },
+      expect.objectContaining({ name: 'Renamed', domain: storedRow.domain, publicKey: storedRow.publicKey })
+    );
+    // The rename sent it back to review (the query resets the flags).
+    const json = (await res.json()) as { instance: { isListed: boolean }; message: string };
+    expect(json.instance.isListed).toBe(false);
+    expect(json.message).toContain('review');
+  });
+
+  it('refuses a request that brings ANOTHER key — even one that signs its own challenge', async () => {
+    const attacker = generateKeyPairSync('ed25519');
+    const attackerKey = attacker.publicKey.export({ format: 'der', type: 'spki' }).toString('base64');
+    const attackerSig = signEd25519(null, Buffer.from(nonceCanonical, 'utf8'), attacker.privateKey).toString('base64');
+    getRegistryInstanceByInstanceId.mockResolvedValue(storedRow);
+    const { POST } = await import('../register/route.js');
+    const res = await POST(
+      registerRequest({ ...baseRegisterBody, name: 'LobbyForge Official Support', publicKey: attackerKey, nonceSignature: attackerSig }),
+      {}
+    );
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toMatch(/rotate-key/);
+    expect(redisGetdel).not.toHaveBeenCalled();
+    expect(ssrfSafeGet).not.toHaveBeenCalled();
+    expect(upsertRegistryInstance).not.toHaveBeenCalled();
+  });
+
+  it('refuses a request that names another domain (change-domain owns moves)', async () => {
+    getRegistryInstanceByInstanceId.mockResolvedValue({ ...storedRow, domain: 'https://old.example.dev' });
+    const { POST } = await import('../register/route.js');
+    const res = await POST(registerRequest(baseRegisterBody), {});
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toMatch(/change-domain/);
+    expect(ssrfSafeGet).not.toHaveBeenCalled();
+    expect(upsertRegistryInstance).not.toHaveBeenCalled();
+  });
+
+  it('a nonce signature that is not by the stored key fails (401)', async () => {
+    getRegistryInstanceByInstanceId.mockResolvedValue(storedRow);
+    const other = generateKeyPairSync('ed25519');
+    const otherSig = signEd25519(null, Buffer.from(nonceCanonical, 'utf8'), other.privateKey).toString('base64');
+    const { POST } = await import('../register/route.js');
+    const res = await POST(registerRequest({ ...baseRegisterBody, nonceSignature: otherSig }), {});
+    expect(res.status).toBe(401);
+    expect(upsertRegistryInstance).not.toHaveBeenCalled();
+  });
+
+  it('another account cannot update the entry (403 before any proof)', async () => {
+    getRegistryInstanceByInstanceId.mockResolvedValue({ ...storedRow, ownerUserId: '00000000-0000-0000-0000-000000000123' });
+    const { POST } = await import('../register/route.js');
+    const res = await POST(registerRequest(baseRegisterBody), {});
+    expect(res.status).toBe(403);
+    expect(upsertRegistryInstance).not.toHaveBeenCalled();
+  });
+});
+
+// security-review FILE-002: a failed fetch must not describe the hub's
+// network, and the directory write routes do not exist on a self-host.
+describe('directory verification errors and scope — security-review FILE-002', () => {
+  it('register answers every fetch failure with the same generic message', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bodies: string[] = [];
+    for (const failure of [
+      new Error('Target resolves to a blocked address: 172.20.0.4'),
+      new Error('getaddrinfo ENOTFOUND postgres'),
+      new Error('connect ECONNREFUSED 203.0.113.7:8443'),
+    ]) {
+      redisGetdel.mockResolvedValueOnce(REG_NONCE);
+      ssrfSafeGet.mockRejectedValueOnce(failure);
+      const { POST } = await import('../register/route.js');
+      const res = await POST(registerRequest(baseRegisterBody), {});
+      expect(res.status).toBe(400);
+      bodies.push(JSON.stringify(await res.json()));
+    }
+    expect(new Set(bodies).size).toBe(1);
+    expect(bodies[0]).toContain('/.well-known/lobbyforge-verification');
+    expect(bodies[0]).not.toMatch(/172\.20|ENOTFOUND|ECONNREFUSED|blocked/);
+    expect(warn.mock.calls.flat().join(' ')).toContain('172.20.0.4');
+    expect(upsertRegistryInstance).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it.each([
+    ['register', '../register/route.js', 'POST'],
+    ['challenge', '../register/challenge/route.js', 'GET'],
+    ['heartbeat', '../heartbeat/route.js', 'POST'],
+    ['rotate-key', '../rotate-key/route.js', 'POST'],
+    ['report', '../[id]/report/route.js', 'POST'],
+  ])('%s answers 404 on a self-hosted deployment', async (_name, modulePath, method) => {
+    deployment.official = false;
+    const mod = (await import(modulePath)) as Record<string, (req: Request, ctx: unknown) => Promise<Response>>;
+    const res = await mod[method]!(
+      new Request('https://example.test/api/directory/x', method === 'POST' ? { method, body: '{}' } : undefined),
+      { params: Promise.resolve({ id: REG_ID }) }
+    );
+    expect(res.status).toBe(404);
+    expect(requireMaterializedSession).not.toHaveBeenCalled();
+    expect(getRegistryInstanceByInstanceId).not.toHaveBeenCalled();
+  });
+
+  it('the public directory listing (a read) stays available everywhere', async () => {
+    deployment.official = false;
+    listPublicRegistryInstances.mockResolvedValue([]);
+    const { GET } = await import('../route.js');
+    const res = await GET(new Request('https://example.test/api/directory'), {});
+    expect(res.status).toBe(200);
   });
 });

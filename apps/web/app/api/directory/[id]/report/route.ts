@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { instanceReports } from '@lobbyforge/db';
 import { requireMaterializedSession } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
+import { directoryWritesUnavailable } from '@/lib/directory-verification';
 import { withApiSecurity } from '@/lib/security-headers';
 
 export const dynamic = 'force-dynamic';
@@ -21,6 +22,10 @@ async function handlePost(
   req: Request,
   ctx: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
+  // security-review FILE-002: the directory is served by the official hub only.
+  const unavailable = directoryWritesUnavailable();
+  if (unavailable) return unavailable;
+
   const { id: instanceId } = await ctx.params;
   const sessionResult = requireMaterializedSession(req);
   if (!sessionResult.ok) return sessionResult.response;

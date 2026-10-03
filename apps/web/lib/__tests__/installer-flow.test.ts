@@ -164,6 +164,12 @@ describe('install.sh — V4-003 safe activation', { timeout: 120_000 }, () => {
     expect(content(sandbox, 'infra/livekit/livekit.yaml')).not.toContain('turn_servers:');
     expect(content(sandbox, 'infra/turn/turnserver.conf')).toContain('use-auth-secret');
     expect(content(sandbox, 'infra/turn/turnserver.conf')).toContain('realm=first.example.com');
+    // AUTHZ-006 follow-up: LiveKit's webhook names THIS install's API key
+    // (random per install) and posts to the web service.
+    const apiKey = /^LIVEKIT_API_KEY=(.+)$/m.exec(content(sandbox, '.env.prod'))![1]!;
+    expect(apiKey).toMatch(/^devkey_[0-9a-f]{16}$/);
+    const livekit = content(sandbox, 'infra/livekit/livekit.yaml');
+    expect(livekit).toMatch(new RegExp(`^webhook:\\n  api_key: ${apiKey}\\n  urls: \\["http://web:3000/api/livekit/webhook"\\]$`, 'm'));
   });
 
   it('scenario 2: RUNNING stack + SAME domain → action menu; exit changes NOTHING', () => {
@@ -301,6 +307,9 @@ describe('install.sh — V4-003 safe activation', { timeout: 120_000 }, () => {
     expect(content(sandbox, 'infra/nginx/conf.d/app.conf')).toContain('server_name new.example.com;');
     expect(content(sandbox, 'infra/livekit/livekit.yaml')).not.toContain('turn_servers:');
     expect(content(sandbox, 'infra/turn/turnserver.conf')).toContain('realm=new.example.com');
+    // The re-run reuses the install's LiveKit key — the webhook still names it.
+    const apiKey = /^LIVEKIT_API_KEY=(.+)$/m.exec(content(sandbox, '.env.prod'))![1]!;
+    expect(content(sandbox, 'infra/livekit/livekit.yaml')).toContain(`\n  api_key: ${apiKey}\n`);
     // Staging must not leak into the live tree.
     expect(out).not.toContain('.install-staging');
   });

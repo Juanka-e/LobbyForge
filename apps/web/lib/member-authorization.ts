@@ -24,6 +24,7 @@ import {
   getServerById,
   getUserPermissions,
   isServerMember,
+  userExists,
 } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 
@@ -65,8 +66,10 @@ export function isActorAboveTarget(actorHighest: number, targetHighest: number):
  * Full moderation-target authorization: server exists, actor is a
  * member with the operation's permission, self-action and owner
  * protection apply, the target is a member, and the actor outranks the
- * target. Kick's self-leave semantics are handled by the kick route
- * BEFORE calling this helper.
+ * target. A BAN may also target an existing user who is not a member
+ * (no rank comparison then — security-review AUTHZ-002). Kick's
+ * self-leave semantics are handled by the kick route BEFORE calling
+ * this helper.
  */
 export async function authorizeModerationTarget(input: {
   operation: ModerationOperation;
@@ -121,6 +124,23 @@ export async function authorizeModerationTarget(input: {
   }
 
   if (!(await isServerMember(getDb(), targetUserId, serverId))) {
+    // security-review AUTHZ-002: a ban must reach a user who is not (or
+    // no longer) a member — someone who left to dodge a moderator, or a
+    // known troublemaker before they join. The actor's BAN_MEMBERS, the
+    // owner protection and the self check above still apply; there is no
+    // rank to compare (a non-member holds no roles). Kick, timeout, mute
+    // and role changes act on a membership and keep requiring one.
+    if (operation === 'ban') {
+      // security-review FILE-001: an existence check selects the id only,
+      // not the target's row with its avatar / banner data URLs.
+      if (!(await userExists(getDb(), targetUserId))) {
+        return { ok: false, response: NextResponse.json({ error: 'User not found' }, { status: 404 }) };
+      }
+      const actorHighest = actorIsOwner
+        ? Number.POSITIVE_INFINITY
+        : await getHighestRolePosition(getDb(), serverId, actorUserId, server.ownerUserId);
+      return { ok: true, context: { server, actorHighest } };
+    }
     return {
       ok: false,
       response: NextResponse.json({ error: 'Target user is not a member of this server' }, { status: 404 }),

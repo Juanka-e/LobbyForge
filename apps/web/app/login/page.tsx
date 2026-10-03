@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation';
 import { getEffectiveInstanceAccessSettings, getInstanceBootstrapStatus } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { getSessionSecret } from '@/lib/api-auth';
-import { readGuestSession } from '@/lib/guest-session';
+import { getActiveSession } from '@/lib/active-session';
 import { isOfficialDeployment } from '@/lib/deployment-mode';
 import { officialAuthDestination } from '@/lib/hub-routes';
 import { isGoogleOAuthConfigured } from '@/lib/oauth-google';
@@ -30,7 +30,7 @@ export default async function LoginPage({
 }) {
   if (isOfficialDeployment()) {
     // The official hub's own accounts: signed in already → the hub home.
-    const session = readGuestSession((await cookies()).toString(), getSessionSecret());
+    const session = await getActiveSession((await cookies()).toString(), getSessionSecret());
     const destination = officialAuthDestination(Boolean(session?.uid));
     if (destination) redirect(destination);
     const { desktopLoginState, error } = await searchParams;
@@ -41,7 +41,7 @@ export default async function LoginPage({
   if (!setup.bootstrapComplete) redirect('/setup');
 
   const cookieStore = await cookies();
-  const session = readGuestSession(cookieStore.toString(), getSessionSecret());
+  const session = await getActiveSession(cookieStore.toString(), getSessionSecret());
   if (session?.uid) redirect('/lobby');
 
   const settings = await getEffectiveInstanceAccessSettings(getDb());

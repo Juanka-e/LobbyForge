@@ -1,10 +1,14 @@
 import { NextResponse } from 'next/server';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
-import { getUserById } from '@lobbyforge/db';
-import { redis } from '@/lib/redis';
+import { getUserCredentialsById } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { getSessionSecret } from '@/lib/api-auth';
+import {
+  credentialMatches,
+  isDesktopHandoffCodeShape,
+  takeDesktopHandoffCode,
+} from '@/lib/desktop-handoff-codes';
 import { buildGuestSessionCookie, createGuestIdentity } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
 import { recordSession } from '@/lib/session-tracker';
@@ -18,18 +22,15 @@ export const runtime = 'nodejs';
  * page calls this with the code the deep link delivered.
  */
 const CompleteSchema = z.object({
-  code: z.string().min(43).max(128),
+  // security-review AUTH-001: only the alphabet the mint route produces,
+  // so a "code" can never address another key under the handoff prefix
+  // (such as the per-user index of outstanding codes).
+  code: z.string().min(43).max(128).refine(isDesktopHandoffCodeShape),
   // LF-SEC-008: the state is REQUIRED and verified against the stored
   // value — a leaked/stolen code alone can no longer complete the
   // handoff.
   state: z.string().min(16).max(128),
 });
-
-interface HandoffRecord {
-  userId: string;
-  state: string;
-  used: boolean;
-}
 
 /**
  * Constant-time string comparison. Hash-first so timingSafeEqual never
@@ -52,15 +53,8 @@ async function handlePost(req: Request): Promise<NextResponse> {
   // record (the old GET→check→DEL had exactly that race). The code is
   // burned BEFORE anything else: a wrong state or a deleted account
   // does NOT resurrect it.
-  const key = `lf:desktop-handoff:${parsed.data.code}`;
-  const raw = await redis.getdel(key);
-  if (!raw) {
-    return NextResponse.json({ error: 'Handoff code expired or invalid.' }, { status: 401 });
-  }
-  let record: HandoffRecord;
-  try {
-    record = JSON.parse(raw) as HandoffRecord;
-  } catch {
+  const record = await takeDesktopHandoffCode(parsed.data.code);
+  if (!record) {
     return NextResponse.json({ error: 'Handoff code expired or invalid.' }, { status: 401 });
   }
 
@@ -71,10 +65,18 @@ async function handlePost(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'Handoff state mismatch.' }, { status: 401 });
   }
 
-  const user = await getUserById(getDb(), record.userId);
+  const user = await getUserCredentialsById(getDb(), record.userId);
   if (!user || user.deletedAt) {
     // Code stays burned — the audit explicitly requires no resurrection.
     return NextResponse.json({ error: 'Account no longer available.' }, { status: 401 });
+  }
+  // security-review AUTH-001: the password the code was minted with must
+  // still be the account's password. A change in between (the victim
+  // locking out an attacker who knows the old one) voids the code, and
+  // so does a record without a fingerprint or an account that no longer
+  // has a password at all.
+  if (!credentialMatches(record, user.passwordHash)) {
+    return NextResponse.json({ error: 'Handoff code expired or invalid.' }, { status: 401 });
   }
 
   const sessionSeed = createGuestIdentity();

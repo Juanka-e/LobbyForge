@@ -232,3 +232,32 @@ export function checkImageDataUrl(dataUrl: string, limits: ImageLimits): ImageCh
   }
   return { ok: true, format: sniffed, ...size };
 }
+
+/** MIME type served for each supported format. */
+export const IMAGE_FORMAT_MIME: Record<ImageFormat, string> = {
+  png: 'image/png',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+};
+
+/**
+ * Decode a STORED image data URL for serving as bytes.
+ *
+ * security-review FILE-001: GET /api/users/{id}/{avatar|banner} serves the
+ * decoded bytes instead of lists inlining the data URL. The same rules as
+ * upload apply — the content is sniffed, never the claimed MIME, and the
+ * claim must match — so a row written before validation existed (or by
+ * hand) cannot be served as anything but PNG / JPEG / GIF / WebP. Size and
+ * dimensions were enforced at upload; they are not re-parsed per request.
+ */
+export function decodeImageDataUrl(dataUrl: string): { format: ImageFormat; bytes: Buffer } | null {
+  const match = DATA_URL_RE.exec(dataUrl);
+  if (!match) return null;
+  const bytes = Buffer.from(match[2]!, 'base64');
+  const sniffed = sniffFormat(bytes);
+  if (!sniffed) return null;
+  const declared = match[1] === 'jpg' || match[1] === 'jpeg' ? 'jpeg' : (match[1] as ImageFormat);
+  if (declared !== sniffed) return null;
+  return { format: sniffed, bytes };
+}

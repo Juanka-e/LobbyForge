@@ -41,10 +41,23 @@ import {
 } from '@/lib/keybind-preferences';
 import { VOICE_TEST_STATE_EVENT, type VoiceTestKind } from '@/lib/voice-test-events';
 import {
+  isMicrophoneBlocked,
+  publishBlockAtJoin,
+  publishBlockFromPermissions,
+  resolvePublishBlockReason,
+  type PublishBlock,
+  type PublishBlockedReason,
+} from '@/lib/voice-publish-state';
+import {
   readStoredPresenceStatus,
   storePresenceStatus,
   type PresenceStatus,
 } from '@/lib/presence-status';
+import {
+  hasAllowedAudioPublication,
+  isRemotePublicationAllowed,
+  isTrackKindAllowedForSource,
+} from '@/lib/voice-track-policy';
 
 /**
  * M21.4a - LiveKit voice connection scoped to the standalone lobby.
@@ -77,7 +90,11 @@ export interface LobbyVoiceParticipant {
   cameraEnabled: boolean;
   /** True when this participant is publishing a screen-share track. */
   hasScreenShare: boolean;
-  /** Moderator server mute (the participant may not publish a microphone). */
+  /**
+   * The participant may not publish a microphone: a moderator server mute,
+   * a timeout (canPublish:false — security-review AUTHZ-006), or a role
+   * without SPEAK.
+   */
   serverMuted?: boolean;
 }
 
@@ -156,6 +173,14 @@ export interface LobbyVoiceContextValue {
   setPresenceStatus: (status: PresenceStatus) => void;
   /** A moderator server-muted this user (the mic cannot be turned on). */
   serverMuted?: boolean;
+  /**
+   * Nothing may be published — no mic, camera or screen share
+   * (canPublish:false: a timeout, security-review AUTHZ-006). The
+   * controls disable turning anything on.
+   */
+  publishBlocked?: boolean;
+  /** Why publishing is restricted, for the copy; null when it is not. */
+  publishBlockedReason?: PublishBlockedReason | null;
   /** The browser blocked audio playback; `startAudio` must run from a click. */
   audioBlocked?: boolean;
   startAudio?: () => Promise<void>;
@@ -184,7 +209,9 @@ interface TokenResponse {
   // VOICE-001: per-user ephemeral TURN credentials (coturn REST auth).
   iceServers?: RTCIceServer[];
   serverVoiceSettings?: {
+    /** Server mute OR timeout: the microphone is withheld either way. */
     serverMuted?: boolean;
+    publishBlockedReason?: PublishBlockedReason | null;
     requirePushToTalk: boolean;
     startMuted: boolean;
     maxScreenShareHeight: number;
@@ -210,15 +237,31 @@ function audioCaptureOptions(prefs: VoiceVideoPreferences): AudioCaptureOptions 
   };
 }
 
-/** LiveKit's proto TrackSource.MICROPHONE (livekit-client exposes permissions as proto enums). */
-const PROTO_SOURCE_MICROPHONE = 2;
-
-function publishSourcesExcludeMic(sources: readonly number[] | undefined): boolean {
-  return !!sources && sources.length > 0 && !sources.includes(PROTO_SOURCE_MICROPHONE);
+// security-review AUTHZ-006 follow-up: a timed-out member is granted
+// canPublish:false with an EMPTY source list, which the old
+// "non-empty list without the mic" check read as a normal speaker. The
+// helpers in lib/voice-publish-state start from canPublish.
+function isMicrophoneRevoked(room: Room): boolean {
+  return isMicrophoneBlocked(room.localParticipant.permissions);
 }
 
-function isMicrophoneRevoked(room: Room): boolean {
-  return publishSourcesExcludeMic(room.localParticipant.permissions?.canPublishSources);
+interface PublishState {
+  block: PublishBlock;
+  reason: PublishBlockedReason | null;
+}
+
+const NO_PUBLISH_BLOCK: PublishState = { block: 'none', reason: null };
+
+/** The local grant as it stands now; `previous` until LiveKit reports one. */
+function livePublishState(
+  room: Room,
+  previous: PublishState,
+  joinReason: PublishBlockedReason | null
+): PublishState {
+  const permissions = room.localParticipant.permissions;
+  if (!permissions) return previous;
+  const block = publishBlockFromPermissions(permissions);
+  return { block, reason: resolvePublishBlockReason(block, joinReason) };
 }
 
 function localMicOn(room: Room): boolean {
@@ -267,6 +310,11 @@ function microphoneErrorNotice(error: unknown, joinedListenOnly: boolean): Voice
 }
 
 const SERVER_MUTED_NOTICE: VoiceNotice = { key: 'lobby.voice.error.serverMuted' };
+const TIMED_OUT_NOTICE: VoiceNotice = { key: 'lobby.voice.error.timedOut' };
+
+function publishBlockedNotice(reason: PublishBlockedReason | null): VoiceNotice {
+  return reason === 'timeout' ? TIMED_OUT_NOTICE : SERVER_MUTED_NOTICE;
+}
 
 function disconnectReasonNotice(reason: DisconnectReason | undefined): VoiceNotice | null {
   switch (reason) {
@@ -350,7 +398,10 @@ function participantToView(
   const pubs = Array.from(p.videoTrackPublications.values());
   // beta-review: the MICROPHONE publication (not screen-share audio), and a
   // muted local track counts as off — it stays published while muted.
-  const audioPub = p.getTrackPublication(Track.Source.Microphone);
+  // security-review AUTHZ-006 follow-up: only real AUDIO counts as the
+  // microphone (a video track labelled Microphone is never subscribed).
+  const sourceMicPub = p.getTrackPublication(Track.Source.Microphone);
+  const audioPub = sourceMicPub?.kind === Track.Kind.Audio ? sourceMicPub : undefined;
   const micEnabled = isLocal
     ? !!audioPub?.track && !audioPub.isMuted
     : !!audioPub?.track && !audioPub.track.isMuted;
@@ -369,11 +420,15 @@ function participantToView(
     identity,
     name: p.name || knownNames[identity] || identity,
     isLocal,
-    isSpeaking: p.isSpeaking,
+    // LiveKit derives "speaking" from every AUDIO track, mislabelled ones
+    // included — a remote participant must publish audio under an audio
+    // source (microphone / screen-share audio) to light up.
+    isSpeaking: p.isSpeaking && (isLocal || hasAllowedAudioPublication(p.audioTrackPublications.values())),
     micEnabled,
     cameraEnabled,
     hasScreenShare,
-    serverMuted: publishSourcesExcludeMic(p.permissions?.canPublishSources),
+    // A timed-out member (canPublish:false) shows as muted in every roster.
+    serverMuted: isMicrophoneBlocked(p.permissions),
   };
 }
 
@@ -428,7 +483,24 @@ export function LobbyVoiceProvider({
   // below) so a reload doesn't silently flip the user back to Online.
   const [presenceStatus, setPresenceStatusState] = useState<PresenceStatus>('online');
   const presenceStatusRef = useRef<PresenceStatus>('online');
-  const [serverMuted, setServerMuted] = useState(false);
+  // What the local grant blocks, and why. The ref mirrors it for event
+  // handlers and callbacks; `joinBlockReasonRef` keeps the reason the token
+  // reported, the only source that can say "timeout" for sure.
+  const [publishState, setPublishStateValue] = useState<PublishState>(NO_PUBLISH_BLOCK);
+  const publishStateRef = useRef<PublishState>(NO_PUBLISH_BLOCK);
+  const joinBlockReasonRef = useRef<PublishBlockedReason | null>(null);
+  const setPublishState = useCallback((next: PublishState) => {
+    publishStateRef.current = next;
+    setPublishStateValue((current) =>
+      current.block === next.block && current.reason === next.reason ? current : next
+    );
+  }, []);
+  const resetPublishState = useCallback(() => {
+    joinBlockReasonRef.current = null;
+    setPublishState(NO_PUBLISH_BLOCK);
+  }, [setPublishState]);
+  const serverMuted = publishState.block !== 'none';
+  const publishBlocked = publishState.block === 'all';
   const [audioBlocked, setAudioBlocked] = useState(false);
   const [participants, setParticipants] = useState<LobbyVoiceParticipant[]>([]);
   const [mainViewMode, setMainViewMode] = useState<MainViewMode>(initialDm ? 'dm' : 'chat');
@@ -531,6 +603,9 @@ export function LobbyVoiceProvider({
 
   const attachRemoteAudio = useCallback((track: RemoteTrack, participant: Participant) => {
     if (track.kind !== Track.Kind.Audio) return;
+    // security-review AUTHZ-006 follow-up: audio plays only from an audio
+    // source — never a microphone published as Camera / ScreenShare.
+    if (!isTrackKindAllowedForSource(track.kind, track.source)) return;
     const key = `${participant.identity}:${track.sid}`;
     if (remoteAudioElementsRef.current.has(key)) return;
     const element = track.attach();
@@ -772,6 +847,8 @@ export function LobbyVoiceProvider({
       setError(null);
       setParticipants([]);
       setMicEnabled(false);
+      // A block belongs to the room it was granted for.
+      resetPublishState();
 
       try {
         const voicePrefs = await loadVoicePreferences();
@@ -798,6 +875,14 @@ export function LobbyVoiceProvider({
         roomRef.current = room;
 
         const applyDefaultSubscription = (publication: RemoteTrackPublication) => {
+          // security-review AUTHZ-006 follow-up: LiveKit only checks the
+          // SOURCE a track claims, so a server-muted member could publish
+          // their microphone as Camera / ScreenShare. A track whose kind
+          // does not match its source is never subscribed (or played).
+          if (!isRemotePublicationAllowed(publication)) {
+            publication.setSubscribed(false);
+            return;
+          }
           const isScreenShare =
             publication.source === Track.Source.ScreenShare ||
             publication.source === Track.Source.ScreenShareAudio;
@@ -810,9 +895,30 @@ export function LobbyVoiceProvider({
         };
         const syncLocalMic = () => {
           if (roomRef.current !== room) return;
-          const revoked = isMicrophoneRevoked(room);
-          setServerMuted(revoked);
+          const next = livePublishState(room, publishStateRef.current, joinBlockReasonRef.current);
+          setPublishState(next);
           setMicEnabled(localMicOn(room));
+          if (next.block === 'none') {
+            // Lifted mid-call: drop a "muted" / "timed out" notice that no
+            // longer holds (any other message stays).
+            setError((current) =>
+              current === TIMED_OUT_NOTICE || current === SERVER_MUTED_NOTICE ? null : current
+            );
+          }
+          if (next.block === 'all') {
+            // security-review AUTHZ-006: a timeout mid-call withholds the
+            // camera and screen share too. The server silences those tracks;
+            // turn them off here so the controls and tiles stop showing
+            // them live and the disabled buttons do not strand them "on".
+            if (room.localParticipant.isCameraEnabled) {
+              void room.localParticipant.setCameraEnabled(false).catch(() => {});
+            }
+            if (room.localParticipant.getTrackPublication(Track.Source.ScreenShare)) {
+              void room.localParticipant.setScreenShareEnabled(false).catch(() => {});
+            }
+            setCameraEnabled(false);
+            setScreenShareEnabled(false);
+          }
         };
 
         room.on(RoomEvent.ConnectionStateChanged, (state: ConnectionState) => {
@@ -826,7 +932,7 @@ export function LobbyVoiceProvider({
           // instead of silently flipping back to "Voice Ready".
           const notice = disconnectReasonNotice(reason);
           if (notice) setError(notice);
-          setServerMuted(false);
+          resetPublishState();
           setAudioBlocked(false);
           detachRemoteAudio();
           stopHeartbeat();
@@ -863,6 +969,11 @@ export function LobbyVoiceProvider({
           if (roomRef.current === room) setAudioBlocked(!room.canPlaybackAudio);
         });
         room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+          // Checked again against the media that actually arrived.
+          if (!isRemotePublicationAllowed(publication, track)) {
+            publication.setSubscribed(false);
+            return;
+          }
           if (track.kind === Track.Kind.Audio && deafenRef.current) publication.setEnabled(false);
           attachRemoteAudio(track, participant);
           queueMicrotask(() => {
@@ -949,8 +1060,25 @@ export function LobbyVoiceProvider({
         setScreenSharePolicy(screenSharePolicyRef.current);
         const effectiveInputMode = serverRequiresPTT ? 'push_to_talk' : voicePrefs.inputMode;
         effectiveInputModeRef.current = effectiveInputMode;
-        const moderatorMuted = token.serverVoiceSettings?.serverMuted === true || isMicrophoneRevoked(room);
-        setServerMuted(moderatorMuted);
+        // security-review AUTHZ-006 follow-up: a timed-out member is granted
+        // canPublish:false and an empty source list. The token now says so
+        // (serverMuted covers the timeout, the reason tells them apart), and
+        // the grant check reads canPublish, so a blocked member never
+        // reaches setMicrophoneEnabled(true) and its device error.
+        const tokenBlockReason: PublishBlockedReason | null =
+          token.serverVoiceSettings?.publishBlockedReason
+          ?? (token.serverVoiceSettings?.serverMuted === true ? 'server_mute' : null);
+        joinBlockReasonRef.current = tokenBlockReason;
+        const joinBlock = publishBlockAtJoin(tokenBlockReason, room.localParticipant.permissions);
+        const joinPublishState: PublishState = {
+          block: joinBlock,
+          reason: resolvePublishBlockReason(joinBlock, tokenBlockReason),
+        };
+        setPublishState(joinPublishState);
+        // A timeout also switches off the camera and screen share; say why
+        // up front instead of leaving three dead buttons unexplained.
+        if (joinPublishState.reason === 'timeout') setError(TIMED_OUT_NOTICE);
+        const moderatorMuted = joinBlock !== 'none';
         const shouldStartMic = !moderatorMuted && !serverStartMuted && effectiveInputMode === 'voice_activity';
         voicePrefsRef.current = voicePrefs;
         setAudioBlocked(!room.canPlaybackAudio);
@@ -1014,6 +1142,8 @@ export function LobbyVoiceProvider({
       detachRemoteAudio,
       detachParticipantAudio,
       loadVoicePreferences,
+      setPublishState,
+      resetPublishState,
     ]
   );
 
@@ -1029,7 +1159,7 @@ export function LobbyVoiceProvider({
     setCameraEnabled(false);
     setScreenShareEnabled(false);
     setDeafenEnabled(false);
-    setServerMuted(false);
+    resetPublishState();
     setAudioBlocked(false);
     micBeforeDeafenRef.current = null;
     // Leaving voice drops the video grid, but not a conversation or an
@@ -1043,7 +1173,7 @@ export function LobbyVoiceProvider({
     } catch {
       /* swallow */
     }
-  }, [stopHeartbeat]);
+  }, [stopHeartbeat, resetPublishState]);
 
   const toggleMic = useCallback(async () => {
     const r = roomRef.current;
@@ -1052,10 +1182,16 @@ export function LobbyVoiceProvider({
     // the callback is stable and a moderator mute cannot desync it; muting
     // no longer waits for a settings round-trip.
     const next = !localMicOn(r);
-    if (next && isMicrophoneRevoked(r)) {
-      setServerMuted(true);
-      setError(SERVER_MUTED_NOTICE);
-      return;
+    if (next) {
+      // security-review AUTHZ-006 follow-up: canPublish:false (a timeout)
+      // blocks the mic as surely as a server mute — show why, and never
+      // ask the browser for a device the grant would refuse.
+      const state = livePublishState(r, publishStateRef.current, joinBlockReasonRef.current);
+      if (state.block !== 'none') {
+        setPublishState(state);
+        setError(publishBlockedNotice(state.reason));
+        return;
+      }
     }
     try {
       const prefs = next ? await loadVoicePreferences() : voicePrefsRef.current;
@@ -1072,12 +1208,27 @@ export function LobbyVoiceProvider({
     }
     setMicEnabled(localMicOn(r));
     collectParticipants(r);
-  }, [collectParticipants, loadVoicePreferences]);
+  }, [collectParticipants, loadVoicePreferences, setPublishState]);
+
+  /**
+   * True (and the reason shown) when the grant allows nothing at all — a
+   * keyboard shortcut reaches the toggles even while the buttons are
+   * disabled (security-review AUTHZ-006 follow-up). Turning something OFF
+   * is always allowed.
+   */
+  const refusePublishing = useCallback((room: Room): boolean => {
+    const state = livePublishState(room, publishStateRef.current, joinBlockReasonRef.current);
+    if (state.block !== 'all') return false;
+    setPublishState(state);
+    setError(publishBlockedNotice(state.reason));
+    return true;
+  }, [setPublishState]);
 
   const toggleCamera = useCallback(async () => {
     const r = roomRef.current;
     if (!r) return;
     const next = !cameraEnabled;
+    if (next && refusePublishing(r)) return;
     try {
       const prefs = await loadVoicePreferences();
       await r.localParticipant.setCameraEnabled(next, cameraCaptureOptions(prefs));
@@ -1088,12 +1239,13 @@ export function LobbyVoiceProvider({
     } catch (err) {
       setError(mediaErrorNotice(err, 'camera'));
     }
-  }, [cameraEnabled, collectParticipants, loadVoicePreferences]);
+  }, [cameraEnabled, collectParticipants, loadVoicePreferences, refusePublishing]);
 
   const toggleScreenShare = useCallback(async () => {
     const r = roomRef.current;
     if (!r) return;
     const next = !screenShareEnabled;
+    if (next && refusePublishing(r)) return;
     try {
       const prefs = await loadVoicePreferences();
       await r.localParticipant.setScreenShareEnabled(next, screenShareOptions(prefs, screenSharePolicyRef.current));
@@ -1104,7 +1256,7 @@ export function LobbyVoiceProvider({
     } catch (err) {
       setError(mediaErrorNotice(err, 'screen'));
     }
-  }, [screenShareEnabled, collectParticipants, loadVoicePreferences]);
+  }, [screenShareEnabled, collectParticipants, loadVoicePreferences, refusePublishing]);
 
   const setScreenSharePreference = useCallback(async (quality: ScreenQuality, fps: ScreenFps) => {
     const next = { ...voicePrefsRef.current, screenQuality: quality, screenFps: fps };
@@ -1375,8 +1527,10 @@ export function LobbyVoiceProvider({
     if (!participant) return;
     for (const publication of participant.trackPublications.values()) {
       if (
-        publication.source === Track.Source.ScreenShare ||
-        publication.source === Track.Source.ScreenShareAudio
+        (publication.source === Track.Source.ScreenShare ||
+          publication.source === Track.Source.ScreenShareAudio) &&
+        // An audio track labelled ScreenShare stays unsubscribed.
+        isRemotePublicationAllowed(publication)
       ) {
         publication.setSubscribed(true);
       }
@@ -1491,11 +1645,11 @@ export function LobbyVoiceProvider({
       setCameraEnabled(false);
       setScreenShareEnabled(false);
       setDeafenEnabled(false);
-      setServerMuted(false);
+      resetPublishState();
       setAudioBlocked(false);
       setConnectionState(ConnectionState.Disconnected);
     }
-  }, [serverId, stopHeartbeat]);
+  }, [serverId, stopHeartbeat, resetPublishState]);
 
   // Reset camera/screen-share state on disconnect so the footer UI
   // doesn't show stale "on" state when the user reconnects.
@@ -1610,6 +1764,8 @@ export function LobbyVoiceProvider({
       presenceStatus,
       setPresenceStatus,
       serverMuted,
+      publishBlocked,
+      publishBlockedReason: publishState.reason,
       audioBlocked,
       startAudio,
     }),
@@ -1653,6 +1809,8 @@ export function LobbyVoiceProvider({
       presenceStatus,
       setPresenceStatus,
       serverMuted,
+      publishBlocked,
+      publishState.reason,
       audioBlocked,
       startAudio,
     ]

@@ -13,13 +13,23 @@
 import { and, asc, eq } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
 import { userBlocks, users } from '../schema.js';
+import { profileVisibilitySql, sharesServerSql, toProfileVisibility, userImageRefSql } from './userImages.js';
+import type { ActivityVisibilityScope } from './userSettings.js';
 
 export interface UserBlockRow {
   id: string;
   blockerUserId: string;
   blockedUserId: string;
   blockedDisplayName: string;
-  blockedAvatarUrl: string | null;
+  /**
+   * security-review FILE-001: short image reference (version token or
+   * legacy https URL) — never the stored data URL.
+   */
+  blockedAvatarRef: string | null;
+  /** security-review AUTHZ-005: the blocked user's profile visibility. */
+  blockedProfileVisibility: ActivityVisibilityScope;
+  /** Whether the blocker and the blocked user share a server. */
+  sharesServerWithBlocked: boolean;
   createdAt: Date;
 }
 
@@ -75,14 +85,21 @@ export async function listBlockedUsers(
       blockerUserId: userBlocks.blockerUserId,
       blockedUserId: userBlocks.blockedUserId,
       blockedDisplayName: users.displayName,
-      blockedAvatarUrl: users.avatarUrl,
+      blockedAvatarRef: userImageRefSql(users.avatarUrl),
+      blockedProfileVisibility: profileVisibilitySql(users.id),
+      sharesServerWithBlocked: sharesServerSql(blockerUserId, users.id),
       createdAt: userBlocks.createdAt,
     })
     .from(userBlocks)
     .innerJoin(users, eq(users.id, userBlocks.blockedUserId))
     .where(eq(userBlocks.blockerUserId, blockerUserId))
     .orderBy(asc(userBlocks.createdAt));
-  return rows;
+  return rows.map((row) => ({
+    ...row,
+    blockedAvatarRef: row.blockedAvatarRef ?? null,
+    blockedProfileVisibility: toProfileVisibility(row.blockedProfileVisibility),
+    sharesServerWithBlocked: row.sharesServerWithBlocked === true,
+  }));
 }
 
 /**

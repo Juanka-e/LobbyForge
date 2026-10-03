@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { getInstanceSetupStatus } from '@lobbyforge/db';
+import { isSessionActive } from '@/lib/active-session';
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 
@@ -35,12 +36,18 @@ export async function isInstanceAdminAllowed(
   const session = readGuestSession(cookieHeader, secret);
   if (!session?.uid) return false;
 
+  let isOwner = false;
   try {
     const setup = await getInstanceSetupStatus(getDb());
-    return setup.bootstrapVersion >= 2 && setup.ownerUserId === session.uid;
+    isOwner = setup.bootstrapVersion >= 2 && setup.ownerUserId === session.uid;
   } catch {
     return false;
   }
+  // security-review AUTH-002: a revoked owner session is not an admin —
+  // every admin page, the root layout and the admin API routes come
+  // through here. Checked after the owner match, so the root layout does
+  // not add a Redis round trip for every other signed-in visitor.
+  return isOwner && (await isSessionActive(session));
 }
 
 export async function requireInstanceAdmin(req: Request): Promise<NextResponse | null> {

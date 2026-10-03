@@ -1,7 +1,11 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import type { Metadata } from 'next';
-import { getRegistryInstanceByInstanceId, HEARTBEAT_STALE_MS } from '@lobbyforge/db';
+import {
+  getRegistryInstanceByInstanceId,
+  HEARTBEAT_STALE_MS,
+  isRegistryInstancePubliclyVisible,
+} from '@lobbyforge/db';
 import { buttonOutline, buttonPrimary, focusRing } from '@/app/(marketing)/_components/styles';
 import { isOfficialDeployment } from '@/lib/deployment-mode';
 import { getDb } from '@/lib/db';
@@ -61,7 +65,10 @@ export default async function InstanceDetailPage({
   } catch {
     // fall through to not-found
   }
-  if (!instance || !instance.isListed || instance.isBlocked) notFound();
+  // security-review HUB-003: the listing's freshness rule applies here too.
+  // A stale entry's operator may be gone and its domain re-registered by
+  // someone else — no verified badge, no way out to it, just not found.
+  if (!instance || !isRegistryInstancePubliclyVisible(instance)) notFound();
 
   const t = await getTranslator();
   const heartbeat = heartbeatLabel(instance.lastHeartbeatAt ?? null, t);

@@ -1,6 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
 import { memberships } from '../schema.js';
+import { recordMemberSanction } from './memberSanctions.js';
 
 /**
  * Persistent MUTE_MEMBERS server mute. Returns false when the user is not
@@ -12,12 +13,23 @@ export async function setMemberVoiceMuted(
   userId: string,
   muted: boolean
 ): Promise<boolean> {
-  const rows = await db
-    .update(memberships)
-    .set({ voiceMuted: muted })
-    .where(and(eq(memberships.serverId, serverId), eq(memberships.userId, userId)))
-    .returning({ id: memberships.id });
-  return rows.length > 0;
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(memberships)
+      .set({ voiceMuted: muted })
+      .where(and(eq(memberships.serverId, serverId), eq(memberships.userId, userId)))
+      .returning({ timedOutUntil: memberships.timedOutUntil, voiceMuted: memberships.voiceMuted });
+    if (!row) return false;
+    // security-review AUTHZ-002: the mute is mirrored outside the
+    // membership row so leaving and rejoining cannot lift it.
+    await recordMemberSanction(tx as unknown as DbClient, {
+      serverId,
+      userId,
+      timedOutUntil: row.timedOutUntil,
+      voiceMuted: row.voiceMuted,
+    });
+    return true;
+  });
 }
 
 /** True when a moderator has server-muted this member. */

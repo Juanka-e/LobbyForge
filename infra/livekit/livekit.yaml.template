@@ -48,5 +48,17 @@ room:
   enable_remote_unmute: false
   empty_timeout: 300
 
+# security-review AUTHZ-006 follow-up: LiveKit checks only the SOURCE a
+# track claims (camera, microphone, …), never its kind — a server-muted
+# member could publish their microphone as "camera" and be heard. LiveKit
+# posts its room events to the web app, which on track_published removes
+# a participant whose track kind does not match its source
+# (apps/web/app/api/livekit/webhook). The web service is reached over the
+# compose network; nginx 404s this path at the public edge.
+# api_key must NAME one of the configured keys (LIVEKIT_KEYS) — it is
+# random per install, so scripts/render-configs.sh fills it in from
+# LIVEKIT_WEBHOOK_API_KEY (install.sh passes LIVEKIT_API_KEY). Rendered
+# without it, the block stays commented out (webhook disabled).
 webhook:
-  # api_key: your-key  # Set if you use webhooks
+  @LIVEKIT_WEBHOOK_API_KEY_LINE@
+  @LIVEKIT_WEBHOOK_URLS_LINE@

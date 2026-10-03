@@ -9,7 +9,7 @@ import {
 import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
 import { getSessionSecret } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
-import { readGuestSession } from '@/lib/guest-session';
+import { getActiveSession } from '@/lib/active-session';
 import type { Translator } from '@/lib/i18n/core';
 import { getTranslator } from '@/lib/i18n/server';
 import SettingsShell from '@/app/SettingsShell';
@@ -120,7 +120,7 @@ export default async function StorageSettingsPage() {
   // resolve a first server. We don't want to silently load data for
   // the wrong tenant if the admin context changes later.
   await getInstanceSetupStatus(getDb());
-  const session = readGuestSession(cookieStore.toString(), getSessionSecret());
+  const session = await getActiveSession(cookieStore.toString(), getSessionSecret());
   if (session?.uid) {
     await listServersForUser(getDb(), session.uid, { limit: 1 });
   }

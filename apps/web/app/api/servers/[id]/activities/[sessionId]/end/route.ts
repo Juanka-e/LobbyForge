@@ -5,6 +5,7 @@ import {
   getGameSessionById,
   getServerById,
   getUserPermissions,
+  isServerMember,
   logAction,
 } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
@@ -57,6 +58,15 @@ async function handlePost(
     const server = await getServerById(getDb(), serverId);
     if (!server) {
       return NextResponse.json({ error: 'Server not found' }, { status: 404 });
+    }
+    // security-review PLUG-002: membership first, like GET/actions/SSE.
+    // Without it a host who was kicked or banned could still end their
+    // game: visibility passes for anyone on a channel without overrides,
+    // and the host shortcut below skips the permission check.
+    if (server.ownerUserId !== session.uid) {
+      if (!(await isServerMember(getDb(), session.uid, serverId))) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
     }
     const row = await getGameSessionById(getDb(), sessionId);
     if (!row) {

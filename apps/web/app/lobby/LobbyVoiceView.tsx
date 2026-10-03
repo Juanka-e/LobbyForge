@@ -360,6 +360,16 @@ function VoiceControls({ channelName }: { channelName: string }) {
     if (voice.screenShareEnabled) setShareMenuOpen(false);
   }, [voice.screenShareEnabled]);
 
+  // security-review AUTHZ-006 follow-up: a timeout (canPublish:false)
+  // withholds the mic, camera and screen share — same rule as the footer:
+  // turning one ON is disabled and labelled with the reason, turning a
+  // still-live one OFF stays possible.
+  const timedOut = voice.publishBlockedReason === 'timeout';
+  const blockedLabel = timedOut ? t('lobby.voice.blockedTimedOut') : t('lobby.voice.publishUnavailable');
+  const micBlocked = voice.publishBlocked === true && !voice.micEnabled;
+  const cameraBlocked = voice.publishBlocked === true && !voice.cameraEnabled;
+  const screenShareBlocked = voice.publishBlocked === true && !voice.screenShareEnabled;
+
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-2 pb-[max(10px,env(safe-area-inset-bottom))]">
       <div
@@ -377,10 +387,11 @@ function VoiceControls({ channelName }: { channelName: string }) {
         </div>
 
         <CallControlButton
-          label={voice.micEnabled ? t('lobby.voice.micMuteAria') : t('lobby.voice.micUnmuteAria')}
+          label={micBlocked ? blockedLabel : voice.micEnabled ? t('lobby.voice.micMuteAria') : t('lobby.voice.micUnmuteAria')}
           icon={voice.micEnabled ? 'mic' : 'mic_off'}
           pressed={!voice.micEnabled}
           danger={!voice.micEnabled}
+          disabled={micBlocked}
           onClick={() => void voice.toggleMic()}
         />
         <CallControlButton
@@ -392,32 +403,35 @@ function VoiceControls({ channelName }: { channelName: string }) {
         />
         <span className="h-7 w-px bg-white/10" aria-hidden />
         <CallControlButton
-          label={voice.cameraEnabled ? t('lobbyMain.voice.cameraStop') : t('lobbyMain.voice.cameraStart')}
+          label={cameraBlocked ? blockedLabel : voice.cameraEnabled ? t('lobbyMain.voice.cameraStop') : t('lobbyMain.voice.cameraStart')}
           icon={voice.cameraEnabled ? 'videocam' : 'videocam_off'}
           pressed={voice.cameraEnabled}
+          disabled={cameraBlocked}
           onClick={() => void voice.toggleCamera()}
         />
 
         <div className={cn(
           'relative flex h-11 flex-none items-stretch overflow-visible rounded-full transition-colors',
-          voice.screenShareEnabled ? 'bg-emerald-400 text-[#0d1a14]' : 'bg-white/10 text-white/80 hover:bg-white/15 hover:text-white'
+          voice.screenShareEnabled ? 'bg-emerald-400 text-[#0d1a14]' : 'bg-white/10 text-white/80 hover:bg-white/15 hover:text-white',
+          screenShareBlocked && 'opacity-40'
         )}>
           <button
             type="button"
             onClick={() => void voice.toggleScreenShare()}
-            title={voice.screenShareEnabled ? t('lobbyMain.voice.shareStop') : t('lobbyMain.voice.shareStart')}
-            aria-label={voice.screenShareEnabled ? t('lobbyMain.voice.shareStop') : t('lobbyMain.voice.shareStart')}
+            disabled={screenShareBlocked}
+            title={screenShareBlocked ? blockedLabel : voice.screenShareEnabled ? t('lobbyMain.voice.shareStop') : t('lobbyMain.voice.shareStart')}
+            aria-label={screenShareBlocked ? blockedLabel : voice.screenShareEnabled ? t('lobbyMain.voice.shareStop') : t('lobbyMain.voice.shareStart')}
             aria-pressed={voice.screenShareEnabled}
-            className="grid w-10 place-items-center rounded-l-full"
+            className="grid w-10 place-items-center rounded-l-full disabled:cursor-not-allowed"
           >
             <span className="material-symbols-outlined text-[21px]" aria-hidden>{voice.screenShareEnabled ? 'stop_screen_share' : 'screen_share'}</span>
           </button>
           {!voice.screenShareEnabled ? (
-            <button type="button" onClick={() => setShareMenuOpen((open) => !open)} aria-label={t('lobbyMain.voice.streamQuality')} aria-expanded={shareMenuOpen} className="grid w-6 place-items-center rounded-r-full border-l border-white/10 text-white/55 hover:text-white">
+            <button type="button" onClick={() => setShareMenuOpen((open) => !open)} disabled={screenShareBlocked} aria-label={t('lobbyMain.voice.streamQuality')} aria-expanded={shareMenuOpen} className="grid w-6 place-items-center rounded-r-full border-l border-white/10 text-white/55 hover:text-white disabled:cursor-not-allowed">
               <span className="material-symbols-outlined text-[16px]" aria-hidden>expand_less</span>
             </button>
           ) : null}
-          {shareMenuOpen && !voice.screenShareEnabled ? (
+          {shareMenuOpen && !voice.screenShareEnabled && !screenShareBlocked ? (
             <div className="absolute bottom-14 right-0 z-30 w-60 rounded-md border border-white/10 bg-[#252830] p-2.5 text-white shadow-2xl">
               <p className="px-1 pb-1.5 text-[10px] font-semibold uppercase text-white/45">{t('lobbyMain.voice.streamQuality')}</p>
               <div className="grid grid-cols-2 gap-1">
@@ -464,23 +478,26 @@ function CallControlButton({
   icon,
   pressed,
   danger = false,
+  disabled = false,
   onClick,
 }: {
   label: string;
   icon: string;
   pressed: boolean;
   danger?: boolean;
+  disabled?: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       title={label}
       aria-label={label}
       aria-pressed={pressed}
       className={cn(
-        'grid size-11 flex-none place-items-center rounded-full transition-colors',
+        'grid size-11 flex-none place-items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40',
         danger
           ? 'bg-red-500/20 text-red-200 hover:bg-red-500/30'
           : pressed

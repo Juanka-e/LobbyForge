@@ -11,7 +11,7 @@ import {
 import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
 import { getSessionSecret } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
-import { readGuestSession } from '@/lib/guest-session';
+import { getActiveSession } from '@/lib/active-session';
 import { getTranslator } from '@/lib/i18n/server';
 import SettingsShell from '@/app/SettingsShell';
 import AuditClient, { type AuditEntryView } from './AuditClient';
@@ -48,7 +48,7 @@ export default async function AuditLogPage() {
 
   const setup = await getInstanceSetupStatus(getDb());
   const db = getDb();
-  const session = readGuestSession(cookieStore.toString(), getSessionSecret());
+  const session = await getActiveSession(cookieStore.toString(), getSessionSecret());
   const userId = session?.uid ?? setup.ownerUserId ?? null;
 
   let entries: AuditEntryView[] = [];

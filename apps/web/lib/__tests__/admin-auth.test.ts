@@ -13,6 +13,9 @@ vi.mock('@/lib/db', () => ({
   getDb: () => ({ test: true }),
 }));
 
+const { isSessionRevoked } = vi.hoisted(() => ({ isSessionRevoked: vi.fn() }));
+vi.mock('@/lib/session-tracker', () => ({ isSessionRevoked }));
+
 import {
   isAdminHealthAllowed,
   isInstanceAdminAllowed,
@@ -41,6 +44,8 @@ describe('instance admin authentication', () => {
       bootstrapVersion: 2,
       ownerUserId: OWNER_ID,
     });
+    isSessionRevoked.mockReset();
+    isSessionRevoked.mockResolvedValue(false);
   });
 
   afterEach(() => {
@@ -66,6 +71,45 @@ describe('instance admin authentication', () => {
     expect(isAdminHealthAllowed(`${ADMIN_TOKEN.slice(0, -1)}b`)).toBe(false);
     vi.stubEnv('LOBBYFORGE_ADMIN_TOKEN', 'short');
     expect(isAdminHealthAllowed('short')).toBe(false);
+  });
+
+  // security-review AUTH-002: every admin page, the root layout and the
+  // admin API routes trust this check — a revoked owner session must fail it.
+  it('rejects a revoked owner session', async () => {
+    isSessionRevoked.mockResolvedValue(true);
+    await expect(isInstanceAdminAllowed(ownerCookie(), null)).resolves.toBe(false);
+    expect(isSessionRevoked).toHaveBeenCalledWith(OWNER_ID, `g_${'1'.repeat(32)}`);
+  });
+
+  it('rejects the owner in production when the revocation check is unavailable', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    isSessionRevoked.mockRejectedValue(new Error('redis down'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await expect(isInstanceAdminAllowed(ownerCookie(), null)).resolves.toBe(false);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('answers 401 on an admin API route for a revoked owner session', async () => {
+    isSessionRevoked.mockResolvedValue(true);
+    const response = await requireInstanceAdmin(
+      new Request('http://localhost/api/admin/updates', {
+        headers: { cookie: ownerCookie().split(';', 1)[0] },
+      })
+    );
+    expect(response?.status).toBe(401);
+  });
+
+  it('does not query revocation for a visitor who is not the owner', async () => {
+    await expect(isInstanceAdminAllowed(ownerCookie(OTHER_ID), null)).resolves.toBe(false);
+    expect(isSessionRevoked).not.toHaveBeenCalled();
+  });
+
+  it('the emergency token does not depend on a session', async () => {
+    isSessionRevoked.mockResolvedValue(true);
+    await expect(isInstanceAdminAllowed(ownerCookie(), ADMIN_TOKEN)).resolves.toBe(true);
   });
 
   it('returns 401 without owner session or emergency token', async () => {

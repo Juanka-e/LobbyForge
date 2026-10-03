@@ -22,6 +22,10 @@ import type { DbClient } from '../client.js';
 import { membershipRoles, memberships, roles, users } from '../schema.js';
 import { activeBanOnMembershipSql, isCurrentlyBanned } from './bans.js';
 import { EVERYONE_ROLE_NAME } from './roles.js';
+import { getMemberSanction, membershipValuesFromSanction, recordMemberSanction } from './memberSanctions.js';
+import { isNewMemberApprovalRequired } from './serverAccessPolicies.js';
+import { profileVisibilitySql, toProfileVisibility, userImageRefSql } from './userImages.js';
+import type { ActivityVisibilityScope } from './userSettings.js';
 
 export interface MembershipRow {
   id: string;
@@ -103,7 +107,9 @@ export async function getServerMember(
 /**
  * Idempotently make `userId` a member of `serverId` (the /lobby
  * auto-join on open instances). Returns `null` — and creates nothing —
- * when the user holds an ACTIVE ban on the server.
+ * when the user holds an ACTIVE ban on the server, or (security-review
+ * AUTHZ-004) when the server's access policy requires approval for a
+ * newcomer.
  *
  * beta-review (S2): the lobby called this unconditionally, so a banned
  * user on an open instance was silently re-joined on their next visit.
@@ -137,6 +143,11 @@ export async function ensureServerMembershipDetailed(
   if (await isCurrentlyBanned(db, serverId, userId)) return null;
   const existing = await getServerMember(db, serverId, userId);
   if (existing) return { membership: existing, created: false };
+  // security-review AUTHZ-004: a server whose access policy asks for
+  // approval (there is no queue) takes no new members by auto-join either
+  // — the same refusal invite redeem and registration give. Returns null
+  // like a ban: the caller creates nothing.
+  if (await isNewMemberApprovalRequired(db, serverId, userId)) return null;
 
   const [everyone] = await db
     .select({ id: roles.id })
@@ -146,9 +157,13 @@ export async function ensureServerMembershipDetailed(
     .orderBy(asc(roles.position), asc(roles.createdAt))
     .limit(1);
 
+  // security-review AUTHZ-002: a returning member starts with the timeout
+  // / server mute they left with — leaving must not lift a sanction.
+  const sanction = await getMemberSanction(db, serverId, userId);
+
   const [created] = await db
     .insert(memberships)
-    .values({ serverId, userId })
+    .values({ serverId, userId, ...membershipValuesFromSanction(sanction) })
     .onConflictDoNothing({
       target: [memberships.serverId, memberships.userId],
     })
@@ -341,14 +356,23 @@ export async function listRoleIdsForMemberships(
  * the name and color, falling back to "Member" / "Guest" if no role is
  * assigned. Online/voice presence is intentionally omitted — the admin
  * screen is for offline review.
+ *
+ * security-review FILE-001: images are returned as short references
+ * (`userImageRefSql`), never as the stored data URLs — the list is
+ * serialized into every /lobby render. security-review AUTHZ-005:
+ * `profileVisibility` is the member's setting; callers project avatar /
+ * banner / bio / status per viewer.
  */
 export interface MemberSummary {
   userId: string;
   displayName: string;
   globalDisplayName: string;
   nickname: string | null;
-  avatarUrl: string | null;
-  bannerUrl: string | null;
+  /** Short image reference (version token or legacy https URL), never the image. */
+  avatarRef: string | null;
+  /** Short image reference (version token or legacy https URL), never the image. */
+  bannerRef: string | null;
+  profileVisibility: ActivityVisibilityScope;
   isGuest: boolean;
   roleName: string | null;
   roleColor: string | null;
@@ -359,21 +383,32 @@ export interface MemberSummary {
   joinedAt: Date;
 }
 
+/**
+ * Every member by default, oldest first. `limit` is optional and has no
+ * default on purpose: the lobby member list, mention autocomplete, voice
+ * rosters and the admin Members page all treat this as the COMPLETE member
+ * set — a cap (security-review FILE-001 briefly had one at 500) made later
+ * members vanish from the list and show as "Unknown user" in voice. Rows
+ * carry short image references, not images, so a full list stays small.
+ */
 export async function listMemberSummariesForServer(
   db: DbClient,
-  serverId: string
+  serverId: string,
+  options: { limit?: number } = {}
 ): Promise<MemberSummary[]> {
   // We leftJoin roles so members without a role still surface. `users`
   // is the source of truth for display name / username / avatar.
-  const rows = await db
+  const query = db
     .select({
       userId: memberships.userId,
       membershipId: memberships.id,
       displayName: memberships.nickname,
       globalDisplayName: users.displayName,
       nickname: memberships.nickname,
-      avatarUrl: users.avatarUrl,
-      bannerUrl: users.bannerUrl,
+      // security-review FILE-001: references only — the data URLs stay in Postgres.
+      avatarRef: userImageRefSql(users.avatarUrl),
+      bannerRef: userImageRefSql(users.bannerUrl),
+      profileVisibility: profileVisibilitySql(users.id),
       isGuest: users.isGuest,
       roleName: roles.name,
       roleColor: roles.color,
@@ -391,7 +426,14 @@ export async function listMemberSummariesForServer(
         isNull(users.deletedAt)
       )
     )
-    .orderBy(asc(memberships.createdAt));
+    .orderBy(asc(memberships.createdAt), asc(memberships.id));
+  const rows = options.limit === undefined
+    ? await query
+    : await query.limit(Math.max(1, Math.floor(options.limit)));
+  // Scoped by server through a join rather than `IN (<every membership
+  // id>)`: with no cap, a list of one bind parameter per member would hit
+  // Postgres' 65,535-parameter ceiling on a very large server. Links of
+  // members outside `rows` (soft-deleted users, beyond `limit`) are ignored.
   const roleLinks = rows.length === 0
     ? []
     : await db
@@ -406,7 +448,8 @@ export async function listMemberSummariesForServer(
         })
         .from(membershipRoles)
         .innerJoin(roles, eq(roles.id, membershipRoles.roleId))
-        .where(inArray(membershipRoles.membershipId, rows.map((row) => row.membershipId)));
+        .innerJoin(memberships, eq(memberships.id, membershipRoles.membershipId))
+        .where(eq(memberships.serverId, serverId));
   const rolesByMembership = new Map<string, MemberSummary['roles']>();
   for (const role of roleLinks) {
     const current = rolesByMembership.get(role.membershipId) ?? [];
@@ -416,6 +459,9 @@ export async function listMemberSummariesForServer(
   return rows.map(({ membershipId, ...row }) => ({
     ...row,
     displayName: row.displayName || row.globalDisplayName,
+    avatarRef: row.avatarRef ?? null,
+    bannerRef: row.bannerRef ?? null,
+    profileVisibility: toProfileVisibility(row.profileVisibility),
     roles: (rolesByMembership.get(membershipId) ?? []).sort((a, b) => b.position - a.position),
   }));
 }
@@ -431,13 +477,23 @@ export async function setMemberTimeout(
   userId: string,
   until: Date | null
 ): Promise<MembershipRow> {
-  const [row] = await db
-    .update(memberships)
-    .set({ timedOutUntil: until })
-    .where(and(eq(memberships.serverId, serverId), eq(memberships.userId, userId)))
-    .returning();
-  if (!row) throw new Error(`setMemberTimeout: user ${userId} is not a member of server ${serverId}`);
-  return row as MembershipRow;
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(memberships)
+      .set({ timedOutUntil: until })
+      .where(and(eq(memberships.serverId, serverId), eq(memberships.userId, userId)))
+      .returning();
+    if (!row) throw new Error(`setMemberTimeout: user ${userId} is not a member of server ${serverId}`);
+    // security-review AUTHZ-002: mirror the moderation state outside the
+    // membership row (same transaction) so leave + rejoin keeps it.
+    await recordMemberSanction(tx as unknown as DbClient, {
+      serverId,
+      userId,
+      timedOutUntil: row.timedOutUntil,
+      voiceMuted: row.voiceMuted,
+    });
+    return row as MembershipRow;
+  });
 }
 
 /** Active (non-expired) timeout for a member, or null. */

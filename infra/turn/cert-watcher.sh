@@ -14,6 +14,21 @@
 # the loop into a restart cycle.
 set -eu
 
+CONF="${TURN_CONFIG:-/etc/coturn/turnserver.conf}"
+
+# security-review INFRA-001: coturn treats an unreadable config as "no
+# config" and falls back to its defaults — anonymous access, no
+# denied-peer-ip rules: an open relay that still passes the healthcheck.
+# Refuse to start instead, so a broken install crash-loops visibly.
+if [ ! -r "$CONF" ]; then
+    echo "[turn] FATAL: $CONF is not readable by uid $(id -u) — refusing to start an unauthenticated relay" >&2
+    exit 1
+fi
+if ! grep -q '^use-auth-secret' "$CONF" || ! grep -q '^static-auth-secret=.' "$CONF"; then
+    echo "[turn] FATAL: $CONF does not configure REST auth (use-auth-secret + static-auth-secret) — refusing to start" >&2
+    exit 1
+fi
+
 CERT_DIR="${CERT_DIR:-/etc/letsencrypt/live}"
 SUM=/tmp/.certsum
 SUM_NEW=/tmp/.certsum.new
@@ -40,4 +55,4 @@ md5_files() {
     done
 ) &
 
-exec turnserver -c /etc/coturn/turnserver.conf
+exec turnserver -c "$CONF"

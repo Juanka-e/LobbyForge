@@ -32,6 +32,10 @@ vi.mock('@/lib/redis', () => ({ redis: { set: (...a: unknown[]) => redisSet(...a
 vi.mock('@/lib/security-headers', () => ({
   withApiSecurity: (handler: unknown) => handler,
 }));
+// security-review FILE-002: the directory write routes exist on the
+// official hub only.
+const deployment = vi.hoisted(() => ({ official: true }));
+vi.mock('@/lib/deployment-mode', () => ({ isOfficialDeployment: () => deployment.official }));
 
 const UID = '00000000-0000-0000-0000-000000000099';
 const INSTANCE_ID = 'inst-1';
@@ -117,6 +121,7 @@ beforeEach(() => {
   changeRegistryInstanceDomain.mockReset().mockResolvedValue(true);
   redisSet.mockReset().mockResolvedValue('OK');
   ssrfSafeGet.mockReset();
+  deployment.official = true;
 });
 
 describe('POST /api/directory/change-domain — beta-review S10', () => {
@@ -158,5 +163,45 @@ describe('POST /api/directory/change-domain — beta-review S10', () => {
     const res = await post(body);
     expect(res.status).toBe(401);
     expect(changeRegistryInstanceDomain).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/directory/change-domain — security-review FILE-002', () => {
+  it('answers a failed fetch with one generic message, never the internal detail', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const failures = [
+      new Error('Target resolves to a blocked address: 172.20.0.4'),
+      new Error('getaddrinfo ENOTFOUND postgres.internal'),
+      new Error('connect ECONNREFUSED 203.0.113.7:8443'),
+      new Error('Client network socket disconnected before secure TLS connection was established'),
+    ];
+    const bodies: string[] = [];
+    for (const failure of failures) {
+      ssrfSafeGet.mockRejectedValueOnce(failure);
+      const res = await post(changeBody());
+      expect(res.status).toBe(400);
+      bodies.push(JSON.stringify(await res.json()));
+    }
+    ssrfSafeGet.mockResolvedValueOnce({ ok: false, status: 502, body: '' });
+    const httpRes = await post(changeBody());
+    expect(httpRes.status).toBe(400);
+    bodies.push(JSON.stringify(await httpRes.json()));
+
+    // Every failure reads the same, and none of them leaks what happened.
+    expect(new Set(bodies).size).toBe(1);
+    expect(bodies[0]).toContain('/.well-known/lobbyforge-verification');
+    expect(bodies[0]).not.toMatch(/172\.20|ENOTFOUND|ECONNREFUSED|TLS|blocked|502/);
+    // ...the operator still finds it in the server log.
+    expect(warn.mock.calls.flat().join(' ')).toContain('172.20.0.4');
+    expect(changeRegistryInstanceDomain).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('is not served on a self-hosted deployment (404)', async () => {
+    deployment.official = false;
+    const res = await post(changeBody());
+    expect(res.status).toBe(404);
+    expect(getRegistryInstanceByInstanceId).not.toHaveBeenCalled();
+    expect(ssrfSafeGet).not.toHaveBeenCalled();
   });
 });

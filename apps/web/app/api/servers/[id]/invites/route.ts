@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { CorePermission, hasPermission } from '@lobbyforge/core';
 import {
   createInvite,
+  getActiveMemberTimeout,
   getServerById,
   isServerMember,
   listInvitesForServer,
@@ -117,6 +118,18 @@ async function handlePost(req: Request, ctx: { params: Promise<{ id: string }> }
     }
     const auth = await authorizeServerPermission(session.uid, serverId, CorePermission.CREATE_INVITE);
     if (!auth.ok) return auth.response;
+
+    // security-review AUTHZ-002: a timed-out member cannot mint invites —
+    // an invite was the first step of the leave-and-rejoin timeout escape,
+    // and a timeout silences the member in every other way too. Same
+    // 403 shape as the message routes.
+    const activeTimeout = await getActiveMemberTimeout(getDb(), serverId, session.uid);
+    if (activeTimeout) {
+      return NextResponse.json(
+        { error: 'You are timed out in this server', until: activeTimeout.toISOString() },
+        { status: 403 }
+      );
+    }
 
     let body: z.infer<typeof CreateInviteSchema>;
     try {

@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
-import { serverAccessPolicies } from '../schema.js';
+import { serverAccessPolicies, servers } from '../schema.js';
 
 export type JoinPolicy = 'invite_only' | 'public_with_approval' | 'public_self_register' | 'guest_allowed';
 export type ExternalIdentityPolicy = 'off' | 'allow_lobbyforge' | 'require_lobbyforge_for_registry';
@@ -45,6 +45,45 @@ export async function getServerAccessPolicy(
     .where(eq(serverAccessPolicies.serverId, serverId))
     .limit(1);
   return (row as ServerAccessPolicyRow | undefined) ?? null;
+}
+
+/**
+ * security-review AUTHZ-004: does this policy hold a newcomer for
+ * moderator approval? There is no approval queue, so every path that
+ * creates a membership refuses instead (invite redeem, the /lobby
+ * auto-join, registration). The three fields are read EXACTLY as
+ * `api/auth/register` reads them — keep the two in step.
+ */
+export function accessPolicyRequiresApproval(
+  policy: Pick<ServerAccessPolicyRow, 'joinPolicy' | 'accountLinking' | 'requireApprovalForFirstJoin'> | null | undefined
+): boolean {
+  if (!policy) return false;
+  return (
+    policy.requireApprovalForFirstJoin ||
+    policy.joinPolicy === 'public_with_approval' ||
+    policy.accountLinking === 'require_admin_approval_first_join'
+  );
+}
+
+/**
+ * security-review AUTHZ-004: may `userId` become a NEW member of the
+ * server without an approval step? False when the server's policy asks
+ * for approval — except for the owner, who is never held out of their own
+ * server. Callers check this only when they are about to INSERT a
+ * membership (an existing member is not re-approved).
+ */
+export async function isNewMemberApprovalRequired(
+  db: DbClient,
+  serverId: string,
+  userId: string
+): Promise<boolean> {
+  const [server] = await db
+    .select({ ownerUserId: servers.ownerUserId })
+    .from(servers)
+    .where(eq(servers.id, serverId))
+    .limit(1);
+  if (server?.ownerUserId === userId) return false;
+  return accessPolicyRequiresApproval(await getServerAccessPolicy(db, serverId));
 }
 
 export async function getEffectiveServerAccessPolicy(

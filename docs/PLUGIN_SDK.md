@@ -159,6 +159,8 @@ Unknown action types default to `host`, so new actions are safe by default.
 type GamePluginActionPolicy = {
   role: "host" | "member" | "player";
   actorFields?: string[];
+  joinsRoster?: boolean;
+  audit?: boolean;
 };
 ```
 
@@ -179,6 +181,18 @@ type GamePluginActionPolicy = {
   by name.
 - `actorFields`: fields overwritten by the host with `ctx.actorUserId`.
   Use this for `playerId`, `voterId`, `hostId`, and similar identity fields.
+- `audit`: whether an action that changes state writes an
+  `activity.action` row (actor, plugin id, action type) to the server's
+  audit log. Defaults to `true` for `host` actions (configure, start,
+  kick, reveal — running the table) and `false` for `member` / `player`
+  actions (gameplay). Every `VIEW_AUDIT_LOG` holder reads that log, so
+  "who sent which action type, when" is public to them: a night action
+  would name a hidden role and a vote row lined up with the poll counts
+  would name the voter. Set `audit: true` only on an action whose author
+  and type are public anyway; set `audit: false` on a host action whose
+  type alone gives a secret away. A refused action (the reducer returned
+  the same state) is never audited. `shouldAuditAction(policy)` in the SDK
+  is the rule the host applies.
 
 Do not trust actor identity fields sent by the browser.
 

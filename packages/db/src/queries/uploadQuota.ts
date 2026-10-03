@@ -11,18 +11,23 @@
  * layer can reject an upload that would exceed the quota. The instance
  * logo is admin-only and intentionally uncounted (there is exactly one).
  */
-import { eq } from 'drizzle-orm';
+import { eq, sql, type AnyColumn } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
 import { servers, users } from '../schema.js';
 
 /** Total stored-image budget per user (avatar + banners). 24 MiB. */
 export const USER_IMAGE_QUOTA_BYTES = 24 * 1024 * 1024;
 
-function storedBytes(value: string | null | undefined): number {
-  // Only data URLs count toward the quota — an http(s) URL points at
-  // external storage and costs this database nothing.
-  if (!value || !value.startsWith('data:')) return 0;
-  return value.length;
+/**
+ * Bytes a stored image value costs this database, measured IN SQL.
+ * Only data URLs count — an http(s) URL points at external storage.
+ * security-review FILE-001: the old code selected the data URLs (up to
+ * ~6 + ~8 MB each, plus every owned server banner) into Node on every
+ * upload just to call `.length`; `octet_length` reads the TOAST size
+ * instead (data URLs are ASCII, so bytes == characters).
+ */
+function storedBytesSql(column: AnyColumn) {
+  return sql<number>`coalesce(sum(case when ${column} like 'data:%' then octet_length(${column}) else 0 end), 0)::bigint`;
 }
 
 /**
@@ -31,18 +36,14 @@ function storedBytes(value: string | null | undefined): number {
  */
 export async function getUserStoredImageBytes(db: DbClient, userId: string): Promise<number> {
   const [userRow] = await db
-    .select({ avatarUrl: users.avatarUrl, bannerUrl: users.bannerUrl })
+    .select({ avatar: storedBytesSql(users.avatarUrl), banner: storedBytesSql(users.bannerUrl) })
     .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
+    .where(eq(users.id, userId));
 
-  let total = storedBytes(userRow?.avatarUrl) + storedBytes(userRow?.bannerUrl);
-
-  const owned = await db
-    .select({ bannerUrl: servers.bannerUrl })
+  const [ownedRow] = await db
+    .select({ banners: storedBytesSql(servers.bannerUrl) })
     .from(servers)
     .where(eq(servers.ownerUserId, userId));
 
-  for (const row of owned) total += storedBytes(row.bannerUrl);
-  return total;
+  return Number(userRow?.avatar ?? 0) + Number(userRow?.banner ?? 0) + Number(ownedRow?.banners ?? 0);
 }

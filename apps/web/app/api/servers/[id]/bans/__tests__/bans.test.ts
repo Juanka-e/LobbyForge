@@ -10,6 +10,7 @@ const banUser = vi.fn();
 const unbanUser = vi.fn();
 const isCurrentlyBanned = vi.fn();
 const listBansForServer = vi.fn();
+const userExists = vi.fn();
 const logAction = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('@lobbyforge/db', () => ({
@@ -17,6 +18,7 @@ vi.mock('@lobbyforge/db', () => ({
   isServerMember,
   getUserPermissions,
   getHighestRolePosition,
+  userExists,
   banUser,
   unbanUser,
   isCurrentlyBanned,
@@ -303,6 +305,88 @@ describe('POST /api/servers/{id}/bans', () => {
       expect.anything(),
       expect.objectContaining({ serverId: SERVER_ID, userId: TARGET_ID, reason: 'spam' })
     );
+  });
+});
+
+// security-review AUTHZ-002: a member who left could not be banned
+// (`POST /bans` → 404 "not a member"), so leaving was a way to dodge a
+// moderator. A ban now reaches any existing user; kick/timeout/mute still
+// need a membership.
+describe('POST /api/servers/{id}/bans — security-review AUTHZ-002 non-member ban', () => {
+  function banRow() {
+    return {
+      ok: true,
+      ban: {
+        id: 'ban-left',
+        serverId: SERVER_ID,
+        userId: TARGET_ID,
+        bannedBy: USER_ID,
+        reason: 'evasion',
+        expiresAt: null,
+        createdAt: new Date('2026-10-03T00:00:00Z'),
+      },
+    };
+  }
+
+  function post(userId: string) {
+    return new Request(`https://example.test/api/servers/${SERVER_ID}/bans`, {
+      method: 'POST',
+      headers: { cookie: makeSessionCookie() },
+      body: JSON.stringify({ userId, reason: 'evasion' }),
+    });
+  }
+
+  beforeEach(() => {
+    userExists.mockReset().mockResolvedValue(true);
+    getServerById.mockResolvedValue(mockServer(OWNER_ID));
+    getUserPermissions.mockResolvedValue(['ban_members']);
+    // The actor is a member; the target left.
+    isServerMember.mockImplementation(async (_db: unknown, userId: string) => userId !== TARGET_ID);
+    banUser.mockResolvedValue(banRow());
+  });
+
+  it('bans a user who is no longer a member (201), with no rank comparison', async () => {
+    // Even a target that WAS ranked above the moderator: they hold no roles now.
+    getHighestRolePosition.mockImplementation(async (_db: unknown, _sid: string, userId: string) =>
+      userId === TARGET_ID ? 80 : 50
+    );
+    const { POST } = await loadRoute();
+    const res = await POST(post(TARGET_ID), { params: Promise.resolve({ id: SERVER_ID }) });
+    expect(res.status).toBe(201);
+    expect(banUser).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ serverId: SERVER_ID, userId: TARGET_ID, bannedBy: USER_ID })
+    );
+    expect(getHighestRolePosition).not.toHaveBeenCalledWith(expect.anything(), SERVER_ID, TARGET_ID, expect.anything());
+    // security-review FILE-001: an id-only existence check, not a full user row.
+    expect(userExists).toHaveBeenCalledWith(expect.anything(), TARGET_ID);
+  });
+
+  it('still needs BAN_MEMBERS', async () => {
+    getUserPermissions.mockResolvedValue(['kick_members']);
+    const { POST } = await loadRoute();
+    const res = await POST(post(TARGET_ID), { params: Promise.resolve({ id: SERVER_ID }) });
+    expect(res.status).toBe(403);
+    expect(banUser).not.toHaveBeenCalled();
+  });
+
+  it('404 for a user id that does not exist', async () => {
+    userExists.mockResolvedValue(false);
+    const { POST } = await loadRoute();
+    const res = await POST(post(TARGET_ID), { params: Promise.resolve({ id: SERVER_ID }) });
+    expect(res.status).toBe(404);
+    expect(banUser).not.toHaveBeenCalled();
+  });
+
+  it('still refuses the owner and the actor themselves', async () => {
+    isServerMember.mockResolvedValue(false);
+    const { POST } = await loadRoute();
+    const owner = await POST(post(OWNER_ID), { params: Promise.resolve({ id: SERVER_ID }) });
+    expect(owner.status).toBe(400);
+    isServerMember.mockImplementation(async (_db: unknown, userId: string) => userId === USER_ID);
+    const self = await POST(post(USER_ID), { params: Promise.resolve({ id: SERVER_ID }) });
+    expect(self.status).toBe(400);
+    expect(banUser).not.toHaveBeenCalled();
   });
 });
 

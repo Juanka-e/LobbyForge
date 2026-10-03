@@ -2,6 +2,93 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - security review fixes - 2026-10-03
+
+The whole-codebase review in `docs/SECURITY_REVIEW_2026-10.md` found one
+high, seven medium and nine low issues; all are fixed here.
+
+### Operators — action needed
+- **TURN was an open relay on every `install.sh` deployment (INFRA-001).**
+  The installer writes `infra/turn/turnserver.conf` as 0600 root and the
+  coturn image runs as `nobody`, so coturn never read its config and
+  started with anonymous access and no peer restrictions. Pull this
+  release and recreate the TURN container:
+  `docker compose -f infra/docker/docker-compose.prod.yml --env-file .env.prod up -d turn`,
+  then check it with `node scripts/turn-auth-probe.mjs <your-domain> 3478`
+  (must answer 401). The container now starts as root, coturn drops to
+  `nobody` after reading its config and certificate (`proc-user`), the
+  watcher refuses to start without a readable config with REST auth, TCP
+  relays are off and more special-purpose ranges are denied. TURN over
+  TLS (5349) now works too — the key was unreadable before.
+- Rendered configs (TURN secret) no longer enter locally built images
+  (INFRA-002).
+- Migrations 0039 (per-install directory id) and 0040 (moderation state
+  that survives leaving) run on boot.
+
+### Accounts and sessions
+- A desktop sign-in code minted before a password change no longer
+  completes after it; changing the password also drops outstanding codes
+  (AUTH-001).
+- Revoked sessions are signed out on server-rendered pages and admin
+  screens too, not only on API calls; a request carrying two session
+  cookies is refused (AUTH-002).
+
+### Communities and moderation
+- Deleting the last role that gates a channel is refused (409) instead of
+  silently making the channel public (AUTHZ-001).
+- Timeouts and server mutes survive leaving and rejoining; timed-out
+  members cannot create invites; users who already left can be banned
+  (AUTHZ-002).
+- Only a message's author can change its text; Manage Messages keeps
+  delete and pin (AUTHZ-003).
+- Invites and auto-join respect "approval required" access policies
+  (AUTHZ-004); the lobby says so instead of showing a data error. There
+  is no approval queue yet, so those settings now turn away every new
+  member (the settings page says so) — servers that had them on stop
+  accepting invitees after this upgrade.
+- "Profile visibility" is enforced: avatar, banner, bio and status are
+  hidden from viewers it excludes (AUTHZ-005).
+- A server mute also removes screen-share audio, a timeout every publish
+  source; an empty source list now means no publishing at all (LiveKit
+  treats an empty list as "everything") (AUTHZ-006).
+- A server-muted member can no longer be heard by publishing their
+  microphone as "camera" or "screen share". LiveKit only checks the
+  source a track claims, not whether it is audio or video. The app now
+  never plays a track whose kind does not match its source, and a new
+  LiveKit webhook (`/api/livekit/webhook`, internal only) removes whoever
+  publishes one and writes an audit entry (AUTHZ-006 follow-up). Operators
+  of existing installs: to turn the webhook on, stop the stack and re-run
+  `bash install.sh`, or re-render the configs with
+  `LIVEKIT_WEBHOOK_API_KEY=<your LIVEKIT_API_KEY> bash scripts/render-configs.sh <domain> <turn-secret>`
+  and recreate the `livekit` container. Without it, the app still refuses
+  to play such tracks.
+
+### Activities and plugins
+- Gameplay actions are no longer written to the audit log, which named
+  Vampire Village roles and anonymous poll voters; host actions are still
+  audited when they change state. New optional `audit` flag on
+  `GamePluginActionPolicy` (PLUG-001).
+- Channel visibility checks require membership, so a kicked host cannot
+  end their activity (PLUG-002); action types named after
+  `Object.prototype` members no longer bypass the host check.
+
+### Images
+- Member lists, DMs and block lists no longer inline avatar/banner data
+  URLs; images are served from `/api/users/<id>/avatar|banner` with the
+  owner's profile visibility applied. The lobby member list is capped at
+  500 (FILE-001).
+
+### Directory
+- Each install has its own random directory id; `.well-known` and the
+  admin config work again (they read a row that never existed) (HUB-001).
+- Re-registering a listed entry needs the stored key and domain and sends
+  changed listings back to review (HUB-002); stale entries are no longer
+  linked from detail or leave-site pages, and admins see every entry with
+  its status (HUB-003).
+- Verification failures return a generic message, single-label hosts are
+  rejected and the directory write routes exist only on the official hub
+  (FILE-002).
+
 ## [Unreleased] - official hub, plugin UI kit, finished games and bots - 2026-09-29
 
 ### Official hub

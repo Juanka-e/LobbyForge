@@ -9,6 +9,8 @@
  */
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import postgres from 'postgres';
+import { createDb } from '../client.js';
+import { upsertRegistryInstance } from '../queries/registryInstances.js';
 
 const TEST_URL = process.env.TEST_DATABASE_URL;
 const describeIf = TEST_URL ? describe : describe.skip;
@@ -201,5 +203,64 @@ describeIf('REAL Postgres: registry instance ownership', () => {
     }
 
     await sql`DELETE FROM registry_instances WHERE instance_id = ${concurrentId}`;
+  });
+});
+
+// security-review HUB-002: the register upsert must keep the domain and
+// key, and send a reviewed entry back to review when anything the
+// directory SHOWS changes — proven against the real ON CONFLICT … WHERE
+// statement, not a mock.
+describeIf('REAL Postgres: registry re-registration (HUB-002)', () => {
+  let sql: postgres.Sql;
+  let db: ReturnType<typeof createDb>;
+  const INSTANCE_ID = `test-inst-hub002-${Date.now()}`;
+  const OWNER = '00000000-0000-0000-0000-0000000000cc';
+
+  beforeAll(async () => {
+    sql = postgres(TEST_URL!, { max: 1 });
+    db = createDb(TEST_URL!);
+    await sql`DELETE FROM registry_instances WHERE instance_id = ${INSTANCE_ID}`;
+    await sql`DELETE FROM users WHERE id = ${OWNER}`;
+    await sql`INSERT INTO users (id, email, password_hash, display_name) VALUES (${OWNER}, 'hub002@test', 'x', 'Owner')`;
+  });
+
+  afterAll(async () => {
+    if (sql) {
+      await sql`DELETE FROM registry_instances WHERE instance_id = ${INSTANCE_ID}`;
+      await sql`DELETE FROM users WHERE id = ${OWNER}`;
+      await sql.end();
+    }
+  });
+
+  const base = {
+    instanceId: INSTANCE_ID,
+    name: 'Reviewed Instance',
+    domain: 'https://reviewed.example.com',
+    description: 'A friendly place',
+    tags: ['games'],
+    publicKey: 'pk-original',
+    actorUserId: OWNER,
+  };
+
+  it('an unchanged re-registration keeps the listing', async () => {
+    await upsertRegistryInstance(db, base);
+    await sql`UPDATE registry_instances SET is_listed = true, is_verified = true WHERE instance_id = ${INSTANCE_ID}`;
+    const row = await upsertRegistryInstance(db, base);
+    expect(row.isListed).toBe(true);
+    expect(row.isVerified).toBe(true);
+  });
+
+  it('a changed display field un-lists the entry, and domain/key never move', async () => {
+    const row = await upsertRegistryInstance(db, {
+      ...base,
+      name: 'LobbyForge Official Support',
+      domain: 'https://evil.example.com',
+      publicKey: 'pk-attacker',
+    });
+    expect(row.name).toBe('LobbyForge Official Support');
+    expect(row.isListed).toBe(false);
+    expect(row.isVerified).toBe(false);
+    expect(row.domain).toBe('https://reviewed.example.com');
+    expect(row.publicKey).toBe('pk-original');
   });
 });

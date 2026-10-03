@@ -7,18 +7,23 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  */
 
 const listPendingSubmissions = vi.fn();
-const listPublicRegistryInstances = vi.fn();
+const listRegistryInstancesForModeration = vi.fn();
 const listInstanceReports = vi.fn();
 const setRegistryInstanceListing = vi.fn();
 const setInstanceReportStatus = vi.fn();
 
-vi.mock('@lobbyforge/db', () => ({
-  listPendingSubmissions,
-  listPublicRegistryInstances,
-  listInstanceReports,
-  setRegistryInstanceListing,
-  setInstanceReportStatus,
-}));
+vi.mock('@lobbyforge/db', async () => {
+  // The status rule is the real one (pure); the queries are mocked.
+  const actual = await vi.importActual<typeof import('@lobbyforge/db')>('@lobbyforge/db');
+  return {
+    listPendingSubmissions,
+    listRegistryInstancesForModeration,
+    listInstanceReports,
+    setRegistryInstanceListing,
+    setInstanceReportStatus,
+    registryInstanceStatus: actual.registryInstanceStatus,
+  };
+});
 
 const requireAdminHealthToken = vi.fn();
 vi.mock('@/lib/admin-auth', () => ({ requireAdminHealthToken }));
@@ -37,7 +42,7 @@ beforeEach(() => {
   process.env.LOBBYFORGE_SESSION_SECRET = 'x'.repeat(32);
   for (const fn of [
     listPendingSubmissions,
-    listPublicRegistryInstances,
+    listRegistryInstancesForModeration,
     listInstanceReports,
     setRegistryInstanceListing,
     setInstanceReportStatus,
@@ -48,7 +53,7 @@ beforeEach(() => {
   }
   requireAdminHealthToken.mockResolvedValue(null);
   listPendingSubmissions.mockResolvedValue([]);
-  listPublicRegistryInstances.mockResolvedValue([]);
+  listRegistryInstancesForModeration.mockResolvedValue([]);
   listInstanceReports.mockResolvedValue([]);
   readGuestSession.mockReturnValue(null);
 });
@@ -91,6 +96,34 @@ describe('GET /api/admin/moderation', () => {
     const json = (await res.json()) as { reports: Array<{ id: string; reporterName: string }> };
     expect(json.reports).toHaveLength(1);
     expect(json.reports[0]!.reporterName).toBe('Alice');
+  });
+
+  // security-review HUB-003: the dashboard sees every entry, with its status.
+  it('lists pending, stale and blocked directory entries with their status', async () => {
+    const base = {
+      domain: 'https://x.example.com', isVerified: false, onlineUsers: 0,
+      id: 'x', createdAt: new Date(), publicKey: 'pk', ownerUserId: 'u',
+    };
+    const fresh = new Date(Date.now() - 60_000);
+    const stale = new Date(Date.now() - 60 * 60_000);
+    listRegistryInstancesForModeration.mockResolvedValue([
+      { ...base, instanceId: 'live', name: 'Live', isListed: true, isBlocked: false, lastHeartbeatAt: fresh },
+      { ...base, instanceId: 'quiet', name: 'Quiet', isListed: true, isBlocked: false, lastHeartbeatAt: stale },
+      { ...base, instanceId: 'never', name: 'Never', isListed: true, isBlocked: false, lastHeartbeatAt: null },
+      { ...base, instanceId: 'new', name: 'New', isListed: false, isBlocked: false, lastHeartbeatAt: fresh },
+      { ...base, instanceId: 'bad', name: 'Bad', isListed: false, isBlocked: true, lastHeartbeatAt: fresh },
+    ]);
+    const res = await get();
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { registryInstances: Array<{ instanceId: string; status: string }> };
+    expect(Object.fromEntries(json.registryInstances.map((i) => [i.instanceId, i.status]))).toEqual({
+      live: 'listed',
+      quiet: 'stale',
+      never: 'stale',
+      new: 'pending',
+      bad: 'blocked',
+    });
+    expect(listRegistryInstancesForModeration).toHaveBeenCalledWith({ __mockDb: true }, { limit: 200 });
   });
 
   it('401 for non-admins', async () => {

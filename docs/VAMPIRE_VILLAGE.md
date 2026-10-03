@@ -234,7 +234,8 @@ plugins/vampire-village/
   channel remains: the realtime bus announces every committed action, so a
   watcher can tell *that* something happened at night (never who or what).
   Closing it would take the host publishing only when a viewer's projection
-  changes.
+  changes. The audit log is not a side door either: player actions are
+  `member` actions, which the host never writes there.
 - **Actions**: player actions are `member` with `actorFields: ['playerId']` —
   the reducer keeps its own roster and checks seat, life, role and phase;
   table controls are `host`. Every refused action returns the same state

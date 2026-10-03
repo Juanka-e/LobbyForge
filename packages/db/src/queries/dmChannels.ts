@@ -9,6 +9,8 @@ import { and, eq, or, desc, lt } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
 import { dmChannels, dmMessages, users } from '../schema.js';
 import { isUserBlocked } from './userBlocks.js';
+import { profileVisibilitySql, sharesServerSql, toProfileVisibility, userImageRefSql } from './userImages.js';
+import type { ActivityVisibilityScope } from './userSettings.js';
 
 export interface DmChannelRow {
   id: string;
@@ -24,7 +26,15 @@ export interface DmChannelSummary {
   /** The OTHER participant's user id (not the caller). */
   otherUserId: string;
   otherUserDisplayName: string;
-  otherUserAvatarUrl: string | null;
+  /**
+   * security-review FILE-001: short image reference (version token or
+   * legacy https URL) — never the stored data URL.
+   */
+  otherUserAvatarRef: string | null;
+  /** security-review AUTHZ-005: the other participant's profile visibility. */
+  otherUserProfileVisibility: ActivityVisibilityScope;
+  /** Whether the caller and the other participant share a server. */
+  sharesServerWithOtherUser: boolean;
   lastMessageAt: Date;
 }
 
@@ -82,7 +92,9 @@ export async function listDmChannelsForUser(
       channel: dmChannels,
       otherId: users.id,
       otherName: users.displayName,
-      otherAvatar: users.avatarUrl,
+      otherAvatarRef: userImageRefSql(users.avatarUrl),
+      otherProfileVisibility: profileVisibilitySql(users.id),
+      sharesServer: sharesServerSql(userId, users.id),
     })
     .from(dmChannels)
     .leftJoin(users, or(eq(users.id, dmChannels.userAId), eq(users.id, dmChannels.userBId)))
@@ -95,7 +107,9 @@ export async function listDmChannelsForUser(
       id: r.channel.id,
       otherUserId: r.otherId!,
       otherUserDisplayName: r.otherName ?? 'Unknown',
-      otherUserAvatarUrl: r.otherAvatar ?? null,
+      otherUserAvatarRef: r.otherAvatarRef ?? null,
+      otherUserProfileVisibility: toProfileVisibility(r.otherProfileVisibility),
+      sharesServerWithOtherUser: r.sharesServer === true,
       lastMessageAt: r.channel.lastMessageAt,
     }))
     .sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime());

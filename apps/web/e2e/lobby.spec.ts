@@ -5,12 +5,17 @@ import { test, expect } from '@playwright/test';
  * to establish a session before navigating to /lobby.
  */
 
+// A production-mode stack's CSRF guard refuses a POST without an Origin
+// ("Missing request origin", 403) — send the app's own, as a browser would.
+test.use({ extraHTTPHeaders: { Origin: process.env.LF_E2E_BASE_URL ?? 'http://localhost:19520' } });
+
 test.describe('Lobby experience', () => {
   test.beforeEach(async ({ page, context }) => {
     await context.grantPermissions(['microphone', 'camera']);
     // Mint a guest session via POST so the Set-Cookie header is stored.
     const res = await page.request.post('/api/auth/guest', {
-      data: { displayName: 'TestUser' },
+      // The route's schema is strict: `displayNameSeed`, not `displayName`.
+      data: { displayNameSeed: 'TestUser' },
     });
     // If guest creation fails (e.g. registration closed), the lobby
     // page will redirect to /login — tests will skip in that case.

@@ -488,6 +488,66 @@ describe('DELETE /api/servers/{id}/roles/{roleId}', () => {
     expect(res.status).toBe(200);
     expect(deleteRole).toHaveBeenCalledWith(expect.anything(), ROLE_ID);
   });
+
+  // security-review AUTHZ-001: deleting a channel's only gating role
+  // cascaded the override away and made the private channel public.
+  it("409 role_gates_channels when the role is a channel's last gate (nothing deleted, no side effects)", async () => {
+    getServerById.mockResolvedValue(mockServer());
+    getRoleById.mockResolvedValue({
+      id: ROLE_ID,
+      serverId: SERVER_ID,
+      name: 'Staff',
+      color: null,
+      position: 3,
+      permissions: [],
+      createdAt: new Date('2026-06-10T00:00:00Z'),
+    });
+    getUserPermissions.mockResolvedValue(['administrator']);
+    deleteRole.mockRejectedValue(
+      Object.assign(new Error('deleteRole: the role is the only visibility override of 1 channel(s)'), {
+        name: 'RoleGatesChannelsError',
+        code: 'role_gates_channels',
+        channels: [{ id: 'ch-staff', name: 'staff' }],
+      })
+    );
+    const { DELETE } = await loadItemRoute();
+    const res = await DELETE(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/roles/${ROLE_ID}`, {
+        method: 'DELETE',
+        headers: { cookie: makeSessionCookie() },
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, roleId: ROLE_ID }) }
+    );
+    expect(res.status).toBe(409);
+    const json = (await res.json()) as { code: string; channels: Array<{ id: string; name: string }> };
+    expect(json.code).toBe('role_gates_channels');
+    expect(json.channels).toEqual([{ id: 'ch-staff', name: 'staff' }]);
+    expect(logAction).not.toHaveBeenCalled();
+  });
+
+  it('any other delete failure stays a 500', async () => {
+    getServerById.mockResolvedValue(mockServer());
+    getRoleById.mockResolvedValue({
+      id: ROLE_ID,
+      serverId: SERVER_ID,
+      name: 'Mod',
+      color: null,
+      position: 0,
+      permissions: [],
+      createdAt: new Date('2026-06-10T00:00:00Z'),
+    });
+    getUserPermissions.mockResolvedValue(['administrator']);
+    deleteRole.mockRejectedValue(new Error('connection reset'));
+    const { DELETE } = await loadItemRoute();
+    const res = await DELETE(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/roles/${ROLE_ID}`, {
+        method: 'DELETE',
+        headers: { cookie: makeSessionCookie() },
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, roleId: ROLE_ID }) }
+    );
+    expect(res.status).toBe(500);
+  });
 });
 
 // beta-review (S1): MANAGE_ROLES → ADMINISTRATOR escalation. A member with

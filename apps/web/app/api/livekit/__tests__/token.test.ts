@@ -201,7 +201,7 @@ describe('POST /api/livekit/token role-gated publish sources', () => {
     );
   });
 
-  it('a timed-out member keeps listen access but loses the microphone', async () => {
+  it('a timed-out member keeps listen access but may publish nothing (security-review AUTHZ-006)', async () => {
     getUserPermissions.mockResolvedValue(['connect_voice', 'speak', 'stream']);
     getActiveMemberTimeout.mockResolvedValue(new Date(Date.now() + 60_000));
     const { POST } = await loadRoute();
@@ -214,11 +214,40 @@ describe('POST /api/livekit/token role-gated publish sources', () => {
       {}
     );
     expect(res.status).toBe(200);
-    // Timeout mutes the person; streaming stays available.
+    // A timeout means listen-only: no mic, camera, screen share or screen
+    // audio — and canPublish:false, because LiveKit reads an empty source
+    // list as "anything goes".
     expect(issueLiveKitToken).toHaveBeenCalledWith(
       expect.objectContaining({
-        grants: expect.objectContaining({ canPublishSources: ['screen-share'] }),
+        grants: expect.objectContaining({ canPublish: false, canPublishSources: [] }),
       })
+    );
+    // AUTHZ-006 follow-up: the response says the mic is withheld and why,
+    // so the client shows the timeout notice instead of trying the mic.
+    const body = (await res.json()) as {
+      serverVoiceSettings: { serverMuted: boolean; publishBlockedReason: string | null };
+    };
+    expect(body.serverVoiceSettings.serverMuted).toBe(true);
+    expect(body.serverVoiceSettings.publishBlockedReason).toBe('timeout');
+  });
+
+  it('AUTHZ-006 follow-up: a timed-out AND server-muted member is reported as timed out', async () => {
+    getActiveMemberTimeout.mockResolvedValue(new Date(Date.now() + 60_000));
+    isMemberVoiceMuted.mockResolvedValue(true);
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest({ serverId: SERVER_ID, channelId: CHANNEL_ID }), {});
+    const body = (await res.json()) as {
+      serverVoiceSettings: { serverMuted: boolean; publishBlockedReason: string | null };
+    };
+    expect(body.serverVoiceSettings).toMatchObject({ serverMuted: true, publishBlockedReason: 'timeout' });
+  });
+
+  it('security-review AUTHZ-006: a client asking for no sources gets canPublish:false, not an open grant', async () => {
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest({ serverId: SERVER_ID, channelId: CHANNEL_ID, canPublishSources: [] }), {});
+    expect(res.status).toBe(200);
+    expect(issueLiveKitToken).toHaveBeenCalledWith(
+      expect.objectContaining({ grants: expect.objectContaining({ canPublish: false, canPublishSources: [] }) })
     );
   });
 });
@@ -306,7 +335,13 @@ describe('POST /api/livekit/token room limits', () => {
     const res = await POST(makeRequest({ serverId: SERVER_ID, channelId: CHANNEL_ID }), {});
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.serverVoiceSettings).toEqual({ serverMuted: false, requirePushToTalk: true, startMuted: true });
+    // A normal member: nothing withheld, no reason.
+    expect(json.serverVoiceSettings).toEqual({
+      serverMuted: false,
+      publishBlockedReason: null,
+      requirePushToTalk: true,
+      startMuted: true,
+    });
   });
 });
 
@@ -408,20 +443,26 @@ describe('POST /api/livekit/token VOICE-003 limit failure policy', () => {
 });
 
 describe('POST /api/livekit/token beta-review enforcement', () => {
-  it('a server-muted member gets no microphone grant (rejoin cannot undo a moderator mute)', async () => {
+  it('a server-muted member gets no microphone and no screen-share audio grant (rejoin cannot undo a moderator mute)', async () => {
     isMemberVoiceMuted.mockResolvedValue(true);
     const { POST } = await loadRoute();
     const res = await POST(makeRequest({ serverId: SERVER_ID, channelId: CHANNEL_ID }), {});
     expect(res.status).toBe(200);
+    // security-review AUTHZ-006: screen-share audio was a way to keep
+    // talking through a server mute; camera and silent screen share stay.
     expect(issueLiveKitToken).toHaveBeenCalledWith(
       expect.objectContaining({
         grants: expect.objectContaining({
-          canPublishSources: ['camera', 'screen-share', 'screen-share-audio'],
+          canPublish: true,
+          canPublishSources: ['camera', 'screen-share'],
         }),
       })
     );
-    const body = (await res.json()) as { serverVoiceSettings: { serverMuted: boolean } };
+    const body = (await res.json()) as {
+      serverVoiceSettings: { serverMuted: boolean; publishBlockedReason: string | null };
+    };
     expect(body.serverVoiceSettings.serverMuted).toBe(true);
+    expect(body.serverVoiceSettings.publishBlockedReason).toBe('server_mute');
   });
 
   it('ignores a client-supplied displayName and uses the server nickname', async () => {

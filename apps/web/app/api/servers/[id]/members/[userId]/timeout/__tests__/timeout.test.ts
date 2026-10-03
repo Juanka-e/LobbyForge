@@ -117,6 +117,13 @@ describe('PUT members/[userId]/timeout — MODERATE_MEMBERS', () => {
     const passedUntil = dbFns.setMemberTimeout.mock.calls[0]![3] as Date;
     expect(passedUntil.getTime()).toBeLessThanOrEqual(Date.now() + 28 * 24 * 60 * 60 * 1000 + 1000);
   });
+
+  it('security-review AUTHZ-002: unlike a ban, a timeout still needs the target to be a member (404)', async () => {
+    dbFns.isServerMember.mockImplementation(async (_db: unknown, userId: string) => userId !== MEMBER);
+    const res = await put({ until: new Date(Date.now() + 60_000).toISOString() }, MOD, MEMBER);
+    expect(res.status).toBe(404);
+    expect(dbFns.setMemberTimeout).not.toHaveBeenCalled();
+  });
 });
 
 describe('PUT members/[userId]/timeout — beta-review S2 voice enforcement', () => {

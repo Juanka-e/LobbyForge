@@ -90,6 +90,14 @@ async function handlePost(req: Request, ctx: { params: Promise<{ code: string }>
           { error: 'You are banned from this server' },
           { status: 403 }
         );
+      case 'approval_required':
+        // security-review AUTHZ-004: the server's access policy holds new
+        // members for approval and there is no approval queue — the invite
+        // cannot be used to get around it (registration refuses too).
+        return NextResponse.json(
+          { error: 'This server requires moderator approval to join', code: 'approval_required' },
+          { status: 403 }
+        );
     }
   } catch {
     return NextResponse.json(

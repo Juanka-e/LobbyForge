@@ -96,6 +96,15 @@ server {
         return 404;
     }
 
+    # security-review AUTHZ-006 follow-up: LiveKit posts its webhook to
+    # http://web:3000/api/livekit/webhook over the compose network. The
+    # route verifies LiveKit's signature anyway, but it has no business
+    # being reachable from the internet. ^~ so no regex location wins;
+    # prefix (not =) so a trailing slash or suffix is covered too.
+    location ^~ /api/livekit/webhook {
+        return 404;
+    }
+
     # Next.js app
     location / {
         proxy_pass http://web:3000;

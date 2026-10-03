@@ -16,6 +16,12 @@
 #   [out-root]    where the GENERATED files go (default: infra-root). V4-003:
 #                 install.sh renders into a staging out-root and activates
 #                 atomically only after the certificate succeeds.
+#
+# Optional env:
+#   TURN_EXTERNAL_IP          coturn public address behind 1:1 NAT
+#   LIVEKIT_WEBHOOK_API_KEY   the LiveKit API key NAME (LIVEKIT_API_KEY) —
+#                             enables LiveKit's webhook to the web app
+#                             (AUTHZ-006 follow-up); unset = disabled
 set -euo pipefail
 
 DOMAIN="${1:?usage: render-configs.sh <domain> <turn-secret> [infra-root] [out-root]}"
@@ -56,6 +62,27 @@ else
   EXTERNAL_IP_LINE="# external-ip: auto-detected (set LOBBYFORGE_TURN_EXTERNAL_IP behind 1:1 NAT)"
 fi
 
+# security-review AUTHZ-006 follow-up: LiveKit posts track_published to
+# the web app, which removes a participant whose track kind does not match
+# its source. LiveKit refuses to start unless webhook.api_key NAMES one of
+# its configured keys, and that name is random per install (install.sh:
+# LIVEKIT_API_KEY=devkey_<hex>), so the caller passes it here. Unset ->
+# the webhook block renders commented out (disabled), as before.
+LIVEKIT_WEBHOOK_API_KEY="${LIVEKIT_WEBHOOK_API_KEY:-}"
+LIVEKIT_WEBHOOK_URL="http://web:3000/api/livekit/webhook"
+if [ -n "$LIVEKIT_WEBHOOK_API_KEY" ]; then
+  # Plain key characters only — anything else could inject YAML.
+  if ! [[ "$LIVEKIT_WEBHOOK_API_KEY" =~ ^[A-Za-z0-9_-]{1,128}$ ]]; then
+    echo "render-configs: invalid LIVEKIT_WEBHOOK_API_KEY (letters, digits, _ and - only)" >&2
+    exit 1
+  fi
+  WEBHOOK_API_KEY_LINE="api_key: $LIVEKIT_WEBHOOK_API_KEY"
+  WEBHOOK_URLS_LINE="urls: [\"$LIVEKIT_WEBHOOK_URL\"]"
+else
+  WEBHOOK_API_KEY_LINE="# api_key: disabled - render with LIVEKIT_WEBHOOK_API_KEY=<LIVEKIT_API_KEY> to enable"
+  WEBHOOK_URLS_LINE="# urls: [\"$LIVEKIT_WEBHOOK_URL\"]"
+fi
+
 render() {
   local template="$1" target="$2"
   if [ ! -f "$template" ]; then
@@ -68,6 +95,8 @@ render() {
   sed -e "s/LOBBYFORGE_DOMAIN/$DOMAIN/g" \
       -e "s/TURN_SECRET/$TURN_SECRET/g" \
       -e "s|@TURN_EXTERNAL_IP_LINE@|$EXTERNAL_IP_LINE|" \
+      -e "s|@LIVEKIT_WEBHOOK_API_KEY_LINE@|$WEBHOOK_API_KEY_LINE|" \
+      -e "s|@LIVEKIT_WEBHOOK_URLS_LINE@|$WEBHOOK_URLS_LINE|" \
     "$template" > "$target"
   echo "rendered $(basename "$target") for $DOMAIN"
 }

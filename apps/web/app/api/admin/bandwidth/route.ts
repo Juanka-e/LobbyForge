@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { readCookie } from '@lobbyforge/core';
 import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
 import { getDb } from '@/lib/db';
 import { getInstanceSetupStatus, listServersForUser } from '@lobbyforge/db';
-import { cookies } from 'next/headers';
 import { getServerBandwidthTotals, clearBandwidthAlert } from '@/lib/redis';
 import { withApiSecurity } from '@/lib/security-headers';
 
@@ -23,10 +23,20 @@ export const runtime = 'nodejs';
  * The route never exposes per-user bandwidth — only per-server totals.
  */
 
-async function handleGet(): Promise<NextResponse> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(ADMIN_TOKEN_COOKIE)?.value ?? null;
-  if (!(await isInstanceAdminAllowed(cookieStore.toString(), token))) {
+/**
+ * security-review AUTH-002: read the cookies from the request itself, the
+ * same header `withApiSecurity` checked for revocation. `next/headers`
+ * `cookies()` keeps the LAST of two duplicate `lf_guest` cookies while the
+ * wrapper reads the FIRST, so `Cookie: lf_guest=<valid>; lf_guest=<revoked>`
+ * used to authorize this route with the revoked one.
+ */
+async function isAdminRequest(req: Request): Promise<boolean> {
+  const cookieHeader = req.headers.get('cookie');
+  return isInstanceAdminAllowed(cookieHeader, readCookie(cookieHeader, ADMIN_TOKEN_COOKIE));
+}
+
+async function handleGet(req: Request): Promise<NextResponse> {
+  if (!(await isAdminRequest(req))) {
     return NextResponse.json({ error: 'Admin token required.' }, { status: 403 });
   }
   const setup = await getInstanceSetupStatus(getDb());
@@ -61,9 +71,7 @@ const PostSchema = z.object({
 });
 
 async function handlePost(req: Request): Promise<NextResponse> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(ADMIN_TOKEN_COOKIE)?.value ?? null;
-  if (!(await isInstanceAdminAllowed(cookieStore.toString(), token))) {
+  if (!(await isAdminRequest(req))) {
     return NextResponse.json({ error: 'Admin token required.' }, { status: 403 });
   }
   let body: z.infer<typeof PostSchema>;

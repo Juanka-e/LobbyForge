@@ -21,7 +21,7 @@ const getMessageById = vi.fn();
 const updateMessage = vi.fn();
 const logAction = vi.fn();
 const getBuiltInBotForServer = vi.fn();
-const getUserById = vi.fn();
+const listUserDisplayNames = vi.fn();
 const isChannelOpenToBots = vi.fn();
 
 vi.mock('@lobbyforge/db', () => ({
@@ -40,11 +40,10 @@ vi.mock('@lobbyforge/db', () => ({
   softDeleteMessage: vi.fn(),
   logAction,
   getBuiltInBotForServer,
-  getUserById,
   isChannelOpenToBots,
   touchBotLastUsed: vi.fn().mockResolvedValue(undefined),
   listBotAccessibleChannels: vi.fn(),
-  listUserDisplayNames: vi.fn(),
+  listUserDisplayNames,
 }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
 vi.mock('@/lib/security-headers', async () => {
@@ -112,7 +111,7 @@ function post(uid: string, content: string) {
 beforeEach(() => {
   vi.resetModules();
   process.env.LOBBYFORGE_SESSION_SECRET = SECRET;
-  for (const fn of [getServerById, isServerMember, getChannelById, getUserPermissions, canMemberAccessChannel, getActiveMemberTimeout, createMessage, listMessagesForChannel, getBlockedUserIds, getMessageById, updateMessage, logAction, getBuiltInBotForServer, getUserById, isChannelOpenToBots, publishChatMessage]) {
+  for (const fn of [getServerById, isServerMember, getChannelById, getUserPermissions, canMemberAccessChannel, getActiveMemberTimeout, createMessage, listMessagesForChannel, getBlockedUserIds, getMessageById, updateMessage, logAction, getBuiltInBotForServer, listUserDisplayNames, isChannelOpenToBots, publishChatMessage]) {
     fn.mockReset();
   }
   getServerById.mockResolvedValue({ id: SERVER, name: 'Lobby', ownerUserId: OWNER });
@@ -125,7 +124,7 @@ beforeEach(() => {
   getActiveMemberTimeout.mockResolvedValue(null);
   getBlockedUserIds.mockResolvedValue(new Set());
   logAction.mockResolvedValue(undefined);
-  getUserById.mockResolvedValue({ id: MEMBER, displayName: 'Mallory' });
+  listUserDisplayNames.mockResolvedValue(new Map([[MEMBER, 'Mallory']]));
   isChannelOpenToBots.mockResolvedValue(true);
   getBuiltInBotForServer.mockResolvedValue(moderationBot());
   createMessage.mockImplementation(async (_db: unknown, row: Record<string, unknown>) =>

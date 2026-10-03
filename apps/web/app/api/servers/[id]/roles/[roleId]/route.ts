@@ -11,6 +11,7 @@ import {
   isServerMember,
   logAction,
   updateRole,
+  type RoleGatesChannelsError,
   type RoleRow,
 } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
@@ -339,12 +340,38 @@ async function handleDelete(req: Request, ctx: { params: Promise<{ id: string; r
       targetId: roleId,
     }).catch((err) => console.error('[audit] role.delete failed:', (err as Error).message));
     return NextResponse.json({ ok: true }, { headers: { 'Cache-Control': 'no-store' } });
-  } catch {
+  } catch (err) {
+    // security-review AUTHZ-001: the role is the last visibility override
+    // of some channels — deleting it would make them public. Nothing was
+    // deleted; the admin must change those channels' visibility first.
+    const gated = asRoleGatesChannels(err);
+    if (gated) {
+      return NextResponse.json(
+        {
+          error: 'This role is the only role that can see some channels. Change their visibility before deleting it.',
+          code: gated.code,
+          channels: gated.channels,
+        },
+        { status: 409, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
     return NextResponse.json(
       { error: 'Failed to delete role' },
       { status: 500 }
     );
   }
+}
+
+/**
+ * Recognise `deleteRole`'s RoleGatesChannelsError by its stable `code`
+ * (not `instanceof`, which a second copy of the package would defeat).
+ */
+function asRoleGatesChannels(err: unknown): RoleGatesChannelsError | null {
+  if (!(err instanceof Error)) return null;
+  const candidate = err as Partial<RoleGatesChannelsError>;
+  return candidate.code === 'role_gates_channels' && Array.isArray(candidate.channels)
+    ? (err as RoleGatesChannelsError)
+    : null;
 }
 
 export const GET = withApiSecurity(handleGet, {

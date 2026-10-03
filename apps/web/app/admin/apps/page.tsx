@@ -8,7 +8,7 @@ import {
 import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
 import { getSessionSecret } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
-import { readGuestSession } from '@/lib/guest-session';
+import { getActiveSession } from '@/lib/active-session';
 import { getTranslator } from '@/lib/i18n/server';
 import { listPluginSummaries } from '@/lib/plugin-registry';
 import SettingsShell from '@/app/SettingsShell';
@@ -49,7 +49,7 @@ export default async function AppsSettingsPage() {
 
   const db = getDb();
   const setup = await getInstanceSetupStatus(db);
-  const session = readGuestSession(cookieStore.toString(), getSessionSecret());
+  const session = await getActiveSession(cookieStore.toString(), getSessionSecret());
   const userId = session?.uid ?? setup.ownerUserId ?? null;
 
   let serverId: string | null = null;

@@ -27,7 +27,8 @@ import {
 import { withApiSecurity } from '@/lib/security-headers';
 import { liveKitRoomName } from '@/lib/livekit-room';
 import { getEphemeralTurnIceServers } from '@/lib/turn-credentials';
-import { buildAllowedPublishSources } from '@/lib/voice-moderation';
+import { buildAllowedPublishSources, canPublishAnySource } from '@/lib/voice-moderation';
+import { publishBlockedReason } from '@/lib/voice-publish-state';
 import { getRuntimeLiveKitUrl } from '@/lib/public-endpoints';
 
 export const dynamic = 'force-dynamic';
@@ -146,18 +147,23 @@ async function handler(req: Request): Promise<NextResponse> {
   // beta-review: a moderator server mute is persisted and enforced in the
   // GRANT — rejoining cannot bring the microphone back.
   const serverMuted = await isMemberVoiceMuted(getDb(), body.serverId, session.uid);
+  const timedOut = activeTimeout !== null;
   const allowedPublishSources = buildAllowedPublishSources(
     {
       allowCamera: effectiveAllowCamera,
       allowScreenShare: effectiveAllowScreenShare,
       memberPermissions,
-      timedOut: activeTimeout !== null,
+      timedOut,
       voiceMuted: serverMuted,
     },
     body.canPublishSources
   );
   const grants: LiveKitGrants = {
     room,
+    // security-review AUTHZ-006: LiveKit reads an empty canPublishSources
+    // as "every source" — a member allowed nothing (timed out, or a client
+    // that asked for []) must get canPublish:false instead.
+    canPublish: canPublishAnySource(allowedPublishSources),
     canPublishSources: allowedPublishSources,
     hidden: false, // Regular users are never hidden — admin bots use a separate endpoint.
   };
@@ -198,7 +204,14 @@ async function handler(req: Request): Promise<NextResponse> {
         // own preferences. Hard limits (user/camera/screen-share caps) are
         // enforced above at token-mint time.
         serverVoiceSettings: {
-          serverMuted,
+          // security-review AUTHZ-006 follow-up: a timeout now withholds
+          // every source (canPublish:false), so it mutes the microphone
+          // too — reporting only the server mute sent a timed-out client
+          // straight into setMicrophoneEnabled(true) and a device error.
+          // The reason picks the copy (a timeout also blocks the camera
+          // and screen share, and it ends).
+          serverMuted: serverMuted || timedOut,
+          publishBlockedReason: publishBlockedReason({ timedOut, voiceMuted: serverMuted }),
           requirePushToTalk: voiceSettings.requirePushToTalk,
           startMuted: voiceSettings.startMuted,
           maxScreenShareHeight: voiceSettings.maxScreenShareHeight,

@@ -1,12 +1,14 @@
 import { NextResponse } from 'next/server';
-import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
-import { getUserCredentialsByEmail, getUserById } from '@lobbyforge/db';
-import { redis } from '@/lib/redis';
+import { getUserCredentialsByEmail } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { verifyPassword, DUMMY_PASSWORD_HASH } from '@/lib/password';
-import { getSessionSecret } from '@/lib/api-auth';
-import { buildGuestSessionCookie, createGuestIdentity } from '@/lib/guest-session';
+import {
+  DESKTOP_HANDOFF_TTL_SECONDS,
+  credentialFingerprint,
+  storeDesktopHandoffCode,
+} from '@/lib/desktop-handoff-codes';
 import { withApiSecurity } from '@/lib/security-headers';
 
 export const dynamic = 'force-dynamic';
@@ -37,11 +39,7 @@ const StartSchema = z.object({
   state: z.string().min(32).max(128).optional(),
 });
 
-const CODE_TTL_SECONDS = 300;
-
-function redisKey(code: string): string {
-  return `lf:desktop-handoff:${code}`;
-}
+const CODE_TTL_SECONDS = DESKTOP_HANDOFF_TTL_SECONDS;
 
 async function handleStart(req: Request): Promise<NextResponse> {
   const parsed = StartSchema.safeParse(await req.json().catch(() => null));
@@ -60,12 +58,14 @@ async function handleStart(req: Request): Promise<NextResponse> {
   const code = randomBytes(32).toString('base64url');
   const state = parsed.data.state ?? randomBytes(24).toString('base64url');
 
-  await redis.set(
-    redisKey(code),
-    JSON.stringify({ userId: user.id, state, used: false }),
-    'EX',
-    CODE_TTL_SECONDS
-  );
+  // security-review AUTH-001: bind the code to the credential it was
+  // minted under (and index it per user) so a password change kills it.
+  await storeDesktopHandoffCode(code, {
+    userId: user.id,
+    state,
+    used: false,
+    credential: credentialFingerprint(user.passwordHash),
+  });
 
   return NextResponse.json(
     {

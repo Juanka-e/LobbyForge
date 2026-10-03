@@ -249,6 +249,7 @@
   "adminSettings.roles.deleted": "Rol silindi.",
   "adminSettings.roles.edit": "Rolü düzenle",
   "adminSettings.roles.empty": "Henüz rol yok. Varsayılan @everyone rolü otomatik oluşturulur.",
+  "adminSettings.roles.gatesChannels": "{count, plural, one {{channels} kanalını yalnızca bu rol görebiliyor. Önce kanalın erişimini değiştir, sonra rolü sil.} other {{channels} kanallarını yalnızca bu rol görebiliyor. Önce bu kanalların erişimini değiştir, sonra rolü sil.}}",
   "adminSettings.roles.group.activities": "Etkinlikler",
   "adminSettings.roles.group.general": "Genel",
   "adminSettings.roles.group.members": "Üyeler",
