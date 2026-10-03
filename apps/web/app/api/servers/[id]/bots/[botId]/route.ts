@@ -13,6 +13,7 @@ import {
 } from '@/lib/bots/admin';
 import { invalidateBotCache } from '@/lib/bots/cache';
 import { BOT_PERMISSIONS, findUngrantableBotPermissions, isBuiltInType } from '@/lib/bots/permissions';
+import { CorePermission, hasPermission } from '@lobbyforge/core';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -56,6 +57,16 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
   if (body.name !== undefined && body.name !== bot.name) {
     patch.name = body.name;
     changes.name = { from: bot.name, to: body.name };
+  }
+  // Same rule as PUT /bots/builtin/moderation: switching on the bot that
+  // removes members' messages takes the right to remove them yourself.
+  if (
+    body.enabled === true &&
+    bot.type === 'moderation' &&
+    !manager.isOwner &&
+    !hasPermission([...manager.permissions], CorePermission.MANAGE_MESSAGES)
+  ) {
+    return NextResponse.json({ error: 'Forbidden', code: 'missing_permission' }, { status: 403 });
   }
   if (body.enabled !== undefined && body.enabled !== bot.enabled) {
     patch.enabled = body.enabled;

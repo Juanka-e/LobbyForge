@@ -18,11 +18,16 @@ on:
     tags:
       - 'desktop-v*'
 
+# security-review §7.1: read-only by default; only `publish` (tauri-action
+# creates the draft release and uploads installers on a desktop-v* tag)
+# gets contents:write. Actions are pinned to full commit SHAs.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   publish:
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -37,24 +42,29 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           version: 10.12.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
           cache: pnpm
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        # Pinned to the `stable` branch tip; the repo has no version tags,
+        # so Dependabot cannot bump this one — refresh the SHA by hand
+        # (gh api repos/dtolnay/rust-toolchain/branches/stable).
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable (branch tip 2026-10-01)
+        with:
+          toolchain: stable
 
       - name: Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: apps/desktop/src-tauri -> target
 
@@ -72,7 +82,7 @@ jobs:
         run: pnpm --filter @lobbyforge/desktop build:ts
 
       - name: Build Tauri installers
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -103,7 +113,7 @@ jobs:
       # manual runs we must attach the bundles to the workflow run
       # ourselves so the smoke job (and humans) can download them.
       - name: Upload installers as run artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: LobbyForge-${{ matrix.platform }}
           path: |
@@ -125,7 +135,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Download the NSIS installer artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           pattern: LobbyForge*
           merge-multiple: true

@@ -120,6 +120,10 @@ services:
       - LOBBYFORGE_PLUGIN_WORKER_URL=http://plugin-worker:7101
       - LOBBYFORGE_PLUGIN_WORKER_TOKEN=${LOBBYFORGE_PLUGIN_WORKER_TOKEN:?Set LOBBYFORGE_PLUGIN_WORKER_TOKEN}
       - LOBBYFORGE_PLUGIN_STORAGE_TOKEN=${LOBBYFORGE_PLUGIN_STORAGE_TOKEN:?Set LOBBYFORGE_PLUGIN_STORAGE_TOKEN}
+      # The ONE install root, inside the plugins-data volume below. The
+      # plugin-worker sets the same value. (It used to be resolved from the
+      # working directory, /app/apps/web, which is not on the volume.)
+      - LOBBYFORGE_PLUGIN_INSTALL_DIR=/app/plugins/installed
     depends_on:
       postgres:
         condition: service_healthy
@@ -128,8 +132,11 @@ services:
       migrate:
         condition: service_completed_successfully
     volumes:
-      # The installer (web) extracts approved bundles here; the worker
-      # mounts the SAME directory read-only.
+      # The installer (web) extracts approved bundles into
+      # /app/plugins/installed (LOBBYFORGE_PLUGIN_INSTALL_DIR); the worker
+      # mounts the SAME volume read-only. The mount also hides the image's
+      # official plugin sources under /app/plugins: nothing reads them at
+      # runtime (Next compiles them into .next).
       - plugins-data:/app/plugins
     healthcheck:
       # TEST-001: the runtime image (node:22-bookworm-slim) has NO wget —
@@ -188,7 +195,8 @@ services:
     environment:
       PLUGIN_WORKER_STANDALONE: "1"
       PLUGIN_WORKER_PORT: "7101"
-      PLUGINS_DIR: /app/plugins/installed
+      # Same root as the web service (the installer); read-only here.
+      LOBBYFORGE_PLUGIN_INSTALL_DIR: /app/plugins/installed
       PLUGIN_WORKER_TOKEN: ${LOBBYFORGE_PLUGIN_WORKER_TOKEN:?Set LOBBYFORGE_PLUGIN_WORKER_TOKEN}
       # 9th-audit: NO storage secret here — the worker only relays
       # host-minted scoped capabilities.

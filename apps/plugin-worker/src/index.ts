@@ -13,11 +13,15 @@
  * A frozen/hung worker cannot touch the web app: the host client times
  * out, this service's healthcheck fails and compose restarts it.
  *
- * RPC surface (POST /rpc, header `x-lf-worker-token`):
- *   { op: 'list' }
- *   { op: 'createInitialState', pluginId, ctx, ... }
- *   { op: 'handleAction', pluginId, ctx, state, action }
- *   { op: 'migrateState', pluginId, raw }
+ * RPC surface (POST /rpc, header `x-lf-worker-token`). Every op names the
+ * exact bundle — `pluginId`, the active `version` and the `digest` of its
+ * files, as recorded by the web app's installer — and the worker refuses
+ * anything else (bundle.ts). There is no `list` op any more: it chose the
+ * alphabetically last version folder.
+ *   { op: 'describe', pluginId, version, digest }
+ *   { op: 'createInitialState', pluginId, version, digest, ctx, ... }
+ *   { op: 'handleAction', pluginId, version, digest, ctx, state, action }
+ *   { op: 'migrateState', pluginId, version, digest, raw }
  *
  * The ctx envelope carries ONLY snapshot data (actorUserId, players,
  * voiceParticipants). Write-side capabilities (`ctx.storage.*`) are
@@ -26,18 +30,17 @@
  * at worst touch its OWN (serverId, pluginId) storage keyspace.
  */
 import * as http from 'node:http';
-import { existsSync, readdirSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { fork } from 'node:child_process';
-import { createHmac } from 'node:crypto';
-import type { GamePlugin, GamePluginContext } from '@lobbyforge/plugin-sdk';
+import { pluginInstallDir, readBundleRef, resolveBundle, type VerifiedBundles } from './bundle.js';
 
 const PORT = parseInt(process.env.PLUGIN_WORKER_PORT || '7101', 10);
 const HOST = process.env.PLUGIN_WORKER_HOST || '0.0.0.0';
 
 // Read the runtime knobs LAZILY (tests set process.env after import).
-const pluginsDir = () => resolve(process.env.PLUGINS_DIR || './plugins/installed');
+// The install root is LOBBYFORGE_PLUGIN_INSTALL_DIR (shared with the web
+// app's installer; PLUGINS_DIR is the old name), default /app/plugins/installed.
+const pluginsDir = () => pluginInstallDir();
 const rpcToken = () => process.env.PLUGIN_WORKER_TOKEN || '';
 const hostOrigin = () => (process.env.PLUGIN_HOST_ORIGIN || '').replace(/\/$/, '');
 // 9th-audit: the worker holds NO storage secret at all. The HOST mints
@@ -70,44 +73,10 @@ interface CtxEnvelope {
  * top-level code: a malicious plugin could block this process,
  * read process.env, monkeypatch globals or spy on later RPCs before
  * any executor thread existed). Importing and shape-validation happen
- * exclusively inside disposable executor threads.
+ * exclusively inside disposable executor processes. The parent only
+ * resolves the exact folder and verifies its digest (bundle.ts).
  */
-interface LoadedPlugin {
-  pluginPath: string;
-}
-
-const loaded = new Map<string, LoadedPlugin>();
-
-function isValidGamePlugin(obj: unknown): obj is GamePlugin<unknown, unknown, unknown> {
-  if (!obj || typeof obj !== 'object') return false;
-  const o = obj as Record<string, unknown>;
-  const manifest = o.manifest as Record<string, unknown> | undefined;
-  if (!manifest || typeof manifest.id !== 'string' || typeof manifest.name !== 'string') {
-    return false;
-  }
-  return (
-    typeof o.createInitialState === 'function' &&
-    typeof o.handleAction === 'function' &&
-    typeof o.renderClient === 'function'
-  );
-}
-
-/** Resolve the bundle path WITHOUT importing it (parent stays clean). */
-function resolvePluginPath(pluginId: string): string | null {
-  const base = join(pluginsDir(), pluginId);
-  if (!existsSync(base) || !statSync(base).isDirectory()) return null;
-
-  let indexPath = join(base, 'index.js');
-  if (!existsSync(indexPath)) {
-    const subdirs = readdirSync(base)
-      .filter((name) => statSync(join(base, name)).isDirectory())
-      .sort();
-    if (subdirs.length === 0) return null;
-    indexPath = join(base, subdirs[subdirs.length - 1]!, 'index.js');
-    if (!existsSync(indexPath)) return null;
-  }
-  return indexPath;
-}
+const verifiedBundles: VerifiedBundles = new Map();
 
 /**
  * 10th-audit (findings 4+5): run ONE plugin op in a dedicated
@@ -237,19 +206,6 @@ function resolveChildExecutorPath(): string {
   return fileURLToPath(new URL('./executor-child.mjs', import.meta.url));
 }
 
-async function getPlugin(pluginId: string): Promise<LoadedPlugin | null> {
-  const cached = loaded.get(pluginId);
-  if (cached) return cached;
-  const pluginPath = resolvePluginPath(pluginId);
-  if (!pluginPath) return null;
-  const fresh: LoadedPlugin = { pluginPath };
-  loaded.set(pluginId, fresh);
-  return fresh;
-}
-
-
-
-
 function json(res: http.ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
   res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -284,48 +240,51 @@ async function handleRpc(rawBody: Buffer): Promise<{ status: number; body: unkno
   }
   const op = msg.op;
 
-  if (op === 'list') {
-    const entries = existsSync(pluginsDir())
-      ? readdirSync(pluginsDir()).filter((name) => statSync(join(pluginsDir(), name)).isDirectory())
-      : [];
-    const plugins: Array<{ id: string; name: string; version: string | null }> = [];
-    for (const id of entries) {
-      const loadedPlugin = await getPlugin(id);
-      if (!loadedPlugin) continue;
-      try {
-        // Manifest probe in the DISPOSABLE executor — the parent never
-        // imports untrusted code (10th-audit finding 2). A broken or
-        // malicious bundle only loses its own listing slot.
-        const described = await runInExecutorProcess({
-          pluginPath: loadedPlugin.pluginPath,
-          op: 'describe',
-          ctx: { actorUserId: '', players: [], voiceParticipants: [], serverId: '', pluginId: id },
-          storageCapability: '',
-          storageEndpoint: '',
-        });
-        if (
-          described &&
-          typeof described === 'object' &&
-          (described as { id?: unknown }).id === id
-        ) {
-          const d = described as { name?: unknown; version?: unknown };
-          plugins.push({
-            id,
-            name: typeof d.name === 'string' ? d.name : id,
-            version: typeof d.version === 'string' ? d.version : null,
-          });
-        }
-      } catch {
-        /* invalid bundle — skip its listing */
+  if (op === 'describe') {
+    const ref = readBundleRef(msg);
+    const bundle = resolveBundle(pluginsDir(), ref, verifiedBundles);
+    if (!bundle.ok) return { status: bundle.status, body: { error: bundle.error } };
+    try {
+      // Manifest probe in the DISPOSABLE executor — the parent never
+      // imports untrusted code (10th-audit finding 2).
+      const described = await runInExecutorProcess({
+        pluginPath: bundle.indexPath,
+        op: 'describe',
+        ctx: { actorUserId: '', players: [], voiceParticipants: [], serverId: '', pluginId: ref.pluginId },
+        storageCapability: '',
+        storageEndpoint: '',
+      });
+      const d = (described && typeof described === 'object' ? described : {}) as {
+        id?: unknown;
+        name?: unknown;
+        version?: unknown;
+      };
+      if (d.id !== ref.pluginId) {
+        return {
+          status: 422,
+          body: { error: `Bundle manifest id "${String(d.id)}" does not match plugin id "${ref.pluginId}"` },
+        };
       }
+      return {
+        status: 200,
+        body: {
+          plugin: {
+            id: ref.pluginId,
+            name: typeof d.name === 'string' ? d.name : ref.pluginId,
+            version: typeof d.version === 'string' ? d.version : null,
+          },
+        },
+      };
+    } catch (err) {
+      return { status: 500, body: { error: `Plugin "${ref.pluginId}" failed: ${(err as Error).message}` } };
     }
-    return { status: 200, body: { plugins } };
   }
 
   if (op === 'createInitialState' || op === 'handleAction' || op === 'migrateState') {
-    const pluginId = String(msg.pluginId ?? '');
-    const loadedPlugin = await getPlugin(pluginId);
-    if (!loadedPlugin) return { status: 404, body: { error: `Plugin "${pluginId}" not loaded` } };
+    const ref = readBundleRef(msg);
+    const pluginId = ref.pluginId;
+    const bundle = resolveBundle(pluginsDir(), ref, verifiedBundles);
+    if (!bundle.ok) return { status: bundle.status, body: { error: bundle.error } };
 
     const envelope = msg.ctx as CtxEnvelope;
     // Host-minted scoped capability rides the RPC envelope.
@@ -334,7 +293,7 @@ async function handleRpc(rawBody: Buffer): Promise<{ status: number; body: unkno
 
     try {
       const result = await runInExecutorProcess({
-        pluginPath: loadedPlugin.pluginPath,
+        pluginPath: bundle.indexPath,
         op,
         ctx: envelope,
         state: msg.state,
@@ -362,7 +321,7 @@ async function handleRpc(rawBody: Buffer): Promise<{ status: number; body: unkno
 export function createPluginWorkerServer(): http.Server {
   return http.createServer((req, res) => {
     if (req.url === '/health' && req.method === 'GET') {
-      json(res, 200, { ok: true, service: 'plugin-worker', loaded: loaded.size });
+      json(res, 200, { ok: true, service: 'plugin-worker', loaded: verifiedBundles.size });
       return;
     }
     if (req.url === '/rpc' && req.method === 'POST') {

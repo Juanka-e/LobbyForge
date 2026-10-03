@@ -34,15 +34,32 @@ export async function resolvePublicAddresses(host: string): Promise<string[]> {
  * internal service); SNI/certificate validation keep the real hostname
  * via servername. The lookup callback answers Node-22's autoSelectFamily
  * shape ({address, family} objects) on every code path.
+ *
+ * Three clocks (security follow-up): `timeoutMs` is the socket IDLE
+ * timeout, which a server dripping one byte at a time never trips;
+ * `headersTimeoutMs` (default `timeoutMs`) bounds the wait for the
+ * response headers; `totalTimeoutMs` (default 3 × `timeoutMs`) is a hard
+ * deadline for the whole request, body included. A caller `signal`
+ * aborts it early.
  */
 export async function fetchIpPinned(
   url: string,
   originalHostname: string,
   verifiedAddresses: string[],
-  options: { timeoutMs?: number; maxStreamBytes?: number; userAgent?: string } = {}
+  options: {
+    timeoutMs?: number;
+    headersTimeoutMs?: number;
+    totalTimeoutMs?: number;
+    signal?: AbortSignal;
+    maxStreamBytes?: number;
+    userAgent?: string;
+  } = {}
 ): Promise<{ ok: boolean; status: number; body: Buffer; arrayBuffer: ArrayBuffer }> {
   const timeoutMs = options.timeoutMs ?? 10_000;
+  const headersTimeoutMs = options.headersTimeoutMs ?? timeoutMs;
+  const totalTimeoutMs = options.totalTimeoutMs ?? timeoutMs * 3;
   const maxStreamBytes = options.maxStreamBytes ?? 16 * 1024 * 1024;
+  if (options.signal?.aborted) throw new Error('Request aborted');
   const lookupFn = (
     _hostname: string,
     _opts: unknown,
@@ -57,9 +74,29 @@ export async function fetchIpPinned(
     lookup: lookupFn as never,
     servername: originalHostname,
   });
+  const deadline = AbortSignal.timeout(totalTimeoutMs);
+  const signal = options.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
   return new Promise((resolve, reject) => {
     let received = 0;
     const chunks: Buffer[] = [];
+    let headersTimer: ReturnType<typeof setTimeout> | null = null;
+    const cleanup = () => {
+      if (headersTimer) clearTimeout(headersTimer);
+      headersTimer = null;
+      signal.removeEventListener('abort', onAbort);
+    };
+    const fail = (err: Error) => {
+      cleanup();
+      req.destroy(err);
+      reject(err);
+    };
+    const onAbort = () => {
+      fail(
+        deadline.aborted
+          ? new Error(`Request exceeded the ${totalTimeoutMs} ms deadline`)
+          : new Error('Request aborted')
+      );
+    };
     const req = https.request(
       url,
       {
@@ -68,15 +105,18 @@ export async function fetchIpPinned(
         headers: { 'user-agent': options.userAgent ?? 'LobbyForge/1.0' },
       },
       (res) => {
+        if (headersTimer) clearTimeout(headersTimer);
+        headersTimer = null;
         res.on('data', (chunk: Buffer) => {
           received += chunk.length;
           if (received > maxStreamBytes) {
-            req.destroy(new Error(`Download exceeds the ${maxStreamBytes} byte cap`));
+            fail(new Error(`Download exceeds the ${maxStreamBytes} byte cap`));
             return;
           }
           chunks.push(chunk);
         });
         res.on('end', () => {
+          cleanup();
           const body = Buffer.concat(chunks);
           resolve({
             ok: (res.statusCode ?? 500) >= 200 && (res.statusCode ?? 500) < 300,
@@ -88,14 +128,19 @@ export async function fetchIpPinned(
             ) as ArrayBuffer,
           });
         });
-        res.on('error', reject);
+        res.on('error', (err: Error) => fail(err));
       }
     );
-    req.on('timeout', () => {
-      req.destroy();
-      reject(new Error('Request timed out'));
+    headersTimer = setTimeout(
+      () => fail(new Error(`No response headers within ${headersTimeoutMs} ms`)),
+      headersTimeoutMs
+    );
+    signal.addEventListener('abort', onAbort, { once: true });
+    req.on('timeout', () => fail(new Error('Request timed out')));
+    req.on('error', (err: Error) => {
+      cleanup();
+      reject(err);
     });
-    req.on('error', reject);
     req.end();
   });
 }

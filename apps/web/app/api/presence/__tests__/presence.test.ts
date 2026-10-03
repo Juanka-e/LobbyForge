@@ -7,6 +7,7 @@ const requireServerMember = vi.fn();
 const requireChannelInServer = vi.fn();
 const setUserPresence = vi.fn();
 const incrServerBandwidth = vi.fn();
+const reserveUserBandwidth = vi.fn();
 const getUserPresenceInServer = vi.fn();
 const publishPresenceChange = vi.fn();
 const getServerById = vi.fn();
@@ -25,6 +26,7 @@ vi.mock('@/lib/api-auth', () => ({
 vi.mock('@/lib/redis', () => ({
   setUserPresence,
   incrServerBandwidth,
+  reserveUserBandwidth,
   getUserPresenceInServer,
 }));
 vi.mock('@/lib/presence-bus', () => ({ publishPresenceChange }));
@@ -68,6 +70,8 @@ beforeEach(() => {
   requireChannelInServer.mockReset();
   setUserPresence.mockReset();
   incrServerBandwidth.mockReset();
+  // Default: the user's hourly budget has room for the whole delta.
+  reserveUserBandwidth.mockReset().mockImplementation(async (_uid: string, delta: number) => delta);
   getUserPresenceInServer.mockReset();
   publishPresenceChange.mockReset();
   getServerById.mockReset();
@@ -144,6 +148,45 @@ describe('POST /api/presence', () => {
       {}
     );
     expect(incrServerBandwidth).toHaveBeenCalledWith(SERVER_ID, 12345, expect.objectContaining({}));
+  });
+
+  // Security follow-up: a client-reported delta could trip the admin alert.
+  const postBandwidth = async (bandwidthDeltaBytes: number) => {
+    const { POST } = await loadRoute();
+    return POST(
+      new Request('https://example.test/api/presence', {
+        method: 'POST',
+        body: JSON.stringify({ serverId: SERVER_ID, channelId: CHANNEL_ID, bandwidthDeltaBytes }),
+      }),
+      {}
+    );
+  };
+
+  it('clamps one report to 240 MB (32 Mbit/s for 60 s) and charges the user hourly budget of 14.4 GB', async () => {
+    const res = await postBandwidth(10 * 1024 * 1024 * 1024);
+    expect(res.status).toBe(200);
+    expect(reserveUserBandwidth).toHaveBeenCalledWith(UID, 240_000_000, 14_400_000_000);
+    expect(incrServerBandwidth).toHaveBeenCalledWith(SERVER_ID, 240_000_000, expect.anything());
+  });
+
+  it('counts only what fits in the user hourly budget, and nothing once it is spent', async () => {
+    reserveUserBandwidth.mockResolvedValueOnce(1000);
+    await postBandwidth(5000);
+    expect(incrServerBandwidth).toHaveBeenCalledWith(SERVER_ID, 1000, expect.anything());
+
+    incrServerBandwidth.mockClear();
+    reserveUserBandwidth.mockResolvedValueOnce(0);
+    const res = await postBandwidth(5000);
+    expect(res.status).toBe(200);
+    expect(incrServerBandwidth).not.toHaveBeenCalled();
+  });
+
+  it('still records presence when the budget check fails', async () => {
+    reserveUserBandwidth.mockRejectedValueOnce(new Error('redis down'));
+    const res = await postBandwidth(5000);
+    expect(res.status).toBe(200);
+    expect(setUserPresence).toHaveBeenCalled();
+    expect(incrServerBandwidth).not.toHaveBeenCalled();
   });
 
   it('does not call incrServerBandwidth when bandwidthDeltaBytes is absent', async () => {

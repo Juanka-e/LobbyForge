@@ -40,6 +40,7 @@ import {
   type KeybindPreferences,
 } from '@/lib/keybind-preferences';
 import { VOICE_TEST_STATE_EVENT, type VoiceTestKind } from '@/lib/voice-test-events';
+import { voiceBlockedNotice } from '@/lib/voice-block-notice';
 import {
   isMicrophoneBlocked,
   publishBlockAtJoin,
@@ -865,6 +866,10 @@ export function LobbyVoiceProvider({
         }
         if (!res.ok) {
           const detail = (await res.json().catch(() => ({}))) as { error?: string };
+          // Removed for a mislabelled track and blocked for a while: say so
+          // in the viewer's language, with how long is left.
+          const blockedNotice = voiceBlockedNotice(detail);
+          if (blockedNotice) throw new VoiceNoticeError(blockedNotice);
           // The server's own `error` is shown as sent; ours is only the fallback.
           if (detail.error) throw new Error(detail.error);
           throw new VoiceNoticeError({ key: 'lobby.voice.error.tokenFailed', params: { status: res.status } });

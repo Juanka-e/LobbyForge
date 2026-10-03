@@ -4,6 +4,7 @@ import { getUserCredentialsByEmail } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { buildGuestSessionCookie, createGuestIdentity } from '@/lib/guest-session';
 import { getSessionSecret } from '@/lib/api-auth';
+import { accountLockedResponse, beginAccountAttempt, clearAccountAttempts } from '@/lib/auth-throttle';
 import { DUMMY_PASSWORD_HASH, verifyPassword } from '@/lib/password';
 import { withApiSecurity } from '@/lib/security-headers';
 import { recordSession } from '@/lib/session-tracker';
@@ -22,12 +23,22 @@ async function handlePost(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'Invalid email or password.' }, { status: 400 });
   }
 
+  // Security follow-up: a per-ACCOUNT failure limit shared with the
+  // desktop handoff start (the per-IP bucket alone let a distributed
+  // attacker guess forever). Counted before anything is looked up, for
+  // known and unknown emails alike; a locked account gets the generic 429
+  // whether or not the password is right.
+  const subject = { scope: 'sign-in', email: parsed.data.email } as const;
+  const attempt = await beginAccountAttempt(subject);
+  if (!attempt.allowed) return accountLockedResponse(attempt.retryAfterSeconds);
+
   const user = await getUserCredentialsByEmail(getDb(), parsed.data.email);
   const valid = await verifyPassword(parsed.data.password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
   if (!user || user.deletedAt || !user.passwordHash || !valid) {
     console.warn(`[security] failed login: email=${parsed.data.email.slice(0, 3)}*** ip=${req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'}`);
     return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 });
   }
+  await clearAccountAttempts(subject);
 
   const sessionSeed = createGuestIdentity();
   const session = buildGuestSessionCookie(

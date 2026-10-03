@@ -374,6 +374,26 @@ describe('beta-review S6 — subscription caps + in-flight subscribe on close', 
   });
 });
 
+describe('security follow-up — subscribe errors never reach the client verbatim', () => {
+  it('sends a fixed code and message when authorization throws (no SQL in the frame)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    authorizeMocks.authorizeTopicSubscribe.mockRejectedValue(
+      new Error('Failed query: select "id", "owner_user_id" from "servers" where "servers"."id" = $1 params: srv-1')
+    );
+    baseUrl = await start();
+    const ws = await connect(baseUrl);
+    await nextMessage(ws); // hello
+    ws.send(JSON.stringify({ type: 'subscribe', topic: 'chat:srv-1:ch-1' }));
+    const frame = await nextMessage(ws);
+    expect(frame).toEqual({ type: 'error', topic: 'chat:srv-1:ch-1', code: 'internal_error', message: 'Subscription failed' });
+    expect(JSON.stringify(frame)).not.toMatch(/select|servers|params/i);
+    // The detail is still logged for the operator.
+    expect(warn.mock.calls.flat().join(' ')).toContain('Failed query');
+    warn.mockRestore();
+    ws.close();
+  });
+});
+
 describe('beta-review S6 — per-IP slot accounting', () => {
   const loopbackCount = () =>
     __ipConnectionCount('127.0.0.1') + __ipConnectionCount('::ffff:127.0.0.1');

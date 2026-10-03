@@ -210,3 +210,48 @@ describe('setTyping / getTypingUsers', () => {
     expect(typers).toEqual([]);
   });
 });
+
+describe('reserveUserBandwidth (security follow-up)', () => {
+  const USER_ID = '00000000-0000-4000-8000-0000000000aa';
+  const CAP = 1000;
+
+  /** Make the pipeline reply as Redis would to INCRBYFLOAT then EXPIRE. */
+  function counterAfter(value: number) {
+    pipelineExec = async () => [
+      [null, String(value)],
+      [null, 1],
+    ];
+  }
+
+  it('ignores non-positive and non-finite deltas without touching Redis', async () => {
+    const { reserveUserBandwidth } = await import('../redis.js');
+    expect(await reserveUserBandwidth(USER_ID, 0, CAP, { now: FIXED_NOW })).toBe(0);
+    expect(await reserveUserBandwidth(USER_ID, -5, CAP, { now: FIXED_NOW })).toBe(0);
+    expect(await reserveUserBandwidth(USER_ID, Number.NaN, CAP, { now: FIXED_NOW })).toBe(0);
+    expect(pipelineCommands).toHaveLength(0);
+  });
+
+  it('adds to the user hourly counter (2h TTL) and grants the whole delta while under the cap', async () => {
+    const { reserveUserBandwidth } = await import('../redis.js');
+    counterAfter(300);
+    expect(await reserveUserBandwidth(USER_ID, 300, CAP, { now: FIXED_NOW })).toBe(300);
+    expect(pipelineCommands.map((c) => `${c.cmd} ${c.args.join(' ')}`)).toEqual([
+      `incrbyfloat lf:test:bw:user:${USER_ID}:2026-03-15T14 300`,
+      `expire lf:test:bw:user:${USER_ID}:2026-03-15T14 7200`,
+    ]);
+  });
+
+  it('grants only the part that fits, then nothing', async () => {
+    const { reserveUserBandwidth } = await import('../redis.js');
+    counterAfter(1200); // 900 already counted + 300 now
+    expect(await reserveUserBandwidth(USER_ID, 300, CAP, { now: FIXED_NOW })).toBe(100);
+    counterAfter(1500);
+    expect(await reserveUserBandwidth(USER_ID, 300, CAP, { now: FIXED_NOW })).toBe(0);
+  });
+
+  it('throws when Redis reports an error, so the caller counts nothing', async () => {
+    const { reserveUserBandwidth } = await import('../redis.js');
+    pipelineExec = async () => [[new Error('OOM'), null], [null, 1]];
+    await expect(reserveUserBandwidth(USER_ID, 300, CAP, { now: FIXED_NOW })).rejects.toThrow('OOM');
+  });
+});

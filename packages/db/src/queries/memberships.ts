@@ -105,11 +105,12 @@ export async function getServerMember(
 }
 
 /**
- * Idempotently make `userId` a member of `serverId` (the /lobby
- * auto-join on open instances). Returns `null` — and creates nothing —
- * when the user holds an ACTIVE ban on the server, or (security-review
- * AUTHZ-004) when the server's access policy requires approval for a
- * newcomer.
+ * Idempotently make `userId` a member of `serverId`. Returns `null` — and
+ * creates nothing — when the user holds an ACTIVE ban on the server, or
+ * (security-review AUTHZ-004) when the server's access policy requires
+ * approval for a newcomer. The /lobby auto-join uses `autoJoinServer`
+ * (queries/joinRequests.ts), which reports the user's join request in
+ * that case instead (the lobby's "Ask to join" files one).
  *
  * beta-review (S2): the lobby called this unconditionally, so a banned
  * user on an open instance was silently re-joined on their next visit.
@@ -144,11 +145,28 @@ export async function ensureServerMembershipDetailed(
   const existing = await getServerMember(db, serverId, userId);
   if (existing) return { membership: existing, created: false };
   // security-review AUTHZ-004: a server whose access policy asks for
-  // approval (there is no queue) takes no new members by auto-join either
-  // — the same refusal invite redeem and registration give. Returns null
-  // like a ban: the caller creates nothing.
+  // approval takes no new member without a moderator's decision. Returns
+  // null like a ban: nothing is created (a join request is filed by an
+  // invite redeem or the lobby's "Ask to join").
   if (await isNewMemberApprovalRequired(db, serverId, userId)) return null;
 
+  return createMembershipWithEveryone(db, serverId, userId);
+}
+
+/**
+ * Insert the membership for a NEW member: the `@everyone` role in
+ * `membership_roles`, an empty display role, and the timeout / server
+ * mute stored in `server_member_sanctions` (security-review AUTHZ-002).
+ * The ONE creation path shared by the auto-join and an approved join
+ * request; callers have already checked bans and the access policy.
+ * Idempotent on (server, user): a concurrent insert yields
+ * `created: false` with the existing row.
+ */
+export async function createMembershipWithEveryone(
+  db: DbClient,
+  serverId: string,
+  userId: string
+): Promise<{ membership: MembershipRow; created: boolean }> {
   const [everyone] = await db
     .select({ id: roles.id })
     .from(roles)

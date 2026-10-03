@@ -16,7 +16,8 @@
  *   AUTHZ-002  a timeout survives leave + rejoin; timed-out members mint
  *              no invites; users who left can be banned
  *   AUTHZ-003  Manage Messages deletes and pins, never rewrites
- *   AUTHZ-004  "approval required" stops invite redemption
+ *   AUTHZ-004  "approval required": an invite files a join request (no
+ *              membership) that the owner approves from the queue
  *   AUTHZ-005 / FILE-001  avatars are short URLs, served with nosniff,
  *              and hidden by "Profile visibility: nobody"
  *   AUTHZ-006  publish grants: a member publishes mic, camera and screen;
@@ -24,7 +25,9 @@
  *              camera and screen share; a timed-out member publishes
  *              nothing; a member who publishes audio under the Camera /
  *              ScreenShare source is removed by the server (LiveKit
- *              webhook) before the room hears more than a moment of it
+ *              webhook) before the room hears more than a moment of it,
+ *              and is blocked from voice for a while (no fresh token;
+ *              the old token is thrown out again on join)
  *   PLUG-001   a poll vote is not written to the audit log
  *   PLUG-002   a kicked host cannot end their activity
  *   FILE-002 / HUB-001  directory writes are official-hub only; the
@@ -699,7 +702,7 @@ test.describe('security review 2026-10 — regressions on the real stack', () =>
     }
   });
 
-  test('AUTHZ-004: with approval required for a first join, an invite cannot be redeemed', async ({ playwright }) => {
+  test('AUTHZ-004: with approval required for a first join, an invite files a join request a moderator approves', async ({ playwright }) => {
     const policyUrl = `/api/servers/${serverId}/access-policy`;
     const current = ((await (await owner.get(policyUrl)).json()) as {
       accessPolicy: {
@@ -723,22 +726,38 @@ test.describe('security review 2026-10 — regressions on the real stack', () =>
       const strict = await send(() => owner.patch(policyUrl, { data: { ...original, requireApprovalForFirstJoin: true } }));
       expect(strict.status()).toBe(200);
 
+      // The redeem files a join request instead of a membership; a repeat
+      // returns the same request.
       const redeem = await send(() => newcomer.api.post(`/api/invites/${inviteCode}/redeem`));
-      expect(redeem.status()).toBe(403);
-      expect(await redeem.json()).toMatchObject({ code: 'approval_required' });
-      // The lobby's auto-join refuses too — and says so, not "data unavailable".
+      expect(redeem.status()).toBe(202);
+      const pending = (await redeem.json()) as { status: string; request: { id: string } };
+      expect(pending.status).toBe('pending_approval');
+      const again = await send(() => newcomer.api.post(`/api/invites/${inviteCode}/redeem`));
+      expect(again.status()).toBe(202);
+      expect(((await again.json()) as { request: { id: string } }).request.id).toBe(pending.request.id);
+      // The lobby says the request is waiting — not "data unavailable".
       const lobby = await rawRequest('/lobby', newcomerCookie);
       expect(lobby.status).toBe(200);
-      expect(await lobby.text()).toContain('Ask one of its moderators for an invite or for approval.');
-      expect((await newcomer.api.get('/api/servers')).status()).toBe(200);
-      const { servers } = (await (await newcomer.api.get('/api/servers')).json()) as { servers: Array<{ id: string }> };
-      expect(servers.map((s) => s.id)).not.toContain(serverId);
+      expect(await lobby.text()).toContain('Your request to join this community is waiting for a moderator.');
+      const serverIds = async () =>
+        ((await (await newcomer.api.get('/api/servers')).json()) as { servers: Array<{ id: string }> }).servers.map((s) => s.id);
+      expect(await serverIds()).not.toContain(serverId);
+
+      // The newcomer cannot see the queue; the owner can, and approves.
+      expect((await newcomer.api.get(`/api/servers/${serverId}/join-requests`)).status()).toBe(403);
+      const queue = await send(() => owner.get(`/api/servers/${serverId}/join-requests`));
+      expect(queue.status()).toBe(200);
+      const { requests } = (await queue.json()) as { requests: Array<{ id: string; userId: string; status: string }> };
+      expect(requests.find((r) => r.id === pending.request.id)).toMatchObject({ status: 'pending' });
+      const approve = await send(() =>
+        owner.post(`/api/servers/${serverId}/join-requests/${pending.request.id}`, { data: { action: 'approve' } })
+      );
+      expect(approve.status()).toBe(200);
+      expect(await serverIds()).toContain(serverId);
     } finally {
       const restore = await send(() => owner.patch(policyUrl, { data: original }));
       expect(restore.status(), 'access policy restored').toBe(200);
     }
-    // Policy back: the same invite works again.
-    await join(newcomer);
     await newcomer.api.dispose();
   });
 
@@ -900,8 +919,10 @@ test.describe('security review 2026-10 — regressions on the real stack', () =>
       listener: Page;
       talker: Page;
       identity: string;
-      /** The talker fetches a fresh token and connects again (after a removal). */
-      rejoinTalker: () => Promise<void>;
+      /** The token the talker connected with (still valid after a removal). */
+      talkerToken: { token: string; livekitUrl: string };
+      /** The talker asks the token route again (raw response: may be refused). */
+      requestTalkerToken: () => Promise<APIResponse>;
     }) => Promise<void>
   ) {
     const muted = await newGuest(playwright, 'Muted');
@@ -925,11 +946,15 @@ test.describe('security review 2026-10 — regressions on the real stack', () =>
       pages.push(listener.ctx, talker.ctx);
       await connectRoom(listener.page, ownerToken.livekitUrl, ownerToken.token);
       await connectRoom(talker.page, mutedToken.livekitUrl, mutedToken.token);
-      const rejoinTalker = async () => {
-        const fresh = await voiceToken(muted, channelId);
-        await connectRoom(talker.page, fresh.livekitUrl, fresh.token);
-      };
-      await body({ listener: listener.page, talker: talker.page, identity: mutedToken.identity, rejoinTalker });
+      const requestTalkerToken = () =>
+        send(() => muted.api.post('/api/livekit/token', { data: { serverId, channelId } }));
+      await body({
+        listener: listener.page,
+        talker: talker.page,
+        identity: mutedToken.identity,
+        talkerToken: mutedToken,
+        requestTalkerToken,
+      });
     } finally {
       for (const ctx of pages) await ctx.close();
       await send(() => owner.post(muteUrl, { data: { muted: false } })).catch(() => undefined);
@@ -984,43 +1009,69 @@ test.describe('security review 2026-10 — regressions on the real stack', () =>
     // This listener is a RAW livekit-client with autoSubscribe — no app
     // filter — so what it receives is exactly what the server lets through:
     // the moment between the publish and the removal, nothing more.
-    await withServerMutedTalker(playwright, browser, 'c', async ({ listener, talker, identity, rejoinTalker }) => {
-      const peaks = new Map<string, number>();
-      const rounds: Array<{ attempt: PublishAttempt; result: string; leakedBytes: number }> = [];
-      for (const attempt of ['audio-as-camera', 'audio-as-screen-share'] as const) {
-        if (rounds.length > 0) {
-          // Removal is not a ban: the member may come back — and is removed again.
-          await rejoinTalker();
-          await expect
-            .poll(() => listener.evaluate((id) => window.__room.remoteParticipants.has(id), identity), { timeout: 20_000 })
-            .toBe(true);
-        }
-        const before = totalPeakBytes(peaks);
-        const result = await tryPublish(talker, attempt);
-        await sampleInboundAudio(listener, peaks, 6_000);
-        const leakedBytes = totalPeakBytes(peaks) - before;
-        rounds.push({ attempt, result, leakedBytes });
+    //
+    // A removal also BLOCKS the member from voice on the server for a while
+    // (lib/voice-block.ts): RemoveParticipant does not revoke tokens. So
+    // each attempt gets its own muted member, and after the removal the
+    // spec checks both ways back in are shut: a fresh token is refused
+    // (403 voice_blocked), and the token minted before the removal — still
+    // valid — is thrown out again on participant_joined.
+    const rounds: Array<{ attempt: PublishAttempt; result: string; leakedBytes: number; received: unknown }> = [];
+    for (const [attempt, suffix] of [
+      ['audio-as-camera', 'c'],
+      ['audio-as-screen-share', 'd'],
+    ] as const) {
+      await withServerMutedTalker(
+        playwright,
+        browser,
+        suffix,
+        async ({ listener, talker, identity, talkerToken, requestTalkerToken }) => {
+          const peaks = new Map<string, number>();
+          const result = await tryPublish(talker, attempt);
+          await sampleInboundAudio(listener, peaks, 6_000);
+          const leakedBytes = totalPeakBytes(peaks);
+          rounds.push({ attempt, result, leakedBytes, received: await subscriptionsFrom(listener, identity) });
 
-        // LiveKit still ACCEPTS the mislabelled source (should it ever refuse
-        // it, even better); once accepted, the server must remove the talker.
-        if (result === 'accepted') {
-          await expect
-            .poll(() => talker.evaluate(() => window.__room.state as string), { timeout: 15_000 })
-            .toBe('disconnected');
-          await expect
-            .poll(() => listener.evaluate((id) => window.__room.remoteParticipants.has(id), identity), { timeout: 15_000 })
-            .toBe(false);
-        }
-        // At most a moment of audio — far below a talk-around.
-        expect(leakedBytes, `${attempt}: inbound audio bytes at the listener`).toBeLessThan(MAX_LEAKED_AUDIO_BYTES);
-      }
+          // LiveKit still ACCEPTS the mislabelled source (should it ever
+          // refuse it, even better); once accepted, the server must remove
+          // the talker.
+          if (result === 'accepted') {
+            await expect
+              .poll(() => talker.evaluate(() => window.__room.state as string), { timeout: 15_000 })
+              .toBe('disconnected');
+            await expect
+              .poll(() => listener.evaluate((id) => window.__room.remoteParticipants.has(id), identity), { timeout: 15_000 })
+              .toBe(false);
 
-      const received = await subscriptionsFrom(listener, identity);
-      console.info('[livekit] server-muted member, audio under other sources:', rounds, 'listener subscribed to', received);
-      test.info().annotations.push({
-        type: 'livekit result',
-        description: JSON.stringify({ rounds, received }),
-      });
+            const refused = await requestTalkerToken();
+            expect(refused.status(), 'a fresh voice token while blocked').toBe(403);
+            const refusal = (await refused.json()) as { code?: string; retryAfter?: number };
+            expect(refusal.code).toBe('voice_blocked');
+            expect(refusal.retryAfter).toBeGreaterThan(0);
+            expect(refusal.retryAfter).toBeLessThanOrEqual(10 * 60);
+            expect(refused.headers()['retry-after']).toBe(String(refusal.retryAfter));
+
+            // The old token still connects (LiveKit cannot revoke it); the
+            // participant_joined webhook removes it again at once. A connect
+            // that fails outright (removed mid-join) is just as good.
+            await connectRoom(talker, talkerToken.livekitUrl, talkerToken.token).catch(() => undefined);
+            await expect
+              .poll(() => talker.evaluate(() => window.__room.state as string), { timeout: 15_000 })
+              .toBe('disconnected');
+            await expect
+              .poll(() => listener.evaluate((id) => window.__room.remoteParticipants.has(id), identity), { timeout: 15_000 })
+              .toBe(false);
+          }
+          // At most a moment of audio — far below a talk-around.
+          expect(leakedBytes, `${attempt}: inbound audio bytes at the listener`).toBeLessThan(MAX_LEAKED_AUDIO_BYTES);
+        }
+      );
+    }
+
+    console.info('[livekit] server-muted member, audio under other sources:', rounds);
+    test.info().annotations.push({
+      type: 'livekit result',
+      description: JSON.stringify({ rounds }),
     });
   });
 

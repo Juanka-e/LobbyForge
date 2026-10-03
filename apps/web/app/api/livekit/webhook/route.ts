@@ -5,6 +5,7 @@ import { getDb } from '@/lib/db';
 import { getRoomServiceClient, requireLiveKitCredentials } from '@/lib/livekit';
 import { parseLiveKitRoomName } from '@/lib/livekit-room';
 import { withMachineApiSecurity } from '@/lib/security-headers';
+import { blockVoice, isVoiceBlocked, type VoiceBlockResult } from '@/lib/voice-block';
 import { isTrackInfoAllowed, protoTrackKind, protoTrackSource } from '@/lib/voice-track-policy';
 
 export const dynamic = 'force-dynamic';
@@ -20,6 +21,12 @@ export const runtime = 'nodejs';
  * (lib/voice-track-policy.ts); this endpoint makes the SERVER enforce it:
  * on `track_published`, a track whose type does not match its source gets
  * its publisher removed from the room.
+ *
+ * Removal alone does not keep them out: LiveKit OSS RemoveParticipant does
+ * not revoke tokens. So the publisher is also blocked from voice on that
+ * server for a while (lib/voice-block.ts — the token route refuses new
+ * tokens), and on `participant_joined` a blocked identity is removed again
+ * at once: that is a token minted before the block, still valid.
  *
  * Called only by LiveKit over the compose network
  * (http://web:3000/api/livekit/webhook — `webhook:` in livekit.yaml, or
@@ -52,6 +59,9 @@ async function handlePost(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  if (event.event === 'participant_joined') {
+    return handleParticipantJoined(event);
+  }
   if (event.event !== 'track_published') {
     return NextResponse.json({ ok: true });
   }
@@ -70,6 +80,22 @@ async function handlePost(req: Request): Promise<NextResponse> {
     return NextResponse.json({ ok: true });
   }
 
+  const scope = parseLiveKitRoomName(room);
+  // Block BEFORE removing: once removed, a modified client reconnects
+  // within milliseconds, and the token route must already say no. The
+  // participant SID makes a redelivery of this event (after a 503 below)
+  // and the connection's other bad tracks count as ONE offence.
+  let block: VoiceBlockResult | null = null;
+  if (scope) {
+    try {
+      block = await blockVoice(scope, identity, { offenceId: event.participant?.sid || event.id || undefined });
+    } catch (err) {
+      // Removal still goes ahead. Without Redis the token route refuses
+      // every token in production anyway (fail-closed, see voice-block.ts).
+      console.error('[livekit/webhook] could not record the voice block:', (err as Error).message);
+    }
+  }
+
   const source = protoTrackSource(offending.source);
   const type = protoTrackKind(offending.type);
   console.warn('[livekit/webhook] removing a participant who published a track whose type does not match its source', {
@@ -79,6 +105,7 @@ async function handlePost(req: Request): Promise<NextResponse> {
     source,
     type,
     mimeType: offending.mimeType || undefined,
+    blockedSeconds: block?.seconds,
   });
 
   try {
@@ -92,7 +119,12 @@ async function handlePost(req: Request): Promise<NextResponse> {
     // Already gone (left, or removed by an earlier delivery) — nothing to do.
   }
 
-  const scope = parseLiveKitRoomName(room);
+  // The block covers the whole server, so a second live connection in
+  // another voice channel of the same server must go too — otherwise a
+  // modified client keeps talking there (LiveKit keeps refreshing that
+  // connection's token). Best effort: the offending room is already handled.
+  if (scope) await removeFromOtherServerRooms(scope.serverId, room, identity);
+
   if (scope) {
     try {
       await logAction(getDb(), {
@@ -101,7 +133,13 @@ async function handlePost(req: Request): Promise<NextResponse> {
         action: 'voice.track_rejected',
         targetType: 'user',
         targetId: identity,
-        metadata: { channelId: scope.channelId, room, source, type },
+        metadata: {
+          channelId: scope.channelId,
+          room,
+          source,
+          type,
+          ...(block ? { blockedSeconds: block.seconds } : {}),
+        },
       });
     } catch (err) {
       console.error('[audit] voice track rejection failed:', (err as Error).message);
@@ -109,6 +147,75 @@ async function handlePost(req: Request): Promise<NextResponse> {
   }
 
   return NextResponse.json({ ok: true, removed: true });
+}
+
+/**
+ * `participant_joined` while blocked: the identity is connecting with a
+ * token minted before the block (the token route refuses new ones). Remove
+ * it at once. Only a server log line — the offence that caused the block
+ * already wrote its audit row, and a reconnect loop must not flood the log.
+ */
+async function handleParticipantJoined(event: WebhookEvent): Promise<NextResponse> {
+  const room = event.room?.name ?? '';
+  const identity = event.participant?.identity ?? '';
+  const scope = room ? parseLiveKitRoomName(room) : null;
+  if (!scope || !identity) {
+    return NextResponse.json({ ok: true });
+  }
+
+  let blocked: boolean;
+  try {
+    blocked = await isVoiceBlocked(scope, identity);
+  } catch (err) {
+    // Fail OPEN here, and answer 200 rather than asking for a retry:
+    // LiveKit queues a room's webhooks one after another (keyed by room
+    // name), so retrying every join while Redis is down would hold back
+    // that room's track_published events, the ones that matter. The token
+    // route is the primary gate and fails closed in production.
+    console.error('[livekit/webhook] voice block check failed:', (err as Error).message);
+    return NextResponse.json({ ok: true });
+  }
+  if (!blocked) {
+    return NextResponse.json({ ok: true });
+  }
+
+  console.warn('[livekit/webhook] removing a participant who joined while blocked from voice', { room, identity });
+  try {
+    await getRoomServiceClient().removeParticipant(room, identity);
+  } catch (err) {
+    if (!isNotFound(err)) {
+      console.error('[livekit/webhook] removeParticipant failed:', (err as Error).message);
+      return NextResponse.json({ error: 'Failed to remove participant' }, { status: 503 });
+    }
+  }
+  return NextResponse.json({ ok: true, removed: true });
+}
+
+/**
+ * Remove `identity` from every OTHER live room of the server. Room names
+ * are `s_<serverHex>_c_<channelHex>` (`liveKitRoomName`), so the server's
+ * rooms share a prefix. Errors are logged, never thrown: the offending
+ * room was already handled, and `participant_joined` catches any
+ * connection this misses when it reconnects.
+ */
+async function removeFromOtherServerRooms(serverId: string, handledRoom: string, identity: string): Promise<void> {
+  const prefix = `s_${serverId.replaceAll('-', '').toLowerCase()}_c_`;
+  const lk = getRoomServiceClient();
+  let rooms: Array<{ name: string }>;
+  try {
+    rooms = await lk.listRooms();
+  } catch (err) {
+    console.error('[livekit/webhook] listRooms failed:', (err as Error).message);
+    return;
+  }
+  for (const { name } of rooms) {
+    if (name === handledRoom || !name.toLowerCase().startsWith(prefix)) continue;
+    try {
+      await lk.removeParticipant(name, identity);
+    } catch (err) {
+      if (!isNotFound(err)) console.error('[livekit/webhook] removeParticipant failed:', (err as Error).message);
+    }
+  }
 }
 
 /** RoomService answers 404 / `not_found` for a participant no longer in the room. */

@@ -183,7 +183,14 @@ What is **not** there yet:
   CSRF tokens remain planned for cross-origin desktop handoff flows.
 - **Proxy configuration.** Client IP headers are ignored unless
   `LOBBYFORGE_TRUSTED_PROXY=x-forwarded-for|cloudflare` is explicitly set for a
-  trusted proxy that strips and replaces that header.
+  trusted proxy that strips and replaces that header. Without it, production
+  puts every client in one rate-limit bucket: the app still starts, logs a
+  warning once per process and Doctor reports a `trusted_proxy` warning.
+  Behind the bundled nginx use `x-forwarded-for` (with
+  `infra/nginx/conf.d/cf-real-ip.conf` when Cloudflare is in front).
+  `cloudflare` (the app reads `CF-Connecting-IP` itself) is only safe when the
+  origin accepts traffic from Cloudflare alone — see
+  [DEPLOY_CLOUDFLARE.md](./DEPLOY_CLOUDFLARE.md#which-lobbyforge_trusted_proxy-to-use).
 
 The implementation is a self-hosted, no-Supabase adaptation of the `secure-nextjs-api-routes` skill in `.agents/`. We did not import that skill's `lib/csrf-protection.ts` / `lib/rate-limiter.ts` verbatim because they pull in Supabase; the patterns were re-implemented to match the LobbyForge stack.
 

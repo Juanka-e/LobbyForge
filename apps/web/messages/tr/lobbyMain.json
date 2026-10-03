@@ -1,5 +1,6 @@
 {
   "lobbyMain.activities.backTitle": "Kanala dön",
+  "lobbyMain.activities.channelNotAllowed": "Bu uygulama bu kanalda başlatılamaz. Bir sunucu yöneticisi onu başka kanallarla sınırladı.",
   "lobbyMain.activities.close": "Kapat",
   "lobbyMain.activities.closeLabel": "Etkinlikleri Kapat",
   "lobbyMain.activities.emptyManage": "Bir oyun ya da etkinlik yükle; burada bütün üyelere görünsün.",
@@ -20,6 +21,7 @@
   "lobbyMain.activities.playerRange": "{min}–{max} oyuncu",
   "lobbyMain.activities.playerRangeAny": "sınırsız",
   "lobbyMain.activities.resolving": "Devam eden bir oyun var mı diye bakılıyor…",
+  "lobbyMain.activities.roleNotAllowed": "Bu uygulamayı başlatamazsın. Bir sunucu yöneticisi onu belirli rollerle sınırladı.",
   "lobbyMain.activities.start": "Başlat",
   "lobbyMain.activities.starting": "Başlatılıyor…",
   "lobbyMain.activities.title": "Etkinlikler",

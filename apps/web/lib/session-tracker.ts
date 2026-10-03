@@ -8,7 +8,11 @@
  * last-seen timestamps.
  *
  * Sessions expire after 7 days of inactivity (TTL refreshed on every
- * request). Revocation deletes the Redis key and adds the `gid` to a
+ * request), and never outlive the session's absolute lifetime
+ * (`lib/session-lifetime.ts`): the entry remembers when the session was
+ * first issued (the cookie's `auth_time`), its TTL is capped at the time
+ * left, and `listSessions` hides an over-age entry — the cookie is signed
+ * out by then. Revocation deletes the Redis key and adds the `gid` to a
  * per-user revocation set so the cookie is rejected on the next request
  * even if the client still holds it.
  *
@@ -16,6 +20,7 @@
  * presence system's pattern.
  */
 import { redis } from './redis';
+import { sessionMaxAgeSeconds } from './session-lifetime';
 
 const SESSION_TTL_SECONDS = 7 * 24 * 3600; // 7 days
 
@@ -43,6 +48,11 @@ export interface SessionFingerprint {
   location: string;
   createdAt: number;
   lastSeen: number;
+  /**
+   * When the session was first issued (ms) — the cookie's `auth_time`.
+   * Absent on entries recorded before the absolute lifetime existed.
+   */
+  sessionStartedAt?: number;
 }
 
 /**
@@ -131,11 +141,19 @@ export function resolveLocation(req: Request): string {
  * Record (or refresh) a session fingerprint in Redis. Called on every
  * authenticated request via the session-tracking middleware. Creates
  * the entry on first sight; bumps `lastSeen` + TTL on subsequent.
+ *
+ * `options.authTime` is the cookie's `auth_time` (seconds). The refresh
+ * route passes it so the entry tracks the cookie exactly; without it the
+ * entry keeps what it recorded before, or starts now. Starting now is
+ * never earlier than the real `auth_time`, so the entry can outlive its
+ * cookie a little but never disappear while the cookie still works —
+ * `revokeOtherSessions` can only revoke what it can list.
  */
 export async function recordSession(
   userId: string,
   gid: string,
-  req: Request
+  req: Request,
+  options: { authTime?: number } = {}
 ): Promise<void> {
   if (!userId || !gid) return;
 
@@ -153,6 +171,9 @@ export async function recordSession(
   const existingRaw = await redis.get(sessionKey(userId, gid));
   const existing = existingRaw ? (JSON.parse(existingRaw) as SessionFingerprint) : null;
 
+  const sessionStartedAt =
+    typeof options.authTime === 'number' ? options.authTime * 1000 : existing?.sessionStartedAt ?? now;
+
   const fingerprint: SessionFingerprint = {
     gid,
     userId,
@@ -163,17 +184,34 @@ export async function recordSession(
     location,
     createdAt: existing?.createdAt ?? now,
     lastSeen: now,
+    sessionStartedAt,
   };
 
-  await redis.set(sessionKey(userId, gid), JSON.stringify(fingerprint), 'EX', SESSION_TTL_SECONDS);
+  // Never keep the entry past the session's absolute lifetime.
+  const secondsLeft = Math.ceil((sessionStartedAt + sessionMaxAgeSeconds() * 1000 - now) / 1000);
+  const ttl = Math.min(SESSION_TTL_SECONDS, Math.max(1, secondsLeft));
+  await redis.set(sessionKey(userId, gid), JSON.stringify(fingerprint), 'EX', ttl);
+}
+
+/** Whether a recorded session has outlived the absolute lifetime. */
+export function isRecordedSessionOverAge(session: SessionFingerprint, now = Date.now()): boolean {
+  if (typeof session.sessionStartedAt !== 'number') return false;
+  return session.sessionStartedAt + sessionMaxAgeSeconds() * 1000 < now;
 }
 
 /**
  * List all active sessions for a user. Scans the Redis keyspace for
  * `session:{userId}:*` and returns the fingerprints sorted by
- * lastSeen descending (most recent first).
+ * lastSeen descending (most recent first). Sessions past their absolute
+ * lifetime are signed out, so they are not listed.
  */
 export async function listSessions(userId: string): Promise<SessionFingerprint[]> {
+  const now = Date.now();
+  return (await listRecordedSessions(userId)).filter((session) => !isRecordedSessionOverAge(session, now));
+}
+
+/** Every recorded entry, over-age ones included. */
+async function listRecordedSessions(userId: string): Promise<SessionFingerprint[]> {
   const pattern = `lf:${process.env.NODE_ENV || 'dev'}:session:${userId}:*`;
   const keys: string[] = [];
   let cursor = '0';
@@ -211,7 +249,8 @@ export async function revokeSession(userId: string, gid: string): Promise<void> 
 }
 
 export async function revokeOtherSessions(userId: string, currentGid: string): Promise<number> {
-  const sessions = await listSessions(userId);
+  // Over-age entries too: revoking one is harmless, missing a live one is not.
+  const sessions = await listRecordedSessions(userId);
   const otherGids = sessions
     .map((session) => session.gid)
     .filter((gid) => gid !== currentGid);

@@ -64,15 +64,45 @@ async function workerRpc<T>(payload: Record<string, unknown>): Promise<T> {
   }
 }
 
-export interface WorkerPluginInfo {
-  id: string;
-  name: string;
-  version: string | null;
+/** The exact bundle a request targets: the version recorded as active and its digest. */
+export interface WorkerBundleRef {
+  pluginId: string;
+  version: string;
+  digest: string;
 }
 
-export async function listWorkerPlugins(): Promise<WorkerPluginInfo[]> {
-  const { plugins } = await workerRpc<{ plugins: WorkerPluginInfo[] }>({ op: 'list' });
-  return plugins;
+export interface WorkerPluginInfo {
+  id: string;
+  /** manifest.name as the bundle reports it. */
+  name: string;
+  /** The INSTALLED (active) version — the folder the worker runs. */
+  version: string;
+  /** Digest of that folder (plugin-install-layout.ts computeBundleDigest). */
+  digest: string;
+}
+
+/**
+ * Ask the worker to load exactly `ref` and report its manifest. The worker
+ * refuses a missing version or a digest mismatch; it never picks a version
+ * itself (the old `list` op took the alphabetically last folder, so 1.9.0
+ * won over 1.10.0).
+ */
+export async function describeWorkerPlugin(ref: WorkerBundleRef): Promise<WorkerPluginInfo> {
+  const { plugin } = await workerRpc<{ plugin?: { id?: unknown; name?: unknown } }>({
+    op: 'describe',
+    pluginId: ref.pluginId,
+    version: ref.version,
+    digest: ref.digest,
+  });
+  if (!plugin || plugin.id !== ref.pluginId) {
+    throw new Error(`Bundle manifest id "${String(plugin?.id)}" does not match plugin id "${ref.pluginId}"`);
+  }
+  return {
+    id: ref.pluginId,
+    name: typeof plugin.name === 'string' ? plugin.name : ref.pluginId,
+    version: ref.version,
+    digest: ref.digest,
+  };
 }
 
 /** Scope attached (non-enumerably) to host-built ctx objects. */
@@ -103,16 +133,19 @@ function extractEnvelope(ctx: GamePluginContext, pluginId: string) {
 
 /**
  * Build the worker-backed plugin object stored in the dynamic registry.
- * Its methods return Promises — the host call sites already await the
- * wrapping functions (callCreateInitialState/callHandleAction), which
- * absorb them.
+ * Its methods return Promises — the host call sites await the wrapping
+ * functions (callCreateInitialState/callHandleAction), and every
+ * `migrateState` call site awaits it directly (the GET, SSE and actions
+ * routes used it unawaited and lost the state). Every RPC names the exact
+ * version + digest; the worker refuses anything else.
  */
 export function buildWorkerPlugin(info: WorkerPluginInfo): RegisteredGamePlugin {
+  const bundle = { pluginId: info.id, version: info.version, digest: info.digest };
   const plugin = {
     manifest: {
       id: info.id,
       name: info.name,
-      version: info.version ?? '0.0.0',
+      version: info.version,
       type: 'game' as const,
       minAppVersion: '0.0.0',
       permissions: [],
@@ -126,7 +159,7 @@ export function buildWorkerPlugin(info: WorkerPluginInfo): RegisteredGamePlugin 
       const { storageCapability, ...ctxSnapshot } = envelope;
       const { result } = await workerRpc<{ result: unknown }>({
         op: 'createInitialState',
-        pluginId: info.id,
+        ...bundle,
         ctx: ctxSnapshot,
         storageCapability,
       });
@@ -144,7 +177,7 @@ export function buildWorkerPlugin(info: WorkerPluginInfo): RegisteredGamePlugin 
       const { storageCapability, ...ctxSnapshot } = envelope;
       const { result } = await workerRpc<{ result: unknown }>({
         op: 'handleAction',
-        pluginId: info.id,
+        ...bundle,
         ctx: ctxSnapshot,
         storageCapability,
         state,
@@ -155,7 +188,7 @@ export function buildWorkerPlugin(info: WorkerPluginInfo): RegisteredGamePlugin 
     migrateState: async (raw: unknown): Promise<unknown> => {
       const { result } = await workerRpc<{ result: unknown }>({
         op: 'migrateState',
-        pluginId: info.id,
+        ...bundle,
         raw,
       });
       return result;

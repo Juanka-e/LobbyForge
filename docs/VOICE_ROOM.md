@@ -79,11 +79,40 @@ that contradicts the declared kind. The rule lives in one module,
   breaks the rule, or any other track the participant already has, it
   removes the participant (`RemoveParticipant`). It also logs a warning
   with the room, identity, source and type, and writes a
-  `voice.track_rejected` audit row. Every other event gets a 200 and
-  nothing else happens. Removal is not a ban: the member can rejoin, and
-  is removed again on the next mislabelled track. A raw client (not
-  the app) can hear a few hundred milliseconds of audio before the
+  `voice.track_rejected` audit row (with `blockedSeconds`). A raw client
+  (not the app) can hear a few hundred milliseconds of audio before the
   removal lands.
+- **Voice block.** LiveKit OSS `RemoveParticipant` does not revoke
+  tokens, so before removing, the webhook blocks the member from voice
+  on that SERVER (`lib/voice-block.ts`; Redis key
+  `lf:{env}:voice-block:{serverId}:{userId}` with a TTL), so hopping to
+  another voice channel does not help. The block lasts 10 minutes, then
+  30, then 120 (the cap) when the next offence comes within an hour of
+  the previous block ending; an hour without one starts over at 10. One
+  LiveKit connection (participant SID) counts once, so a redelivered
+  event or several bad tracks on one connection do not escalate.
+  - `POST /api/livekit/token` answers **403** `{ code: 'voice_blocked',
+    retryAfter }` (plus `Retry-After`) while the block holds. The lobby
+    shows `lobby.voice.error.voiceBlocked` with the minutes left. If Redis
+    cannot be read, production refuses with a retryable 503 (the same
+    rule as session revocation) and dev/test let the token through.
+  - On `participant_joined`, a blocked identity is removed at once: it is
+    connecting with a token minted before the block. This writes only a
+    server log line, no audit row. If Redis cannot be read here the
+    webhook answers 200 and does nothing (fail open): LiveKit queues a
+    room's webhooks one after another, and retrying every join would
+    hold back that room's `track_published` events.
+  - Every other event gets a 200 and nothing else happens.
+- **Token lifetime.** LiveKit tokens live 10 minutes
+  (`LIVEKIT_TOKEN_TTL_SECONDS`). The token only has to get a participant
+  connected: while connected, LiveKit (v1.13.7) sends the client a fresh
+  token every 5 minutes, valid for 10 minutes or whatever the original
+  had left, whichever is longer. livekit-client keeps it (`refreshToken`
+  signal) and uses it to resume or restart, and its reconnect policy
+  gives up after about 45 seconds, well inside that window. The lobby
+  fetches a new token for every join. A 1-hour token gave a removed
+  member a valid token for up to an hour. TURN credentials have their
+  own 12 h lifetime (`lib/turn-credentials.ts`).
 - **Wiring.** LiveKit reaches the web service at
   `http://web:3000/api/livekit/webhook` over the compose network. nginx
   answers 404 for that path at the public edge. `webhook.api_key` must
@@ -123,7 +152,7 @@ that contradicts the declared kind. The rule lives in one module,
 `apps/web/app/room/[roomName]/page.tsx` is a client component. On mount:
 
 1. **Guest session.** Probes `GET /api/auth/guest` first; if 401, POSTs to mint a new identity. The rebind path lets a returning visitor keep their `gid` (which is also the LiveKit identity).
-2. **LiveKit token.** `POST /api/livekit/token` with `{ room: roomName }`. The server signs a JWT with the user's `gid` as the identity and the cookie's display name as the participant name. The token TTL is 1 hour; the page's heartbeat keeps the LobbyForge-side presence alive, but the LiveKit token itself is the only thing that authorizes the WebSocket connect.
+2. **LiveKit token.** `POST /api/livekit/token` with `{ room: roomName }`. The server signs a JWT with the user's `gid` as the identity and the cookie's display name as the participant name. The token TTL is 10 minutes (LiveKit refreshes it while connected — see "Token lifetime" above); the page's heartbeat keeps the LobbyForge-side presence alive, but the LiveKit token itself is the only thing that authorizes the WebSocket connect.
 3. **`Room.connect`.** `new Room({ adaptiveStream: true, dynacast: true }).connect(NEXT_PUBLIC_LIVEKIT_URL, token)`. `adaptiveStream` tells LiveKit to throttle video quality on the server side based on the subscriber's viewport; `dynacast` tells the SFU to dynamically unsubscribe publishers from tracks nobody is watching. Both are server-side cost savers that don't change the wire format.
 4. **Render.** The room name + connection state (from `RoomEvent.ConnectionStateChanged`) + a participant list (local + remote, with the "you" decoration on the local participant) + two buttons (mute, deafen).
 5. **Heartbeat.** If the URL carries `?serverId=…&channelId=…`, the page posts a presence heartbeat every 5 seconds to `/api/servers/{serverId}/channels/{channelId}/presence`.

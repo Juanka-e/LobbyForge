@@ -594,11 +594,14 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
             at: new Date().toISOString(),
           });
         } catch (err) {
+          // Never echo the error to the client: a Drizzle/pg error message
+          // carries the SQL text and parameters. Log it, send a fixed code.
+          console.warn(`[ws-gateway] subscribe failed: ${(err as Error)?.message ?? String(err)}`);
           send(socket, {
             type: 'error',
             topic: msg.topic,
-            code: 'unknown_topic',
-            message: (err as Error).message,
+            code: 'internal_error',
+            message: 'Subscription failed',
           });
         }
       } else {

@@ -42,6 +42,8 @@
   "admin.audit.action.invite.create": "created an invite",
   "admin.audit.action.invite.redeem": "joined with an invite",
   "admin.audit.action.invite.revoke": "revoked an invite",
+  "admin.audit.action.member.join_approved": "approved a request to join",
+  "admin.audit.action.member.join_rejected": "rejected a request to join",
   "admin.audit.action.member.kick": "kicked a member",
   "admin.audit.action.member.leave": "left the community",
   "admin.audit.action.member.set_roles": "changed a member's roles",

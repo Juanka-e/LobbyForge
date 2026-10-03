@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { DisplayNameSchema, readCookie } from '@lobbyforge/core';
 import { sanitizeOAuthRedirect } from '@/lib/oauth-redirect';
 import { withApiSecurity } from '@/lib/security-headers';
 import { exchangeGoogleCode, isGoogleOAuthConfigured } from '@/lib/oauth-google';
@@ -6,11 +7,10 @@ import {
   getIdentityLinkByProviderSubject,
   createUserIdentityLink,
   touchUserIdentityLink,
-  listUserIdentityLinks,
 } from '@lobbyforge/db';
 import { findOrCreateGuestUser } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
-import { buildGuestSessionCookie, createGuestIdentity, GUEST_SESSION_TTL_SECONDS } from '@/lib/guest-session';
+import { buildGuestSessionCookie, createGuestIdentity } from '@/lib/guest-session';
 import { isOfficialDeployment } from '@/lib/deployment-mode';
 import { authorizeGuestRegistration } from '@/lib/instance-access';
 import { recordSession } from '@/lib/session-tracker';
@@ -18,6 +18,27 @@ import { timingSafeEqual } from 'node:crypto';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+
+/** The start route mints `randomBytes(32).toString('hex')`. */
+const OAUTH_STATE_PATTERN = /^[a-f0-9]{32,128}$/;
+
+/**
+ * Security follow-up: the display name an account gets from Google goes
+ * through the same schema as local registration (`DisplayNameSchema`:
+ * 2–64 characters, trimmed, no control characters). Google's `name` is
+ * free profile text, and `exchangeGoogleCode` falls back to the EMAIL
+ * when there is none — which must never become a name other members see.
+ * Anything unusable gets the generated guest-style name instead.
+ */
+function oauthDisplayName(name: unknown, email: string | null | undefined, fallback: string): string {
+  const parsed = DisplayNameSchema.safeParse(name);
+  if (!parsed.success) return fallback;
+  const value = parsed.data;
+  // The schema measures length before trimming.
+  if (value.length < 2) return fallback;
+  if (email && value.toLowerCase() === email.trim().toLowerCase()) return fallback;
+  return value;
+}
 
 /**
  * GET /api/auth/oauth/google/callback — Google redirects here after consent.
@@ -40,9 +61,13 @@ async function handleGet(req: Request): Promise<NextResponse> {
     return NextResponse.redirect(new URL('/login?error=missing_params', req.url));
   }
 
-  // Verify state against the cookie (CSRF protection).
-  const cookieState = req.headers.get('cookie')
-    ?.match(/lf_oauth_state=([a-f0-9]+)/)?.[1];
+  // Verify state against the cookie (CSRF protection). Security
+  // follow-up: read by exact cookie name — the old unanchored regexes
+  // also matched any cookie whose name merely ENDED in `lf_oauth_state`
+  // (e.g. `x_lf_oauth_state`, which a sibling subdomain can set).
+  const cookieHeader = req.headers.get('cookie');
+  const rawCookieState = readCookie(cookieHeader, 'lf_oauth_state');
+  const cookieState = rawCookieState && OAUTH_STATE_PATTERN.test(rawCookieState) ? rawCookieState : null;
   // Length guard before timingSafeEqual to prevent RangeError on mismatched lengths.
   const stateBuf = Buffer.from(state);
   const cookieBuf = cookieState ? Buffer.from(cookieState) : Buffer.alloc(0);
@@ -53,13 +78,15 @@ async function handleGet(req: Request): Promise<NextResponse> {
   // SEC-005: the cookie is client-writable storage — sanitize on read,
   // not just on write (a tampered lf_oauth_redirect must not become an
   // open redirect at `new URL(redirect, req.url)`).
-  const redirect = sanitizeOAuthRedirect(
-    req.headers.get('cookie')?.match(/lf_oauth_redirect=([^;]+)/)?.[1] ?? null
-  );
+  const redirect = sanitizeOAuthRedirect(readCookie(cookieHeader, 'lf_oauth_redirect'));
 
   try {
     // Exchange code → verify ID token → get Google user info.
     const googleUser = await exchangeGoogleCode(code);
+    // The session identity, minted up front so its generated name can be
+    // the fallback display name.
+    const identity = createGuestIdentity();
+    const displayName = oauthDisplayName(googleUser.name, googleUser.email, identity.name);
 
     const db = getDb();
 
@@ -94,7 +121,7 @@ async function handleGet(req: Request): Promise<NextResponse> {
       // No link yet — create a new user (or find by email).
       const user = await findOrCreateGuestUser(db, {
         guestKey: `google:${googleUser.sub}`,
-        displayName: googleUser.name,
+        displayName,
       });
       if (!user) throw new Error('Failed to create user from Google OAuth');
       userId = user.id;
@@ -111,9 +138,8 @@ async function handleGet(req: Request): Promise<NextResponse> {
     }
 
     // Issue a session cookie for the resolved user.
-    const identity = createGuestIdentity();
     identity.uid = userId;
-    identity.name = googleUser.name;
+    identity.name = displayName;
     const secret = process.env.LOBBYFORGE_SESSION_SECRET!;
     const signed = buildGuestSessionCookie(identity, secret, {
       secure: process.env.NODE_ENV === 'production',

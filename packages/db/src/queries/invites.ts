@@ -6,7 +6,8 @@
  * combinations; collisions handled by a unique-index on `invites.code`).
  * A redeem atomically checks `expiresAt` + `maxUses`, increments
  * `currentUses`, and inserts a `memberships` row assigned to the server's
- * `@everyone` role.
+ * `@everyone` role — or, when the server's access policy holds newcomers
+ * for approval, files a join request instead (queries/joinRequests.ts).
  */
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { randomInt } from 'node:crypto';
@@ -15,6 +16,13 @@ import { invites, membershipRoles, memberships, roles, serverBans, servers } fro
 import { EVERYONE_ROLE_NAME } from './roles.js';
 import { getMemberSanction, membershipValuesFromSanction } from './memberSanctions.js';
 import { isNewMemberApprovalRequired } from './serverAccessPolicies.js';
+import {
+  fileJoinRequest,
+  getOpenJoinRequest,
+  hasFiledThroughInvite,
+  joinRequestRetryAfter,
+  type JoinRequestRow,
+} from './joinRequests.js';
 
 export interface InviteRow {
   id: string;
@@ -207,10 +215,8 @@ export async function revokeInvite(db: DbClient, inviteId: string): Promise<bool
 
 /**
  * Reason a redeem failed. The route layer maps this to a status code:
- *   - `not_found` → 404
- *   - `expired` / `exhausted` → 410
+ *   - `not_found` / `expired` / `exhausted` / `banned` → 403
  *   - `already_member` → 409
- *   - `approval_required` → 403 (security-review AUTHZ-004)
  */
 export type RedeemInviteError =
   | 'not_found'
@@ -218,12 +224,27 @@ export type RedeemInviteError =
   | 'exhausted'
   | 'already_member'
   | 'no_everyone_role'
-  | 'banned'
-  | 'approval_required';
+  | 'banned';
+
+/**
+ * The redeem did not create a membership because the server's access
+ * policy holds newcomers for approval (security-review AUTHZ-004 follow-up):
+ *   - `pending_approval` — a join request is waiting (`created`: filed by
+ *     THIS call, which consumed one use of the invite unless the user had
+ *     already filed one through this code) → 202;
+ *   - `join_rejected` — a moderator rejected the user's last request and
+ *     the cooldown runs until `retryAfter` → 403;
+ *   - `join_request_limit` — too many requests in 24 h → 429.
+ */
+export type RedeemInviteHeld =
+  | { ok: false; error: 'pending_approval'; serverId: string; request: JoinRequestRow; created: boolean }
+  | { ok: false; error: 'join_rejected'; serverId: string; retryAfter: Date }
+  | { ok: false; error: 'join_request_limit'; serverId: string };
 
 export type RedeemInviteResult =
   | { ok: true; membershipId: string; serverId: string; roleId: string }
-  | { ok: false; error: RedeemInviteError };
+  | { ok: false; error: RedeemInviteError }
+  | RedeemInviteHeld;
 
 /**
  * Atomically redeem an invite. The whole flow runs inside a Drizzle
@@ -238,13 +259,25 @@ export type RedeemInviteResult =
  *   6. Insert the `memberships` row with `roleId = @everyone.id`.
  *   7. Increment `currentUses`.
  *
+ * Under an approval policy, steps 5-6 are replaced by filing a join
+ * request (`options.note` is the requester's optional message). The
+ * user's existing pending request — or a rejection still in its cooldown —
+ * is returned BEFORE the expiry / use checks: the use their own request
+ * consumed may be the invite's last. A user's FIRST request through this
+ * code consumes one use (step 7), so `maxUses` bounds how many people one
+ * code can put in the queue. Nothing else does: a repeat redeem of a
+ * pending request, a new request after the user withdrew (or after a
+ * rejection's cooldown) through the same code — which also skips the
+ * exhausted check, the user already holds a use — and the approval.
+ *
  * Returns a discriminated-union result so the route layer can map errors
  * to status codes without parsing strings.
  */
 export async function redeemInvite(
   db: DbClient,
   code: string,
-  userId: string
+  userId: string,
+  options: { note?: string | null } = {}
 ): Promise<RedeemInviteResult> {
   return db.transaction(async (tx) => {
     // 1. Lock the invite row.
@@ -303,21 +336,72 @@ export async function redeemInvite(
       return { ok: false as const, error: 'already_member' as RedeemInviteError };
     }
 
+    // security-review AUTHZ-004 follow-up: the server's access policy can
+    // hold newcomers for moderator approval — the redeem files a join
+    // request (the approval queue) instead of a membership. Registration
+    // refuses such a policy before it gets here; an invite must not be a
+    // way around the queue.
+    const executor = tx as unknown as DbClient;
+    const needsApproval = await isNewMemberApprovalRequired(executor, invite.server_id, userId);
+    if (needsApproval) {
+      const open = await getOpenJoinRequest(executor, invite.server_id, userId);
+      if (open?.status === 'pending') {
+        return { ok: false as const, error: 'pending_approval' as const, serverId: invite.server_id, request: open, created: false };
+      }
+      if (open) {
+        return { ok: false as const, error: 'join_rejected' as const, serverId: invite.server_id, retryAfter: joinRequestRetryAfter(open) };
+      }
+    }
+    // Invite-use burning: an earlier request of this user through this
+    // code (whatever became of it) already took a use, so asking again —
+    // after withdrawing, or after a rejection's cooldown — takes none.
+    // Refunding on withdraw instead would hand the use to the next
+    // stranger, and the code would no longer bound how many people it
+    // queues; this way `maxUses` is "how many people may ask through it".
+    const alreadyHoldsUse =
+      needsApproval &&
+      (await hasFiledThroughInvite(executor, { serverId: invite.server_id, userId, inviteCode: code }));
+
     // 4. Expired?
     if (invite.expires_at && invite.expires_at.getTime() < Date.now()) {
       return { ok: false as const, error: 'expired' as RedeemInviteError };
     }
-    // Exhausted?
-    if (invite.max_uses !== null && invite.current_uses >= invite.max_uses) {
+    // Exhausted? (Not for a requester whose own earlier request took the use.)
+    if (!alreadyHoldsUse && invite.max_uses !== null && invite.current_uses >= invite.max_uses) {
       return { ok: false as const, error: 'exhausted' as RedeemInviteError };
     }
 
-    // security-review AUTHZ-004: the server's access policy can hold
-    // newcomers for moderator approval. There is no approval queue, so the
-    // redeem is refused — registration already refused it; an invite must
-    // not be the way around the policy.
-    if (await isNewMemberApprovalRequired(tx as unknown as DbClient, invite.server_id, userId)) {
-      return { ok: false as const, error: 'approval_required' as RedeemInviteError };
+    if (needsApproval) {
+      const filed = await fileJoinRequest(executor, {
+        serverId: invite.server_id,
+        userId,
+        source: 'invite',
+        inviteCode: code,
+        note: options.note ?? null,
+      });
+      if (filed.kind === 'limited') {
+        return { ok: false as const, error: 'join_request_limit' as const, serverId: invite.server_id };
+      }
+      if (filed.kind === 'rejected') {
+        return { ok: false as const, error: 'join_rejected' as const, serverId: invite.server_id, retryAfter: filed.retryAfter };
+      }
+      // A request filed by THIS redeem takes one use of the invite (the
+      // row is locked above), so one code cannot flood the queue past
+      // its maxUses. A concurrent duplicate (created: false) takes none,
+      // and neither does the user's second request through this code.
+      if (filed.created && !alreadyHoldsUse) {
+        await tx
+          .update(invites)
+          .set({ currentUses: sql`${invites.currentUses} + 1` })
+          .where(eq(invites.id, invite.id));
+      }
+      return {
+        ok: false as const,
+        error: 'pending_approval' as const,
+        serverId: invite.server_id,
+        request: filed.request,
+        created: filed.created,
+      };
     }
 
     // 5. Look up the server's @everyone role. The M13 seed runs on
@@ -338,7 +422,7 @@ export async function redeemInvite(
     // 6. Insert the membership. security-review AUTHZ-002: a returning
     //    member starts with the timeout / server mute they left with —
     //    leave + redeem used to hand them a clean row.
-    const sanction = await getMemberSanction(tx as unknown as DbClient, invite.server_id, userId);
+    const sanction = await getMemberSanction(executor, invite.server_id, userId);
     const [member] = await tx
       .insert(memberships)
       .values({

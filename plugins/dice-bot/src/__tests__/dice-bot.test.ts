@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   diceBotPlugin,
   diceValidateAction,
@@ -176,5 +176,27 @@ describe('dice bot — validateAction (malformed HTTP payloads)', () => {
     const next = diceBotPlugin.handleAction(null as never, state, malformed);
     expect(next).toBe(state);
     expect(JSON.stringify(next)).not.toContain('NaN');
+  });
+});
+
+describe('dice bot — rolls come from the CSPRNG (security follow-up)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('rolls with crypto.getRandomValues, never Math.random', () => {
+    const math = vi.spyOn(Math, 'random');
+    const crypto = vi.spyOn(globalThis.crypto, 'getRandomValues');
+    let state = initial();
+    for (let i = 0; i < 20; i += 1) state = roll(state, 'p1', 6);
+    expect(state.stats['p1'].rolls).toBe(20);
+    expect(crypto).toHaveBeenCalledTimes(20);
+    expect(math).not.toHaveBeenCalled();
+  });
+
+  it('maps the whole [0, 1) range onto 1..sides', () => {
+    expect(rollDie(6, () => 0)).toBe(1);
+    expect(rollDie(6, () => 0.999_999_999)).toBe(6);
+    expect(rollDie(20, () => 0.5)).toBe(11);
   });
 });

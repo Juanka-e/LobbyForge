@@ -43,7 +43,9 @@ export interface SignResult {
 
 function base64urlEncode(input: Buffer | string): string {
   const buf = typeof input === 'string' ? Buffer.from(input, 'utf8') : input;
-  return buf.toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+  // Node's own unpadded URL-safe alphabet (RFC 4648 §5). The old
+  // `.replace(/=+$/, '')` backtracked quadratically on long runs of '='.
+  return buf.toString('base64url');
 }
 
 function base64urlDecode(input: string): Buffer {

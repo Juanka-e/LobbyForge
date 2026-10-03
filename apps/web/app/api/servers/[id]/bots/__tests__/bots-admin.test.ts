@@ -293,6 +293,28 @@ describe('PATCH /api/servers/{id}/bots/{botId}', () => {
     expect(res.status).toBe(200);
   });
 
+  it('lets only someone who may remove messages switch on the Moderation Bot', async () => {
+    // MANAGER can manage the server but not messages (same rule as PUT /bots/builtin/moderation).
+    getBotById.mockResolvedValue(botRow({ type: 'moderation', tokenHash: null, enabled: false, permissions: ['moderate_messages'] }));
+    const { PATCH } = await import('../[botId]/route.js');
+    const denied = await PATCH(req('PATCH', '/x', MANAGER, { enabled: true }), botCtx());
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toMatchObject({ code: 'missing_permission' });
+    expect(updateBot).not.toHaveBeenCalled();
+
+    const owner = await PATCH(req('PATCH', '/x', OWNER, { enabled: true }), botCtx());
+    expect(owner.status).toBe(200);
+    expect(updateBot).toHaveBeenCalledWith(expect.anything(), BOT_ID, { enabled: true });
+  });
+
+  it('still lets a bot manager switch on other bots and switch the Moderation Bot off', async () => {
+    const { PATCH } = await import('../[botId]/route.js');
+    getBotById.mockResolvedValue(botRow({ type: 'welcome', tokenHash: null, enabled: false }));
+    expect((await PATCH(req('PATCH', '/x', MANAGER, { enabled: true }), botCtx())).status).toBe(200);
+    getBotById.mockResolvedValue(botRow({ type: 'moderation', tokenHash: null, enabled: true }));
+    expect((await PATCH(req('PATCH', '/x', MANAGER, { enabled: false }), botCtx())).status).toBe(200);
+  });
+
   it('never lets a built-in bot’s permissions change', async () => {
     getBotById.mockResolvedValue(botRow({ type: 'welcome', permissions: ['send_messages'] }));
     const { PATCH } = await import('../[botId]/route.js');
@@ -329,6 +351,26 @@ describe('bot tokens', () => {
     expect(setBotTokenHash).toHaveBeenCalledWith(expect.anything(), BOT_ID, hashBotToken(token));
     expect(auditCalls('bot.token.rotate')).toHaveLength(1);
     expect(JSON.stringify(logAction.mock.calls)).not.toContain(token);
+  });
+
+  it('refuses a token to a manager who could not grant every permission the bot holds', async () => {
+    // A token is the bot's whole permission set: rotating it is a fresh grant.
+    getBotById.mockResolvedValue(botRow({ permissions: ['send_messages', 'read_audit_log'] }));
+    const { POST } = await import('../[botId]/token/route.js');
+    const denied = await POST(req('POST', '/x', MANAGER), botCtx());
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toMatchObject({ code: 'ungrantable_permissions', permissions: ['read_audit_log'] });
+    expect(setBotTokenHash).not.toHaveBeenCalled();
+
+    const owner = await POST(req('POST', '/x', OWNER), botCtx());
+    expect(owner.status).toBe(200);
+    expect(setBotTokenHash).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not hold a permission id that no longer exists against the manager', async () => {
+    getBotById.mockResolvedValue(botRow({ permissions: ['send_messages', 'retired_permission'] }));
+    const { POST } = await import('../[botId]/token/route.js');
+    expect((await POST(req('POST', '/x', MANAGER), botCtx())).status).toBe(200);
   });
 
   it('issues a first token as an issue, not a rotation', async () => {

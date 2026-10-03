@@ -6,6 +6,7 @@ import {
   createGameSession,
   getActiveGameSessionForChannel,
   getChannelById,
+  getMemberRoleIds,
   getPluginInstall,
   getServerById,
   getUserPermissions,
@@ -55,6 +56,13 @@ async function resolveSession(req: Request): Promise<
     };
   }
   return { ok: true, uid: session.uid };
+}
+
+/** A string-array setting from the app's stored settings (jsonb), defensively. */
+function idList(settings: unknown, key: 'allowedChannelIds' | 'allowedRoleIds'): string[] {
+  if (!settings || typeof settings !== 'object') return [];
+  const value = (settings as Record<string, unknown>)[key];
+  return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
 }
 
 function toSummary(row: Awaited<ReturnType<typeof listGameSessionsForChannel>>[number]) {
@@ -170,6 +178,27 @@ async function handlePost(
         { error: 'App is not installed or enabled for this server' },
         { status: 403 }
       );
+    }
+    // Security follow-up: the /apps settings' allow-lists were stored but
+    // never applied. An empty list means "no restriction".
+    const allowedChannelIds = idList(install.settings, 'allowedChannelIds');
+    if (allowedChannelIds.length > 0 && !allowedChannelIds.includes(channelId)) {
+      return NextResponse.json(
+        { error: 'This app cannot be started in this channel', code: 'app_channel_not_allowed' },
+        { status: 403 }
+      );
+    }
+    const allowedRoleIds = idList(install.settings, 'allowedRoleIds');
+    const bypassesRoles =
+      server.ownerUserId === session.uid || permissions.includes(CorePermission.ADMINISTRATOR);
+    if (allowedRoleIds.length > 0 && !bypassesRoles) {
+      const roleIds = await getMemberRoleIds(getDb(), serverId, session.uid);
+      if (!roleIds.some((roleId) => allowedRoleIds.includes(roleId))) {
+        return NextResponse.json(
+          { error: 'Your roles cannot start this app', code: 'app_role_not_allowed' },
+          { status: 403 }
+        );
+      }
     }
 
     // Build the initial state against a fresh HTTP context. The

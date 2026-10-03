@@ -116,3 +116,99 @@ describe('GET /api/auth/guest', () => {
     expect(res.status).toBe(401);
   });
 });
+
+// Security follow-up (absolute session lifetime): the refresh route used to
+// extend a session forever. It now keeps the session's auth_time, never
+// signs past auth_time + the lifetime, and does not refresh an over-age
+// session at all.
+describe('POST /api/auth/guest — absolute session lifetime', () => {
+  const DAY = 24 * 60 * 60;
+  const USER_ID = '00000000-0000-0000-0000-000000000001';
+  const nowSeconds = () => Math.floor(Date.now() / 1000);
+
+  function cookieStartedDaysAgo(days: number): string {
+    const identity: GuestIdentity = { gid: 'g_'.padEnd(34, 'a'), uid: USER_ID, name: 'Owner' };
+    return `lf_guest=${buildGuestSessionCookie(identity, SECRET, { authTime: nowSeconds() - days * DAY }).raw}`;
+  }
+
+  async function refresh(cookie?: string) {
+    const { POST } = await loadRoute();
+    return POST(
+      new Request('https://example.test/api/auth/guest', {
+        method: 'POST',
+        headers: cookie ? { cookie } : {},
+        body: JSON.stringify({}),
+      }),
+      {}
+    );
+  }
+
+  async function sessionOf(res: Response) {
+    const { readGuestSession } = await import('@/lib/guest-session');
+    return readGuestSession(res.headers.get('set-cookie')?.split(';', 1)[0] ?? null, SECRET);
+  }
+
+  it('a refresh keeps the original auth_time and records it', async () => {
+    const res = await refresh(cookieStartedDaysAgo(3));
+    expect(res.status).toBe(200);
+    const session = await sessionOf(res);
+    expect(session?.gid).toBe('g_'.padEnd(34, 'a'));
+    expect(session?.uid).toBe(USER_ID);
+    expect(session?.auth_time).toBeLessThanOrEqual(nowSeconds() - 3 * DAY);
+    expect(session?.auth_time).toBeGreaterThan(nowSeconds() - 3 * DAY - 5);
+    expect(recordSession).toHaveBeenCalledWith(USER_ID, session?.gid, expect.any(Request), {
+      authTime: session?.auth_time,
+    });
+    expect(findOrCreateGuestUser).not.toHaveBeenCalled();
+  });
+
+  it('near the limit the refreshed cookie expires at the limit, not an hour later', async () => {
+    const res = await refresh(cookieStartedDaysAgo(30 - 1 / 144)); // ten minutes left
+    const session = await sessionOf(res);
+    expect(session).not.toBeNull();
+    expect(session!.exp).toBe(session!.auth_time! + 30 * DAY);
+    const json = (await res.json()) as { guest: { ttlSeconds: number } };
+    expect(json.guest.ttlSeconds).toBeLessThanOrEqual(600);
+    expect(json.guest.ttlSeconds).toBeGreaterThan(590);
+  });
+
+  it('an over-age session is not refreshed — the request gets a NEW guest identity', async () => {
+    findOrCreateGuestUser.mockResolvedValue({ id: '00000000-0000-0000-0000-000000000009', displayName: 'Guest beef' });
+    const res = await refresh(cookieStartedDaysAgo(31));
+    expect(res.status).toBe(200);
+    const session = await sessionOf(res);
+    expect(session?.gid).not.toBe('g_'.padEnd(34, 'a'));
+    expect(session?.uid).toBe('00000000-0000-0000-0000-000000000009');
+    expect(session?.auth_time).toBeGreaterThan(nowSeconds() - 5);
+    // Treated like a request without a session, for the access policy too.
+    expect(authorizeGuestRegistration).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ existingUserId: undefined }));
+    expect(isSessionRevoked).not.toHaveBeenCalled();
+  });
+
+  it('an over-age session is refused outright when guests are not allowed', async () => {
+    authorizeGuestRegistration.mockResolvedValue({ ok: false, status: 403, error: 'Guest access is disabled' });
+    const res = await refresh(cookieStartedDaysAgo(31));
+    expect(res.status).toBe(403);
+    expect(res.headers.get('set-cookie')).toBeNull();
+  });
+
+  it('honours LOBBYFORGE_SESSION_MAX_AGE_DAYS', async () => {
+    process.env.LOBBYFORGE_SESSION_MAX_AGE_DAYS = '2';
+    findOrCreateGuestUser.mockResolvedValue({ id: '00000000-0000-0000-0000-000000000009', displayName: 'Guest beef' });
+    const res = await refresh(cookieStartedDaysAgo(3));
+    expect((await sessionOf(res))?.gid).not.toBe('g_'.padEnd(34, 'a'));
+  });
+
+  it('a legacy cookie without auth_time is refreshed and its clock starts now', async () => {
+    const { signSessionCookie } = await import('@lobbyforge/core');
+    const now = nowSeconds();
+    const legacy = signSessionCookie(
+      { gid: 'g_'.padEnd(34, 'a'), uid: USER_ID, name: 'Owner', iat: now - 60, exp: now + 3540 },
+      { name: 'lf_guest', secret: SECRET, maxAgeSeconds: 3600 }
+    );
+    const res = await refresh(`lf_guest=${legacy.raw}`);
+    const session = await sessionOf(res);
+    expect(session?.gid).toBe('g_'.padEnd(34, 'a'));
+    expect(session?.auth_time).toBeGreaterThanOrEqual(now);
+  });
+});

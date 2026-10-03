@@ -140,7 +140,8 @@ async function handleStream(
     if (!visibility.ok) return applySecurityHeaders(visibility.response);
 
     const plugin = getPluginServer(row.pluginId);
-    const initialState = plugin?.migrateState ? plugin.migrateState(row.state) : row.state;
+    // Awaited: a marketplace plugin migrates in the plugin-worker (async).
+    const initialState = plugin?.migrateState ? await plugin.migrateState(row.state) : row.state;
 
     // LF-001: EVERYONE gets the projection — including the host. A host who
     // isn't the current explainer must not see the secret card (anti-cheat).

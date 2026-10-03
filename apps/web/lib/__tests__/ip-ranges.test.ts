@@ -73,6 +73,50 @@ describe('isBlockedNetworkIp — IPv6', () => {
   });
 });
 
+// Security follow-up: IPv4-compatible (::/96) and 6to4 (2002::/16).
+describe('isBlockedNetworkIp — IPv4-compatible and 6to4', () => {
+  it.each([
+    '::127.0.0.1',             // IPv4-compatible loopback
+    '::7f00:1',                // same, hex
+    '::10.0.0.1',              // IPv4-compatible private
+    '::8.8.8.8',               // the whole deprecated ::/96 range is refused
+    '2002:7f00:1::',           // 6to4 → 127.0.0.1
+    '2002:7f00:0001:0:0:0:0:1',
+    '2002:a00:1::1',           // 6to4 → 10.0.0.1
+    '2002:c0a8:101::1',        // 6to4 → 192.168.1.1
+    '2002:a9fe:a9fe::',        // 6to4 → 169.254.169.254 (cloud metadata)
+    '2002:6440:1::',           // 6to4 → 100.64.0.1 (CGNAT)
+    '2002::',                  // 6to4 → 0.0.0.0
+  ])('blocks %s', (ip) => {
+    expect(isBlockedNetworkIp(ip)).toBe(true);
+  });
+
+  it.each([
+    '2002:808:808::1',         // 6to4 → 8.8.8.8 (public)
+    '2002:5db8:d822::',        // 6to4 → 93.184.216.34 (public)
+    '2003::1',                 // just outside 2002::/16
+  ])('allows %s', (ip) => {
+    expect(isBlockedNetworkIp(ip)).toBe(false);
+  });
+});
+
+describe('isBlockedNetworkIp — Teredo and local-use NAT64', () => {
+  it.each([
+    '2001:0:4136:e378:8000:63bf:3fff:fdd2', // Teredo (2001::/32) — embedded IPv4 is obfuscated
+    '2001::1',
+    '64:ff9b:1::a00:1',                     // local-use NAT64 (RFC 8215)
+  ])('blocks %s', (ip) => {
+    expect(isBlockedNetworkIp(ip)).toBe(true);
+  });
+
+  it.each([
+    '2001:4860:4860::8888',                 // public 2001:: space outside Teredo
+    '2001:1::1',                            // 2001:0001::/32 is not Teredo
+  ])('allows %s', (ip) => {
+    expect(isBlockedNetworkIp(ip)).toBe(false);
+  });
+});
+
 describe('parseIp normalization', () => {
   it('compressed and expanded IPv6 forms parse to the same value', () => {
     expect(parseIp('::1')!.value).toBe(parseIp('0:0:0:0:0:0:0:1')!.value);

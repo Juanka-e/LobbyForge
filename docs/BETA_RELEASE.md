@@ -85,6 +85,27 @@ hardware:
   refreshes on every run regardless — the pin only fixes the scanner
   binary itself.
 
+## Release signing key
+
+The private half of the manifest signing key (`LF_RELEASE_SIGNING_KEY`)
+signs every `release-manifest.json` that `lfctl update` trusts. Treat it
+as the most sensitive secret in the project:
+
+- **Keep it out of the repo checkout.** `infra/keys/` is gitignored, but
+  the PEM is still on disk inside the working tree, where tools, backups,
+  editors and agents can read it. Move
+  `infra/keys/release-ed25519-private.pem` to an offline or
+  password-manager location outside the clone. Only the public half
+  (`infra/update/release-public.pem`) belongs in the repo.
+- **Protect the `release` environment.** The `github-release` job in
+  `.github/workflows/release.yml` runs in the `release` environment.
+  GitHub creates it on the first run with no rules. In Settings →
+  Environments → `release`, the owner should: set deployment branches
+  and tags to "Selected" with the tag rule `v*`, and optionally add
+  required reviewers. Then add `LF_RELEASE_SIGNING_KEY` as an
+  environment secret and delete the repository-level secret, so no
+  other workflow or branch can read it.
+
 ## Release policy: migrations must be rollback-safe (expand/contract)
 
 App rollback (`lfctl update rollback`) restores the previous image — the

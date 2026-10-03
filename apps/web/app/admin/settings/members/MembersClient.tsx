@@ -1,7 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
+import JoinRequestsSection from './JoinRequestsSection';
 
 export interface MemberView {
   userId: string;
@@ -43,6 +44,8 @@ export default function MembersClient({
 }) {
   const t = useT();
   const [memberList, setMemberList] = useState(members);
+  // An approved join request refreshes the page: take the new server list.
+  useEffect(() => setMemberList(members), [members]);
   const [query, setQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
   const [sortMode, setSortMode] = useState<SortMode>('recent');
@@ -195,6 +198,8 @@ export default function MembersClient({
         <h1 className="text-2xl font-semibold text-text-primary">{t('adminSettings.members.title')}</h1>
         <p className="mt-1 text-sm text-text-secondary">{t('adminSettings.members.subtitle')}</p>
       </header>
+
+      {serverId ? <JoinRequestsSection serverId={serverId} /> : null}
 
       <div className="flex flex-col md:flex-row gap-4 mb-6">
         <div className="relative flex-1">

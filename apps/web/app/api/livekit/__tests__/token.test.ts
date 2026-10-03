@@ -62,6 +62,9 @@ vi.mock('@/lib/security-headers', () => ({
   withApiSecurity: (handler: unknown) => handler,
 }));
 
+const getVoiceBlock = vi.fn();
+vi.mock('@/lib/voice-block', () => ({ getVoiceBlock }));
+
 const SERVER_ID = '00000000-0000-0000-0000-000000000001';
 const CHANNEL_ID = '00000000-0000-0000-0000-000000000002';
 
@@ -97,6 +100,8 @@ beforeEach(() => {
   getServerMember.mockResolvedValue({ nickname: null });
   getUserById.mockReset();
   getUserById.mockResolvedValue({ displayName: 'Owner Profile' });
+  getVoiceBlock.mockReset();
+  getVoiceBlock.mockResolvedValue(null);
   delete process.env.LOBBYFORGE_PUBLIC_LIVEKIT_URL;
 
   requireMaterializedSession.mockReturnValue({
@@ -120,6 +125,67 @@ beforeEach(() => {
     defaultUserLimit: null,
     maxCameraUsersPerRoom: null,
     maxScreenShareUsersPerRoom: null,
+  });
+});
+
+describe('POST /api/livekit/token voice block (AUTHZ-006 follow-up)', () => {
+  it('refuses a token with 403 voice_blocked and the seconds left while the member is blocked on this server', async () => {
+    getVoiceBlock.mockResolvedValue({ retryAfterSeconds: 542 });
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest({ serverId: SERVER_ID, channelId: CHANNEL_ID }), {});
+    expect(res.status).toBe(403);
+    expect(res.headers.get('Retry-After')).toBe('542');
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    expect(await res.json()).toEqual({
+      error: expect.any(String),
+      code: 'voice_blocked',
+      retryAfter: 542,
+    });
+    expect(getVoiceBlock).toHaveBeenCalledWith(
+      { serverId: SERVER_ID, channelId: CHANNEL_ID },
+      '00000000-0000-0000-0000-000000000099'
+    );
+    expect(issueLiveKitToken).not.toHaveBeenCalled();
+  });
+
+  it('issues the token when there is no block', async () => {
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest({ serverId: SERVER_ID, channelId: CHANNEL_ID }), {});
+    expect(res.status).toBe(200);
+    expect(getVoiceBlock).toHaveBeenCalledTimes(1);
+    expect(issueLiveKitToken).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers a non-member with the membership error, without reading the block list', async () => {
+    requireServerMember.mockResolvedValue({ ok: false, response: new Response(null, { status: 403 }) });
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest({ serverId: SERVER_ID, channelId: CHANNEL_ID }), {});
+    expect(res.status).toBe(403);
+    expect(getVoiceBlock).not.toHaveBeenCalled();
+  });
+
+  it('fails CLOSED in production when the block list cannot be read (retryable 503)', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      getVoiceBlock.mockRejectedValue(new Error('redis down'));
+      const { POST } = await loadRoute();
+      const res = await POST(makeRequest({ serverId: SERVER_ID, channelId: CHANNEL_ID }), {});
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual(expect.objectContaining({ retryable: true }));
+      expect(issueLiveKitToken).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('fails open outside production (dev stacks without Redis still join voice)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    getVoiceBlock.mockRejectedValue(new Error('redis down'));
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest({ serverId: SERVER_ID, channelId: CHANNEL_ID }), {});
+    expect(res.status).toBe(200);
+    expect(issueLiveKitToken).toHaveBeenCalledTimes(1);
   });
 });
 

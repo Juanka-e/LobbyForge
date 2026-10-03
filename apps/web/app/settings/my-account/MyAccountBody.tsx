@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { UserRowWithoutImages } from '@lobbyforge/db';
 import { ChangePasswordModal } from '@/components/modals/ChangePasswordModal';
+import { retryAfterMinutes } from '@/app/login/login-errors';
 import { useT } from '@/lib/i18n/client';
 import { rich } from '@/lib/i18n/rich';
 
@@ -31,7 +32,11 @@ export default function MyAccountBody({
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(input),
     });
-    const body = (await response.json().catch(() => ({}))) as { error?: string; warning?: string };
+    const body = (await response.json().catch(() => ({}))) as { error?: string; warning?: string; retryAfter?: number };
+    // Too many wrong current passwords (per-user limit): say how long.
+    if (response.status === 429) {
+      throw new Error(t('auth.login.error.rateLimited', { minutes: retryAfterMinutes(body.retryAfter) }));
+    }
     if (!response.ok) throw new Error(body.error ?? t('settings.account.security.changeFailed'));
     // security-review AUTH-001 follow-up: the password is changed even when
     // the other sessions could not be signed out. That is a success with a

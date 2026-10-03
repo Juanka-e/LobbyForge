@@ -157,9 +157,71 @@ export async function collectDoctorReport(): Promise<{ report: DoctorReport; sta
   // is reported closed. A real STUN-based probe is a deferred item.
   stats.udpLikelyOpen = null;
 
-  const checks = buildChecksFromStats(stats);
+  const checks = [
+    ...buildChecksFromStats(stats),
+    buildTrustedProxyCheck({
+      nodeEnv: process.env.NODE_ENV,
+      trustedProxy: process.env.LOBBYFORGE_TRUSTED_PROXY,
+    }),
+  ];
   const report = buildDoctorReport(checks, stats);
   return { report, stats };
+}
+
+const TRUSTED_PROXY_FIX =
+  'Behind the bundled nginx set LOBBYFORGE_TRUSTED_PROXY=x-forwarded-for in .env.prod and recreate the web container ' +
+  '(behind Cloudflare, also install infra/nginx/cf-real-ip.conf — see docs/DEPLOY_CLOUDFLARE.md).';
+
+/**
+ * Security follow-up (review §7.5): without a trusted proxy the app cannot
+ * tell clients apart, so in production every visitor shares ONE rate-limit
+ * bucket — a single client can lock everyone out of sign-in. Existing
+ * installs keep running; Doctor reports it as a warning with the fix.
+ * Pure: the caller passes the environment.
+ */
+export function buildTrustedProxyCheck(env: { nodeEnv?: string; trustedProxy?: string }): DoctorCheck {
+  const mode = env.trustedProxy?.trim() ?? '';
+  const production = env.nodeEnv === 'production';
+  const base = { id: 'trusted_proxy', category: DoctorCategory.NETWORK, detail: { mode: mode || null } };
+
+  if (mode === 'x-forwarded-for') {
+    return {
+      ...base,
+      ok: true,
+      level: AlertLevel.INFO,
+      message: 'Client addresses come from X-Forwarded-For, set by the trusted reverse proxy.',
+    };
+  }
+  if (mode === 'cloudflare') {
+    return {
+      ...base,
+      ok: true,
+      level: AlertLevel.INFO,
+      message:
+        'Client addresses come from CF-Connecting-IP. This is only safe when the origin accepts traffic from Cloudflare alone — ' +
+        'anyone who reaches it directly can choose their own address. With the bundled nginx, prefer cf-real-ip.conf with x-forwarded-for.',
+    };
+  }
+
+  const problem = !mode
+    ? 'LOBBYFORGE_TRUSTED_PROXY is not set'
+    : mode === 'none'
+      ? 'LOBBYFORGE_TRUSTED_PROXY is "none"'
+      : `LOBBYFORGE_TRUSTED_PROXY="${mode}" is not recognised (use x-forwarded-for or cloudflare)`;
+  if (!production) {
+    return {
+      ...base,
+      ok: true,
+      level: AlertLevel.INFO,
+      message: `${problem} — fine for local development; in production every visitor would share one rate-limit bucket.`,
+    };
+  }
+  return {
+    ...base,
+    ok: false,
+    level: AlertLevel.WARNING,
+    message: `${problem}, so every visitor shares one rate-limit bucket and one client can lock everyone out of sign-in. ${TRUSTED_PROXY_FIX}`,
+  };
 }
 
 /**

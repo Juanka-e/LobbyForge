@@ -71,6 +71,14 @@ describe('normalizeRegistryInstanceUrl — private IPv6 (canonical CIDR)', () =>
     ['https://[fd12:3456::1]/', 'ULA fd00'],
     ['https://[::ffff:10.0.0.1]/', 'IPv4-mapped private'],
     ['https://[::ffff:192.168.1.1]/', 'IPv4-mapped private 2'],
+    // Security follow-up: IPv4-compatible ::/96 and 6to4 2002::/16.
+    ['https://[::127.0.0.1]/', 'IPv4-compatible loopback'],
+    ['https://[::a00:1]/', 'IPv4-compatible private'],
+    ['https://[2002:7f00:1::]/', '6to4 of 127.0.0.1'],
+    ['https://[2002:c0a8:101::1]/', '6to4 of 192.168.1.1'],
+    ['https://[2002:a9fe:a9fe::]/', '6to4 of 169.254.169.254'],
+    ['https://[2001:0:4136:e378:8000:63bf:3fff:fdd2]/', 'Teredo'],
+    ['https://[64:ff9b:1::a00:1]/', 'local-use NAT64'],
   ])('rejects %s (%s)', (url) => {
     expect(() => normalizeRegistryInstanceUrl(url)).toThrow();
   });
@@ -78,6 +86,7 @@ describe('normalizeRegistryInstanceUrl — private IPv6 (canonical CIDR)', () =>
   it.each([
     ['https://[2606:4700:4700::1111]/', 'public IPv6'],
     ['https://[2a00:1450:4001:81b::200e]/', 'public IPv6 2'],
+    ['https://[2002:808:808::1]/', '6to4 of a public IPv4'],
   ])('allows %s', (url) => {
     expect(() => normalizeRegistryInstanceUrl(url)).not.toThrow();
   });

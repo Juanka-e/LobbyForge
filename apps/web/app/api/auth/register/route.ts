@@ -7,6 +7,7 @@ import {
   getInviteMetadata,
   getInstanceBootstrapStatus,
   getServerAccessPolicy,
+  serverPolicyRegistrationRefusal,
 } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { isOfficialDeployment } from '@/lib/deployment-mode';
@@ -69,21 +70,23 @@ async function handlePost(req: Request): Promise<NextResponse> {
   if (!targetServerId) {
     return NextResponse.json({ error: 'Community registration is unavailable.' }, { status: 503 });
   }
-  const serverPolicy = await getServerAccessPolicy(getDb(), targetServerId);
-  if (serverPolicy) {
-    if (serverPolicy.localAccount !== 'allow_local_email_password') {
-      return NextResponse.json({ error: 'New local accounts are disabled for this community.' }, { status: 403 });
-    }
-    if (
-      serverPolicy.requireApprovalForFirstJoin ||
-      serverPolicy.joinPolicy === 'public_with_approval' ||
-      serverPolicy.accountLinking === 'require_admin_approval_first_join'
-    ) {
-      return NextResponse.json({ error: 'Administrator approval is required before registration.' }, { status: 403 });
-    }
-    if (!inviteCode && serverPolicy.joinPolicy !== 'public_self_register') {
-      return NextResponse.json({ error: 'A valid invite code is required.' }, { status: 403 });
-    }
+  // The server's SAVED policy (none saved refuses nothing — and neither do
+  // the defaults the settings page shows for it, so saving them unchanged
+  // keeps registration as it was). An approval policy refuses: a local
+  // account is not created for a join a moderator may reject. Guests and
+  // existing accounts ask through an invite or the lobby, which file a
+  // join request (the approval queue).
+  const refusal = serverPolicyRegistrationRefusal(await getServerAccessPolicy(getDb(), targetServerId), {
+    hasInvite: inviteCode !== null,
+  });
+  if (refusal === 'local_accounts_disabled') {
+    return NextResponse.json({ error: 'New local accounts are disabled for this community.' }, { status: 403 });
+  }
+  if (refusal === 'approval_required') {
+    return NextResponse.json({ error: 'Administrator approval is required before registration.' }, { status: 403 });
+  }
+  if (refusal === 'invite_required') {
+    return NextResponse.json({ error: 'A valid invite code is required.' }, { status: 403 });
   }
 
   const passwordHash = await hashPassword(parsed.data.password);

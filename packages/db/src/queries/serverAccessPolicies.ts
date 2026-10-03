@@ -27,8 +27,19 @@ export interface UpsertServerAccessPolicyInput {
   requireApprovalForFirstJoin?: boolean;
 }
 
+/**
+ * The policy of a server that has NO saved row — and what such a server
+ * actually enforces. Registration (`serverPolicyRegistrationRefusal`) only
+ * applies a saved row, so a server without one has never added a gate of
+ * its own on top of the instance's registration mode: invite-less sign-up
+ * works whenever the instance is open. `joinPolicy` used to read
+ * 'invite_only' here, so the settings page showed "Invite only" for that
+ * open server, and saving the values it showed started refusing invite-less
+ * registration. 'public_self_register' is the value that matches the
+ * enforcement; saving the displayed defaults changes nothing.
+ */
 export const DEFAULT_SERVER_ACCESS_POLICY = {
-  joinPolicy: 'invite_only',
+  joinPolicy: 'public_self_register',
   externalIdentity: 'off',
   localAccount: 'allow_local_email_password',
   accountLinking: 'allow_link',
@@ -49,10 +60,12 @@ export async function getServerAccessPolicy(
 
 /**
  * security-review AUTHZ-004: does this policy hold a newcomer for
- * moderator approval? There is no approval queue, so every path that
- * creates a membership refuses instead (invite redeem, the /lobby
- * auto-join, registration). The three fields are read EXACTLY as
- * `api/auth/register` reads them — keep the two in step.
+ * moderator approval? Invite redeem and the /lobby auto-join then file a
+ * join request (`server_join_requests`, see `queries/joinRequests.ts`)
+ * instead of creating a membership; registration refuses (an account is
+ * not created for a join that may be rejected). Registration reads the
+ * policy through `serverPolicyRegistrationRefusal`, which calls this —
+ * the two cannot drift.
  */
 export function accessPolicyRequiresApproval(
   policy: Pick<ServerAccessPolicyRow, 'joinPolicy' | 'accountLinking' | 'requireApprovalForFirstJoin'> | null | undefined
@@ -66,8 +79,8 @@ export function accessPolicyRequiresApproval(
 }
 
 /**
- * security-review AUTHZ-004: may `userId` become a NEW member of the
- * server without an approval step? False when the server's policy asks
+ * security-review AUTHZ-004: must `userId` go through the approval queue
+ * to become a NEW member of the server? True when the server's policy asks
  * for approval — except for the owner, who is never held out of their own
  * server. Callers check this only when they are about to INSERT a
  * membership (an existing member is not re-approved).
@@ -84,6 +97,28 @@ export async function isNewMemberApprovalRequired(
     .limit(1);
   if (server?.ownerUserId === userId) return false;
   return accessPolicyRequiresApproval(await getServerAccessPolicy(db, serverId));
+}
+
+/** Why a server's saved access policy refuses a local registration, or null when it does not. */
+export type RegistrationPolicyRefusal = 'local_accounts_disabled' | 'approval_required' | 'invite_required';
+
+/**
+ * The server-level part of `POST /api/auth/register` (the instance's
+ * registration mode is checked before it). `policy` is the SAVED row —
+ * null when there is none, which refuses nothing. A row holding exactly
+ * DEFAULT_SERVER_ACCESS_POLICY refuses nothing either, so "save the values
+ * the settings page shows for a server without a row" leaves registration
+ * as it was.
+ */
+export function serverPolicyRegistrationRefusal(
+  policy: Pick<ServerAccessPolicyRow, 'joinPolicy' | 'localAccount' | 'accountLinking' | 'requireApprovalForFirstJoin'> | null | undefined,
+  input: { hasInvite: boolean }
+): RegistrationPolicyRefusal | null {
+  if (!policy) return null;
+  if (policy.localAccount !== 'allow_local_email_password') return 'local_accounts_disabled';
+  if (accessPolicyRequiresApproval(policy)) return 'approval_required';
+  if (!input.hasInvite && policy.joinPolicy !== 'public_self_register') return 'invite_required';
+  return null;
 }
 
 export async function getEffectiveServerAccessPolicy(

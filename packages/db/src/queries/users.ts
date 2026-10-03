@@ -224,8 +224,10 @@ export type CreateLocalAccountError =
   | 'already_member'
   | 'no_everyone_role'
   | 'banned'
-  // security-review AUTHZ-004: redeemInvite's approval refusal (the
-  // register route refuses an approval policy before it gets here).
+  // security-review AUTHZ-004: the server holds newcomers for approval
+  // (redeemInvite filed or found a join request instead of a membership).
+  // The register route refuses an approval policy before it gets here; a
+  // policy change racing the registration lands here and rolls back.
   | 'approval_required';
 
 export type CreateLocalAccountResult =
@@ -271,7 +273,15 @@ export async function createLocalAccount(
       if (input.inviteCode) {
         const redeemed = await redeemInvite(executor, input.inviteCode, user.id);
         if (!redeemed.ok) {
-          throw new LocalAccountRegistrationError(redeemed.error as RedeemInviteError);
+          // A held join (the approval queue) is not a registration: the
+          // throw rolls back the account AND the join request together.
+          const held =
+            redeemed.error === 'pending_approval' ||
+            redeemed.error === 'join_rejected' ||
+            redeemed.error === 'join_request_limit';
+          throw new LocalAccountRegistrationError(
+            held ? 'approval_required' : (redeemed.error as RedeemInviteError)
+          );
         }
         return { ok: true as const, user: { ...user, email: user.email }, serverId: redeemed.serverId };
       }

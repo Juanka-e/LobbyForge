@@ -364,8 +364,12 @@ async function handlePost(
     // current shape before running the reducer. The reducer only
     // accepts the current shape, so without this step a session
     // written by an older build would crash on the first action.
+    // Awaited: a marketplace plugin's migrateState is an RPC to the
+    // plugin-worker and returns a Promise. Used unawaited, the reducer got
+    // the Promise (serialized as `{}`) and the state was lost on every
+    // action. Awaiting an official plugin's plain return value is a no-op.
     const migratedState = plugin.migrateState
-      ? (plugin.migrateState(row.state) as Record<string, unknown>)
+      ? ((await plugin.migrateState(row.state)) as Record<string, unknown>)
       : row.state;
 
     // Compare-and-swap with optimistic concurrency. On each retry the
@@ -404,7 +408,7 @@ async function handlePost(
       }
       currentRev = casResult.row.revision;
       currentState = plugin.migrateState
-        ? (plugin.migrateState(casResult.row.state) as Record<string, unknown>)
+        ? ((await plugin.migrateState(casResult.row.state)) as Record<string, unknown>)
         : casResult.row.state;
     }
 

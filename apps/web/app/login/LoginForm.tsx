@@ -4,6 +4,7 @@ import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useT } from '@/lib/i18n/client';
 import { completeDesktopHandoff } from './desktop-handoff';
+import { retryAfterMinutes } from './login-errors';
 
 type RegistrationMode = 'open' | 'invite_only' | 'closed';
 
@@ -56,9 +57,15 @@ export default function LoginForm({
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    const body = (await response.json().catch(() => ({}))) as { error?: string; retryAfter?: number };
     if (!response.ok) {
-      setError(body.error ?? (mode === 'login' ? t('auth.login.signInFailed') : t('auth.login.registerFailed')));
+      setError(
+        // A rate limit or the per-account sign-in lock: say how long, in the
+        // viewer's language (the route's body is English).
+        response.status === 429
+          ? t('auth.login.error.rateLimited', { minutes: retryAfterMinutes(body.retryAfter) })
+          : body.error ?? (mode === 'login' ? t('auth.login.signInFailed') : t('auth.login.registerFailed'))
+      );
       setBusy(false);
       return;
     }

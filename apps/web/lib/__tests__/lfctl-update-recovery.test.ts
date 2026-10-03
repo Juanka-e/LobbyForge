@@ -166,18 +166,24 @@ function runApply(
     wsImageId?: string;
     /** Run WITHOUT --backup-manifest (exercises the auto-backup path). */
     noBackupManifest?: boolean;
+    /** Run WITHOUT --public-key (the default key path / no key at all). */
+    noPublicKey?: boolean;
   } = {}
 ) {
   const fakeViaBash = `bash ${sandbox.fakeDocker.replace(/\\/g, '/')}`;
   const backupArg = opts.noBackupManifest ? '' : '--backup-manifest backup.manifest.json ';
+  const keyArg = opts.noPublicKey ? '' : '--public-key release-public.pem ';
+  // LFCTL_ROOT: lfctl resolves its DEFAULT paths (.env.prod, deployment
+  // state, backups, the release key) from its own checkout — point it at
+  // the sandbox so a test never touches the real repo.
   const res = spawnSync(
     'bash',
     [
       '-c',
-      `cd "$1" && FAKE_DOCKER_LOG="$2" FAKE_UP_RCS="$3" LFCTL_DOCKER="$4" FAKE_WEB_CONTAINER="$5" \
+      `cd "$1" && env -u LOBBYFORGE_RELEASE_PUBLIC_KEY_PEM LFCTL_ROOT="$1" FAKE_DOCKER_LOG="$2" FAKE_UP_RCS="$3" LFCTL_DOCKER="$4" FAKE_WEB_CONTAINER="$5" \
          FAKE_IMAGE_ID="$6" FAKE_CONFIGURED_IMAGE_ID="$7" FAKE_WS_CONTAINER="$8" FAKE_WS_IMAGE_ID="$9" node "\${10}" update apply \
         --manifest release-manifest.json ${backupArg}\
-        --public-key release-public.pem --yes --force-major`,
+        ${keyArg}--yes --force-major`,
       'run',
       sandbox.dir,
       sandbox.dockerLog,
@@ -360,5 +366,57 @@ describe('lfctl update apply — rollout failure recovery (23rd-audit)', () => {
     ).toBe(true);
     // And no deployment state was written either.
     expect(existsSync(join(sandbox.dir, 'infra', 'update', 'deployment-state.json'))).toBe(false);
+  });
+});
+
+describe('lfctl update apply — release key is mandatory (security follow-up)', () => {
+  it('refuses to apply when no release public key can be found, with zero side effects', () => {
+    const sandbox = makeSandbox();
+    // No --public-key, no LOBBYFORGE_RELEASE_PUBLIC_KEY_PEM, and the
+    // sandbox root has no infra/update/release-public.pem.
+    const { rc, out } = runApply(sandbox, '', { noPublicKey: true });
+    expect(rc, out).toBe(2);
+    expect(out).toContain('No release public key found');
+    expect(upCount(sandbox)).toBe(0);
+    expect(dockerCalls(sandbox)).toEqual([]);
+    expect(envValue(sandbox, 'LOBBYFORGE_IMAGE')).toBe('lobbyforge-web:latest'); // untouched
+    expect(existsSync(join(sandbox.dir, 'infra', 'update', 'deployment-state.json'))).toBe(false);
+  });
+
+  it('finds the default key under the lfctl root, not the cwd', () => {
+    const sandbox = makeSandbox();
+    mkdirSync(join(sandbox.dir, 'infra', 'update'), { recursive: true });
+    writeFileSync(
+      join(sandbox.dir, 'infra', 'update', 'release-public.pem'),
+      readFileSync(join(sandbox.dir, 'release-public.pem'))
+    );
+    const { rc, out } = runApply(sandbox, '', { noPublicKey: true });
+    expect(rc, out).toBe(0);
+    expect(out).toContain('Manifest signature: valid');
+    expect(envValue(sandbox, 'LOBBYFORGE_IMAGE')).toBe(`ghcr.io/juanka-e/lobbyforge@sha256:${'b'.repeat(64)}`);
+  });
+
+  it('without LFCTL_ROOT, resolves the default key from the script checkout even when run elsewhere', () => {
+    // Run `update check` (read-only) from a temp cwd: the repo's committed
+    // key is found (and rejects this test-signed manifest as INVALID)
+    // instead of silently treating the manifest as unsigned.
+    const sandbox = makeSandbox();
+    const res = spawnSync(
+      'bash',
+      [
+        '-c',
+        'cd "$1" && env -u LOBBYFORGE_RELEASE_PUBLIC_KEY_PEM -u LFCTL_ROOT node "$2" update check --manifest "$3" --current-version 0.1.0 --json',
+        'run',
+        sandbox.dir,
+        LFCTL,
+        join(sandbox.dir, 'release-manifest.json').replace(/\\/g, '/'),
+      ],
+      { encoding: 'utf8', timeout: 60_000 }
+    );
+    const out = (res.stdout ?? '') + (res.stderr ?? '');
+    expect(existsSync(join(REPO_ROOT, 'infra', 'update', 'release-public.pem'))).toBe(true);
+    expect(out).toContain('"status": "invalid"');
+    expect(out).not.toContain('not_configured');
+    expect(res.status, out).toBe(2);
   });
 });

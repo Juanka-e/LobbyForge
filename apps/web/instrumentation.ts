@@ -13,8 +13,9 @@ export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
   if (process.env.NEXT_PHASE === 'phase-production-build') return;
 
-  // Pre-warm dynamically-loaded marketplace plugins from disk.
-  // Safe no-op if plugins/installed/ doesn't exist or is empty.
+  // Pre-warm marketplace plugins: the active version recorded under
+  // LOBBYFORGE_PLUGIN_INSTALL_DIR, loaded through the plugin-worker.
+  // A no-op unless LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED=true.
   try {
     const { warmDynamicPlugins } = await import('./lib/plugin-server-registry');
     void warmDynamicPlugins().catch((err: unknown) =>

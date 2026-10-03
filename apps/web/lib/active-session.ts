@@ -13,6 +13,10 @@
  * `uid` is checked against the revocation set; when that check itself
  * fails, production fails closed (signed out) and dev/test fail open.
  * Guest cookies without a `uid` are never tracked and pass unchanged.
+ *
+ * A session past its absolute lifetime (`lib/session-lifetime.ts`) is
+ * signed out here too: the app's `readGuestSession` already reads it as
+ * absent, for guests and accounts alike.
  */
 import { readGuestSession, type GuestPayload } from '@/lib/guest-session';
 import { isSessionRevoked } from '@/lib/session-tracker';

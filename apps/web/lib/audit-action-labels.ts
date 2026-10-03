@@ -27,6 +27,8 @@ const ACTION_LABEL_KEYS: Record<string, string> = {
   'invite.create': 'admin.audit.action.invite.create',
   'invite.redeem': 'admin.audit.action.invite.redeem',
   'invite.revoke': 'admin.audit.action.invite.revoke',
+  'member.join_approved': 'admin.audit.action.member.join_approved',
+  'member.join_rejected': 'admin.audit.action.member.join_rejected',
   'member.kick': 'admin.audit.action.member.kick',
   'member.leave': 'admin.audit.action.member.leave',
   'member.set_roles': 'admin.audit.action.member.set_roles',

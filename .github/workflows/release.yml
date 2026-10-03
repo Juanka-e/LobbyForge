@@ -8,11 +8,11 @@ on:
 # 21st-audit: top-level permissions create a "specified → rest are none"
 # world. The verify job needs checks:read for the check-runs API, so every
 # job gets an EXPLICIT permission block below.
+# security-review §7.1: the default is read-only; write scopes exist only
+# on the job that needs them (packages on docker-publish/promote,
+# contents on github-release). Nothing inherits a publish set any more.
 permissions:
-  contents: write
-  packages: write
-  attestations: write
-  id-token: write
+  contents: read
 
 jobs:
   # 20th-audit: a REAL gate. The tag push triggers ci.yml + security.yml
@@ -31,7 +31,7 @@ jobs:
       checks: read
     steps:
       - name: Checkout
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Wait for CI + security checks, then gate on success
         env:
@@ -56,13 +56,13 @@ jobs:
       digest: ${{ steps.build.outputs.digest }}
     steps:
       - name: Checkout
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -70,7 +70,7 @@ jobs:
 
       - name: Extract metadata (candidate ref only)
         id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
@@ -78,7 +78,7 @@ jobs:
 
       - name: Build and push candidate
         id: build
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           push: true
@@ -110,10 +110,10 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -147,10 +147,10 @@ jobs:
       packages: write
     steps:
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -209,6 +209,10 @@ jobs:
     needs: verify
     continue-on-error: true
     timeout-minutes: 60
+    # Builds and uploads a run artifact only (upload-artifact uses the
+    # runner's own token) — no release, package or OIDC scope.
+    permissions:
+      contents: read
     # 21st-audit: windows-latest defaults to pwsh — every run step here
     # is Bash (find/sha256sum), so force it for the whole job.
     defaults:
@@ -226,7 +230,7 @@ jobs:
             target: macos
     steps:
       - name: Checkout
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Install Tauri system dependencies (Linux)
         if: matrix.os == 'ubuntu-latest'
@@ -237,12 +241,12 @@ jobs:
             libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           version: 10.12.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
 
@@ -271,12 +275,16 @@ jobs:
           ' "${{ github.ref_name }}"
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        # Pinned to the `stable` branch tip; the repo has no version tags,
+        # so Dependabot cannot bump this one — refresh the SHA by hand
+        # (gh api repos/dtolnay/rust-toolchain/branches/stable).
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable (branch tip 2026-10-01)
         with:
+          toolchain: stable
           targets: ${{ matrix.target == 'linux' && 'x86_64-unknown-linux-gnu' || matrix.target == 'windows' && 'x86_64-pc-windows-msvc' || 'aarch64-apple-darwin' }}
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: apps/desktop/src-tauri
 
@@ -320,7 +328,7 @@ jobs:
 
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: desktop-${{ matrix.target }}
           path: release-artifacts/
@@ -331,12 +339,25 @@ jobs:
     name: Create GitHub Release
     runs-on: ubuntu-latest
     needs: [verify, docker-publish, scan, promote, desktop]
+    # Creating the release and uploading its assets (and generated
+    # release notes) needs contents:write — nothing else. download-artifact
+    # reads this run's artifacts with the runner token.
+    permissions:
+      contents: write
+    # security-review §7.1: this job reads LF_RELEASE_SIGNING_KEY. The
+    # `release` environment is auto-created (unprotected) on first run and
+    # repo-level secrets stay readable, so this works as-is. The repo owner
+    # must still, in Settings → Environments → release: limit deployments
+    # to `v*` tags, add required reviewers if wanted, and move
+    # LF_RELEASE_SIGNING_KEY from repo secrets into this environment's
+    # secrets (then delete the repo-level copy). See docs/BETA_RELEASE.md.
+    environment: release
     steps:
       - name: Checkout
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Download desktop artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: release-artifacts/
           # 22nd-drill: an unfiltered download also grabs buildx's SBOM/
@@ -397,6 +418,8 @@ jobs:
       # exactly these verified bytes.
       - name: Generate signed release manifest (lfctl update)
         env:
+          # Belongs in the protected `release` environment (v* tags only),
+          # not in repo-wide secrets — see the job's environment note.
           LF_RELEASE_SIGNING_KEY: ${{ secrets.LF_RELEASE_SIGNING_KEY }}
         run: |
           node scripts/release-manifest.mjs \
@@ -421,7 +444,7 @@ jobs:
           cat SHA256SUMS.txt
 
       - name: Create Release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           body: |
             ## LobbyForge ${{ github.ref_name }}

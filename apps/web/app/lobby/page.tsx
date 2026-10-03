@@ -5,12 +5,13 @@ import { getActiveSession } from '@/lib/active-session';
 import { getSessionSecret } from '@/lib/api-auth';
 import { isOfficialDeployment } from '@/lib/deployment-mode';
 import {
-  getEffectiveInstanceAccessSettings,
+  autoJoinServer,
   getInstanceBootstrapStatus,
   getInstanceSetupStatus,
+  isCurrentlyBanned,
   listServersForUser,
   listActivelyBannedServerIds,
-  ensureServerMembershipDetailed,
+  getOpenJoinRequest,
   seedDefaultRoles,
 } from '@lobbyforge/db';
 import { redirect } from 'next/navigation';
@@ -43,6 +44,7 @@ import { LobbyMainArea } from './LobbyMainArea';
 import { LobbyMembersClient } from './LobbyMembersClient';
 import { LobbyServerMenu } from './LobbyServerMenu';
 import { LobbyAppsSection } from './LobbyAppsSection';
+import { LobbyJoinRequestActions } from './LobbyJoinRequestActions';
 import DmLinkSection from './DmLinkSection';
 import MobileNav from './MobileNav';
 import { BlockListProvider } from './BlockListProvider';
@@ -57,6 +59,7 @@ import type { Translator } from '@/lib/i18n/core';
 import { pluginSummary } from '@/lib/plugin-catalog-text';
 import { projectDmChannel, projectMemberProfile } from '@/lib/profile-privacy';
 import { notifyMemberJoined } from '@/lib/bots/welcome';
+import { resolveAutoJoinServerId } from '@/lib/lobby-auto-join';
 import { readMessageBot } from '@/lib/bots/message-meta';
 import { botTrustLevel, isBuiltInType } from '@/lib/bots/catalog';
 import type { LobbyBot } from './BotIdentity';
@@ -633,31 +636,50 @@ export default async function LobbyPage({
     : process.env.LOBBYFORGE_INSTANCE_NAME?.trim() || 'LobbyForge Community';
   let liveData: LobbyData | null = null;
   let liveDataFailed = false;
-  let joinRefused = false;
+  let joinRefused: JoinRefusal | null = null;
+  // The community the "Ask to join" / "Withdraw request" buttons act on.
+  let joinServerId: string | null = null;
   const joinedServerList: Array<{ id: string; name: string }> = [];
   if (hasUser) {
     try {
       const db = getDb();
       let servers = await listServersForUser(db, userId, { limit: 50 });
       if (servers.length === 0 && setupStatus?.firstServerId) {
-        const access = await getEffectiveInstanceAccessSettings(db);
-        const currentUser = await getUserById(db, userId);
-        const canAutoJoin =
-          setupStatus.ownerUserId === userId ||
-          (access.registrationMode === 'open' &&
-            (currentUser?.isGuest !== true || access.guestAccessEnabled));
-        if (!canAutoJoin) {
+        const firstServerId = setupStatus.firstServerId;
+        const autoJoinServerId = await resolveAutoJoinServerId(db, userId, setupStatus);
+        if (autoJoinServerId === null) {
+          // No auto-join (e.g. an invite-only instance), but an invite may
+          // have filed a join request on this server: say it is waiting
+          // (or was declined) rather than "data unavailable". Without one
+          // (never asked, or just withdrew) the user needs an invite.
+          joinServerId = firstServerId;
+          if (await isCurrentlyBanned(db, firstServerId, userId)) {
+            joinRefused = 'join_refused';
+          } else {
+            const open = await getOpenJoinRequest(db, firstServerId, userId);
+            joinRefused = !open ? 'join_refused' : open.status === 'pending' ? 'join_pending' : 'join_rejected';
+          }
           throw new Error('User has no accessible server and auto-join is disabled by instance policy.');
         }
-        // beta-review (S2): refuses (null) when the user is banned from
-        // the first server — the old unconditional call silently re-joined
-        // banned users on open instances.
-        const joined = await ensureServerMembershipDetailed(db, setupStatus.firstServerId, userId);
-        if (!joined) {
-          // Banned, or (security-review AUTHZ-004) the server's access
-          // policy requires approval — either way nothing was created.
-          joinRefused = true;
-          throw new Error('Auto-join refused: banned from the default server or approval required.');
+        // beta-review (S2): a user banned from the first server is refused —
+        // the old unconditional call silently re-joined banned users on
+        // open instances. security-review AUTHZ-004: a server that holds
+        // newcomers for approval admits no one on a page load, and this
+        // GET never files a join request either (a cross-site link to
+        // /lobby must not queue anyone): the page shows the user's pending
+        // request, or an "Ask to join" button that POSTs one.
+        const joined = await autoJoinServer(db, autoJoinServerId, userId);
+        if (joined.kind !== 'member') {
+          joinServerId = autoJoinServerId;
+          joinRefused =
+            joined.kind === 'banned'
+              ? 'join_refused'
+              : joined.open === null
+                ? 'join_available'
+                : joined.open.status === 'pending'
+                  ? 'join_pending'
+                  : 'join_rejected';
+          throw new Error(`Auto-join held: ${joinRefused}.`);
         }
         if (setupStatus.ownerUserId === userId) {
           await seedDefaultRoles(db, setupStatus.firstServerId, userId);
@@ -704,7 +726,8 @@ export default async function LobbyPage({
   if (!demoAllowed && (liveDataFailed || !liveData)) {
     return (
       <LobbyUnavailable
-        reason={joinRefused ? 'join_refused' : liveDataFailed ? 'data_unavailable' : 'server_missing'}
+        reason={joinRefused ?? (liveDataFailed ? 'data_unavailable' : 'server_missing')}
+        joinServerId={joinServerId}
       />
     );
   }
@@ -767,21 +790,78 @@ export default async function LobbyPage({
   );
 }
 
-async function LobbyUnavailable({ reason }: { reason: 'data_unavailable' | 'server_missing' | 'join_refused' }) {
+/**
+ * Why the auto-join did not let the user in: banned or a limit
+ * (`join_refused`), a server that reviews newcomers where the user has not
+ * asked yet (`join_available` — an "Ask to join" button; the page load
+ * itself never files a request), a join request waiting for a moderator
+ * (`join_pending` — with "Withdraw request"), or a moderator's rejection
+ * still in its cooldown (`join_rejected`).
+ */
+type JoinRefusal = 'join_refused' | 'join_available' | 'join_pending' | 'join_rejected';
+
+async function LobbyUnavailable({
+  reason,
+  joinServerId,
+}: {
+  reason: 'data_unavailable' | 'server_missing' | JoinRefusal;
+  joinServerId: string | null;
+}) {
   const t = await getTranslator();
+  const joinState =
+    reason === 'join_refused' || reason === 'join_available' || reason === 'join_pending' || reason === 'join_rejected';
+  const hopeful = reason === 'join_pending' || reason === 'join_available';
   return (
     <div className="grid h-dvh w-full place-items-center bg-background p-6">
       <section className="w-full max-w-md text-center">
-        <span className="material-symbols-outlined text-4xl text-danger" aria-hidden>cloud_off</span>
-        <h1 className="mt-4 text-xl font-semibold text-text-primary">{t('lobby.unavailable.title')}</h1>
-        <p className="mt-2 text-sm leading-relaxed text-text-secondary">
-          {reason === 'join_refused'
-            ? t('lobby.unavailable.joinRefused')
-            : reason === 'data_unavailable'
-              ? t('lobby.unavailable.dataUnavailable')
-              : t('lobby.unavailable.serverMissing')}
+        <span
+          className={`material-symbols-outlined text-4xl ${hopeful ? 'text-primary' : 'text-danger'}`}
+          aria-hidden
+        >
+          {reason === 'join_pending'
+            ? 'hourglass_top'
+            : reason === 'join_available'
+              ? 'group_add'
+              : reason === 'join_rejected'
+                ? 'block'
+                : 'cloud_off'}
+        </span>
+        <h1 className="mt-4 text-xl font-semibold text-text-primary">
+          {reason === 'join_pending'
+            ? t('lobby.unavailable.joinPendingTitle')
+            : reason === 'join_available'
+              ? t('lobby.unavailable.joinAvailableTitle')
+              : t('lobby.unavailable.title')}
+        </h1>
+        <p className="mt-2 text-sm leading-relaxed text-text-secondary" role={reason === 'join_pending' ? 'status' : undefined}>
+          {reason === 'join_pending'
+            ? t('lobby.unavailable.joinPending')
+            : reason === 'join_available'
+              ? t('lobby.unavailable.joinAvailable')
+              : reason === 'join_rejected'
+                ? t('lobby.unavailable.joinRejected')
+                : reason === 'join_refused'
+                  ? t('lobby.unavailable.joinRefused')
+                  : reason === 'data_unavailable'
+                    ? t('lobby.unavailable.dataUnavailable')
+                    : t('lobby.unavailable.serverMissing')}
         </p>
-        {reason !== 'join_refused' && (
+        {reason === 'join_available' && joinServerId && (
+          <LobbyJoinRequestActions key="ask" serverId={joinServerId} mode="ask" />
+        )}
+        {reason === 'join_pending' && (
+          <div className="mt-5 flex flex-wrap items-start justify-center gap-3">
+            <Link
+              href="/lobby"
+              className="inline-flex items-center gap-2 rounded-md border border-border-strong px-4 py-2 text-sm text-text-secondary hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+            >
+              <span className="material-symbols-outlined text-lg" aria-hidden>refresh</span>
+              {t('lobby.unavailable.checkAgain')}
+            </Link>
+            {joinServerId && <LobbyJoinRequestActions key="pending" serverId={joinServerId} mode="pending" />}
+          </div>
+        )}
+        {!joinState && (
           <Link href="/admin/health" className="mt-5 inline-flex items-center gap-2 rounded-md border border-border-strong px-4 py-2 text-sm text-text-secondary hover:bg-surface-container">
             <span className="material-symbols-outlined text-lg" aria-hidden>health_and_safety</span>
             {t('lobby.unavailable.openHealth')}

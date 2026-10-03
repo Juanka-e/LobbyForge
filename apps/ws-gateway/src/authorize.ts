@@ -20,6 +20,17 @@ import {
 } from '@lobbyforge/db';
 import { parseTopic } from './protocol.js';
 
+/**
+ * Every id in a topic is a Postgres `uuid` column. Refusing anything else
+ * before the first query keeps junk out of the database (a non-uuid makes
+ * pg throw `invalid input syntax for type uuid`) and gives a made-up topic
+ * the same answer as an unknown shape.
+ */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export function isUuid(value: string): boolean {
+  return UUID_RE.test(value);
+}
+
 export type AuthorizeResult =
   | {
       ok: true;
@@ -38,6 +49,7 @@ export async function authorizeTopicSubscribe(
 ): Promise<AuthorizeResult> {
   const parsed = parseTopic(topic);
   if (!parsed) return { ok: false, reason: 'unknown_topic' };
+  if (!isUuid(parsed.serverId) || !isUuid(parsed.resourceId)) return { ok: false, reason: 'unknown_topic' };
 
   // DM topics: the CANONICAL DM policy (LF-SEC-006) — a participant of
   // a channel where either side has blocked the other cannot subscribe,

@@ -107,6 +107,30 @@ The owner shortcut is what makes the "owner always has ADMINISTRATOR" rule work 
 
 All eight sit behind `withApiSecurity(...)` (now generic over `TContext` for the `[roleId]` and `[userId]` segments).
 
+### Join requests
+
+When a server's access policy holds newcomers for approval (see
+[INVITES.md → Approval queue](./INVITES.md#approval-queue)), reviewing the
+queue needs **`KICK_MEMBERS` or `MANAGE_SERVER`** (`ADMINISTRATOR` implies
+both; `canReviewJoinRequests` in `apps/web/lib/join-requests.ts`):
+
+| Method | Path | Body | Description | Rate limit |
+|---|---|---|---|---|
+| `GET`  | `/api/servers/{id}/join-requests` | — | Pending requests first, paginated. Invite codes only for `MANAGE_SERVER`. | 60 / min |
+| `POST` | `/api/servers/{id}/join-requests/{requestId}` | `{ action: 'approve' \| 'reject' }` | Approve (creates the membership with `@everyone` and any stored sanction) or reject. | 30 / min |
+
+Why these two: `KICK_MEMBERS` is the existing "who stays in this
+community" right, so the moderators who remove members are the ones who
+vet arrivals (Discord's join applications are reviewed with the same
+right). `MANAGE_SERVER` holders set the access policy that creates the
+queue; they could switch approval off and let anyone in, so reviewing
+grants them nothing new. `BAN_MEMBERS` or `MODERATE_MEMBERS` alone do not
+admit people. The requester's own `GET` / `POST` / `DELETE
+/api/servers/{id}/join-requests/mine` needs no permission (and no
+membership); the `POST` (the lobby's "Ask to join") is open only for the
+community the `/lobby` auto-join serves — elsewhere a newcomer asks
+through an invite.
+
 ### Atomic Position Shifting (M15.6)
 
 `updateRole` now performs an atomic "move-and-shift" operation when the `position` is updated. It uses a database transaction to reorder sibling roles, ensuring no gaps or duplicates in the position sequence.
