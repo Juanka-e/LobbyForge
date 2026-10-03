@@ -67,6 +67,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      # security-review INFRA-002: install.sh renders the configs (TURN
+      # secret included) into the working tree and then builds from it.
+      # Render them here too so the build context matches a real install
+      # and the check below proves .dockerignore keeps them out.
+      - name: Render production configs into the build context
+        run: bash scripts/render-configs.sh ci.example.com "$(printf 'b%.0s' $(seq 1 64))" infra infra
+
       - name: Build Docker image
         run: docker build -t lobbyforge-web:ci .
 
@@ -88,6 +95,11 @@ jobs:
             fi
             found=$(find /app -name node_modules -prune -o \( -name "*.pem" -o -name "*.key" -o -name "*.dump" \) -print | grep -v "^/app/infra/update/release-public.pem$" || true)
             if [ -n "$found" ]; then echo "::error::secret-like files in image:"; echo "$found"; exit 1; fi
+            rendered=$(grep -rlE "static-auth-secret=b{64}" /app/infra 2>/dev/null || true)
+            if [ -n "$rendered" ]; then echo "::error::rendered TURN config in image:"; echo "$rendered"; exit 1; fi
+            for f in /app/infra/turn/turnserver.conf /app/infra/livekit/livekit.yaml /app/infra/nginx/conf.d/app.conf; do
+              if [ -e "$f" ]; then echo "::error::rendered config in image: $f"; exit 1; fi
+            done
             echo "image clean"
           '
 
@@ -131,19 +143,37 @@ jobs:
       # IPv6 CIDR denied-peer-ip lines crash-looped TURN on every install
       # and no job ever started it). Boot the pinned image with the config
       # the installer renders and require it to stay up.
-      - name: coturn starts with the rendered production config
+      # security-review INFRA-001: render EXACTLY like install.sh (umask
+      # 077 -> 0600 file) and start the container the way compose does
+      # (user 0:0 + cert-watcher entrypoint). The old check ran the image
+      # as its default user against a 0644 file, so it never saw that real
+      # installs could not read the config and fell back to an anonymous
+      # open relay. The probe sends an unauthenticated Allocate: anything
+      # but 401 fails the job.
+      - name: coturn starts with the rendered production config and enforces auth
         run: |
-          bash scripts/render-configs.sh ci.example.com "$(printf 'a%.0s' $(seq 1 64))" infra /tmp/lf-render
+          (umask 077 && bash scripts/render-configs.sh ci.example.com "$(printf 'a%.0s' $(seq 1 64))" infra /tmp/lf-render)
+          test "$(stat -c %a /tmp/lf-render/turn/turnserver.conf)" = "600"
           image=$(grep -o 'coturn/coturn:[^ ]*' infra/docker/docker-compose.prod.yml | head -1)
-          docker run -d --name lf-coturn-check \
+          docker run -d --name lf-coturn-check --user 0:0 -p 3478:3478/udp \
+            --cap-drop ALL --cap-add SETUID --cap-add SETGID --cap-add DAC_READ_SEARCH \
+            --cap-add KILL --cap-add NET_BIND_SERVICE --security-opt no-new-privileges:true \
+            --entrypoint /bin/sh \
             -v /tmp/lf-render/turn/turnserver.conf:/etc/coturn/turnserver.conf:ro \
-            "$image" -c /etc/coturn/turnserver.conf
+            -v "$PWD/infra/turn/cert-watcher.sh:/usr/local/bin/cert-watcher.sh:ro" \
+            "$image" /usr/local/bin/cert-watcher.sh
           sleep 8
           docker logs lf-coturn-check 2>&1 | tail -40
-          if docker logs lf-coturn-check 2>&1 | grep -qiE "Aborting|Wrong address format"; then
-            echo "::error::coturn rejected the rendered turnserver.conf"; exit 1
+          if docker logs lf-coturn-check 2>&1 | grep -qiE "Aborting|Wrong address format|Cannot find config file|FATAL"; then
+            echo "::error::coturn did not load the rendered turnserver.conf"; exit 1
           fi
           test "$(docker inspect -f '{{.State.Running}}' lf-coturn-check)" = "true"
+          # proc-user drop: turnserver must not keep running as root.
+          docker top lf-coturn-check -o user,pid,args | tee /tmp/lf-coturn-top
+          if grep turnserver /tmp/lf-coturn-top | grep -qE '^(root|0) '; then
+            echo "::error::turnserver is still running as root (proc-user drop failed)"; exit 1
+          fi
+          node scripts/turn-auth-probe.mjs 127.0.0.1 3478
           docker rm -f lf-coturn-check
 
   # TEST-001: production TLS e2e — the REAL prod stack (nginx + web +
@@ -190,8 +220,9 @@ jobs:
             -subj "/CN=$DOMAIN" -addext "subjectAltName=DNS:$DOMAIN"
           # Rendered (git-ignored) configs from the same templates the
           # installer uses — the stack under test is byte-identical to
-          # a deploy.
-          bash scripts/render-configs.sh "$DOMAIN" "$(printf 'a%.0s' $(seq 1 64))" infra infra
+          # a deploy. The webhook key names LIVEKIT_API_KEY below (as
+          # install.sh does), so LiveKit boots with its webhook enabled.
+          LIVEKIT_WEBHOOK_API_KEY=cikey bash scripts/render-configs.sh "$DOMAIN" "$(printf 'a%.0s' $(seq 1 64))" infra infra
           cat > .env.prod <<'EOF'
           LOBBYFORGE_SESSION_SECRET=ci-tls-secret-ci-tls-secret-ci-tls
           LOBBYFORGE_ADMIN_TOKEN=ci-tls-admin-token-0123456789abcdef
@@ -361,6 +392,10 @@ jobs:
           # invite consumption (now self-bootstrapping) and ban → membership
           # revocation against real Postgres.
           TEST_DATABASE_URL="postgres://postgres:t@127.0.0.1:$PORT/d" pnpm vitest run src/__tests__/integration.test.ts src/__tests__/bans.integration.test.ts
+          # security-review: sanctions that survive leave/rejoin, the
+          # last-gating-role refusal and approval-required joins (AUTHZ-001/
+          # 002/004), plus the bots runtime — SQL that mocks cannot prove.
+          TEST_DATABASE_URL="postgres://postgres:t@127.0.0.1:$PORT/d" pnpm vitest run src/__tests__/member-sanctions.integration.test.ts src/__tests__/bots.integration.test.ts src/__tests__/user-images.integration.test.ts
           docker rm -f lf-pg-test
 
   # LF-023: end-to-end against the REAL compose stack — Postgres, Redis,
