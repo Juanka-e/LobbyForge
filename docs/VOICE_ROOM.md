@@ -47,6 +47,54 @@ dev pages (`lib/public-endpoints.ts`).
 - Moderators with MUTE_MEMBERS get a mute control in the connected
   channel roster. The target's footer shows "Muted by a moderator".
 
+**A track's kind must match its source (security review AUTHZ-006
+follow-up).** LiveKit checks the source a new track claims against
+`canPublishSources` and nothing else. It never checks that a Camera track
+is video. A server-muted member keeps camera and screen share, so a
+modified client could publish its microphone as `source: camera` and the
+room heard it. A role with STREAM but no SPEAK could talk the same way.
+Video could also be sent under the Microphone source. The rule is now
+enforced on both sides:
+
+| Kind | Allowed sources |
+|---|---|
+| audio | `microphone`, `screen_share_audio` |
+| video | `camera`, `screen_share` |
+
+Anything else is refused: an unknown source, a data track, or a mime type
+that contradicts the declared kind. The rule lives in one module,
+`lib/voice-track-policy.ts`.
+
+- **Listeners.** The lobby (`LobbyVoiceProvider`) and `/room/[roomName]`
+  check every remote track: on publish, on subscribe, for tracks already
+  in the room at join, and when you join a screen share. A track that
+  breaks the rule is unsubscribed and never attached. A remote participant
+  shows as speaking only if they publish audio under an audio source,
+  because LiveKit computes "speaking" from every audio track, mislabelled
+  ones included.
+- **Server.** LiveKit posts its webhooks to
+  `POST /api/livekit/webhook`. The route checks LiveKit's signed JWT
+  (`WebhookReceiver`, `LIVEKIT_API_KEY`/`SECRET`, sha256 of the body) and
+  answers 401 to anything else. On `track_published`, if the new track
+  breaks the rule, or any other track the participant already has, it
+  removes the participant (`RemoveParticipant`). It also logs a warning
+  with the room, identity, source and type, and writes a
+  `voice.track_rejected` audit row. Every other event gets a 200 and
+  nothing else happens. Removal is not a ban: the member can rejoin, and
+  is removed again on the next mislabelled track. A raw client (not
+  the app) can hear a few hundred milliseconds of audio before the
+  removal lands.
+- **Wiring.** LiveKit reaches the web service at
+  `http://web:3000/api/livekit/webhook` over the compose network. nginx
+  answers 404 for that path at the public edge. `webhook.api_key` must
+  name one of LiveKit's keys, and that key is random per install.
+  `scripts/render-configs.sh` fills it in from `LIVEKIT_WEBHOOK_API_KEY`
+  (`install.sh` passes `LIVEKIT_API_KEY`). Rendered without that variable,
+  the webhook block stays commented out and nothing changes. The dev and
+  e2e stacks pass the same block through the `LIVEKIT_CONFIG` config
+  body. Existing installs pick it up when the configs are re-rendered (see
+  the changelog).
+
 **Local controls.**
 - Mic state follows the real local publication (`TrackMuted`/`Unmuted`
   and `ParticipantPermissionsChanged`), not UI state.

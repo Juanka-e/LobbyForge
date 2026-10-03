@@ -96,6 +96,13 @@ No PII (no `createdBy`, no use list) — that's what the authenticated `GET /api
 | `expired`         | 410    | `{ "error": "Invite has expired" }`   |
 | `exhausted`       | 410    | `{ "error": "Invite has reached its use limit" }` |
 | `no_everyone_role`| 500    | `{ "error": "Server is missing the @everyone role. This is a server-side bug." }` |
+| `approval_required` | 403  | `{ "error": "...", "code": "approval_required" }` — the server's access policy holds newcomers for approval (`requireApprovalForFirstJoin`, `joinPolicy: public_with_approval` or `accountLinking: require_admin_approval_first_join`, read exactly as registration reads them). There is no approval queue yet, so the redeem is refused; the `/lobby` auto-join refuses too (security-review AUTHZ-004). |
+
+A redeem (and the `/lobby` auto-join) starts the new membership with the
+timeout / server mute stored in `server_member_sanctions` (migration 0040),
+so leaving and rejoining does not lift a sanction (security-review
+AUTHZ-002). A timed-out member cannot create invites (403, same body as the
+message routes).
 
 On success (201), it returns:
 
