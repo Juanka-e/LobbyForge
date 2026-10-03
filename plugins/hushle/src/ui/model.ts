@@ -12,6 +12,7 @@
  */
 
 import { hushleExplainerQueue, hushleNextExplainerForTeam } from '../actions';
+import { secureRandom } from '../random';
 import type {
   HushleAction,
   HushleCard,
@@ -290,7 +291,7 @@ export function splitIntoTeams(
   playerIds: string[],
   teamSize: number,
   names: [string, string],
-  random: () => number = Math.random
+  random: () => number = secureRandom
 ): { teams: TeamDraft[]; floaterPlayerId: string | null } {
   const pool = [...new Set(playerIds)];
   for (let i = pool.length - 1; i > 0; i -= 1) {

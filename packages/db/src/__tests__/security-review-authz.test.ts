@@ -13,7 +13,7 @@ import { setMemberVoiceMuted } from '../queries/voiceModeration.js';
 import { redeemInvite } from '../queries/invites.js';
 import { accessPolicyRequiresApproval } from '../queries/serverAccessPolicies.js';
 import { membershipValuesFromSanction } from '../queries/memberSanctions.js';
-import { serverMemberSanctions } from '../schema.js';
+import { invites, serverJoinRequests, serverMemberSanctions } from '../schema.js';
 
 interface Step {
   op: string;
@@ -254,19 +254,35 @@ describe('access policy approval — security-review AUTHZ-004', () => {
     ).toBe(true);
   });
 
-  it('invite redeem is refused while the server requires approval (nothing is written)', async () => {
+  it('invite redeem files a join request instead of a membership while the server requires approval', async () => {
+    const request = { id: 'jr-1', serverId: 'srv-1', userId: 'u-1', status: 'pending' };
     const { db, chains } = recordingDb([
       [{ id: 'inv-1', server_id: 'srv-1', max_uses: null, current_uses: 0, expires_at: null }],
       [], // ban
       [], // existing membership
       [{ ownerUserId: 'owner-1' }],
       [{ ...base, requireApprovalForFirstJoin: true }],
+      [], // no open request
+      [], // never filed through this code (its first use)
+      [], // fileJoinRequest: no open request
+      [{ n: 0 }], // requests in the last 24 h
+      [request], // insert join request
+      [], // invite use
     ]);
-    expect(await redeemInvite(db, 'ABCDEFGH2345', 'u-1')).toEqual({ ok: false, error: 'approval_required' });
-    expect(chains.some((c) => ['insert', 'update'].includes(c[0]!.op))).toBe(false);
+    expect(await redeemInvite(db, 'ABCDEFGH2345', 'u-1')).toEqual({
+      ok: false,
+      error: 'pending_approval',
+      serverId: 'srv-1',
+      request,
+      created: true,
+    });
+    // No membership — only the request and one use of the invite.
+    const inserts = chains.filter((c) => c[0]!.op === 'insert');
+    expect(inserts.map((c) => c[0]!.args[0])).toEqual([serverJoinRequests]);
+    expect(chains.filter((c) => c[0]!.op === 'update').map((c) => c[0]!.args[0])).toEqual([invites]);
   });
 
-  it('the lobby auto-join creates nothing while the server requires approval', async () => {
+  it('ensureServerMembershipDetailed creates nothing while the server requires approval', async () => {
     const { db, chains } = recordingDb([
       [], // ban
       [], // existing membership

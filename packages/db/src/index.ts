@@ -16,6 +16,7 @@ export * from './queries/serverAccessPolicies.js';
 export * from './queries/serverVoiceSettings.js';
 export * from './queries/voiceModeration.js';
 export * from './queries/memberSanctions.js';
+export * from './queries/joinRequests.js';
 export * from './queries/bots.js';
 export * from './queries/userSettings.js';
 export { updateMemberNickname } from './queries/memberships.js';

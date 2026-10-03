@@ -105,9 +105,11 @@ async function handleGet(
     // `migrateState(raw)`, run it on the persisted JSONB so the
     // panel + reducer see the current shape even when the row was
     // written by an older build. The migrator is idempotent; it's
-    // safe to run on every read.
+    // safe to run on every read. Awaited: a marketplace plugin migrates
+    // in the plugin-worker and returns a Promise (unawaited it reached the
+    // client as `{}`).
     const plugin = getPluginServer(row.pluginId);
-    const state = plugin?.migrateState ? plugin.migrateState(row.state) : row.state;
+    const state = plugin?.migrateState ? await plugin.migrateState(row.state) : row.state;
 
     // LF-001: EVERYONE gets the projection — including the host. The
     // canonical projector (lib/activity-projection.ts, shared across all

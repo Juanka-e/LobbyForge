@@ -16,3 +16,12 @@ const LOGIN_ERROR_KEYS: Record<string, string> = {
 export function loginErrorKey(code: string | undefined): string | undefined {
   return code && Object.hasOwn(LOGIN_ERROR_KEYS, code) ? LOGIN_ERROR_KEYS[code] : undefined;
 }
+
+/**
+ * Whole minutes to wait after a 429 (`retryAfter` seconds in the body of
+ * the rate limiters and the per-account sign-in limit), at least one.
+ */
+export function retryAfterMinutes(retryAfterSeconds: unknown): number {
+  const seconds = Number(retryAfterSeconds);
+  return Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds / 60) : 1;
+}

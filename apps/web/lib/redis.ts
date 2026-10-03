@@ -159,6 +159,40 @@ export async function incrServerBandwidth(
   }
 }
 
+/**
+ * Per-user hourly budget for CLIENT-REPORTED bandwidth (security
+ * follow-up). The presence heartbeat's `bandwidthDeltaBytes` is whatever
+ * the browser says, so one member could inflate a server's counters and
+ * trip the admin alert. Each user gets `capBytesPerHour` per UTC hour,
+ * across every server; this adds the delta to the user's hourly counter
+ * and returns how much of it still fit (0 once the hour is spent).
+ * INCRBYFLOAT is atomic, so concurrent heartbeats never grant more than
+ * the cap between them.
+ *
+ *   lf:{env}:bw:user:{userId}:{YYYY-MM-DDTHH} → reported bytes (TTL 2h)
+ */
+export async function reserveUserBandwidth(
+  userId: string,
+  bytesDelta: number,
+  capBytesPerHour: number,
+  options: { now?: Date } = {}
+): Promise<number> {
+  if (!Number.isFinite(bytesDelta) || bytesDelta <= 0) return 0;
+  const now = options.now ?? new Date();
+  const hour = `${now.getUTCFullYear()}-${pad2(now.getUTCMonth() + 1)}-${pad2(now.getUTCDate())}T${pad2(now.getUTCHours())}`;
+  const key = bwKey('user', `${userId}:${hour}`);
+  const pipeline = redis.pipeline();
+  pipeline.incrbyfloat(key, bytesDelta);
+  pipeline.expire(key, 2 * 3600);
+  const results = await pipeline.exec();
+  const [error, value] = results?.[0] ?? [new Error('no reply'), null];
+  if (error) throw error;
+  const after = Number(value);
+  if (!Number.isFinite(after)) return 0;
+  const before = after - bytesDelta;
+  return Math.max(0, Math.min(bytesDelta, capBytesPerHour - before));
+}
+
 export interface BandwidthSnapshot {
   totalBytes: number;
   todayBytes: number;

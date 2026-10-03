@@ -281,6 +281,20 @@
       "when": 1786422400000,
       "tag": "0041_user_image_versions",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1786508800000,
+      "tag": "0042_purge_gameplay_audit_rows",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1786595200000,
+      "tag": "0043_server_join_requests",
+      "breakpoints": true
     }
   ]
 }

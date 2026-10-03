@@ -42,6 +42,8 @@
   "admin.audit.action.invite.create": "bir davet oluşturdu",
   "admin.audit.action.invite.redeem": "bir davetle katıldı",
   "admin.audit.action.invite.revoke": "bir daveti iptal etti",
+  "admin.audit.action.member.join_approved": "bir katılma isteğini onayladı",
+  "admin.audit.action.member.join_rejected": "bir katılma isteğini reddetti",
   "admin.audit.action.member.kick": "bir üyeyi sunucudan attı",
   "admin.audit.action.member.leave": "topluluktan ayrıldı",
   "admin.audit.action.member.set_roles": "bir üyenin rollerini değiştirdi",

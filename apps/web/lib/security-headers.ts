@@ -171,6 +171,8 @@ async function revokedSessionResponse(req: Request): Promise<NextResponse | null
 
   const secret = process.env.LOBBYFORGE_SESSION_SECRET;
   if (!secret || secret.length < 32) return null;
+  // The app's readGuestSession also reads a session past its absolute
+  // lifetime as absent, so the handler sees no session (signed out).
   const { readGuestSession } = await import('@/lib/guest-session');
   const session = readGuestSession(cookie, secret);
   if (!session?.uid) return null;
@@ -248,6 +250,9 @@ export function inMemoryRateLimit(
 
 export type TrustedProxyMode = 'none' | 'x-forwarded-for' | 'cloudflare';
 
+/** The untrusted-proxy warning is logged once per process, not per request. */
+let warnedUntrustedProxy = false;
+
 /**
  * Resolve the caller address only from a proxy header the operator explicitly
  * trusts. Public clients can set these headers themselves when no trusted
@@ -269,8 +274,12 @@ export function resolveClientAddress(
     return chain?.[chain.length - 1] ?? 'unknown';
   }
   // In production behind a reverse proxy (Nginx), warn loudly if the trusted
-  // proxy is not configured — without it, ALL clients share one rate-limit bucket.
-  if (process.env.NODE_ENV === 'production') {
+  // proxy is not configured — without it, ALL clients share one rate-limit
+  // bucket. Once per process: this runs on every rate-limited request, and
+  // Admin → Health (Doctor) keeps reporting it as a warning
+  // (`trusted_proxy` check). Existing installs are not refused.
+  if (process.env.NODE_ENV === 'production' && !warnedUntrustedProxy) {
+    warnedUntrustedProxy = true;
     console.warn('[security] LOBBYFORGE_TRUSTED_PROXY is not set — rate limiting is ineffective (all clients share one bucket). Set to "x-forwarded-for" behind Nginx.');
   }
   return 'unknown';

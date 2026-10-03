@@ -8,6 +8,7 @@ import {
   DICE_PLUGIN_ID,
 } from './constants';
 import { DicePanel, type DicePanelClientProps } from './renderClient';
+import { secureRandom } from './random';
 import { LOCALE_TABLES, SHIPPED_LOCALES } from './locales.generated';
 
 // Also registered by the panel, but that is a 'use client' module the
@@ -73,9 +74,9 @@ export type DiceAction =
   /** @deprecated Flips the current value; use `set-enabled`. */
   | { type: 'toggle'; hostId: string };
 
-export function rollDie(sides: number): number {
+export function rollDie(sides: number, random: () => number = secureRandom): number {
   // 1..sides inclusive, uniform.
-  return 1 + Math.floor(Math.random() * sides);
+  return 1 + Math.floor(random() * sides);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

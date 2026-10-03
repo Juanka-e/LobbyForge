@@ -11,7 +11,25 @@
 import { SignJWT } from 'jose';
 import { RoomServiceClient } from 'livekit-server-sdk';
 
-export const LIVEKIT_TOKEN_TTL_SECONDS = 60 * 60; // 1 hour
+/**
+ * 10 minutes (was 1 hour). The token only has to get a participant
+ * CONNECTED: while connected, LiveKit server sends the client a fresh
+ * token every 5 minutes (roommanager.go: tokenRefreshInterval = 5 min,
+ * refreshed tokens valid for max(10 min, what the original had left)),
+ * and livekit-client keeps it (SignalClient `refreshToken` →
+ * RTCEngine.token) for its resume/restart reconnects, so long calls are
+ * unaffected. The lobby fetches a new token from /api/livekit/token for
+ * every join.
+ *
+ * Why shorter: RemoveParticipant does not revoke tokens, and the server
+ * keeps the ORIGINAL expiry when it is longer than 10 minutes — with a
+ * 1-hour token, a member removed for a mislabelled track held a valid
+ * token for up to an hour. The voice block (lib/voice-block.ts) and the
+ * webhook's participant_joined check cover that window; a short token
+ * keeps it short. TURN credentials have their own lifetime
+ * (turn-credentials.ts, 12 h) and do not follow this value.
+ */
+export const LIVEKIT_TOKEN_TTL_SECONDS = 10 * 60;
 
 type LiveKitPublishSource = 'camera' | 'microphone' | 'screen-share' | 'screen-share-audio';
 type LiveKitWirePublishSource = 'camera' | 'microphone' | 'screen_share' | 'screen_share_audio';

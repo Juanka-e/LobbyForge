@@ -180,7 +180,10 @@ export function LobbyActivityView({
           }
         }
         if (!res.ok) {
-          const body = (await res.json().catch(() => ({}))) as { error?: string };
+          const body = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+          // The app's channel / role allow-lists (server settings → Apps).
+          if (body.code === 'app_channel_not_allowed') throw new Error(t('lobbyMain.activities.channelNotAllowed'));
+          if (body.code === 'app_role_not_allowed') throw new Error(t('lobbyMain.activities.roleNotAllowed'));
           throw new Error(
             body.error ?? t('lobbyMain.activities.launchFailed', { status: res.status })
           );

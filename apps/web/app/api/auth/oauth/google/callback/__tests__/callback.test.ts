@@ -158,3 +158,89 @@ describe('OAuth callback — beta-review S7 session tracking', () => {
     }
   });
 });
+
+// Security follow-up (OAuth hygiene): the Google `name` goes through the
+// registration display-name schema, with a fallback; cookies are read by
+// exact name (the old unanchored regexes matched `x_lf_oauth_state=` too).
+describe('OAuth callback — security follow-up: display name and cookie parsing', () => {
+  async function callbackWith(cookie: string): Promise<Response> {
+    const { GET } = await import('../route.js');
+    return GET(
+      new Request(`https://community.example/api/auth/oauth/google/callback?code=abc&state=${STATE}`, {
+        headers: { cookie },
+      }),
+      {}
+    );
+  }
+
+  function createdName(): string {
+    return (dbFns.findOrCreateGuestUser.mock.calls[0]?.[1] as { displayName: string }).displayName;
+  }
+
+  async function sessionName(res: Response): Promise<string | undefined> {
+    const { readGuestSession } = await import('@/lib/guest-session');
+    const cookie = res.headers.getSetCookie().find((c) => c.startsWith('lf_guest='));
+    return readGuestSession(cookie?.split(';')[0] ?? null, SECRET)?.name;
+  }
+
+  it('keeps a valid Google name, trimmed', async () => {
+    exchangeGoogleCode.mockResolvedValue({
+      sub: 'google-sub-1', email: 'someone@example.com', emailVerified: true, name: '  Ada Lovelace  ', picture: null,
+    });
+    const res = await callback();
+    expect(createdName()).toBe('Ada Lovelace');
+    expect(await sessionName(res)).toBe('Ada Lovelace');
+  });
+
+  it.each([
+    ['too long', 'x'.repeat(65)],
+    ['too short', 'x'],
+    ['whitespace only', '     '],
+    ['control characters', 'Ada\u0000Lovelace'],
+    ['a newline (log/UI injection)', 'Ada\nAdmin'],
+    ['not a string', 42],
+  ])('falls back to a generated name when the Google name is %s', async (_label, name) => {
+    exchangeGoogleCode.mockResolvedValue({
+      sub: 'google-sub-1', email: 'someone@example.com', emailVerified: true, name, picture: null,
+    });
+    const res = await callback();
+    expect(createdName()).toMatch(/^Guest [0-9a-f]{4}$/);
+    expect(await sessionName(res)).toBe(createdName());
+  });
+
+  it('never uses the email address as the public display name', async () => {
+    // lib/oauth-google falls back to the email when Google sends no name.
+    exchangeGoogleCode.mockResolvedValue({
+      sub: 'google-sub-1', email: 'someone@example.com', emailVerified: true, name: 'Someone@Example.com', picture: null,
+    });
+    await callback();
+    expect(createdName()).toMatch(/^Guest [0-9a-f]{4}$/);
+  });
+
+  it('an already-linked account signs in with the validated name too', async () => {
+    dbFns.getIdentityLinkByProviderSubject.mockResolvedValue({ id: 'link-9', userId: LINKED_USER_ID });
+    exchangeGoogleCode.mockResolvedValue({
+      sub: 'google-sub-1', email: 'someone@example.com', emailVerified: true, name: 'x'.repeat(200), picture: null,
+    });
+    const res = await callback();
+    expect(await sessionName(res)).toMatch(/^Guest [0-9a-f]{4}$/);
+  });
+
+  it('does not accept the state from a cookie whose name merely ends in lf_oauth_state', async () => {
+    const res = await callbackWith(`x_lf_oauth_state=${STATE}; lf_oauth_redirect=%2Flobby`);
+    expect(res.headers.get('location')).toBe('https://community.example/login?error=state_mismatch');
+    expect(exchangeGoogleCode).not.toHaveBeenCalled();
+  });
+
+  it('reads lf_oauth_redirect by exact name, not a look-alike cookie before it', async () => {
+    const res = await callbackWith(
+      `evil_lf_oauth_redirect=%2Fsettings%2Fdanger; lf_oauth_state=${STATE}; lf_oauth_redirect=%2Flobby`
+    );
+    expect(res.headers.get('location')).toBe('https://community.example/lobby');
+  });
+
+  it('rejects a state cookie that is not the hex token the start route mints', async () => {
+    const res = await callbackWith(`lf_oauth_state=${STATE}zz; lf_oauth_redirect=%2Flobby`);
+    expect(res.headers.get('location')).toBe('https://community.example/login?error=state_mismatch');
+  });
+});

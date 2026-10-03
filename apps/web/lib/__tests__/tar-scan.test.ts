@@ -122,3 +122,57 @@ describe('scanTarEntries (programmatic ustar scan)', () => {
     expect(result.error).toContain('entries');
   });
 });
+
+/**
+ * Security follow-up: ustar splits a long path into `prefix` (offset 345,
+ * 155 bytes) + `name`, and tar extracts to `prefix/name`. A traversal in
+ * the prefix must be caught like one in the name.
+ */
+function ustarHeader(prefix: string, name: string, size: number, magic = 'ustar\u000000'): Buffer {
+  const h = Buffer.alloc(512);
+  h.write(name, 0, 100, 'utf8');
+  h.write(size.toString(8).padStart(11, '0') + '\0', 124, 12, 'utf8');
+  h[156] = '0'.charCodeAt(0);
+  h.write(magic, 257, 8, 'latin1');
+  h.write(prefix, 345, 155, 'utf8');
+  h.fill(0x20, 148, 156);
+  const sum = h.reduce((acc, b) => acc + b, 0);
+  h.write(sum.toString(8).padStart(6, '0') + '\0 ', 148, 8, 'utf8');
+  return h;
+}
+
+function ustarTgz(prefix: string, name: string, magic?: string): Buffer {
+  const data = Buffer.alloc(512);
+  return gzipSync(Buffer.concat([ustarHeader(prefix, name, 5, magic), data, Buffer.alloc(1024)]));
+}
+
+describe('scanTarEntries — ustar prefix field', () => {
+  it.each([
+    ['../../../etc', 'passwd'],
+    ['pkg/../..', 'index.js'],
+    ['/etc', 'shadow'],
+    ['pkg\\..', 'index.js'],
+  ])('REJECTS prefix %j + name %j', (prefix, name) => {
+    const result = scanTarEntries(ustarTgz(prefix, name));
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected rejection');
+    expect(result.error).toContain('unsafe path');
+  });
+
+  it('checks the prefix in GNU-magic headers too', () => {
+    const result = scanTarEntries(ustarTgz('../..', 'x', 'ustar  \u0000'));
+    expect(result.ok).toBe(false);
+  });
+
+  it('still rejects an absolute name behind a harmless prefix', () => {
+    const result = scanTarEntries(ustarTgz('pkg', '/etc/shadow'));
+    expect(result.ok).toBe(false);
+  });
+
+  it('reports the joined path and accepts a safe prefix', () => {
+    const result = scanTarEntries(ustarTgz('package/some/long/dir', 'index.js'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.entries[0]!.name).toBe('package/some/long/dir/index.js');
+  });
+});

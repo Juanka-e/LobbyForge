@@ -72,7 +72,7 @@ export interface EventMessage {
 export interface ErrorMessage {
   type: 'error';
   topic?: string;
-  code: 'bad_message' | 'forbidden' | 'unknown_topic' | 'rate_limited';
+  code: 'bad_message' | 'forbidden' | 'unknown_topic' | 'rate_limited' | 'internal_error';
   message: string;
 }
 

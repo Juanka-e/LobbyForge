@@ -100,3 +100,26 @@ describe('MyAccountBody — password change', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 });
+
+// Security follow-up: wrong current passwords are limited per user; the
+// 429 is worded in the viewer's language with the wait, not the route's
+// English "Rate limit exceeded".
+describe('MyAccountBody — password change rate limit', () => {
+  it('says how long to wait', async () => {
+    respondWith(429, { error: 'Rate limit exceeded', retryAfter: 840, resetAt: new Date().toISOString() });
+    renderBody();
+    submitChange(EN);
+
+    expect(await screen.findByText('Too many attempts. Try again in 14 minutes.')).toBeInTheDocument();
+    expect(screen.queryByText('Rate limit exceeded')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: EN.submit })).toBeInTheDocument();
+  });
+
+  it('in Turkish too', async () => {
+    respondWith(429, { error: 'Rate limit exceeded', retryAfter: 30 });
+    renderBody('tr');
+    submitChange({ change: 'Değiştir', submit: 'Şifreyi güncelle' });
+
+    expect(await screen.findByText('Çok fazla deneme yapıldı. 1 dakika sonra tekrar dene.')).toBeInTheDocument();
+  });
+});

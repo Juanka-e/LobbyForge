@@ -9,6 +9,7 @@ const getUserPermissions = vi.fn();
 const createGameSession = vi.fn();
 const getActiveGameSessionForChannel = vi.fn();
 const getPluginInstall = vi.fn();
+const getMemberRoleIds = vi.fn();
 const listGameSessionsForChannel = vi.fn();
 const getGameSessionById = vi.fn();
 const setGameSessionState = vi.fn();
@@ -49,6 +50,7 @@ vi.mock('@lobbyforge/db', () => ({
   createGameSession,
   getActiveGameSessionForChannel,
   getPluginInstall,
+  getMemberRoleIds,
   listGameSessionsForChannel,
   getGameSessionById,
   setGameSessionState,
@@ -106,6 +108,8 @@ beforeEach(() => {
   getChannelById.mockResolvedValue(mockChannel());
   getActiveGameSessionForChannel.mockResolvedValue(null);
   getPluginInstall.mockResolvedValue(mockPluginInstall());
+  getMemberRoleIds.mockReset();
+  getMemberRoleIds.mockResolvedValue([]);
   getPluginServer.mockReset();
   getPluginServer.mockImplementation((id: string) => (id === 'fake' ? fakePlugin : null));
 });
@@ -197,16 +201,93 @@ function mockSession(overrides: Partial<{
   };
 }
 
-function mockPluginInstall(overrides: Partial<{ enabled: boolean }> = {}) {
+function mockPluginInstall(overrides: Partial<{ enabled: boolean; settings: Record<string, unknown> }> = {}) {
   return {
     id: '00000000-0000-0000-0000-000000000abc',
     serverId: SERVER_ID,
     pluginId: 'fake',
     enabled: overrides.enabled ?? true,
-    settings: {},
+    settings: overrides.settings ?? {},
     createdAt: new Date('2026-06-11T00:00:00Z'),
   };
 }
+
+// Security follow-up: the /apps allow-lists are enforced at start.
+describe('POST /api/servers/{id}/channels/{channelId}/activities — app allow-lists', () => {
+  const OTHER_CHANNEL = '00000000-0000-0000-0000-000000000011';
+  const ROLE_GAMERS = '00000000-0000-0000-0000-0000000000b1';
+  const ROLE_EVERYONE = '00000000-0000-0000-0000-0000000000b0';
+
+  async function start() {
+    const { POST } = await loadListRoute();
+    return POST(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}/activities`, {
+        method: 'POST',
+        headers: { cookie: makeSessionCookie() },
+        body: JSON.stringify({ pluginId: 'fake' }),
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID }) }
+    );
+  }
+
+  beforeEach(() => {
+    // The caller is a plain member (not the owner) with START_ACTIVITY.
+    getServerById.mockResolvedValue(mockServer(OWNER_ID));
+    isServerMember.mockResolvedValue(true);
+    getUserPermissions.mockResolvedValue(['start_activity']);
+    createGameSession.mockResolvedValue(mockSession());
+  });
+
+  it('403 when the channel is not in a non-empty channel allow-list — for the owner too', async () => {
+    getPluginInstall.mockResolvedValue(mockPluginInstall({ settings: { allowedChannelIds: [OTHER_CHANNEL] } }));
+    const res = await start();
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'app_channel_not_allowed' });
+
+    getServerById.mockResolvedValue(mockServer(USER_ID));
+    expect((await start()).status).toBe(403);
+    expect(createGameSession).not.toHaveBeenCalled();
+  });
+
+  it('starts in a listed channel', async () => {
+    getPluginInstall.mockResolvedValue(mockPluginInstall({ settings: { allowedChannelIds: [OTHER_CHANNEL, CHANNEL_ID] } }));
+    expect((await start()).status).toBe(201);
+  });
+
+  it('403 when the starter holds none of the allowed roles', async () => {
+    getPluginInstall.mockResolvedValue(mockPluginInstall({ settings: { allowedRoleIds: [ROLE_GAMERS] } }));
+    getMemberRoleIds.mockResolvedValue([ROLE_EVERYONE]);
+    const res = await start();
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'app_role_not_allowed' });
+    expect(getMemberRoleIds).toHaveBeenCalledWith(expect.anything(), SERVER_ID, USER_ID);
+    expect(createGameSession).not.toHaveBeenCalled();
+  });
+
+  it('starts when the starter holds one of the allowed roles', async () => {
+    getPluginInstall.mockResolvedValue(mockPluginInstall({ settings: { allowedRoleIds: [ROLE_GAMERS] } }));
+    getMemberRoleIds.mockResolvedValue([ROLE_EVERYONE, ROLE_GAMERS]);
+    expect((await start()).status).toBe(201);
+  });
+
+  it('lets the owner and administrators past the role allow-list', async () => {
+    getPluginInstall.mockResolvedValue(mockPluginInstall({ settings: { allowedRoleIds: [ROLE_GAMERS] } }));
+    getUserPermissions.mockResolvedValue(['administrator']);
+    expect((await start()).status).toBe(201);
+
+    getUserPermissions.mockResolvedValue(['start_activity']);
+    getServerById.mockResolvedValue(mockServer(USER_ID));
+    expect((await start()).status).toBe(201);
+    expect(getMemberRoleIds).not.toHaveBeenCalled();
+  });
+
+  it('treats empty or malformed lists as no restriction', async () => {
+    getPluginInstall.mockResolvedValue(
+      mockPluginInstall({ settings: { allowedChannelIds: [], allowedRoleIds: 'not-a-list' } })
+    );
+    expect((await start()).status).toBe(201);
+  });
+});
 
 describe('POST /api/servers/{id}/channels/{channelId}/activities', () => {
   it('returns 401 when there is no guest session', async () => {

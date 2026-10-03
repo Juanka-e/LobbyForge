@@ -9,7 +9,8 @@
  *
  * Same policy as before, now enforced correctly:
  * loopback, private, link-local, CGNAT, ULA, multicast, NAT64,
- * discard-only, documentation and IPv4-mapped forms are all BLOCKED.
+ * discard-only, documentation, IPv4-compatible and IPv4-mapped forms are
+ * all BLOCKED, and a 6to4 address is judged by the IPv4 address inside it.
  */
 
 export interface ParsedIp {
@@ -136,8 +137,11 @@ const BLOCKED_V4 = [
 const BLOCKED_V6 = [
   '::/128',           // unspecified
   '::1/128',          // loopback
+  '::/96',            // IPv4-compatible (deprecated, RFC 4291) — ::a.b.c.d
   '::ffff:0:0/96',    // IPv4-mapped (contents checked below too)
   '64:ff9b::/96',     // NAT64 well-known prefix
+  '64:ff9b:1::/48',   // NAT64 local-use prefix (RFC 8215) — operator-defined translation
+  '2001::/32',        // Teredo (RFC 4380) — tunnels to an obfuscated IPv4 we cannot judge
   '100::/64',         // discard-only
   '2001:db8::/32',    // documentation
   'fc00::/7',         // ULA
@@ -171,6 +175,13 @@ export function isBlockedNetworkIp(ip: string): boolean {
   // IPv4-translated (::ffff:0:a.b.c.d) with 0xffff at bits 48-63.
   if (upperV4 === 0xffffn || upperV4 === 0xffff_0000n) {
     const embedded = parsed.value & 0xffffffffn;
+    return BLOCKED_V4.some((cidr) => inCidr4(embedded, cidr));
+  }
+  // 6to4 (2002::/16, RFC 3056): 2002:AABB:CCDD::/48 tunnels to the IPv4
+  // address AA.BB.CC.DD (bits 80-111). A relay would deliver
+  // 2002:7f00:1:: to 127.0.0.1 — apply the IPv4 policy to it.
+  if (parsed.value >> 112n === 0x2002n) {
+    const embedded = (parsed.value >> 80n) & 0xffffffffn;
     return BLOCKED_V4.some((cidr) => inCidr4(embedded, cidr));
   }
   return false;

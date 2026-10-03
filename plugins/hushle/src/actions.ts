@@ -27,6 +27,7 @@
  */
 
 import { getDefaultDeck, getLanguageForPackSlug } from './decks';
+import { secureRandom } from './random';
 import { cursorAfter, explainerQueue, nextExplainer } from './rotation';
 import type {
   HushleAction,
@@ -50,7 +51,7 @@ function nowMs(): number {
 }
 
 function makeTeamId(): string {
-  return `team-${Math.random().toString(36).slice(2, 10)}`;
+  return `team-${Math.floor(secureRandom() * 36 ** 8).toString(36).padStart(8, '0')}`;
 }
 
 /** A stopped clock: between turns, before play, after the game. */
@@ -75,7 +76,7 @@ function turnTimeIsUp(state: HushleState, now: number): boolean {
  */
 function pickDifficultyTier(
   distribution: Record<HushleDifficulty, number>,
-  rng: () => number = Math.random
+  rng: () => number = secureRandom
 ): HushleDifficulty {
   const order: HushleDifficulty[] = ['easy', 'medium', 'hard'];
   let total = 0;
@@ -103,7 +104,7 @@ function drawNextCardWeighted(
   deck: HushleCard[],
   usedCardIds: string[],
   distribution: Record<HushleDifficulty, number>,
-  rng: () => number = Math.random
+  rng: () => number = secureRandom
 ): HushleCard | null {
   if (deck.length === 0) return null;
   if (usedCardIds.length >= deck.length) return null;

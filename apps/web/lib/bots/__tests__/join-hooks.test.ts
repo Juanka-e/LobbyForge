@@ -25,6 +25,10 @@ vi.mock('@lobbyforge/db', () => ({
   getInstanceBootstrapStatus,
   getInviteMetadata,
   getServerAccessPolicy,
+  // The join approval queue: the redeem route's note limit, and register's
+  // server-policy check (no saved policy here → nothing refused).
+  JOIN_REQUEST_NOTE_MAX_LENGTH: 500,
+  serverPolicyRegistrationRefusal: () => null,
 }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
 vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));

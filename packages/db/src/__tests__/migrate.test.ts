@@ -151,6 +151,76 @@ describe('db:migrate', () => {
     }
   });
 
+  it('purges only gameplay audit rows, with no schema change (0042, security-review PLUG-001)', () => {
+    const drizzleDir = join(__dirname, '..', '..', 'drizzle');
+    const sql = readFileSync(join(drizzleDir, '0042_purge_gameplay_audit_rows.sql'), 'utf8');
+    const body = sql.replace(/^\s*--.*$/gm, '').trim();
+    // One statement, data-only, scoped to activity.action rows.
+    expect(body).not.toMatch(/CREATE |DROP |ALTER |UPDATE /);
+    expect(body.split(';').filter((s) => s.trim())).toHaveLength(1);
+    expect(body).toMatch(/^DELETE FROM "audit_logs"\s+WHERE "action" = 'activity\.action'/);
+    // The privacy-relevant rows go; host actions are never named.
+    for (const gameplay of ["'night-target'", "'pack-chat'", "'night-shield'"]) expect(body).toContain(gameplay);
+    expect(body).toContain(`"metadata"->>'pluginId' = 'poll' AND "metadata"->>'actionType' IN ('vote')`);
+    for (const host of ["'start'", "'kick'", "'configure'", "'close-poll'", "'open-poll'"]) expect(body).not.toContain(host);
+    // Only the plugins whose rows leaked secrets; old Watch Party rows
+    // include former host actions and stay.
+    for (const kept of ["'watch-party'", "'quiz'", "'dice-bot'", "'hushle'"]) expect(body).not.toContain(kept);
+
+    // Snapshot chains from 0041 and is otherwise unchanged.
+    const prev = JSON.parse(readFileSync(join(drizzleDir, 'meta', '0041_snapshot.json'), 'utf8')) as Record<string, unknown>;
+    const snapshot = JSON.parse(readFileSync(join(drizzleDir, 'meta', '0042_snapshot.json'), 'utf8')) as Record<string, unknown>;
+    expect(snapshot.prevId).toBe(prev.id);
+    expect(snapshot.id).not.toBe(prev.id);
+    expect({ ...snapshot, id: null, prevId: null }).toEqual({ ...prev, id: null, prevId: null });
+  });
+
+  it('adds the join approval queue additively, one pending request per user (0043)', () => {
+    const drizzleDir = join(__dirname, '..', '..', 'drizzle');
+    const sql = readFileSync(join(drizzleDir, '0043_server_join_requests.sql'), 'utf8');
+    // Expand-only: one new table; the only ALTER is a column default.
+    expect(sql.match(/CREATE TABLE/g)).toHaveLength(1);
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS "server_join_requests"');
+    expect(sql).not.toMatch(/DROP |DELETE FROM|^UPDATE |ALTER COLUMN "[a-z_]+" TYPE/m);
+    expect(sql).toContain(`ALTER TABLE "server_access_policies" ALTER COLUMN "join_policy" SET DEFAULT 'public_self_register'`);
+    expect(sql).toContain('REFERENCES "servers"("id") ON DELETE cascade');
+    expect(sql).toContain('"decided_by") REFERENCES "users"("id") ON DELETE set null');
+    // The partial unique index (SQL-only, like game_sessions_channel_open_unique).
+    expect(sql).toContain(
+      `CREATE UNIQUE INDEX IF NOT EXISTS "server_join_requests_one_pending_unique" ON "server_join_requests" USING btree ("server_id","user_id") WHERE "status" = 'pending'`
+    );
+    expect(sql).toContain(`CHECK ("status" IN ('pending', 'approved', 'rejected', 'cancelled'))`);
+    expect(sql).toContain(`CHECK ("note" IS NULL OR char_length("note") <= 500)`);
+    const statements = sql
+      .split('--> statement-breakpoint')
+      .map((part) => part.replace(/^\s*--.*$/gm, '').trim())
+      .filter(Boolean);
+    expect(statements).toHaveLength(5);
+    expect(statements.every((statement) => statement.split(';').filter((s) => s.trim()).length === 1)).toBe(true);
+
+    // The snapshot chains from 0042, adds the table and the new default.
+    const prev = JSON.parse(readFileSync(join(drizzleDir, 'meta', '0042_snapshot.json'), 'utf8')) as { id: string };
+    const snapshot = JSON.parse(readFileSync(join(drizzleDir, 'meta', '0043_snapshot.json'), 'utf8')) as {
+      id: string;
+      prevId: string;
+      tables: Record<string, { columns: Record<string, { default?: unknown }> }>;
+    };
+    expect(snapshot.prevId).toBe(prev.id);
+    expect(snapshot.id).not.toBe(prev.id);
+    expect(Object.keys(snapshot.tables['public.server_join_requests']!.columns)).toEqual([
+      'id', 'server_id', 'user_id', 'source', 'invite_code', 'note', 'status', 'created_at', 'decided_at', 'decided_by',
+      'rejected_by_ban',
+    ]);
+    // A rejection written by a ban is flagged so it starts no cooldown.
+    expect(sql).toContain('"rejected_by_ban" boolean DEFAULT false NOT NULL');
+    expect(snapshot.tables['public.server_join_requests']!.columns.rejected_by_ban).toMatchObject({
+      type: 'boolean',
+      notNull: true,
+      default: false,
+    });
+    expect(snapshot.tables['public.server_access_policies']!.columns.join_policy!.default).toBe("'public_self_register'");
+  });
+
   it('adds identity links without recreating previously migrated tables', () => {
     const sql = readFileSync(
       join(__dirname, '..', '..', 'drizzle', '0018_user_identity_links.sql'),

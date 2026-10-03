@@ -10,13 +10,18 @@ const recordSession = vi.fn();
 const isOfficialDeployment = vi.fn();
 const createOfficialAccount = vi.fn();
 
-vi.mock('@lobbyforge/db', () => ({
-  createLocalAccount,
-  getEffectiveInstanceAccessSettings,
-  getInstanceBootstrapStatus,
-  getInviteMetadata,
-  getServerAccessPolicy,
-}));
+vi.mock('@lobbyforge/db', async () => {
+  const actual = await vi.importActual<typeof import('@lobbyforge/db')>('@lobbyforge/db');
+  return {
+    createLocalAccount,
+    getEffectiveInstanceAccessSettings,
+    getInstanceBootstrapStatus,
+    getInviteMetadata,
+    getServerAccessPolicy,
+    // The real server-policy check: these tests pin what it refuses.
+    serverPolicyRegistrationRefusal: actual.serverPolicyRegistrationRefusal,
+  };
+});
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __test: true }) }));
 vi.mock('@/lib/password', () => ({ hashPassword }));
 vi.mock('@/lib/deployment-mode', () => ({ isOfficialDeployment }));
@@ -145,7 +150,7 @@ describe('POST /api/auth/register', () => {
     expect(hashPassword).not.toHaveBeenCalled();
   });
 
-  it('fails closed while first-join approval has no approval queue', async () => {
+  it('refuses registration under a first-join approval policy (joins go through the queue)', async () => {
     getServerAccessPolicy.mockResolvedValue({
       joinPolicy: 'public_self_register',
       localAccount: 'allow_local_email_password',

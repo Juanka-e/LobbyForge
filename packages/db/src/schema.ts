@@ -82,7 +82,10 @@ export const servers = pgTable('servers', {
 export const serverAccessPolicies = pgTable('server_access_policies', {
   id: uuid('id').primaryKey().defaultRandom(),
   serverId: uuid('server_id').notNull().references(() => servers.id, { onDelete: 'cascade' }),
-  joinPolicy: text('join_policy').default('invite_only').notNull(),
+  // 0043: 'public_self_register' — what a server WITHOUT a row has always
+  // enforced (no server-level gate on top of the instance's registration
+  // mode). The app always writes the column; see DEFAULT_SERVER_ACCESS_POLICY.
+  joinPolicy: text('join_policy').default('public_self_register').notNull(),
   externalIdentity: text('external_identity').default('off').notNull(),
   localAccount: text('local_account').default('allow_local_email_password').notNull(),
   accountLinking: text('account_linking').default('allow_link').notNull(),
@@ -552,6 +555,42 @@ export const serverBans = pgTable('server_bans', {
 }, (table) => ({
   uniqueServerUser: unique('server_bans_server_id_user_id_unique').on(table.serverId, table.userId),
   serverUserIdx: index('idx_server_bans_server_user').on(table.serverId, table.userId),
+}));
+
+// SERVER JOIN REQUESTS (0043) — the approval queue behind an access policy
+// that holds newcomers for a moderator (`accessPolicyRequiresApproval`).
+// An invite redeem or the /lobby auto-join files a request instead of a
+// membership; a moderator approves (the membership is created then) or
+// rejects it; the requester can cancel. Rows are kept after a decision as
+// the record of who decided what.
+//   source: 'invite' | 'auto_join'
+//   status: 'pending' | 'approved' | 'rejected' | 'cancelled'
+// Note: the partial unique index `server_join_requests_one_pending_unique`
+// (at most ONE pending request per (server, user)) lives in the migration
+// SQL only (0043) — the table builder cannot express a partial unique
+// index, same as `game_sessions_channel_open_unique`.
+export const serverJoinRequests = pgTable('server_join_requests', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  serverId: uuid('server_id').notNull().references(() => servers.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  source: text('source').notNull(),
+  /** The invite code the request came through (text, not an FK: the invite may be revoked later). */
+  inviteCode: varchar('invite_code', { length: 16 }),
+  /** Optional message to the moderators, at most 500 characters. */
+  note: text('note'),
+  status: text('status').default('pending').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+  decidedBy: uuid('decided_by').references(() => users.id, { onDelete: 'set null' }),
+  /**
+   * A rejection written BY a ban (banUser, or an approval that found the
+   * user banned) — the rejection cooldown ignores it, so lifting the ban
+   * lets the user ask again at once.
+   */
+  rejectedByBan: boolean('rejected_by_ban').default(false).notNull(),
+}, (table) => ({
+  serverStatusIdx: index('idx_server_join_requests_server_status').on(table.serverId, table.status, table.createdAt),
+  serverUserIdx: index('idx_server_join_requests_server_user').on(table.serverId, table.userId),
 }));
 
 // MESSAGE REACTIONS TABLE

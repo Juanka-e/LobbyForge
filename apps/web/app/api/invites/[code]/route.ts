@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getInviteMetadata } from '@lobbyforge/db';
+import { accessPolicyRequiresApproval, getInviteMetadata, getServerAccessPolicy } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { normalizeInviteCode } from '@/lib/invite-code';
 import { withApiSecurity } from '@/lib/security-headers';
@@ -12,6 +12,9 @@ export const runtime = 'nodejs';
  * before the user has accepted so it can render "you're about to join
  * <ServerName>". No auth required: anyone with the code can see the
  * server's display name + the invite's expiry / use-count.
+ *
+ * `requiresApproval`: the server holds newcomers for a moderator (accepting
+ * files a join request), so the page can say so and offer a note up front.
  */
 async function handleGet(_req: Request, ctx: { params: Promise<{ code: string }> }): Promise<NextResponse> {
   const { code: rawCode } = await ctx.params;
@@ -24,6 +27,7 @@ async function handleGet(_req: Request, ctx: { params: Promise<{ code: string }>
     if (!meta) {
       return NextResponse.json({ error: 'Invite not found' }, { status: 404 });
     }
+    const requiresApproval = accessPolicyRequiresApproval(await getServerAccessPolicy(getDb(), meta.serverId));
     return NextResponse.json(
       {
         invite: {
@@ -35,6 +39,7 @@ async function handleGet(_req: Request, ctx: { params: Promise<{ code: string }>
           maxUses: meta.maxUses,
           isExpired: meta.isExpired,
           isExhausted: meta.isExhausted,
+          requiresApproval,
         },
       },
       {

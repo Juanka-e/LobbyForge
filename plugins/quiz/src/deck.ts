@@ -1,6 +1,6 @@
 /**
  * Building a game's deck. Randomness comes from the `random` function the
- * REDUCER passes in — `Math.random` on the server in production (the host
+ * REDUCER passes in — the platform CSPRNG on the server in production (the host
  * runs every action server-side), a seeded stub in tests. No action field
  * can influence it: a client cannot pick, order or peek at the deck.
  */

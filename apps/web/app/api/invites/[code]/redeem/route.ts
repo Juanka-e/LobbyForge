@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { logAction, redeemInvite } from '@lobbyforge/db';
+import { z } from 'zod';
+import { JOIN_REQUEST_NOTE_MAX_LENGTH, logAction, redeemInvite } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { normalizeInviteCode } from '@/lib/invite-code';
@@ -38,6 +39,26 @@ async function resolveSession(req: Request): Promise<
   return { ok: true, uid: session.uid };
 }
 
+/**
+ * Optional body: a note for the moderators, used only when the server holds
+ * newcomers for approval (the join request carries it). An empty body is
+ * the plain redeem.
+ */
+const RedeemBodySchema = z
+  .object({ note: z.string().max(JOIN_REQUEST_NOTE_MAX_LENGTH).optional() })
+  .strict();
+
+async function readNote(req: Request): Promise<{ ok: true; note: string | null } | { ok: false }> {
+  const raw = await req.text().catch(() => '');
+  if (!raw.trim()) return { ok: true, note: null };
+  try {
+    const parsed = RedeemBodySchema.safeParse(JSON.parse(raw));
+    return parsed.success ? { ok: true, note: parsed.data.note ?? null } : { ok: false };
+  } catch {
+    return { ok: false };
+  }
+}
+
 async function handlePost(req: Request, ctx: { params: Promise<{ code: string }> }): Promise<NextResponse> {
   const { code: rawCode } = await ctx.params;
   const session = await resolveSession(req);
@@ -48,7 +69,11 @@ async function handlePost(req: Request, ctx: { params: Promise<{ code: string }>
     if (!code) {
       return NextResponse.json({ error: 'Invalid invite code' }, { status: 400 });
     }
-    const result = await redeemInvite(getDb(), code, session.uid);
+    const body = await readNote(req);
+    if (!body.ok) {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
+    const result = await redeemInvite(getDb(), code, session.uid, { note: body.note });
     if (result.ok) {
       void logAction(getDb(), {
         serverId: result.serverId,
@@ -90,13 +115,35 @@ async function handlePost(req: Request, ctx: { params: Promise<{ code: string }>
           { error: 'You are banned from this server' },
           { status: 403 }
         );
-      case 'approval_required':
-        // security-review AUTHZ-004: the server's access policy holds new
-        // members for approval and there is no approval queue — the invite
-        // cannot be used to get around it (registration refuses too).
+      // security-review AUTHZ-004 follow-up: the server's access policy
+      // holds newcomers for approval — a join request waits for a
+      // moderator instead of a membership (no join hook, no audit row: no
+      // one joined). The request consumed one use of the invite.
+      case 'pending_approval':
         return NextResponse.json(
-          { error: 'This server requires moderator approval to join', code: 'approval_required' },
+          {
+            status: 'pending_approval',
+            request: {
+              id: result.request.id,
+              serverId: result.serverId,
+              createdAt: result.request.createdAt.toISOString(),
+            },
+          },
+          { status: 202, headers: { 'Cache-Control': 'no-store' } }
+        );
+      case 'join_rejected':
+        return NextResponse.json(
+          {
+            error: 'A moderator declined your request to join this server',
+            code: 'join_rejected',
+            retryAfter: result.retryAfter.toISOString(),
+          },
           { status: 403 }
+        );
+      case 'join_request_limit':
+        return NextResponse.json(
+          { error: 'Too many requests to join this server today', code: 'join_request_limit' },
+          { status: 429 }
         );
     }
   } catch {
@@ -109,6 +156,7 @@ async function handlePost(req: Request, ctx: { params: Promise<{ code: string }>
 
 export const POST = withApiSecurity(handlePost, {
   allowedMethods: ['POST'],
-  maxBodyBytes: 0,
+  // `{ note }` (≤ 500 characters) for an approval-held join; 4 KiB is ample.
+  maxBodyBytes: 4 * 1024,
   rateLimit: { identifier: 'invite-redeem', config: { windowMs: 60_000, maxRequests: 10 } },
 });

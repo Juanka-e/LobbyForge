@@ -198,6 +198,37 @@ describe('GET /api/servers/{id}/activities/{sessionId}/stream', () => {
     // prove the route ran end-to-end.
   });
 
+  it('awaits an async migrateState (marketplace plugins) before sending the snapshot', async () => {
+    // A worker-backed plugin migrates over RPC and returns a Promise; used
+    // unawaited, the snapshot carried `{}`.
+    getPluginServer.mockImplementation((id: string) =>
+      id === 'fake'
+        ? { ...fakePlugin, migrateState: async (raw: unknown) => ({ ...(raw as object), migrated: true }) }
+        : null
+    );
+    getServerById.mockResolvedValue(mockServer());
+    isServerMember.mockResolvedValue(true);
+    getGameSessionById.mockResolvedValue(mockSession({ state: { count: 7 } }));
+    const { GET } = await loadStreamRoute();
+    const controller = new AbortController();
+    const res = await GET(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/activities/${SESSION_ID}/stream`, {
+        headers: { cookie: makeSessionCookie() },
+        signal: controller.signal,
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, sessionId: SESSION_ID }) }
+    );
+    expect(res.status).toBe(200);
+    const reader = res.body!.getReader();
+    const { value } = await reader.read();
+    const text = new TextDecoder().decode(value);
+    expect(text.startsWith('event: snapshot\n')).toBe(true);
+    const snapshot = JSON.parse(text.split('\n')[1]!.slice('data: '.length)) as { state: unknown };
+    expect(snapshot.state).toEqual({ count: 7, migrated: true });
+    controller.abort();
+    await reader.cancel();
+  });
+
   it('returns 405 for non-GET methods', async () => {
     const { GET } = await loadStreamRoute();
     const res = await GET(

@@ -4,7 +4,7 @@ import { getBotById, setBotTokenHash } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { withApiSecurity } from '@/lib/security-headers';
 import { auditBotAction, jsonErrors, requireBotManager, toBotJson } from '@/lib/bots/admin';
-import { CUSTOM_BOT_TYPE } from '@/lib/bots/permissions';
+import { CUSTOM_BOT_TYPE, findUngrantableBotPermissions, isBotPermission } from '@/lib/bots/permissions';
 import { generateBotToken } from '@/lib/bots/token';
 
 export const dynamic = 'force-dynamic';
@@ -39,6 +39,26 @@ async function handlePost(req: Request, ctx: RouteContext): Promise<NextResponse
   const { bot, builtIn } = await loadCustomBot(serverId, botId);
   if (!bot) return NOT_FOUND();
   if (builtIn) return BUILT_IN_HAS_NO_TOKEN();
+
+  // Whoever holds the token wields every permission the bot has, so a
+  // new token is a fresh grant of all of them: the caller must be able to
+  // grant each one (the same rule as bot create / PATCH). Ids that are no
+  // longer known grant nothing and are not held against the caller.
+  const ungrantable = findUngrantableBotPermissions({
+    actorIsOwner: auth.manager.isOwner,
+    actorPermissions: auth.manager.permissions,
+    requested: bot.permissions.filter(isBotPermission),
+  });
+  if (ungrantable.length > 0) {
+    return NextResponse.json(
+      {
+        error: 'You cannot take a token for a bot that has permissions you do not have',
+        code: 'ungrantable_permissions',
+        permissions: ungrantable,
+      },
+      { status: 403 }
+    );
+  }
 
   const { token, hash } = generateBotToken(bot.id);
   const updated = await setBotTokenHash(getDb(), bot.id, hash);

@@ -1,5 +1,6 @@
 {
   "lobbyMain.activities.backTitle": "Back to the channel",
+  "lobbyMain.activities.channelNotAllowed": "This app can't be started in this channel. A server admin has limited it to other channels.",
   "lobbyMain.activities.close": "Close",
   "lobbyMain.activities.closeLabel": "Close activities",
   "lobbyMain.activities.emptyManage": "Install a game or activity and it shows up here for every member.",
@@ -20,6 +21,7 @@
   "lobbyMain.activities.playerRange": "{min}–{max} players",
   "lobbyMain.activities.playerRangeAny": "any",
   "lobbyMain.activities.resolving": "Checking for a game in progress…",
+  "lobbyMain.activities.roleNotAllowed": "You can't start this app. A server admin has limited it to certain roles.",
   "lobbyMain.activities.start": "Start",
   "lobbyMain.activities.starting": "Starting…",
   "lobbyMain.activities.title": "Activities",

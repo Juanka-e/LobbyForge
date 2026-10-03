@@ -72,7 +72,18 @@ process.on('message', async (payload) => {
 
     let result;
     if (data.op === 'describe') {
-      result = { id: plugin.manifest.id, name: plugin.manifest.name, version: plugin.manifest.version ?? null };
+      const manifest = plugin.manifest;
+      if (
+        !manifest ||
+        typeof manifest.id !== 'string' ||
+        typeof manifest.name !== 'string' ||
+        typeof plugin.createInitialState !== 'function' ||
+        typeof plugin.handleAction !== 'function'
+      ) {
+        post({ error: 'plugin bundle does not export a valid plugin (manifest.id, manifest.name, createInitialState, handleAction)' });
+        return;
+      }
+      result = { id: manifest.id, name: manifest.name, version: typeof manifest.version === 'string' ? manifest.version : null };
     } else if (data.op === 'createInitialState') {
       result = await plugin.createInitialState(buildCtx());
     } else if (data.op === 'handleAction') {
@@ -82,6 +93,13 @@ process.on('message', async (payload) => {
     }
     post({ result: result ?? null });
   } catch (err) {
-    post({ error: err && err.message ? err.message : String(err) });
+    let message = err && err.message ? err.message : String(err);
+    // The bundle is imported from the install directory, where no
+    // node_modules exist: `react`, `@lobbyforge/plugin-sdk` and every other
+    // package must be bundled into index.js (docs/EXTENDING.md §3.5).
+    if (err && err.code === 'ERR_MODULE_NOT_FOUND') {
+      message += ' — the plugin-worker provides no packages to bundles: bundle every dependency (react and @lobbyforge/plugin-sdk included) into index.js';
+    }
+    post({ error: message });
   }
 });

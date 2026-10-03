@@ -6,6 +6,7 @@ import process from 'node:process';
 import { execFile, spawn } from 'node:child_process';
 import { createWriteStream } from 'node:fs';
 import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 
 const DEFAULT_CHANNEL = 'stable';
 // 21st-audit: check/plan/apply work with NO arguments — the documented
@@ -18,6 +19,27 @@ const DEFAULT_PUBLIC_KEY_PATH = 'infra/update/release-public.pem';
 const ENV_FILE = '.env.prod';
 const COMPOSE_FILE = 'infra/docker/docker-compose.prod.yml';
 const STATE_FILE = 'infra/update/deployment-state.json';
+const DEFAULT_BACKUP_MANIFEST = 'infra/update/backup-manifest.example.json';
+const DEFAULT_BACKUP_DIR = 'backups';
+
+// Security follow-up: DEFAULT paths (release public key, .env.prod, the
+// compose file, deployment state, backups) resolve from the checkout
+// this script lives in (scripts/..), never the caller's cwd. Run from
+// another directory, the default public key used to be "not found", the
+// manifest counted as unsigned and its imageDigest could be deployed.
+// Paths given on the command line still resolve from the cwd.
+// LFCTL_ROOT overrides the root (tests, unusual layouts).
+const ROOT_DIR = process.env.LFCTL_ROOT
+  ? path.resolve(process.env.LFCTL_ROOT)
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+function fromRoot(relativePath) {
+  return path.resolve(ROOT_DIR, relativePath);
+}
+// Backups hold the whole database: owner-only on POSIX (Windows has no
+// mode bits; NTFS ACLs of the parent apply).
+const IS_POSIX = process.platform !== 'win32';
+const BACKUP_DIR_MODE = 0o700;
+const BACKUP_FILE_MODE = 0o600;
 
 // 21st-audit (drill-caught TDZ): main() is invoked mid-file and the
 // backup path runs SYNCHRONOUSLY up to its first await — the pg runtime
@@ -58,7 +80,10 @@ Notes:
   (${DEFAULT_MANIFEST_URL}); override with --manifest or
   LOBBYFORGE_RELEASE_MANIFEST (forks).
   Signature verification defaults to the committed official public key
-  (${DEFAULT_PUBLIC_KEY_PATH}); override with --public-key.
+  (${DEFAULT_PUBLIC_KEY_PATH}, resolved from this checkout, not the cwd);
+  override with --public-key. update apply refuses to run without a key.
+  backup create writes owner-only files (0600) in an owner-only directory
+  (0700) on POSIX.
   update apply creates + verifies a FRESH backup automatically unless
   --backup-manifest points at an existing one. Deployed version state is
   read from .env.prod/deployment-state.json (no hardcoded current version).
@@ -128,8 +153,8 @@ function validateBackupManifest(manifest) {
   return manifest;
 }
 
-async function loadBackupManifest(source = process.env.LOBBYFORGE_BACKUP_MANIFEST ?? 'infra/update/backup-manifest.example.json') {
-  const absolute = path.resolve(process.cwd(), source);
+async function loadBackupManifest(source = process.env.LOBBYFORGE_BACKUP_MANIFEST) {
+  const absolute = source ? path.resolve(process.cwd(), source) : fromRoot(DEFAULT_BACKUP_MANIFEST);
   const raw = await fs.readFile(absolute, 'utf8');
   return { manifest: validateBackupManifest(JSON.parse(raw)), baseDir: path.dirname(absolute) };
 }
@@ -334,7 +359,7 @@ async function loadPublicKey(options) {
   // by DEFAULT so unsigned/tampered manifests fail closed out of the box.
   // Forks override with --public-key / LOBBYFORGE_RELEASE_PUBLIC_KEY_PEM.
   try {
-    return await fs.readFile(path.resolve(process.cwd(), DEFAULT_PUBLIC_KEY_PATH), 'utf8');
+    return await fs.readFile(fromRoot(DEFAULT_PUBLIC_KEY_PATH), 'utf8');
   } catch {
     return null;
   }
@@ -395,7 +420,7 @@ function command(manifestCommand, fallback) {
 
 async function readEnvProdValue(key) {
   try {
-    const raw = await fs.readFile(path.resolve(process.cwd(), ENV_FILE), 'utf8');
+    const raw = await fs.readFile(fromRoot(ENV_FILE), 'utf8');
     for (const line of raw.split(/\r?\n/)) {
       const match = new RegExp(`^\\s*${key}=(.*)$`).exec(line);
       if (match) return match[1].trim().replace(/^["']|["']$/g, '');
@@ -407,7 +432,7 @@ async function readEnvProdValue(key) {
 }
 
 async function setEnvProdValue(key, value) {
-  const file = path.resolve(process.cwd(), ENV_FILE);
+  const file = fromRoot(ENV_FILE);
   let raw = '';
   try {
     raw = await fs.readFile(file, 'utf8');
@@ -431,14 +456,14 @@ async function setEnvProdValue(key, value) {
 
 async function readDeploymentState() {
   try {
-    return JSON.parse(await fs.readFile(path.resolve(process.cwd(), STATE_FILE), 'utf8'));
+    return JSON.parse(await fs.readFile(fromRoot(STATE_FILE), 'utf8'));
   } catch {
     return null;
   }
 }
 
 async function writeDeploymentState(state) {
-  const file = path.resolve(process.cwd(), STATE_FILE);
+  const file = fromRoot(STATE_FILE);
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, `${JSON.stringify({ ...state, updatedAt: state.updatedAt ?? new Date().toISOString() }, null, 2)}\n`);
 }
@@ -463,7 +488,7 @@ async function resolveDatabaseUrl() {
   return process.env.DATABASE_URL ?? (await readEnvProdValue('DATABASE_URL'));
 }
 
-const COMPOSE_BASE_ARGS = ['compose', '-f', COMPOSE_FILE, '--env-file', ENV_FILE];
+const COMPOSE_BASE_ARGS = ['compose', '-f', fromRoot(COMPOSE_FILE), '--env-file', fromRoot(ENV_FILE)];
 const HEALTH_PROBE_SCRIPT =
   "fetch('http://localhost:3000/api/health').then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);process.exit(0)}).catch(e=>{console.error(e.message);process.exit(1)})";
 
@@ -724,7 +749,7 @@ async function main() {
 
   if (domain === 'directory') {
     if (action === 'keygen') {
-      const outDir = options.out ?? 'infra/keys';
+      const outDir = options.out ?? fromRoot('infra/keys');
       const { publicKey, privateKey } = generateKeyPairSync('ed25519');
       await fs.mkdir(outDir, { recursive: true });
       const privPath = path.join(outDir, 'instance-ed25519-private.pem');
@@ -871,9 +896,18 @@ async function main() {
     process.exitCode = 2;
     return;
   }
+  // Security follow-up: apply needs a release public key. Without one the
+  // manifest cannot be verified and its imageDigest would be deployed on
+  // trust alone (this happened when the default key path was resolved
+  // from another cwd).
+  if (!plan.signature || plan.signature.status === 'not_configured') {
+    console.error('\nNo release public key found — refusing to apply an unverifiable manifest.');
+    console.error(`Looked for --public-key, LOBBYFORGE_RELEASE_PUBLIC_KEY_PEM and ${fromRoot(DEFAULT_PUBLIC_KEY_PATH)}.`);
+    process.exitCode = 2;
+    return;
+  }
   // Signature: the verifier returns { status, verified, required }.
-  // Fail-closed only when a key IS configured and verification FAILED.
-  if (plan.signature && plan.signature.required && !plan.signature.verified) {
+  if (plan.signature.required && !plan.signature.verified) {
     console.error('\nManifest signature INVALID — refusing to update from an untrusted source.');
     process.exitCode = 2;
     return;
@@ -1200,7 +1234,7 @@ function streamPgDumpTo(dbUrl, outFile, timeoutMs) {
     const child = spawn(DOCKER_PREFIX[0], dockerArgs(['exec', PG_CONTAINER, 'pg_dump', '-Fc', dbUrl]), {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    const out = createWriteStream(outFile);
+    const out = createWriteStream(outFile, { mode: BACKUP_FILE_MODE });
     let stderr = '';
     let settled = false;
     let timer;
@@ -1231,15 +1265,43 @@ function streamPgDumpTo(dbUrl, outFile, timeoutMs) {
   });
 }
 
+/**
+ * The backup directory, created 0700. An EXISTING directory keeps its mode
+ * (it may be shared, e.g. --out /srv); a warning says when others can
+ * read it. The files inside are 0600 either way.
+ */
+async function ensureBackupDir(outDir) {
+  const created = await fs.mkdir(outDir, { recursive: true, mode: BACKUP_DIR_MODE });
+  if (!IS_POSIX) return;
+  if (created) {
+    await fs.chmod(outDir, BACKUP_DIR_MODE);
+    return;
+  }
+  const { mode } = await fs.stat(outDir);
+  if (mode & 0o077) {
+    console.error(
+      `Warning: backup directory ${outDir} is accessible to other users (mode ${(mode & 0o777).toString(8)}); run chmod 700 on it.`
+    );
+  }
+}
+
+async function restrictBackupFile(file) {
+  if (IS_POSIX) await fs.chmod(file, BACKUP_FILE_MODE);
+}
+
 async function backupCreate(options = {}) {
-  const outDir = options.out ?? 'backups';
+  const outDir = options.out ? path.resolve(process.cwd(), options.out) : fromRoot(DEFAULT_BACKUP_DIR);
   const dbUrl = options['database-url'] ?? process.env.DATABASE_URL;
   if (!dbUrl) throw new Error('backup create requires --database-url or DATABASE_URL');
   await ensurePgContainer(dbUrl);
 
-  await fs.mkdir(outDir, { recursive: true });
+  await ensureBackupDir(outDir);
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const file = path.join(outDir, `lobbyforge-${stamp}.dump`);
+  // Create the dump file owner-only BEFORE pg_dump writes into it, so it
+  // is never readable by others, not even while the dump runs.
+  await (await fs.open(file, 'wx', BACKUP_FILE_MODE)).close();
+  await restrictBackupFile(file);
 
   // pg_dump custom format (-Fc) — compressed, supports parallel restore + selective tables.
   if (PG_CONTAINER) {
@@ -1248,7 +1310,11 @@ async function backupCreate(options = {}) {
     // (binary bytes, no decode step, no RAM buffer).
     await streamPgDumpTo(dbUrl, file, 300_000);
   } else {
-    await pgExec('pg_dump', ['-Fc', '-f', file, dbUrl], { timeout: 300_000 });
+    await pgExec('pg_dump', ['-Fc', '-f', file, dbUrl], { timeout: 300_000 }).catch(async (err) => {
+      // Never leave the pre-created (empty or partial) dump behind.
+      await fs.unlink(file).catch(() => {});
+      throw err;
+    });
   }
 
   // 18th-audit: streaming hash — multi-GB dumps stay flat-memory.
@@ -1281,7 +1347,8 @@ async function backupCreate(options = {}) {
     },
     includes: { database: true },
   };
-  await fs.writeFile(`${file}.manifest.json`, JSON.stringify(manifest, null, 2));
+  await fs.writeFile(`${file}.manifest.json`, JSON.stringify(manifest, null, 2), { mode: BACKUP_FILE_MODE });
+  await restrictBackupFile(`${file}.manifest.json`);
   // Legacy sidecar for `backup restore` (reads sha256 from `${file}.json`).
   const meta = {
     file: path.basename(file),
@@ -1290,7 +1357,8 @@ async function backupCreate(options = {}) {
     createdAt: new Date().toISOString(),
     databaseUrlPrefix: dbUrl.split('@').pop()?.split('/')[0] ?? 'unknown-host',
   };
-  await fs.writeFile(`${file}.json`, JSON.stringify(meta, null, 2));
+  await fs.writeFile(`${file}.json`, JSON.stringify(meta, null, 2), { mode: BACKUP_FILE_MODE });
+  await restrictBackupFile(`${file}.json`);
 
   return { file, sha256, sizeBytes: buf.byteLength ?? buf.length, manifestPath: `${file}.manifest.json`, backupId };
 }

@@ -5,7 +5,8 @@
  *     lobby auto-join (server_member_sanctions);
  *   - a user who is no longer a member can be banned, and the ban then
  *     blocks the redeem;
- *   - a redeem is refused while the access policy requires approval;
+ *   - a redeem files a join request (no membership) while the access
+ *     policy requires approval (the queue itself: join-requests.integration);
  *   - a channel's last gating role cannot be deleted (the channel would
  *     turn public through the override cascade).
  *
@@ -26,6 +27,7 @@ import {
 import { isMemberVoiceMuted, setMemberVoiceMuted } from '../queries/voiceModeration.js';
 import { deleteRole, RoleGatesChannelsError } from '../queries/roles.js';
 import { upsertServerAccessPolicy } from '../queries/serverAccessPolicies.js';
+import { cancelJoinRequest } from '../queries/joinRequests.js';
 
 const DB_URL = process.env.TEST_DATABASE_URL;
 
@@ -124,10 +126,11 @@ describe.skipIf(!DB_URL)('moderation state and join policy (integration)', () =>
     expect(await redeemInvite(db, code, leaver)).toEqual({ ok: false, error: 'banned' });
   });
 
-  it('redeem is refused while the access policy requires approval', async () => {
+  it('redeem files a join request, not a membership, while the access policy requires approval', async () => {
     await upsertServerAccessPolicy(db, { serverId, requireApprovalForFirstJoin: true });
-    expect(await redeemInvite(db, code, newcomer)).toEqual({ ok: false, error: 'approval_required' });
+    expect(await redeemInvite(db, code, newcomer)).toMatchObject({ ok: false, error: 'pending_approval', created: true });
     expect(await ensureServerMembership(db, serverId, newcomer)).toBeNull();
+    expect(await cancelJoinRequest(db, serverId, newcomer)).toMatchObject({ status: 'cancelled' });
     await upsertServerAccessPolicy(db, { serverId, requireApprovalForFirstJoin: false });
     expect(await redeemInvite(db, code, newcomer)).toMatchObject({ ok: true });
   });

@@ -13,8 +13,8 @@
  * may send (`time-up`); the reducer accepts it only once the server clock
  * is past the deadline, so sending it early changes nothing.
  *
- * Randomness and time come from `env` — `Math.random` and `Date.now` on
- * the server; tests pass stubs. No action field can seed or steer them.
+ * Randomness and time come from `env` — the platform CSPRNG and `Date.now`
+ * on the server; tests pass stubs. No action field can seed or steer them.
  *
  * Built-in packs: this module only knows the pack CATALOGUE. A pack game's
  * questions (with answers) are loaded on the server by the host — from the
@@ -55,6 +55,7 @@ import {
   type QuizStartAction,
   type QuizState,
 } from './state';
+import { secureRandom } from './random';
 
 export interface QuizEnv {
   /** Server time, epoch ms. */
@@ -67,7 +68,7 @@ export interface QuizEnv {
 
 export const QUIZ_DEFAULT_ENV: QuizEnv = {
   now: () => Date.now(),
-  random: () => Math.random(),
+  random: secureRandom,
 };
 
 // ---------------------------------------------------------------------------

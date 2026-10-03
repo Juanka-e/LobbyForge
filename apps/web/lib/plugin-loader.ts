@@ -1,45 +1,37 @@
 /**
- * Dynamic plugin loader — resolves marketplace-installed plugins from disk.
+ * Dynamic plugin loader — the registry of marketplace-installed plugins.
  *
- * Approved marketplace plugins are downloaded + extracted to
- * `plugins/installed/<pluginId>/<version>/` by the install API. This module
- * pre-warms them at boot by walking the directory and `import()`-ing each
- * `index.js`, then validates the shape and stores the result in an in-memory
- * map. The hot path (getPlugin) stays synchronous because the map is
- * populated before the first request.
+ * Approved marketplace bundles are extracted by the install API into the
+ * shared install root (`plugin-install-layout.ts`):
+ * `<root>/<pluginId>/<version>/` plus `<root>/<pluginId>/active.json`, the
+ * record of which version is active and the digest of its files.
  *
- * Bundle contract:
- *   - The plugin directory contains an `index.js` (ESM) that exports
- *     `plugin: GamePlugin` (named export).
- *   - The bundle externalizes `@lobbyforge/plugin-sdk` and `react` — the
- *     host provides them (same as workspace packages today).
- *   - The manifest's `id` must match the directory's `<pluginId>`.
+ * This module never imports plugin code. At boot it reads the active
+ * records and asks the isolated plugin-worker to load each exact
+ * version + digest; the worker-backed plugin objects it gets back are kept
+ * in an in-memory map so the hot path (getPlugin) stays synchronous.
+ *
+ * Bundle contract (docs/EXTENDING.md §3.5):
+ *   - `index.js` (ESM) at the bundle root, exporting `plugin` or `default`.
+ *   - Self-contained: the worker provides no packages to bundles, so
+ *     `react` and `@lobbyforge/plugin-sdk` are bundled in, not external.
+ *   - `manifest.id` equals the catalog `pluginId`.
  *
  * Security:
- *   - Only plugins whose `plugin_catalog.review_status === 'approved'` are
- *     loaded. The install API enforces this before extracting.
- *   - The imported object is shape-validated before admission.
- *   - `handleAction` / `createInitialState` run inside try/catch + a CPU
- *     budget in plugin-context.ts (the safety net added in Faz 4.4).
- *   - This is NOT a sandbox — untrusted code still runs in-process. The
- *     trust model relies on review_status + trust_level + admin control.
+ *   - Disabled unless LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED=true, and then only
+ *     through the worker (LOBBYFORGE_PLUGIN_WORKER_URL) — fail closed.
+ *   - Only approved, digest-pinned catalog entries are installed (install
+ *     API), and the worker re-verifies the files' digest before running them.
+ *   - ADR-001: the worker isolates reviewed code, not hostile code.
  */
-
-import { existsSync, readdirSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
-import {
-  registerGamePlugin,
-  type RegisteredGamePlugin,
-  type GamePlugin,
-} from '@lobbyforge/plugin-sdk';
+import type { RegisteredGamePlugin } from '@lobbyforge/plugin-sdk';
 import {
   buildWorkerPlugin,
-  listWorkerPlugins,
+  describeWorkerPlugin,
   workerRuntimeConfigured,
+  type WorkerPluginInfo,
 } from './plugin-worker-client';
-
-const INSTALLED_DIR = resolve(process.cwd(), 'plugins', 'installed');
+import { listActivePlugins, pluginInstallDir, readActivePointer } from './plugin-install-layout';
 
 /** In-memory map of dynamically-loaded plugins, keyed by manifest.id. */
 const dynamicPlugins = new Map<string, RegisteredGamePlugin>();
@@ -47,13 +39,17 @@ const dynamicPlugins = new Map<string, RegisteredGamePlugin>();
 /** True once warmInstalledPlugins() has completed (or found nothing). */
 let warmed = false;
 
-/** The list of pluginIds that were successfully loaded at warm time. */
+/** The list of pluginIds that were successfully loaded. */
 const loadedPluginIds: string[] = [];
 
+function dynamicPluginsEnabled(): boolean {
+  return process.env.LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED === 'true';
+}
+
 /**
- * Walk `plugins/installed/` and `import()` each plugin's `index.js`.
- * Called once at boot (from instrumentation or the first server request).
- * Safe to call multiple times — it skips if already warmed.
+ * Load every plugin that has an active record, through the worker.
+ * Called once at boot (from instrumentation). Safe to call multiple
+ * times — it skips if already warmed.
  */
 export async function warmInstalledPlugins(): Promise<void> {
   if (warmed) return;
@@ -64,7 +60,7 @@ export async function warmInstalledPlugins(): Promise<void> {
   // the flag alone (without LOBBYFORGE_PLUGIN_WORKER_URL) loads
   // NOTHING (fail closed), and in-process import of third-party code
   // is no longer possible from this path at all.
-  if (process.env.LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED !== 'true') {
+  if (!dynamicPluginsEnabled()) {
     return;
   }
   if (!workerRuntimeConfigured()) {
@@ -74,35 +70,35 @@ export async function warmInstalledPlugins(): Promise<void> {
     return;
   }
 
+  let active: ReturnType<typeof listActivePlugins>;
   try {
-    const plugins = await listWorkerPlugins();
-    for (const info of plugins) {
-      dynamicPlugins.set(info.id, buildWorkerPlugin(info));
-      loadedPluginIds.push(info.id);
-    }
-    if (plugins.length > 0) {
-      console.info(`[plugin-loader] ${plugins.length} plugin(s) loaded via the isolated worker`);
-    }
+    active = listActivePlugins(pluginInstallDir());
   } catch (err) {
-    // Fail closed — the worker being down means no dynamic plugins.
-    console.error('[plugin-loader] plugin-worker unreachable:', (err as Error).message);
+    console.error('[plugin-loader] cannot read the plugin install directory:', (err as Error).message);
     return;
+  }
+  let count = 0;
+  for (const ref of active) {
+    try {
+      registerDynamicPlugin(await describeWorkerPlugin(ref));
+      count += 1;
+    } catch (err) {
+      // Fail closed per plugin — an unreachable worker means none load.
+      console.error(
+        `[plugin-loader] ${ref.pluginId}@${ref.version} not loaded:`,
+        (err as Error).message
+      );
+    }
+  }
+  if (count > 0) {
+    console.info(`[plugin-loader] ${count} plugin(s) loaded via the isolated worker`);
   }
 }
 
-/** Validate that the imported object has the required GamePlugin shape. */
-function isValidGamePlugin(obj: unknown): boolean {
-  if (!obj || typeof obj !== 'object') return false;
-  const o = obj as Record<string, unknown>;
-  const manifest = o.manifest as Record<string, unknown> | undefined;
-  if (!manifest || typeof manifest.id !== 'string' || typeof manifest.name !== 'string') {
-    return false;
-  }
-  return (
-    typeof o.createInitialState === 'function' &&
-    typeof o.handleAction === 'function' &&
-    typeof o.renderClient === 'function'
-  );
+/** Put (or replace) a worker-described plugin in the registry. */
+export function registerDynamicPlugin(info: WorkerPluginInfo): void {
+  dynamicPlugins.set(info.id, buildWorkerPlugin(info));
+  if (!loadedPluginIds.includes(info.id)) loadedPluginIds.push(info.id);
 }
 
 /**
@@ -120,12 +116,12 @@ export function listDynamicPluginIds(): string[] {
 }
 
 /**
- * Refresh a single plugin after the install API extracts a new version.
- * In worker mode the WORKER owns loading — we ask it for its current
- * plugin list and sync our registry entry from it.
+ * Re-read one plugin's active record and reload exactly that version
+ * through the worker. The installer registers directly after an
+ * activation; this is for callers that only know the id.
  */
 export async function reloadDynamicPlugin(pluginId: string): Promise<boolean> {
-  if (process.env.LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED !== 'true') {
+  if (!dynamicPluginsEnabled()) {
     console.warn('[plugin-loader] dynamic plugins are disabled (LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED != true)');
     return false;
   }
@@ -134,11 +130,9 @@ export async function reloadDynamicPlugin(pluginId: string): Promise<boolean> {
     return false;
   }
   try {
-    const plugins = await listWorkerPlugins();
-    const info = plugins.find((p) => p.id === pluginId);
-    if (!info) return false;
-    dynamicPlugins.set(info.id, buildWorkerPlugin(info));
-    if (!loadedPluginIds.includes(info.id)) loadedPluginIds.push(info.id);
+    const ref = readActivePointer(pluginInstallDir(), pluginId);
+    if (!ref) return false;
+    registerDynamicPlugin(await describeWorkerPlugin(ref));
     return true;
   } catch (err) {
     console.error(`[plugin-loader] reload via worker failed for "${pluginId}":`, (err as Error).message);

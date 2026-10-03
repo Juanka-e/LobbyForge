@@ -27,6 +27,8 @@ import {
 import { withApiSecurity } from '@/lib/security-headers';
 import { liveKitRoomName } from '@/lib/livekit-room';
 import { getEphemeralTurnIceServers } from '@/lib/turn-credentials';
+import { getVoiceBlock } from '@/lib/voice-block';
+import { VOICE_BLOCKED_CODE } from '@/lib/voice-block-notice';
 import { buildAllowedPublishSources, canPublishAnySource } from '@/lib/voice-moderation';
 import { publishBlockedReason } from '@/lib/voice-publish-state';
 import { getRuntimeLiveKitUrl } from '@/lib/public-endpoints';
@@ -35,8 +37,11 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 const TokenRequestSchema = z.object({
-  serverId: z.string().uuid(),
-  channelId: z.string().uuid(),
+  // Lower-cased so the room name, the voice-block key and the DB lookups
+  // all agree on one spelling of the id (Postgres compares uuids
+  // case-insensitively; Redis keys and room names do not).
+  serverId: z.string().uuid().transform((id) => id.toLowerCase()),
+  channelId: z.string().uuid().transform((id) => id.toLowerCase()),
   // beta-review: accepted for backward compatibility but IGNORED — the
   // participant name is resolved server-side (nickname → profile name) so
   // a member cannot appear under someone else's name in voice.
@@ -73,6 +78,14 @@ async function handler(req: Request): Promise<NextResponse> {
   }
   const voicePermission = await requireServerPermission(session.uid, body.serverId, CorePermission.CONNECT_VOICE);
   if (!voicePermission.ok) return voicePermission.response;
+
+  // AUTHZ-006 follow-up: a member the LiveKit webhook removed for a
+  // mislabelled track is blocked from voice on this server for a while
+  // (lib/voice-block.ts). Without this check they would just fetch a new
+  // token and leak another moment of audio on every attempt.
+  const blocked = await voiceBlockResponse(body.serverId, body.channelId, session.uid);
+  if (blocked) return blocked;
+
   const voiceSettings = await getEffectiveServerVoiceSettings(getDb(), body.serverId);
 
   let apiKey: string;
@@ -226,6 +239,42 @@ async function handler(req: Request): Promise<NextResponse> {
       { status: 500 }
     );
   }
+}
+
+/**
+ * 403 `voice_blocked` (+ `retryAfter` seconds and a Retry-After header)
+ * while the member is blocked from voice on this server; null otherwise.
+ *
+ * When the block list cannot be read, production fails CLOSED with a
+ * retryable 503 — the same rule as session revocation (with Redis down,
+ * withApiSecurity already answers 503 for signed-in calls, so this adds no
+ * new outage) — and dev/test fail open so a stack without Redis still
+ * joins voice.
+ */
+async function voiceBlockResponse(serverId: string, channelId: string, userId: string): Promise<NextResponse | null> {
+  let block: { retryAfterSeconds: number } | null;
+  try {
+    block = await getVoiceBlock({ serverId, channelId }, userId);
+  } catch (err) {
+    console.error('[livekit/token] voice block check unavailable:', (err as Error).message);
+    if (process.env.NODE_ENV !== 'production') return null;
+    return NextResponse.json(
+      { error: 'Voice access cannot be verified — retry shortly.', retryable: true },
+      { status: 503, headers: { 'Cache-Control': 'no-store' } }
+    );
+  }
+  if (!block) return null;
+  return NextResponse.json(
+    {
+      error: 'You were removed from voice on this server for sending a track the server does not allow. Try again later.',
+      code: VOICE_BLOCKED_CODE,
+      retryAfter: block.retryAfterSeconds,
+    },
+    {
+      status: 403,
+      headers: { 'Retry-After': String(block.retryAfterSeconds), 'Cache-Control': 'no-store' },
+    }
+  );
 }
 
 export const POST = withApiSecurity(handler, {

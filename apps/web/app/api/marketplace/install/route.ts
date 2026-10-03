@@ -19,20 +19,22 @@ const InstallSchema = z.object({
  *
  * Admin-only (requireAdminHealthToken). Only works for plugins whose
  * reviewStatus is 'approved'. The bundle is downloaded from the
- * catalog entry's manifestUrl, verified (basic shape check), and
- * extracted to `plugins/installed/<pluginId>/`. The dynamic loader is
- * then reloaded so `getPlugin` resolves the new plugin immediately.
+ * catalog entry's manifestUrl, verified against the reviewed SHA-256
+ * pin and extracted to `<LOBBYFORGE_PLUGIN_INSTALL_DIR>/<pluginId>/<version>/`.
+ * The plugin-worker must load that exact version before it is recorded
+ * as active; the registry then serves it and older versions are deleted
+ * (plugin-installer.ts, plugin-install-layout.ts).
  */
 async function handlePost(req: Request): Promise<NextResponse> {
   const denied = await requireAdminHealthToken(req);
   if (denied) return denied;
 
-  // Dynamic plugin execution is disabled by default until process-level
-  // isolation is implemented. This prevents untrusted code from running
-  // in the web process.
+  // Dynamic plugin execution is opt-in. When enabled, bundles run only in
+  // the isolated plugin-worker container (LF-SEC-010), never in the web
+  // process — the old message here still said "in-process".
   if (process.env.LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED !== 'true') {
     return NextResponse.json(
-      { error: 'Dynamic plugin installation is disabled. Set LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED=true to enable (not recommended — plugins run in-process without isolation).' },
+      { error: 'Dynamic plugin installation is disabled. Set LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED=true to enable it; plugins then run only in the isolated plugin-worker, which isolates reviewed code, not hostile code (ADR-001).' },
       { status: 503 }
     );
   }

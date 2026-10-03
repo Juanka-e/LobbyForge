@@ -9,7 +9,7 @@
  */
 import { and, desc, eq, gt, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
-import { memberships, serverBans, servers, users } from '../schema.js';
+import { memberships, serverBans, serverJoinRequests, servers, users } from '../schema.js';
 
 /**
  * beta-review (S2): SQL predicate "the `memberships` row in the current
@@ -130,6 +130,28 @@ export async function banUser(
     if (!ban) {
       throw new Error('banUser: ban row could not be written');
     }
+
+    // 0043: a ban ends the user's pending join request (the approval
+    // queue) — the moderator who banned them is recorded as the decider.
+    // This runs BEFORE the membership delete on purpose: if an approval is
+    // in flight it holds the request's row lock, so this UPDATE waits for
+    // it to commit, and the DELETE below (a new statement under READ
+    // COMMITTED) then sees and removes the membership it created. In the
+    // other order the DELETE missed the uncommitted membership and the
+    // banned user kept a (deny-listed, but visible) membership row.
+    // `rejectedByBan`: the rejection starts no cooldown — while the ban
+    // lasts it keeps the user out anyway, and once it is lifted (or
+    // expires) the user may ask again at once (getOpenJoinRequest).
+    await tx
+      .update(serverJoinRequests)
+      .set({ status: 'rejected', decidedAt: new Date(), decidedBy: input.bannedBy, rejectedByBan: true })
+      .where(
+        and(
+          eq(serverJoinRequests.serverId, input.serverId),
+          eq(serverJoinRequests.userId, input.userId),
+          eq(serverJoinRequests.status, 'pending')
+        )
+      );
 
     // The CASCADE on membership_roles.membership_id clears role links.
     await tx

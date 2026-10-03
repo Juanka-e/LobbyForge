@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getUserCredentialsById, replaceUserPasswordHash } from '@lobbyforge/db';
 import { requireMaterializedSession } from '@/lib/api-auth';
+import { accountLockedResponse, beginAccountAttempt, clearAccountAttempts } from '@/lib/auth-throttle';
 import { getDb } from '@/lib/db';
 import { revokeDesktopHandoffCodes } from '@/lib/desktop-handoff-codes';
 import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from '@/lib/password';
@@ -35,6 +36,13 @@ async function handlePost(req: Request): Promise<NextResponse> {
     );
   }
 
+  // Security follow-up: a stolen session must not get unlimited guesses at
+  // the current password (that is account takeover: change it, sign the
+  // owner out). Per user, across every IP and session; locked → 429.
+  const subject = { scope: 'password-change', userId: session.session.uid } as const;
+  const attempt = await beginAccountAttempt(subject);
+  if (!attempt.allowed) return accountLockedResponse(attempt.retryAfterSeconds);
+
   const credentials = await getUserCredentialsById(getDb(), session.session.uid);
   const currentHash = credentials?.passwordHash ?? DUMMY_PASSWORD_HASH;
   const currentPasswordValid = await verifyPassword(input.currentPassword, currentHash);
@@ -47,6 +55,7 @@ async function handlePost(req: Request): Promise<NextResponse> {
   ) {
     return NextResponse.json({ error: 'Current password is incorrect.' }, { status: 403 });
   }
+  await clearAccountAttempts(subject);
 
   const newPasswordHash = await hashPassword(input.newPassword);
   const updated = await replaceUserPasswordHash(getDb(), {

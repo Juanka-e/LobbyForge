@@ -1,37 +1,69 @@
 import { gunzipSync } from 'node:zlib';
 /**
- * Plugin installer — downloads, extracts, and validates a marketplace
- * plugin bundle so the dynamic loader can pick it up.
+ * Plugin installer — downloads, extracts, and activates a marketplace
+ * plugin bundle.
  *
- * The bundle is expected to be a tarball (.tgz) served from the
- * catalog entry's `manifestUrl`. After extraction, the plugin's
- * `index.js` is imported and shape-validated before admission.
+ * The bundle is a tarball (.tgz) served from the catalog entry's
+ * `manifestUrl`, verified against the reviewed SHA-256 pin, extracted
+ * into `<root>/<pluginId>/<version>/` (root: LOBBYFORGE_PLUGIN_INSTALL_DIR,
+ * see plugin-install-layout.ts) and loaded by the plugin-worker by exact
+ * version + digest. Only then is it recorded as active; the superseded
+ * version folder is deleted afterwards. Plugin code is never imported here.
  */
 
-import { existsSync, mkdirSync, rmSync, writeFileSync, readdirSync, statSync, lstatSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync, readdirSync, lstatSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { join, resolve, sep } from 'node:path';
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { reloadDynamicPlugin } from './plugin-loader';
+import { registerDynamicPlugin } from './plugin-loader';
+import { describeWorkerPlugin, workerRuntimeConfigured } from './plugin-worker-client';
+import {
+  PLUGIN_ID_RE,
+  VERSION_RE,
+  activateStagedBundle,
+  pluginInstallDir,
+  pruneSupersededVersions,
+} from './plugin-install-layout';
 import { isBlockedNetworkIp } from './ip-ranges';
 import { fetchIpPinned } from './ip-pinned-https';
 
 const execFileAsync = promisify(execFile);
 
-const INSTALLED_DIR = resolve(process.cwd(), 'plugins', 'installed');
 const MAX_BUNDLE_BYTES = 10 * 1024 * 1024; // 10 MB
 const DOWNLOAD_TIMEOUT_MS = 15_000;
 
 export interface InstallResult {
   ok: boolean;
   path?: string;
+  /** The version now recorded as active. */
+  version?: string;
+  /** Digest of the active version's files (what the worker verifies). */
+  digest?: string;
   error?: string;
 }
 
 /**
+ * One install per plugin at a time (the web app is a single process):
+ * activation and pruning read and rewrite the plugin's folder.
+ */
+const installLocks = new Map<string, Promise<unknown>>();
+
+function withPluginLock<T>(pluginId: string, task: () => Promise<T>): Promise<T> {
+  const previous = installLocks.get(pluginId) ?? Promise.resolve();
+  const run = previous.then(task, task);
+  const tail = run.catch(() => undefined);
+  installLocks.set(pluginId, tail);
+  void tail.then(() => {
+    if (installLocks.get(pluginId) === tail) installLocks.delete(pluginId);
+  });
+  return run;
+}
+
+/**
  * Download a plugin bundle from `url`, extract it to
- * `plugins/installed/<pluginId>/<version>/`, and reload the dynamic
- * loader so `getPlugin` resolves it.
+ * `<root>/<pluginId>/<version>/`, have the worker load that exact version,
+ * record it as active, register it and delete superseded versions.
  */
 export async function installPluginBundle(
   pluginId: string,
@@ -45,22 +77,49 @@ export async function installPluginBundle(
    */
   expectedPin?: { sha256: string; sizeBytes: number }
 ): Promise<InstallResult> {
+  // Both are path segments: the id is a folder name, the version too.
+  if (!PLUGIN_ID_RE.test(pluginId)) {
+    return { ok: false, error: `Invalid plugin id "${pluginId}".` };
+  }
   // LF-004: Validate version as strict semver — it's used as a path segment.
-  if (!/^\d+\.\d+\.\d+(-[a-z0-9.-]+)?(\+[a-z0-9.-]+)?$/i.test(version)) {
+  if (!VERSION_RE.test(version)) {
     return { ok: false, error: `Invalid version "${version}" — must be semver (e.g. 1.0.0).` };
   }
+  // Activation needs the worker to load the bundle; without it nothing
+  // could run anyway, so refuse before touching the disk.
+  if (!workerRuntimeConfigured()) {
+    return {
+      ok: false,
+      error:
+        'Dynamic plugins need the isolated plugin-worker: set LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED=true and LOBBYFORGE_PLUGIN_WORKER_URL.',
+    };
+  }
 
-  const targetDir = join(INSTALLED_DIR, pluginId, version);
+  const root = pluginInstallDir();
+  const pluginDir = join(root, pluginId);
 
-  // LF-004: Verify targetDir stays inside INSTALLED_DIR (path traversal guard).
-  const resolvedTarget = resolve(targetDir);
-  if (!resolvedTarget.startsWith(INSTALLED_DIR + sep)) {
+  // LF-004: Verify the version folder stays inside the root (path traversal guard).
+  if (!resolve(pluginDir, version).startsWith(root + sep)) {
     return { ok: false, error: 'Install path escapes the plugin directory. Rejected.' };
   }
 
-  // LF-004: Extract to a staging dir first, then atomically move into place —
-  // a half-failed install never corrupts a previously working version.
-  const stagingDir = join(INSTALLED_DIR, pluginId, `.staging-${Date.now()}`);
+  return withPluginLock(pluginId, () => downloadAndActivate(pluginId, url, version, root, expectedPin));
+}
+
+async function downloadAndActivate(
+  pluginId: string,
+  url: string,
+  version: string,
+  root: string,
+  expectedPin: { sha256: string; sizeBytes: number } | undefined
+): Promise<InstallResult> {
+  // LF-004: Extract to a staging dir first, then move into place — a
+  // half-failed install never corrupts a previously working version. The
+  // tarball itself sits next to the staging dir, so it never ends up in
+  // the bundle folder.
+  const pluginDir = join(root, pluginId);
+  const stagingDir = join(pluginDir, `.staging-${Date.now()}-${randomBytes(4).toString('hex')}`);
+  const tarPath = `${stagingDir}.tgz`;
 
   try {
     // 1. Download the tarball.
@@ -89,45 +148,46 @@ export async function installPluginBundle(
       }
     }
 
-    // 2. Extract into staging.
+    // 2. Write the tarball next to staging and extract into staging.
     mkdirSync(stagingDir, { recursive: true });
-
-    // 3. Write the tarball to staging and extract there.
-    const tarPath = join(stagingDir, 'bundle.tgz');
     writeFileSync(tarPath, Buffer.from(tarball));
     await extractTarball(tarPath, stagingDir);
+    rmSync(tarPath, { force: true });
 
-    // 4. Verify the extracted bundle has an index.js.
-    const indexPath = join(stagingDir, 'index.js');
-    if (!existsSync(indexPath)) {
-      const nested = findIndexJs(stagingDir);
-      if (!nested) {
-        rmSync(stagingDir, { recursive: true, force: true });
-        return { ok: false, error: 'Bundle missing index.js — not a valid LobbyForge plugin.' };
-      }
+    // 3. Move into `<version>/`, have the worker load that exact version +
+    // digest, then record it as active. The previous version stays active
+    // (and on disk) until that record is written; a refusal restores it.
+    const activation = await activateStagedBundle({
+      root,
+      pluginId,
+      version,
+      stagingDir,
+      describe: describeWorkerPlugin,
+    });
+    if (!activation.ok) {
+      return { ok: false, error: activation.error };
     }
 
-    // 5. Atomically move staging into the version dir (replaces any old version).
-    if (existsSync(targetDir)) {
-      rmSync(targetDir, { recursive: true, force: true });
-    }
-    const { renameSync } = await import('node:fs');
-    renameSync(stagingDir, targetDir);
+    // 4. New requests use the new version from here on.
+    registerDynamicPlugin(activation.info);
 
-    // 6. Reload the dynamic loader so the new plugin is immediately available.
-    const reloaded = await reloadDynamicPlugin(pluginId);
-    if (!reloaded) {
-      return { ok: false, error: 'Plugin loaded but failed shape validation. Check server logs.' };
+    // 5. Delete superseded versions. A failure here leaves stale folders
+    // (deleted on the next install), never a broken plugin.
+    try {
+      pruneSupersededVersions(root, pluginId, version);
+    } catch (err) {
+      console.warn(`[plugin-installer] could not prune old versions of "${pluginId}":`, (err as Error).message);
     }
 
-    return { ok: true, path: targetDir };
+    return { ok: true, path: activation.path, version, digest: activation.digest };
   } catch (err) {
     console.error('[plugin-installer] install failed:', (err as Error).message);
-    // Clean up staging — the previous version (if any) stays intact.
-    if (existsSync(stagingDir)) {
-      rmSync(stagingDir, { recursive: true, force: true });
-    }
     return { ok: false, error: (err as Error).message };
+  } finally {
+    // No-ops once staging has been moved into place; otherwise the
+    // previous version (if any) stays intact.
+    rmSync(stagingDir, { recursive: true, force: true });
+    rmSync(tarPath, { force: true });
   }
 }
 
@@ -202,9 +262,24 @@ function isPrivateIp(ip: string): boolean {
  * the POSIX ustar format is stable and parsing it ourselves is exact.
  */
 interface TarEntry {
+  /** The path tar extracts to: ustar `prefix` + '/' + `name` when a prefix is set. */
   name: string;
+  /** The raw path fields (`name`, and `prefix` when set) - each is checked on its own too. */
+  pathFields: string[];
   sizeBytes: number;
   typeflag: string;
+}
+
+/**
+ * Security follow-up: a ustar header splits a long path across `prefix`
+ * (offset 345, 155 bytes) and `name`; tar extracts to `prefix/name`. The
+ * scan used to look at `name` alone, so a `../` hidden in the prefix
+ * passed. Check the joined path and every raw field.
+ */
+function isUnsafeTarPath(entry: TarEntry): boolean {
+  return [entry.name, ...entry.pathFields].some(
+    (path) => path.includes('..') || path.startsWith('/') || path.includes('\\')
+  );
 }
 
 export function parseTarHeaders(uncompressed: Buffer): TarEntry[] {
@@ -216,6 +291,9 @@ export function parseTarHeaders(uncompressed: Buffer): TarEntry[] {
     if (header.every((b) => b === 0)) break;
 
     const name = header.subarray(0, 100).toString('utf8').replace(/ [\s\S]*$/, '');
+    // ustar (POSIX "ustar\0" and GNU "ustar ") carries a path prefix at offset 345.
+    const isUstar = header.subarray(257, 262).toString('latin1') === 'ustar';
+    const prefix = isUstar ? header.subarray(345, 500).toString('utf8').replace(/ [\s\S]*$/, '') : '';
     const sizeField = header.subarray(124, 136);
     const typeflag = String.fromCharCode(header[156]!);
     let size: number;
@@ -229,7 +307,12 @@ export function parseTarHeaders(uncompressed: Buffer): TarEntry[] {
       const octal = sizeField.toString('utf8').replace(/[  ]/g, '');
       size = parseInt(octal, 8) || 0;
     }
-    entries.push({ name, sizeBytes: size, typeflag });
+    entries.push({
+      name: prefix ? `${prefix}/${name}` : name,
+      pathFields: prefix ? [prefix, name] : [name],
+      sizeBytes: size,
+      typeflag,
+    });
 
     const dataBlocks = Math.ceil(size / 512);
     offset += 512 + dataBlocks * 512;
@@ -290,7 +373,7 @@ async function extractTarball(tarPath: string, destDir: string): Promise<void> {
         `Tarball contains a non-regular file entry: ${entry.name} (type "${entry.typeflag}"). Rejected.`
       );
     }
-    if (entry.name.includes('..') || entry.name.startsWith('/') || entry.name.includes('\\')) {
+    if (isUnsafeTarPath(entry)) {
       throw new Error(`Tarball contains an unsafe path: ${entry.name}. Rejected.`);
     }
   }
@@ -327,25 +410,6 @@ function assertNoEscapingSymlinks(dir: string, depth = 0): void {
     if (err instanceof Error && err.message.includes('Rejected')) throw err;
     // ignore walk errors
   }
-}
-
-/** Recursively find an `index.js` in a directory tree (for nested tarballs). */
-function findIndexJs(dir: string): string | null {
-  try {
-    for (const entry of readdirSync(dir)) {
-      const fullPath = join(dir, entry);
-      const stat = statSync(fullPath);
-      if (stat.isDirectory()) {
-        const found = findIndexJs(fullPath);
-        if (found) return found;
-      } else if (entry === 'index.js') {
-        return fullPath;
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return null;
 }
 
 export async function downloadBundleForReview(url: string): Promise<ArrayBuffer> {
@@ -390,7 +454,7 @@ export function scanTarEntries(
     if (!isRegular && !isDir) {
       return { ok: false, error: `Tarball contains a non-regular file entry: ${entry.name} (type "${entry.typeflag}"). Rejected.` };
     }
-    if (entry.name.includes('..') || entry.name.startsWith('/') || entry.name.includes('\\')) {
+    if (isUnsafeTarPath(entry)) {
       return { ok: false, error: `Tarball contains an unsafe path: ${entry.name}. Rejected.` };
     }
   }

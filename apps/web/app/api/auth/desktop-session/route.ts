@@ -9,6 +9,7 @@ import {
   credentialFingerprint,
   storeDesktopHandoffCode,
 } from '@/lib/desktop-handoff-codes';
+import { accountLockedResponse, beginAccountAttempt, clearAccountAttempts } from '@/lib/auth-throttle';
 import { withApiSecurity } from '@/lib/security-headers';
 
 export const dynamic = 'force-dynamic';
@@ -47,12 +48,20 @@ async function handleStart(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'Invalid email or password.' }, { status: 400 });
   }
 
+  // Security follow-up: the SAME per-account failure counter as
+  // /api/auth/login, so the two sign-in doors do not add up to double the
+  // guesses. Counted for unknown emails too; locked → generic 429.
+  const subject = { scope: 'sign-in', email: parsed.data.email } as const;
+  const attempt = await beginAccountAttempt(subject);
+  if (!attempt.allowed) return accountLockedResponse(attempt.retryAfterSeconds);
+
   const user = await getUserCredentialsByEmail(getDb(), parsed.data.email);
   const valid = await verifyPassword(parsed.data.password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
   if (!user || user.deletedAt || !user.passwordHash || !valid) {
     // Same timing-safe shape as /api/auth/login; no account enumeration.
     return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 });
   }
+  await clearAccountAttempts(subject);
 
   // One-time code + state (the TS parser requires 43-128 urlsafe chars).
   const code = randomBytes(32).toString('base64url');

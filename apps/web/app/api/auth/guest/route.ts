@@ -5,7 +5,6 @@ import { findOrCreateGuestUser } from '@lobbyforge/db';
 import {
   buildGuestSessionCookie,
   createGuestIdentity,
-  GUEST_SESSION_TTL_SECONDS,
   readGuestSession,
 } from '@/lib/guest-session';
 import { getDb } from '@/lib/db';
@@ -52,6 +51,11 @@ async function handlePost(req: Request): Promise<NextResponse> {
   }
 
   const secret = getSessionSecret();
+  // Security follow-up (absolute lifetime): `readGuestSession` already
+  // treats a session older than its absolute lifetime as absent, so an
+  // over-age session is never refreshed — the request continues exactly
+  // like one without a cookie (a NEW guest identity, if the instance
+  // allows guests). A signed-in user signs in again.
   let existing = readGuestSession(req.headers.get('cookie'), secret);
   if (existing?.uid) {
     try {
@@ -99,14 +103,20 @@ async function handlePost(req: Request): Promise<NextResponse> {
     }
   }
 
-  const signed = buildGuestSessionCookie(identity, secret, { secure: process.env.NODE_ENV === 'production' });
+  // A refresh keeps the session's original `auth_time` (its expiry is
+  // capped at auth_time + the absolute lifetime). A legacy cookie without
+  // one — and every new session — starts the clock now.
+  const signed = buildGuestSessionCookie(identity, secret, {
+    secure: process.env.NODE_ENV === 'production',
+    authTime: existing?.auth_time,
+  });
 
   // Session fingerprint for the active-sessions feature. beta-review
   // (S7): awaited — this is also the cookie REFRESH path, so it is what
   // keeps every live session listable for `revokeOtherSessions`.
   if (identity.uid) {
     try {
-      await recordSession(identity.uid, identity.gid, req);
+      await recordSession(identity.uid, identity.gid, req, { authTime: signed.payload.auth_time });
     } catch (error) {
       console.error('[auth/guest] session tracking failed:', (error as Error).message);
     }
@@ -114,7 +124,13 @@ async function handlePost(req: Request): Promise<NextResponse> {
 
   return NextResponse.json(
     {
-      guest: { gid: identity.gid, uid: identity.uid, name: identity.name, ttlSeconds: GUEST_SESSION_TTL_SECONDS },
+      guest: {
+        gid: identity.gid,
+        uid: identity.uid,
+        name: identity.name,
+        // One TTL, or less when the session nears its absolute lifetime.
+        ttlSeconds: signed.payload.exp - signed.payload.iat,
+      },
     },
     {
       status: 200,
@@ -134,7 +150,14 @@ async function handleGet(req: Request): Promise<NextResponse> {
   }
   // Fire-and-forget: refresh the session fingerprint on every page-load probe.
   if (session.uid) {
-    void recordSession(session.uid, session.gid, req);
+    const uid = session.uid;
+    void (async () => {
+      try {
+        await recordSession(uid, session.gid, req, { authTime: session.auth_time });
+      } catch (error) {
+        console.error('[auth/guest] session tracking failed:', (error as Error).message);
+      }
+    })();
   }
   return NextResponse.json(
     {
