@@ -12,7 +12,11 @@ import { test, expect } from '@playwright/test';
  * membership, so non-member UUIDs yield 403/404 — that is the assertion.
  */
 
-const NON_MEMBER_SERVER = '00000000-0000-0000-0000-000000000090';
+// A production-mode stack's CSRF guard refuses a POST without an Origin
+// ("Missing request origin", 403) — send the app's own, as a browser would.
+test.use({ extraHTTPHeaders: { Origin: process.env.LF_E2E_BASE_URL ?? 'http://localhost:19520' } });
+
+const NON_MEMBER_SERVER ='00000000-0000-0000-0000-000000000090';
 const NON_MEMBER_CHANNEL = '00000000-0000-0000-0000-000000000091';
 
 test.describe('Chat + presence API boundaries', () => {

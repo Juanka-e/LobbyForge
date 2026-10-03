@@ -8,6 +8,10 @@ import { test, expect } from '@playwright/test';
  * (auto-started by Playwright) + Postgres for guest materialization.
  */
 
+// A production-mode stack's CSRF guard refuses a POST without an Origin
+// ("Missing request origin", 403) — send the app's own, as a browser would.
+test.use({ extraHTTPHeaders: { Origin: process.env.LF_E2E_BASE_URL ?? 'http://localhost:19520' } });
+
 test.describe('Guest auth boundaries', () => {
   test('rejects an overlong displayNameSeed (>48 chars)', async ({ request }) => {
     const res = await request.post('/api/auth/guest', {
