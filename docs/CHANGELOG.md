@@ -2,6 +2,250 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - security follow-ups - 2026-10-03
+
+### CI
+- GitHub Actions supply chain (`docs/SECURITY_REVIEW_2026-10.md` §7.1):
+  every action in every workflow is pinned to a full commit SHA with its
+  version tag as a trailing comment (same majors as before), and
+  Dependabot's `github-actions` updates now run weekly so the pins keep
+  moving. `dtolnay/rust-toolchain` has no version tags: it is pinned to
+  the `stable` branch tip with an explicit `toolchain: stable` and is
+  bumped by hand. Every workflow defaults to `permissions: contents: read`,
+  and write scopes sit only on the jobs that use them. CodeQL gets
+  `security-events: write`. The desktop `publish` job gets
+  `contents: write`. In `release.yml`, `docker-publish` and `promote` get
+  `packages: write` and `github-release` gets `contents: write`. The
+  `desktop` release job no longer inherits the old
+  contents/packages/attestations/id-token write set. The job that reads
+  `LF_RELEASE_SIGNING_KEY` now runs in a `release` environment, which
+  GitHub creates without protection on the next release. The owner must
+  add protection rules (see "Release signing key" in
+  `docs/BETA_RELEASE.md`).
+
+### Voice
+- A member removed for a mislabelled track can no longer rejoin right
+  away (§12, "still open"). LiveKit's `RemoveParticipant` does not revoke
+  tokens, so the webhook now also blocks them from voice on that server
+  (`lib/voice-block.ts`, Redis, server + user): 10 minutes, then 30, then
+  120 for repeat offences within an hour of the previous block ending.
+  The token route answers 403 `voice_blocked` with `retryAfter` (the
+  lobby shows a translated message with the minutes left), failing
+  closed in production if Redis cannot be read. On `participant_joined`
+  the webhook removes a blocked identity again, which covers a token
+  minted before the block. LiveKit tokens now live 10 minutes instead of
+  an hour: LiveKit refreshes the token of a connected participant every
+  5 minutes, so long calls are unaffected, and a removed member's old
+  token dies sooner. TURN credentials keep their own 12 h lifetime.
+  The block covers the whole server, so the webhook also removes the
+  identity from every other live room of that server (a second
+  connection in another voice channel no longer survives it), and the
+  token route lower-cases the server and channel ids so the block key and
+  the room name always agree.
+
+### Hardening
+- Bot tokens (`docs/SECURITY_REVIEW_2026-10.md` §7.7): issuing or
+  rotating a custom bot's token hands over every permission the bot
+  holds, so `POST /api/servers/{id}/bots/{botId}/token` now requires
+  that the caller could grant each of them (the same no-escalation rule
+  as bot create/PATCH; owners always can). Otherwise 403
+  `ungrantable_permissions`. `PATCH /bots/{botId} {enabled:true}` on the
+  built-in Moderation Bot now needs Manage Messages, like
+  `PUT /bots/builtin/moderation`.
+- App allow-lists (§7.7): the channel and role allow-lists saved in
+  server settings → Apps are now enforced when an activity starts. A
+  channel outside a non-empty channel list gets 403
+  `app_channel_not_allowed` (owners included). A starter without one of
+  the listed roles gets 403 `app_role_not_allowed` (owner and
+  administrators bypass). The lobby shows both in English and Turkish.
+- ws-gateway (§7.8): a failed subscribe no longer echoes the error
+  message to the client (Drizzle errors carry the SQL). The client gets
+  `internal_error` / "Subscription failed" and the detail goes to the
+  log. Topic ids must be UUIDs before any database lookup; anything else
+  is `unknown_topic`.
+- Games use the platform CSPRNG (§7.8): Hushle card draws, team ids and
+  the room split, Dice Bot rolls, and Quiz's question and option order
+  (the built-in packs are public, so a predictable shuffle would place the
+  correct answer) now use `crypto.getRandomValues`
+  (the helper Vampire Village already used) instead of `Math.random`,
+  whose state can be recovered from a few outputs. Injected RNGs in tests
+  still work.
+- Presence bandwidth (§7.8): a client-reported `bandwidthDeltaBytes` is
+  clamped per report and counted against a per-user hourly budget in
+  Redis (`lf:{env}:bw:user:{uid}:{hour}`), so a member can report at most
+  14.4 GB per hour (240 MB per report). That limits how far one member
+  can push the counters, but it can still trip the admin bandwidth
+  alert: the threshold is operator-set, the budget allows about 346 GB a
+  day, and every guest account has its own budget. Both numbers come
+  from a generous 32 Mbit/s (4 MB/s) per participant: 60 s per report
+  (a hidden tab's throttled timer; the heartbeat itself runs every 5 s)
+  and 3600 s per hour.
+- SSRF transport (§7.8): `fetchIpPinned` adds a response-header timeout
+  (default: the idle timeout) and a total deadline (default: three times
+  the idle timeout, so 45 s for plugin downloads and 30 s for directory
+  verification), and it accepts a caller `AbortSignal`. Before, a server
+  dripping one byte at a time could hold a request open indefinitely.
+  `isBlockedNetworkIp` (web and registry) now blocks IPv4-compatible
+  `::/96` addresses, and it judges 6to4 `2002::/16` addresses by the IPv4
+  address embedded in them, so `2002:7f00:1::` counts as 127.0.0.1.
+  Teredo (`2001::/32`, whose embedded IPv4 is obfuscated) and the
+  local-use NAT64 prefix `64:ff9b:1::/48` are blocked outright.
+- Plugin tarballs (§7.8): the pre-extraction scan joins the ustar
+  `prefix` field (offset 345) with `name`, as tar does, and checks the
+  joined path and each field. A `../` hidden in the prefix is rejected.
+- `lfctl` (§7.8): `update apply` refuses to run when no release public
+  key is found. Default paths (the release key, `.env.prod`, the compose
+  file, deployment state, `backups/`, `infra/keys`) resolve from the
+  checkout the script lives in, not the current directory. Run from
+  another directory, the default key used to be missed, so the manifest
+  counted as unsigned and its `imageDigest` could be deployed. Paths
+  given on the command line still resolve from the cwd, and `LFCTL_ROOT`
+  overrides the root. On POSIX, `backup create` makes a new backup
+  directory 0700 and every dump and manifest 0600. An existing `--out`
+  directory keeps its mode, with a warning when others can read it.
+  Side effect: an apply now always verifies the manifest's signature, and
+  a verified manifest must carry an `imageDigest`, so the old unsigned
+  local-build path cannot run.
+
+### Accounts and sessions
+- Per-account sign-in limit (`docs/SECURITY_REVIEW_2026-10.md` §7.3):
+  `POST /api/auth/login` and the desktop handoff start
+  (`POST /api/auth/desktop-session`) share a failure counter keyed by the
+  normalised email. After 10 failures in 15 minutes every further attempt
+  gets the generic 429 with `Retry-After` until the window ends, whether
+  or not the password is right; a successful sign-in clears it. Attempts
+  are counted atomically before the password check, so parallel requests
+  cannot add guesses. Unknown emails count and lock exactly like real
+  ones (the dummy-hash path stays), so the limit tells nothing about which
+  accounts exist. `POST /api/auth/password` allows 5 wrong current
+  passwords per 15 minutes per user, across all sessions. Redis keys hold
+  an HMAC of the email, never the address. If Redis is down in production
+  the attempt is refused, like the per-IP limiter. Trade-off: anyone who
+  knows an address can keep that account's sign-in locked in 15-minute
+  stretches.
+- Absolute session lifetime (§7.4): `POST /api/auth/guest` could refresh a
+  session forever. Cookies now carry `auth_time` (when the session was
+  first issued). A refresh keeps it and never signs an expiry past
+  `auth_time` + `LOBBYFORGE_SESSION_MAX_AGE_DAYS` (default 30). An over-age
+  session is signed out for API routes, pages and the ws-gateway, and the
+  refresh route treats it like no session: a new guest identity, or the
+  access-policy error. A signed-in user signs in again. Guest sessions are
+  included, since a guest's identity is the cookie. The active-sessions
+  list hides over-age sessions; "sign out other sessions" still revokes
+  them. Compatibility: existing cookies keep working, their clock starts
+  at their next refresh, and nobody is signed out by the upgrade.
+- Google sign-in: the Google name goes through the registration
+  display-name schema (2–64 characters, no control characters). A name
+  that fails it gets a generated `Guest xxxx` name. The email address is
+  never used as the public name, which happened when Google sent no name.
+  The OAuth state and redirect cookies are read by exact name: the old
+  regexes also matched cookies whose names only ended in `lf_oauth_state`
+  or `lf_oauth_redirect`.
+- Trusted proxy (§7.5): production without `LOBBYFORGE_TRUSTED_PROXY`
+  still starts (no existing install is refused), but every client shares
+  one rate-limit bucket. Doctor now reports this as a `trusted_proxy`
+  warning with the fix, and the console warning is logged once per
+  process instead of on every rate-limited request. The docs now say
+  `cloudflare` is only safe when the origin accepts traffic from
+  Cloudflare alone. With the bundled nginx, use `cf-real-ip.conf` with
+  `x-forwarded-for`.
+
+### Communities
+- Join approval queue (replaces the AUTHZ-004 stopgap). A server whose
+  access policy holds newcomers for approval no longer turns everyone
+  away: an invite redeem or the lobby's "Ask to join" files a join request
+  (migration 0043, `server_join_requests`, one pending request per user)
+  and answers 202 `pending_approval`. The join page and the lobby say the
+  request is waiting, or that it was declined. A moderator with Kick
+  members or Manage server approves or rejects it in Community Settings →
+  Members (`GET /api/servers/{id}/join-requests`,
+  `POST …/join-requests/{requestId}`). Approval creates the membership
+  like the auto-join (`@everyone`, stored timeout / server mute), greets
+  the member and audits `member.join_approved`; rejection audits
+  `member.join_rejected` and blocks a new request for 7 days. The
+  requester can withdraw (`DELETE …/join-requests/mine`) and leave an
+  optional note (≤ 500 characters). Bans win: a banned user cannot ask, a
+  ban rejects the pending request, approval re-checks it. A request takes
+  one use of the invite when it is filed (once per person and code), so a
+  code cannot queue more people than its `maxUses`. At most 5 requests per
+  server and user a day. Registration still refuses an approval policy.
+  See `docs/INVITES.md` and `docs/ROLES.md`.
+- Join approval queue, review follow-ups: opening `/lobby` no longer files
+  a request (a GET — or a cross-site link — put any signed-in visitor,
+  free guests included, in the queue). The "community unavailable" page
+  shows an "Ask to join" form with an optional note
+  (`POST /api/servers/{id}/join-requests/mine`, only for the community the
+  lobby auto-join serves, same rules and limits as an invite) and a
+  "Withdraw request" button while one is pending. Withdrawing and asking
+  again through the same invite no longer burns a use each time: a user's
+  later requests through a code they already used take none. A rejection
+  written by a ban (flagged `rejected_by_ban`, a column in 0043) starts no
+  7-day cooldown, so an unbanned user may ask again at once. Non-UUID
+  server and request ids answer 404 instead of 500, `member.join_*` audit
+  rows no longer carry the invite code, and a failed withdraw on the join
+  page shows a translated message instead of a status code.
+- Access-policy default: a server that never saved an access policy showed
+  "Invite only" in its settings, while registration (which only applies a
+  saved policy) allowed sign-up without an invite on an open instance.
+  Saving the values shown then closed registration. The default now reads
+  "Public self-register", which is what such a server has always enforced,
+  so nothing changes for existing instances and saving the displayed
+  values changes nothing. The column default follows (0043). Registration
+  reads the saved policy through one helper
+  (`serverPolicyRegistrationRefusal`).
+
+### Plugins
+These fix the marketplace (dynamic) plugin path, which is off unless
+`LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED=true` (`docs/EXTENDING.md` §3.5).
+Unit and route tests cover them; no end-to-end test runs this path on a
+real stack yet.
+- A marketplace plugin keeps its state between actions. Its `migrateState`
+  is an RPC to the plugin-worker, so it returns a Promise. The activity
+  GET, SSE snapshot and actions routes, including the CAS retry loop,
+  used that Promise without `await`. The reducer got `{}` on every
+  action, and readers saw `{}`. Every call site now awaits it. Official
+  plugins return plain values, so nothing changes for them.
+- One install directory: `LOBBYFORGE_PLUGIN_INSTALL_DIR`, default
+  `/app/plugins/installed`. The installer resolved `plugins/installed`
+  from its working directory (`/app/apps/web` in the image). That is not
+  on the `plugins-data` volume, so the worker never saw an install. The
+  installer, the loader and the worker now share the setting; the worker
+  still accepts the old name, `PLUGINS_DIR`. Compose sets the same value
+  on web (read-write) and plugin-worker (read-only).
+- Exact versions, and old versions removed. The installer records the
+  active version and a SHA-256 digest of its files in
+  `<pluginId>/active.json` on the volume. The web app sends that exact
+  version and digest with every worker call. The worker re-hashes the
+  folder and refuses a missing version (404) or a mismatch (409). Before,
+  it ran the alphabetically last folder, so `1.9.0` won over `1.10.0`.
+  An upgrade keeps the previous version active until the worker has
+  loaded the new one; then the old folder is deleted. A refused bundle
+  leaves the previous version active. The worker's `list` op is gone, and
+  `describe` takes the exact version.
+- Bundles must be self-contained. The installer refuses a bundle without
+  `index.js` at its root; a nested one was accepted but could never load.
+  The worker checks the exported plugin's shape. An import it cannot
+  resolve now fails with a message to bundle every dependency
+  (`react` and `@lobbyforge/plugin-sdk` included). The downloaded tarball
+  is no longer left in the version folder. `docs/PLUGIN_PUBLISHING.md` no
+  longer says to externalize them, that plugins run in-process, or that
+  the catalog is shared between instances.
+- The install API's "disabled" error no longer says plugins run
+  in-process without isolation.
+- Operators: nothing to do. No earlier install could reach the worker,
+  so there is nothing to migrate. A plugin folder without `active.json`
+  is ignored: install it again.
+
+### Data
+- Migration 0042 deletes the audit rows that leaked hidden game
+  information before the PLUG-001 fix: Vampire Village player actions
+  (night targets, shields, pack chat, votes …) and poll votes. Host
+  actions and every other plugin's rows stay — old Watch Party rows
+  include what were host actions before 2026-09-29.
+- A ban that races a join approval now waits for the approval to commit
+  and removes the membership it created (the ban updates the request
+  before deleting the membership).
+
 ## [Unreleased] - security review fixes - 2026-10-03
 
 The whole-codebase review in `docs/SECURITY_REVIEW_2026-10.md` found one

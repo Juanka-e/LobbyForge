@@ -34,7 +34,7 @@ client ── ICE: client-to-SFU direct ──► LiveKit SFU (udp 50000-60000)
   credential pair: `username = ${unixExpiry}:${userId}`,
   `credential = base64(HMAC-SHA1(secret, username))`. The token
   endpoint (`/api/livekit/token`) ships one alongside every LiveKit
-  token (1h, matching the token TTL).
+  token (12 h, independent of the 10-minute LiveKit token TTL).
 - `infra/livekit/livekit.yaml.template` — NO `turn_servers` entries:
   LiveKit's config only accepts a STATIC credential, which used to hand
   every community member one permanent relay credential. Do not re-add

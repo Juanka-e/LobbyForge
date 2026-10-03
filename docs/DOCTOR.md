@@ -82,6 +82,7 @@ The function is pure and exhaustive over the tier — Vitest covers all branches
 | `redis` | services | info | `redisReachable === false` ⇒ `CRITICAL` |
 | `livekit_signaling` | services | info | `livekitReachable === false` ⇒ `CRITICAL` |
 | `turn_configured` | media | info | TURN missing **and** UDP looks blocked ⇒ `WARNING` |
+| `trusted_proxy` | network | info | production with `LOBBYFORGE_TRUSTED_PROXY` unset, `none` or unrecognised ⇒ `WARNING` (every client shares one rate-limit bucket; the message carries the fix). Added by `collectDoctorReport` from the environment via `buildTrustedProxyCheck` |
 
 `null` reachability always renders as `ok: true, level: 'info'` with the message *"… has not been probed yet"*. This is what keeps the very first 60-second ping from being noisy.
 

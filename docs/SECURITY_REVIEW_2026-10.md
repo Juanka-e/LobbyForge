@@ -859,16 +859,32 @@ kopyasında uygulandı. Uçtan uca sonuçlar için PR açıklamasına bakın.
   Var olan kurulumlarda webhook, ayarlar yeniden render edilince açılıyor
   (`bash install.sh`). İstemci katmanı güncellemeyle hemen geliyor.
 
-Hâlâ açık (bu turda kapsam dışı):
-- Atılan katılımcı yeniden bağlanabiliyor: LiveKit OSS `RemoveParticipant`
-  token'ı geçersiz kılmıyor. Değiştirilmiş bir istemci her denemede, ham bir
-  istemcinin duyabileceği kısa bir ses parçası sızdırabilir. Uygulamanın
-  kendi dinleyicileri bunu çalmıyor.
-- Geçmişte yazılmış `activity.action` denetim satırları hâlâ duruyor; tek
-  seferlik bir temizlik düşünülebilir.
-- Onay kuyruğu yok (AUTHZ-004 şimdilik katılımı reddediyor).
-- Kayıtlı erişim politikası yokken GET `invite_only` gösteriyor ama davetsiz
-  kayda izin veriliyor. Aynı değerler kaydedilince kayıt kapanıyor. Eskiden
-  kalan bir tutarsızlık.
-- §7'deki sertleştirme önerilerinin çoğu (CI action sabitleme, hesap
-  başına giriş sınırı, mutlak oturum ömrü vb.).
+### Takip turu (2026-10-03, `fix/security-followups`)
+
+Yukarıda açık kalan maddeler ve §7'deki sertleştirmeler:
+
+| Madde | Durum |
+|---|---|
+| Odadan atılan katılımcı yeniden bağlanabiliyordu | ✅ Atılan kullanıcı o sunucunun sesinden engelleniyor (10 → 30 → 120 dk) ve sunucunun diğer odalarındaki bağlantıları da kapatılıyor. Yeni token verilmiyor (`voice_blocked`). Eski token'la katılırsa `participant_joined` webhook'u onu hemen atıyor. LiveKit token ömrü 1 saatten 10 dakikaya indi; LiveKit bağlı katılımcının token'ını kendisi yeniliyor. |
+| Eski oyun denetim satırları | ✅ Migration 0042, gizli bilgi sızdıran satırları siliyor: Vampire Village oyuncu aksiyonları ve anket oyları. Host aksiyonları, diğer eklentiler ve eski Watch Party'nin host kayıtları korunuyor; gerçek Postgres'te doğrulandı. |
+| Onay kuyruğu yoktu | ✅ `server_join_requests` (0043). Davet ve otomatik katılım istek oluşturuyor; `KICK_MEMBERS` ya da `MANAGE_SERVER` yetkisi olan onaylıyor veya reddediyor. Ban her zaman öncelikli, yaptırımlar onayda uygulanıyor. Ret sonrası 7 gün bekleme, günde en fazla 5 istek. |
+| Varsayılan erişim politikası tutarsızlığı | ✅ Kayıtlı politika yokken gösterilen ve uygulanan değer artık aynı (`public_self_register`). Gösterilen değerleri kaydetmek davranışı değiştirmiyor. |
+| CI action sabitleme ve izinler | ✅ 57 `uses:` satırının hepsi SHA'ya sabitlendi. Varsayılan izin `contents: read`, yayın işlerine yalnızca gereken izinler veriliyor. İmzalama anahtarı `release` ortamına bağlandı (repo ayarlarında koruma kuralı sahibin işi). |
+| Hesap başına giriş sınırı | ✅ E-posta başına 15 dakikada 10 hata; login ve masaüstü girişi ortak sayaç kullanıyor. Bilinmeyen e-posta da aynı şekilde sayıldığı için hesap tespiti yapılamıyor. Şifre değişikliğinde kullanıcı başına 15 dakikada 5 deneme. |
+| Mutlak oturum ömrü | ✅ Çerezdeki `auth_time` alanından itibaren 30 gün (`LOBBYFORGE_SESSION_MAX_AGE_DAYS`). Eski çerezler ilk yenilemede saymaya başlıyor. |
+| Diğer §7 maddeleri | ✅ Bot token döndürme ve Moderation Bot PATCH yetki kontrolleri. Gateway hata mesajı sızıntısı ve UUID doğrulaması. Hushle, zar ve Quiz'de kripto rastgelelik. Sahte bant genişliği raporlarına sınır. `fetchIpPinned` toplam süre sınırı; `::/96`, 6to4, Teredo ve yerel NAT64 engeli. Tar `prefix` alanı. `lfctl` açık anahtar zorunluluğu ve 0700/0600 izinler. Uygulamaların kanal/rol izin listelerinin uygulanması. Google adı doğrulaması. Proxy ayarı için Doctor uyarısı. |
+| Marketplace eklenti yolu | ✅ `migrateState` artık bekleniyor; önceden state aksiyonlar arasında kayboluyordu. Kurulum ve worker aynı dizini kullanıyor. Yalnızca aktif olarak kaydedilen sürüm ve digest yükleniyor. İç içe paket reddediliyor. Bkz. `docs/EXTENDING.md`. |
+
+Hâlâ açık:
+- E-postayı bilen biri, yanlış şifre deneyerek o hesabın girişini 15
+  dakikalık aralıklarla kilitleyebilir. Hesap başına sınırın bilinen
+  ödünleşimi.
+- Kural dışı sayılan dürüst bir istemci (beklenmedik bir tarayıcı hatası)
+  10 dakika sesten engellenir.
+- Plugin worker hâlâ tek UID'de çalışıyor (ADR-001); marketplace eklentileri
+  düşmanca koda karşı tam izole değil.
+- `style-src 'unsafe-inline'` CSP'de duruyor.
+- Repo ayarlarında yapılacaklar: `release` ortamına `v*` koruma kuralı,
+  `LF_RELEASE_SIGNING_KEY`'i ortama taşımak, Dependabot uyarılarını açmak.
+  Ayrıca `infra/keys/release-ed25519-private.pem` dosyasını repo
+  klasöründen taşımak.

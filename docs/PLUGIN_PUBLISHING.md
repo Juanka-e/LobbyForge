@@ -14,8 +14,18 @@ LobbyForge plugins follow a **two-tier distribution model**:
 
 Community plugins do **not** need to be in the LobbyForge repository. You
 publish the built bundle on your own hosting (GitHub Releases, CDN, npm) and
-submit the URL to the marketplace. After admin review, other instances can
-discover and install it.
+submit the URL to the marketplace of the instance that will run it. The
+catalog is **per instance**: an entry approved on one instance (including
+the official one) does not appear on any other. After that instance's
+owner approves it, the owner can install it there.
+
+**Know the limits first.** The marketplace path is off by default and
+experimental. A marketplace plugin runs only in the isolated
+`plugin-worker` container. It has no panel (`renderClient` is never
+called, see ADR-002 in [ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md)),
+all its actions are host-only, and viewers receive its full state. If you
+need any of that, compile the plugin into your image instead
+([EXTENDING.md §3.3–3.5](EXTENDING.md#33-path-a-compile-your-plugin-into-your-image-recommended)).
 
 ## Step 1 — Write the plugin
 
@@ -28,7 +38,7 @@ my-awesome-game/
   src/
     index.ts        ← exports `plugin: GamePlugin`
     state.ts         ← your game state types + reducer
-    renderClient.tsx ← the React panel players see
+    renderClient.tsx ← the React panel (not rendered for marketplace plugins yet)
 ```
 
 ### `package.json`
@@ -40,18 +50,24 @@ my-awesome-game/
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
-    "build": "tsc"
+    "typecheck": "tsc --noEmit",
+    "build": "esbuild src/index.ts --bundle --format=esm --platform=node --target=node22 --jsx=automatic --outfile=bundle/index.js"
   },
-  "peerDependencies": {
+  "devDependencies": {
     "@lobbyforge/plugin-sdk": "*",
+    "esbuild": "^0.28.0",
     "react": "^19"
   }
 }
 ```
 
-**Critical:** list `@lobbyforge/plugin-sdk` and `react` as
-`peerDependencies`, not regular dependencies. The host provides them at
-runtime — your bundle must externalize them (not bundle them in).
+**Critical:** the bundle must be **self-contained**. The plugin-worker
+imports it from the install directory, where no `node_modules` exist, so
+nothing is provided at runtime: `react`, `@lobbyforge/plugin-sdk` and
+every other import are bundled into `index.js`. A bundle that leaves one
+external is refused at install with `ERR_MODULE_NOT_FOUND … bundle every
+dependency`. Inside the LobbyForge monorepo, point `@lobbyforge/plugin-sdk`
+at `workspace:*` and run `pnpm build:packages` first.
 
 ### `src/index.ts`
 
@@ -130,28 +146,25 @@ pnpm install
 pnpm build
 ```
 
-This produces `dist/index.js` (ESM), `dist/renderClient.js`, and type files.
-Verify the output is ESM:
+This produces one ESM file, `bundle/index.js`. Check that no package
+import is left in it (this should print nothing):
 
 ```sh
-head -1 dist/index.js
-# Should start with: import { ... } or export { ... }
+grep -nE "^import .* from ['\"][^./]" bundle/index.js
 ```
 
 ## Step 3 — Package as a tarball
 
 ```sh
-cd dist
-tar czf ../my-awesome-game-1.0.0.tgz .
-cd ..
+tar -czf my-awesome-game-1.0.0.tgz -C bundle .
 ```
 
-The tarball must contain `index.js` at the root level (no `package/` wrapper).
-Verify:
+The tarball must contain `index.js` at the root level (no `package/`
+wrapper); the installer refuses it otherwise. Verify:
 
 ```sh
 tar tzf my-awesome-game-1.0.0.tgz | head -5
-# Should show: ./index.js, ./renderClient.js, etc.
+# Should show: ./ and ./index.js
 ```
 
 ## Step 4 — Publish the tarball
@@ -170,10 +183,12 @@ Host the `.tgz` file somewhere publicly accessible:
 
 ## Step 5 — Submit to the marketplace
 
-On the official LobbyForge instance:
+On the instance that will run the plugin (the catalog is per instance),
+as any signed-in user:
 
 ```sh
-curl -X POST https://app.lobbyforge.dev/api/marketplace/submit \
+curl -X POST https://chat.example.com/api/marketplace/submit \
+  -H "Origin: https://chat.example.com" \
   -H "Content-Type: application/json" \
   -H "Cookie: lf_guest=..." \
   -d '{
@@ -191,22 +206,29 @@ curl -X POST https://app.lobbyforge.dev/api/marketplace/submit \
   }'
 ```
 
-Or use the UI at `/marketplace` → "Submit a plugin".
+There is no submit form; use the API.
 
 ## Step 6 — Admin review
 
 Your submission enters the review queue with `reviewStatus: 'pending'`.
-An admin reviews it at `/admin/moderation`:
+The instance owner reviews it at `/admin/moderation`:
 
-- **Approve** → plugin appears in the public marketplace browse page.
+- **Approve** → the server downloads the tarball and pins its SHA-256 and
+  size; the plugin appears on that instance's `/marketplace` page.
 - **Reject** → you get feedback and can resubmit.
 
-Once approved, any LobbyForge instance admin can:
-1. Browse it at `/marketplace`
-2. Click **Install** → the server downloads the tarball, extracts it to
-   `plugins/installed/<pluginId>/<version>/`, and the dynamic loader picks
-   it up at boot (or immediately via reload).
-3. Enable it per-server via the existing Apps panel.
+Once approved, the instance owner can (with
+`LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED=true`):
+1. Browse it at `/marketplace`.
+2. Click **Install** → the server downloads the tarball again, checks it
+   against the pinned digest, extracts it to
+   `<LOBBYFORGE_PLUGIN_INSTALL_DIR>/<pluginId>/<version>/` (compose sets
+   `/app/plugins/installed`, on the volume the plugin-worker mounts
+   read-only), has the worker load that exact version and only then
+   records it as the active one.
+3. Enable it per server with `POST /api/servers/{id}/apps`
+   `{"pluginId":"…","enabled":true}`. The Apps panel and the activity
+   picker list compiled-in plugins only.
 
 ## Versioning & updates
 
@@ -215,17 +237,31 @@ To release a new version:
 1. Bump `version` in your plugin's `manifest` and `package.json`.
 2. Build + tarball + publish the new version.
 3. Re-submit to the marketplace with the same `pluginId` but new `version`
-   + updated `manifestUrl`. The catalog entry is upserted.
+   + updated `manifestUrl`. The catalog entry is updated and goes back to
+   `pending`: it must be approved again (which pins the new bundle)
+   before it can be installed.
 
-Installing a new version overwrites the old one on disk (the install path
-includes the version directory).
+Installing the new version extracts it next to the old one. The old
+version keeps running until the worker has loaded the new one; then the
+old folder is deleted. If the worker refuses the new bundle, the old
+version stays active. The active version and a digest of its files are
+recorded in `<pluginId>/active.json`, and every worker call names that
+exact version — the worker refuses anything else. Running sessions carry
+on with the new reducer, and their saved state goes through your
+`migrateState` first, so version your state.
 
 ## Security notes
 
-- Your bundle runs **server-side** (the reducer) and **client-side** (the
-  React panel). It executes in the host process — there is no sandbox.
-- The host wraps your `handleAction` and `createInitialState` in `try/catch`
-  so a crash won't take down the API, but you should still test thoroughly.
+- Your bundle runs **server-side only**, in the isolated `plugin-worker`
+  container: a fresh child process per call with an empty environment, a
+  128 MB heap and a 10 s budget, no host secrets, a read-only plugin
+  directory and an internal network only. Your panel is not rendered
+  (ADR-002). The worker is built for **reviewed** code, not hostile code
+  (ADR-001), so expect the instance owner to read your bundle.
+- The host turns a crash or timeout in your code into a failed request,
+  so it won't take down the API, but you should still test thoroughly.
+- `ctx.storage` reaches the host's database through a short-lived
+  capability scoped to one community and your plugin.
 - Do not import `@lobbyforge/db`, `ioredis`, `postgres`, or any Node-only
   module — your plugin should be a pure reducer + React component.
 - The `permissions` array in your manifest declares what your plugin can

@@ -94,6 +94,28 @@ rewritten to `CF-Connecting-IP`; direct connections keep their real
 address. Refresh the ranges from <https://www.cloudflare.com/ips/> when
 Cloudflare announces changes.
 
+### Which `LOBBYFORGE_TRUSTED_PROXY` to use
+
+The app keys rate limits (sign-in included) on the client address, and it
+only believes the header named by `LOBBYFORGE_TRUSTED_PROXY`:
+
+- **Bundled nginx (this guide): keep `LOBBYFORGE_TRUSTED_PROXY=x-forwarded-for`**
+  (the installer's default) and install `cf-real-ip.conf` as above. nginx
+  then rewrites the address only for connections that really come from
+  Cloudflare and passes the result on as `X-Forwarded-For`, so a visitor
+  who reaches the origin directly still gets their own address.
+- **`LOBBYFORGE_TRUSTED_PROXY=cloudflare`** makes the app read
+  `CF-Connecting-IP` itself. That is only safe when the origin accepts
+  traffic **from Cloudflare alone** (firewall limited to Cloudflare's
+  ranges, or a Cloudflare Tunnel). Otherwise anyone who finds the server's
+  IP can connect directly and send any `CF-Connecting-IP` they like — a
+  fresh rate-limit bucket on every request, or a victim's address to lock
+  them out. nginx forwards that header untouched.
+- **Unset (or `none`) in production**: every visitor shares one rate-limit
+  bucket, so one client can lock everyone out of sign-in. The app still
+  starts (existing installs are not refused); it logs a warning once and
+  Admin → Health (Doctor) shows a `trusted_proxy` warning with this fix.
+
 ## Without Cloudflare (the default path)
 
 No Cloudflare account needed: point DNS at the server, open ports
@@ -109,6 +131,7 @@ later (re-run the installer with the own-certificate option).
 |---------|-------------|
 | Voice connects for some users, never for others | TURN hostname proxied — set it DNS-only; verify UDP ranges open on the host firewall |
 | `curl https://<domain>` works, app shows CF IPs in logs | `cf-real-ip.conf` not installed / nginx not restarted |
+| Everyone gets "Rate limit exceeded" at once; Doctor shows `trusted_proxy` | `LOBBYFORGE_TRUSTED_PROXY` unset — set it to `x-forwarded-for` in `.env.prod` and recreate `web` |
 | Browser certificate warning | SSL/TLS mode is not Full (strict), or you grey-clouded a hostname while using an Origin cert |
 | WS connects then drops every ~100s | A proxy in between without WebSocket support — keep the hostname proxied only via Cloudflare, which supports WS |
 | certbot log spam | Expected with an origin certificate — nothing renews, ignore |

@@ -34,15 +34,25 @@ getInviteByCode(db, code)
 listInvitesForServer(db, serverId)            // joins `servers` to filter out soft-deleted
 getInviteMetadata(db, code)                   // public projection (no PII)
 revokeInvite(db, inviteId)                    // hard delete
-redeemInvite(db, code, userId)                // transactional SELECT FOR UPDATE
+redeemInvite(db, code, userId, { note? })     // transactional SELECT FOR UPDATE
 ```
+
+The approval queue lives in [`packages/db/src/queries/joinRequests.ts`](../packages/db/src/queries/joinRequests.ts)
+(`fileJoinRequest`, `autoJoinServer`, `requestToJoinServer`,
+`hasFiledThroughInvite`, `listJoinRequestsForServer`, `approveJoinRequest`,
+`rejectJoinRequest`, `cancelJoinRequest`, `getOpenJoinRequest`) — see
+[Approval queue](#approval-queue).
 
 `redeemInvite` returns a discriminated union:
 
 ```ts
 type RedeemInviteResult =
   | { ok: true; membershipId: string; serverId: string; roleId: string }
-  | { ok: false; error: 'not_found' | 'expired' | 'exhausted' | 'already_member' | 'no_everyone_role' };
+  | { ok: false; error: 'not_found' | 'expired' | 'exhausted' | 'already_member' | 'no_everyone_role' | 'banned' }
+  // held for approval (no membership):
+  | { ok: false; error: 'pending_approval'; serverId: string; request: JoinRequestRow; created: boolean }
+  | { ok: false; error: 'join_rejected'; serverId: string; retryAfter: Date }
+  | { ok: false; error: 'join_request_limit'; serverId: string };
 ```
 
 The error map is a route-layer concern (the route layer maps it to status codes — see "Endpoints" below).
@@ -55,7 +65,7 @@ The error map is a route-layer concern (the route layer maps it to status codes 
 | `POST`   | `/api/servers/{id}/invites`              | `CREATE_INVITE` | `{ maxUses?: 1..1000, expiresAt?: ISO8601 }` | 201 / 400 / 403 / 404 | 10 / min |
 | `DELETE` | `/api/servers/{id}/invites/{inviteId}`   | `MANAGE_ROLES`  | — | 200 / 400 / 403 / 404 | 10 / min |
 | `GET`    | `/api/invites/{code}`                    | Public  | — | 200 / 400 / 404 | 60 / min |
-| `POST`   | `/api/invites/{code}/redeem`             | Session + `uid` | — | 201 / 400 / 401 / 404 / 409 / 410 / 503 | 30 / min |
+| `POST`   | `/api/invites/{code}/redeem`             | Session + `uid` | `{ note?: string ≤ 500 }` (optional; only used under an approval policy) | 201 / 202 / 400 / 401 / 403 / 409 / 429 / 503 | 10 / min |
 
 The body of `POST /api/servers/{id}/invites` is validated by:
 
@@ -96,13 +106,19 @@ No PII (no `createdBy`, no use list) — that's what the authenticated `GET /api
 | `expired`         | 410    | `{ "error": "Invite has expired" }`   |
 | `exhausted`       | 410    | `{ "error": "Invite has reached its use limit" }` |
 | `no_everyone_role`| 500    | `{ "error": "Server is missing the @everyone role. This is a server-side bug." }` |
-| `approval_required` | 403  | `{ "error": "...", "code": "approval_required" }` — the server's access policy holds newcomers for approval (`requireApprovalForFirstJoin`, `joinPolicy: public_with_approval` or `accountLinking: require_admin_approval_first_join`, read exactly as registration reads them). There is no approval queue yet, so the redeem is refused; the `/lobby` auto-join refuses too (security-review AUTHZ-004). |
+| `pending_approval` | **202** | `{ "status": "pending_approval", "request": { "id", "serverId", "createdAt" } }` — the server's access policy holds newcomers for a moderator, so a join request was filed (or the user's pending one returned). See [Approval queue](#approval-queue). |
+| `join_rejected` | 403 | `{ "error": "...", "code": "join_rejected", "retryAfter": ISO8601 }` — a moderator rejected the user's last request; they cannot ask again until `retryAfter`. |
+| `join_request_limit` | 429 | `{ "error": "...", "code": "join_request_limit" }` — too many requests to this server in 24 hours. |
 
 A redeem (and the `/lobby` auto-join) starts the new membership with the
 timeout / server mute stored in `server_member_sanctions` (migration 0040),
 so leaving and rejoining does not lift a sanction (security-review
 AUTHZ-002). A timed-out member cannot create invites (403, same body as the
 message routes).
+
+(`not_found`, `expired`, `exhausted` and `banned` all answer 403 with the
+same `Invite is unavailable` / `You are banned` bodies — the table above is
+the query's vocabulary, the route keeps the outward answers uniform.)
 
 On success (201), it returns:
 
@@ -115,6 +131,145 @@ On success (201), it returns:
   }
 }
 ```
+
+## Approval queue
+
+A server whose access policy holds newcomers for a moderator —
+`requireApprovalForFirstJoin`, `joinPolicy: public_with_approval` or
+`accountLinking: require_admin_approval_first_join`
+(`accessPolicyRequiresApproval`) — admits nobody without a decision. The
+owner is never held out of their own server; existing members are never
+re-checked.
+
+**Filing a request.** Two explicit, same-origin POSTs file a row in
+`server_join_requests` (migration 0043) instead of a membership and answer
+**202 `pending_approval`**:
+
+- `POST /api/invites/{code}/redeem` (source `invite`). The join page offers
+  the optional note when `GET /api/invites/{code}` says
+  `requiresApproval: true`.
+- `POST /api/servers/{id}/join-requests/mine` (source `auto_join`) — the
+  lobby's **Ask to join** button. Without an invite only the community the
+  `/lobby` auto-join serves can be asked: the instance's first community,
+  for its owner or, on an open-registration instance, anyone who could have
+  registered into it (guests only while guest access is on —
+  `resolveAutoJoinServerId` in `apps/web/lib/lobby-auto-join.ts`, shared
+  with the lobby). Any other server answers 403 `invite_required`.
+
+Both take an optional `{ note }` (≤ 500 characters), shown to the
+moderators, and follow the same rules below.
+
+**The lobby never files a request on a page load.** Opening `/lobby`
+(`autoJoinServer`) still joins a community that needs no approval, but
+under an approval policy it only reports where the user stands — a GET,
+possibly a cross-site top-level link, must not put anyone (a free guest
+included) in the queue. The "community unavailable" page then shows an
+**Ask to join** form (an optional note + button) when the user has no
+request, "Waiting for approval" with **Check again** and **Withdraw
+request** while one is pending (also for a request an invite filed on an
+invite-only instance), or "declined" during a cooldown. Where the user may
+not auto-join and has no request, it says to ask a moderator for an
+invite (previously "could not load the community data"). After either
+button the server-rendered page is refreshed (`router.refresh()`), so it
+always shows what the server knows.
+
+- **One pending request per (server, user)** — a partial unique index
+  (`server_join_requests_one_pending_unique`, SQL-only). Redeeming again,
+  or pressing Ask to join again, returns the same pending request.
+- **Bans win.** A banned user gets 403 `banned` and no request; banning a
+  user rejects their pending request (`banUser`); approval re-checks the
+  ban and rejects instead of admitting.
+- **Rejection cooldown.** After a moderator's rejection the user cannot
+  ask again for 7 days (`JOIN_REQUEST_REJECTION_COOLDOWN_MS`): 403
+  `join_rejected` with `retryAfter`, and the lobby says the request was
+  declined.
+- **No cooldown from a ban.** A rejection written *by* a ban (`banUser`,
+  or an approval that found the user banned) is flagged
+  `rejected_by_ban` and starts no cooldown (`getOpenJoinRequest` ignores
+  it). While the ban lasts it keeps the user out anyway; once it is lifted
+  — or a timed ban expires — the user may ask again at once instead of
+  waiting out 7 days for a decision nobody made about their request. The
+  flag needs a column because the ban row is deleted on unban, so nothing
+  else could tell the two rejections apart afterwards.
+- **Flood limits.** At most 5 requests per (server, user) per 24 hours,
+  whatever became of them (429 `join_request_limit`; a cancel → re-request
+  loop stops there), on top of the routes' per-address rate limits (10 /
+  min for the redeem and for Ask to join).
+- **Registration** still refuses an approval policy (403): a local account
+  is not created for a join a moderator may reject. Guests and existing
+  accounts ask through an invite or the lobby.
+
+**Invite uses — one per person and code.** A user's *first* request
+through a code takes one use of the invite, inside the same transaction
+that locks the invite row. Nothing else takes one: not a repeat redeem of
+a pending request, not the approval, and not a new request by the same
+user through the same code after they withdrew or after a rejection's
+cooldown (`hasFiledThroughInvite`: any earlier request of theirs with this
+`invite_code` on this server, whatever its status). Such a re-request also
+skips the "exhausted" check — the user already holds a use, possibly the
+code's last — but not the expiry check. The user's own pending request (or
+a rejection in its cooldown) is returned *before* the expiry / use checks
+too, so it never locks them out of seeing it.
+
+Why this and not a refund on withdraw: counting uses at approval would let
+a `maxUses: 1` code posted publicly put any number of strangers in the
+queue, so uses are taken when the request is filed. A refund on withdraw
+would hand the freed use to the next stranger — file, withdraw, next
+account — and the code would no longer bound how many people it puts in
+front of the moderators. Charging once per person keeps `maxUses` meaning
+"how many people may ask through this code" and stops the burn (file →
+withdraw → file used to take up to 5 uses a day from one account). A
+rejected or cancelled request never gives its use back.
+
+**Deciding.** Moderators with **KICK_MEMBERS or MANAGE_SERVER** (see
+[ROLES.md](./ROLES.md#join-requests)) review the queue in Community
+Settings → Members (the "Join requests" section):
+
+| Method | Path | Who | Body | Status | Rate limit |
+|---|---|---|---|---|---|
+| `GET` | `/api/servers/{id}/join-requests?status=pending\|all&limit=&offset=` | KICK_MEMBERS or MANAGE_SERVER | — | 200 / 400 / 401 / 403 / 404 | 60 / min |
+| `POST` | `/api/servers/{id}/join-requests/{requestId}` | KICK_MEMBERS or MANAGE_SERVER | `{ action: 'approve' \| 'reject' }` | 200 / 400 / 403 / 404 / 409 | 30 / min |
+| `GET` | `/api/servers/{id}/join-requests/mine` | the requester | — | 200 / 401 / 404 | 60 / min |
+| `POST` | `/api/servers/{id}/join-requests/mine` | a signed-in non-member the lobby auto-join serves | `{ note?: string ≤ 500 }` (optional) | 202 / 400 / 401 / 403 / 404 / 409 / 429 | 10 / min |
+| `DELETE` | `/api/servers/{id}/join-requests/mine` | the requester | — | 200 / 401 / 404 | 10 / min |
+
+A server id or request id that is not a UUID answers **404** on every one
+of these routes, before any database call (Postgres would throw on the
+cast → 500).
+
+- The list shows pending requests first, oldest first (`status=all`
+  appends decided ones, newest decision first), with `pendingCount` and
+  `nextOffset` (`limit` ≤ 100). Each row carries the requester's name,
+  guest flag, account age, source (`invite` / `auto_join`), the note, and
+  who created the invite used. The invite code itself is shown only to
+  MANAGE_SERVER holders (beta-review F7). A pending request whose user
+  joined some other way meanwhile is left out.
+- **Approve** creates the membership exactly like the auto-join
+  (`createMembershipWithEveryone`: `@everyone`, plus the timeout / server
+  mute stored in `server_member_sanctions`), in one transaction with the
+  request row locked, so two moderators cannot both decide it. It greets
+  the member (Welcome Bot, `notifyMemberJoined`) and audits
+  `member.join_approved`. A plain join publishes no realtime event, so
+  neither does an approval. 409 `not_pending` when the request was already
+  decided; 409 `banned` when the user was banned meanwhile.
+- **Reject** audits `member.join_rejected` and starts the cooldown.
+- **Scoped to the URL's server.** The request row is looked up by id AND
+  the server in the URL — the server whose permissions were checked — so a
+  moderator of server A who sends server B's request id gets 404 and
+  nothing changes (proven against real Postgres in
+  `join-requests.integration.test.ts`).
+- **Audit metadata** is `{ requestId, source }` (plus `membershipId` on
+  approval) — never the invite code. Moderators who read the audit log may
+  lack MANAGE_SERVER, and invite codes are for MANAGE_SERVER holders only
+  (beta-review F7); masking them in the audit reader would be one more
+  place to get wrong, and the request id already leads a manager to the
+  code in the join-request list.
+- **Mine** returns only the caller's own pending request (or a moderator's
+  rejection in its cooldown, with `retryAfter`) — no membership needed, no
+  note or moderator echoed back. `POST` is the lobby's Ask to join (see
+  "Filing a request": 403 `banned` / `join_rejected` / `invite_required`,
+  409 `already_member` / `approval_not_required`, 429
+  `join_request_limit`). `DELETE` withdraws a pending request.
 
 ## The transactional redeem
 
