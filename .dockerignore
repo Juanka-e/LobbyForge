@@ -26,6 +26,16 @@ design_stitch
 infra/keys
 infra/certbot
 backups
+# security-review INFRA-002: configs rendered by install.sh /
+# render-configs.sh carry the TURN shared secret (and the operator's
+# domain); install.sh renders them into the working tree right before
+# `up -d --build`, and the plugin worker runs this same image. The image
+# only needs infra/update (manifests + release public key).
+infra/turn/turnserver.conf
+infra/livekit/livekit.yaml
+infra/nginx/conf.d/*.conf
+.install-staging*
+**/*.log
 **/*.dump
 **/*.pem
 !infra/update/release-public.pem

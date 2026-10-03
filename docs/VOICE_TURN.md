@@ -96,6 +96,27 @@ connection quality in the room UI.
 | 5 | Symmetric NAT (e.g. some hotel Wi-Fi) | TURN/UDP relay | hardest case |
 | 6 | VPN exit node | STUN via VPN egress | |
 
+**First, prove the relay is NOT open** (security-review INFRA-001). An
+unauthenticated Allocate must be refused with 401; coturn silently runs
+as an anonymous open relay when it cannot read its config, and voice
+still works in that state:
+
+```bash
+node scripts/turn-auth-probe.mjs your.domain 3478
+# exit 0: "answered 401 — authentication is enforced"
+# exit 2: "ACCEPTED an unauthenticated allocation — OPEN RELAY" → stop and
+#         check `docker logs lobbyforge-turn` for "Cannot find config file"
+```
+
+The container starts as root (`user: "0:0"` in the prod compose, with
+every capability dropped except SETUID, SETGID, DAC_READ_SEARCH, KILL and
+the binary's own NET_BIND_SERVICE, plus `no-new-privileges`) so the 0600
+config and the Let's Encrypt key are readable; `proc-user` / `proc-group`
+in the config drop turnserver to `nobody:nogroup` with an empty
+capability set after initialisation, and `infra/turn/cert-watcher.sh`
+refuses to start turnserver at all when the config is unreadable or lacks
+REST auth.
+
 Quick relay smoke checks from a laptop:
 
 ```bash
