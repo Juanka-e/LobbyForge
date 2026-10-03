@@ -111,9 +111,12 @@ export function readActivePointer(root: string, pluginId: string): ActivePluginV
 export function writeActivePointer(root: string, pointer: ActivePluginVersion): void {
   const dir = join(root, pointer.pluginId);
   const tmp = join(dir, `.${ACTIVE_POINTER_FILE}.${process.pid}.${Date.now()}`);
+  // `wx`: create exclusively (never follow or overwrite something already
+  // at that name); 0600 — only the web process reads it back.
   writeFileSync(
     tmp,
-    `${JSON.stringify({ version: pointer.version, digest: pointer.digest, activatedAt: new Date().toISOString() })}\n`
+    `${JSON.stringify({ version: pointer.version, digest: pointer.digest, activatedAt: new Date().toISOString() })}\n`,
+    { flag: 'wx', mode: 0o600 }
   );
   renameSync(tmp, join(dir, ACTIVE_POINTER_FILE));
 }

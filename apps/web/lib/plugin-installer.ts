@@ -181,7 +181,9 @@ async function downloadAndActivate(
 
     return { ok: true, path: activation.path, version, digest: activation.digest };
   } catch (err) {
-    console.error('[plugin-installer] install failed:', (err as Error).message);
+    // One line, no control characters: the message can carry catalogue
+    // data (plugin ids, versions, URLs) that must not forge log entries.
+    console.error('[plugin-installer] install failed:', JSON.stringify((err as Error).message));
     return { ok: false, error: (err as Error).message };
   } finally {
     // No-ops once staging has been moved into place; otherwise the

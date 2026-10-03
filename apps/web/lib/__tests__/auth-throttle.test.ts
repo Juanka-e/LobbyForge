@@ -18,7 +18,7 @@ import {
 } from '../auth-throttle.js';
 
 const signIn = (email: string) => ({ scope: 'sign-in', email }) as const;
-const passwordChange = (userId: string) => ({ scope: 'password-change', userId }) as const;
+const reauthSubject = (userId: string) => ({ scope: 'reauth', userId }) as const;
 
 async function attempts(subject: Parameters<typeof beginAccountAttempt>[0], n: number) {
   const results = [];
@@ -63,12 +63,12 @@ describe('beginAccountAttempt (in-process store)', () => {
     await attempts(signIn('a@example.com'), 10);
     expect((await beginAccountAttempt(signIn('a@example.com'))).allowed).toBe(false);
     expect((await beginAccountAttempt(signIn('b@example.com'))).allowed).toBe(true);
-    expect((await beginAccountAttempt(passwordChange('a@example.com'))).allowed).toBe(true);
+    expect((await beginAccountAttempt(reauthSubject('a@example.com'))).allowed).toBe(true);
   });
 
   it('allows 5 current-password attempts per user', async () => {
     expect(PASSWORD_CHANGE_ACCOUNT_LIMIT).toEqual({ maxAttempts: 5, windowMs: 15 * 60_000 });
-    const results = await attempts(passwordChange('user-1'), 6);
+    const results = await attempts(reauthSubject('user-1'), 6);
     expect(results.map((r) => r.allowed)).toEqual([true, true, true, true, true, false]);
   });
 

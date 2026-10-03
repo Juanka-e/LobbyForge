@@ -4,7 +4,7 @@
  * active version + digest, activation that keeps the previous version
  * until the worker has loaded the new one, and pruning afterwards.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -53,7 +53,7 @@ const describeOk = (name = 'Game') =>
   vi.fn(async (ref: { pluginId: string; version: string; digest: string }) => ({ id: ref.pluginId, name, ...ref }));
 
 beforeEach(() => {
-  root = join(tmpdir(), `lf-plugin-layout-${process.pid}-${Date.now()}`);
+  root = mkdtempSync(join(tmpdir(), 'lf-plugin-layout-'));
   mkdirSync(root, { recursive: true });
 });
 

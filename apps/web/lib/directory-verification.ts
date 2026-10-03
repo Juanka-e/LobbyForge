@@ -83,7 +83,9 @@ export async function fetchVerificationDocument(
   try {
     res = await ssrfSafeGet(wellKnown);
   } catch (err) {
-    console.warn(`[${logTag}] verification fetch failed for ${wellKnown}: ${(err as Error).message}`);
+    // JSON-quoted: the URL and the error come from the requested domain
+    // and must not forge log entries.
+    console.warn(`[${logTag}] verification fetch failed for ${JSON.stringify(wellKnown)}: ${JSON.stringify((err as Error).message)}`);
     return unavailable;
   }
   if (!res.ok) {

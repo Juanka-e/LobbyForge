@@ -39,7 +39,7 @@ async function handlePost(req: Request): Promise<NextResponse> {
   // Security follow-up: a stolen session must not get unlimited guesses at
   // the current password (that is account takeover: change it, sign the
   // owner out). Per user, across every IP and session; locked → 429.
-  const subject = { scope: 'password-change', userId: session.session.uid } as const;
+  const subject = { scope: 'reauth', userId: session.session.uid } as const;
   const attempt = await beginAccountAttempt(subject);
   if (!attempt.allowed) return accountLockedResponse(attempt.retryAfterSeconds);
 

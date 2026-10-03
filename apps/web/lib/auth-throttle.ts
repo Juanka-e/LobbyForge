@@ -42,7 +42,7 @@ export const PASSWORD_CHANGE_ACCOUNT_LIMIT: AccountLimit = { maxAttempts: 5, win
 
 export type AccountSubject =
   | { scope: 'sign-in'; email: string }
-  | { scope: 'password-change'; userId: string };
+  | { scope: 'reauth'; userId: string };
 
 export type AccountAttempt = { allowed: true } | { allowed: false; retryAfterSeconds: number };
 

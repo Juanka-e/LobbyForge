@@ -18,6 +18,14 @@ vi.mock('@/lib/password', () => ({
 vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));
 vi.mock('@/lib/session-tracker', () => ({ revokeOtherSessions }));
 vi.mock('@/lib/desktop-handoff-codes', () => ({ revokeDesktopHandoffCodes }));
+// The per-account limiter has its own tests (lib/__tests__/auth-throttle.test.ts
+// and the account-limit route tests). Here it always allows: under
+// NODE_ENV=production it would otherwise reach for Redis, which CI lacks.
+vi.mock('@/lib/auth-throttle', () => ({
+  beginAccountAttempt: async () => ({ allowed: true }),
+  clearAccountAttempts: async () => undefined,
+  accountLockedResponse: () => new Response(null, { status: 429 }),
+}));
 
 const secret = 'x'.repeat(32);
 const userId = '00000000-0000-0000-0000-000000000001';
