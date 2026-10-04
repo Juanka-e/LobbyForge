@@ -8,7 +8,7 @@ import {
   SetupAlreadyCompleteError,
 } from '../queries/instanceSettings.js';
 import { createLocalAccount } from '../queries/users.js';
-import { createInvite } from '../queries/invites.js';
+import { createInvite, redeemInvite } from '../queries/invites.js';
 import {
   createUserIdentityLink,
   getIdentityLinkByProviderSubject,
@@ -188,6 +188,78 @@ describe('Database Integrations', () => {
     } finally {
       await db.delete(invites).where(eq(invites.id, invite.id));
       if (userId) await db.delete(users).where(eq(users.id, userId));
+    }
+  }, 15000);
+
+  // The redeem locked the invite with a raw `tx.execute`, which hands back
+  // `expires_at` as the driver's string: every invite WITH an expiry threw
+  // on `.getTime()` (a 500), on redeem and on sign-up through the invite.
+  // The tests above only ever used invites without one.
+  it('redeems an invite with a future expiry and refuses an expired one', async () => {
+    const db = createDb(url);
+    const setup = await ensureDefaultInstanceBootstrapped(db);
+    if (!setup.firstServerId || !setup.ownerUserId) throw new Error('Default instance is not bootstrapped');
+    const nonce = crypto.randomUUID();
+    const hour = 60 * 60 * 1000;
+    const valid = await createInvite(db, {
+      serverId: setup.firstServerId,
+      createdBy: setup.ownerUserId,
+      expiresAt: new Date(Date.now() + hour),
+    });
+    const expired = await createInvite(db, {
+      serverId: setup.firstServerId,
+      createdBy: setup.ownerUserId,
+      expiresAt: new Date(Date.now() - hour),
+    });
+    const created = await db
+      .insert(users)
+      .values([
+        { displayName: `Expiry Valid ${nonce}` },
+        { displayName: `Expiry Late ${nonce}` },
+      ])
+      .returning({ id: users.id });
+    const [onTime, late] = created;
+    if (!onTime || !late) throw new Error('Expiry integration users were not created');
+    const signUpEmail = `invite-expiry-${nonce}@example.invalid`;
+    let signUpUserId: string | undefined;
+
+    try {
+      const redeemed = await redeemInvite(db, valid.code, onTime.id);
+      expect(redeemed).toMatchObject({ ok: true, serverId: setup.firstServerId });
+      const joined = await db
+        .select({ id: memberships.id })
+        .from(memberships)
+        .where(and(eq(memberships.serverId, setup.firstServerId), eq(memberships.userId, onTime.id)));
+      expect(joined).toHaveLength(1);
+
+      expect(await redeemInvite(db, expired.code, late.id)).toEqual({ ok: false, error: 'expired' });
+      const refused = await db
+        .select({ id: memberships.id })
+        .from(memberships)
+        .where(and(eq(memberships.serverId, setup.firstServerId), eq(memberships.userId, late.id)));
+      expect(refused).toHaveLength(0);
+
+      // Sign-up through an invite runs the same redeem inside its transaction.
+      const signUp = await createLocalAccount(db, {
+        email: signUpEmail,
+        displayName: 'Invite Expiry Sign-up',
+        passwordHash: '$test$not-a-real-password-hash',
+        inviteCode: valid.code,
+      });
+      expect(signUp.ok).toBe(true);
+      if (signUp.ok) signUpUserId = signUp.user.id;
+
+      const [stored] = await db
+        .select({ currentUses: invites.currentUses })
+        .from(invites)
+        .where(eq(invites.id, valid.id));
+      expect(stored?.currentUses).toBe(2);
+    } finally {
+      await db.delete(invites).where(eq(invites.id, valid.id));
+      await db.delete(invites).where(eq(invites.id, expired.id));
+      await db.delete(users).where(eq(users.id, onTime.id));
+      await db.delete(users).where(eq(users.id, late.id));
+      if (signUpUserId) await db.delete(users).where(eq(users.id, signUpUserId));
     }
   }, 15000);
 

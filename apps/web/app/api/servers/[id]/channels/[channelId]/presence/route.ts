@@ -74,7 +74,7 @@ async function handleGet(
       return NextResponse.json({ error: 'Channel not found' }, { status: 404 });
     }
     const presences = await getUserPresenceInChannel(channelId);
-    const filtered = await Promise.all(
+    const projected = await Promise.all(
       presences.map(async (presence) => {
         const settings = await getUserSettings(getDb(), presence.userId);
         return applyPresencePrivacy(presence, settings?.privacy ?? DEFAULT_USER_PRIVACY_SETTINGS, {
@@ -83,6 +83,10 @@ async function handleGet(
         });
       })
     );
+    // Every entry of this list sits in THIS channel, so a hidden status
+    // would still say where the user is: leave such users out (the viewer
+    // always sees themselves — applyPresencePrivacy never hides self).
+    const filtered = projected.filter((presence) => presence.status !== 'hidden');
     return NextResponse.json(
       { presences: filtered },
       { headers: { 'Cache-Control': 'no-store' } }

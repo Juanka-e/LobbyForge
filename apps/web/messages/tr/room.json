@@ -1,4 +1,5 @@
 {
+  "room.activity.conflict": "Aynı anda çok fazla oyuncu hamle yaptı. Yeniden dene.",
   "room.activity.end": "Bitir",
   "room.activity.meta": "durum: {status} · oyuncu: {count}",
   "room.activity.title": "Etkinlik: {name}",

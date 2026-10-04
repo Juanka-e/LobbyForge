@@ -12,6 +12,7 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { randomInt } from 'node:crypto';
 import type { DbClient } from '../client.js';
+import { isPgUniqueViolation } from '../pg-errors.js';
 import { invites, membershipRoles, memberships, roles, serverBans, servers } from '../schema.js';
 import { EVERYONE_ROLE_NAME } from './roles.js';
 import { getMemberSanction, membershipValuesFromSanction } from './memberSanctions.js';
@@ -105,10 +106,8 @@ export async function createInvite(
       if (!row) throw new Error('createInvite: insert returned no rows');
       return row as InviteRow;
     } catch (err) {
-      // Postgres unique violation → retry with a fresh code.
-      const isUniqueViolation =
-        err && typeof err === 'object' && 'code' in err && (err as { code: string }).code === '23505';
-      if (!isUniqueViolation) throw err;
+      // Postgres unique violation (Drizzle wraps it) → retry with a fresh code.
+      if (!isPgUniqueViolation(err)) throw err;
     }
   }
   throw new Error('createInvite: failed to generate a unique code after 5 attempts');
@@ -280,30 +279,23 @@ export async function redeemInvite(
   options: { note?: string | null } = {}
 ): Promise<RedeemInviteResult> {
   return db.transaction(async (tx) => {
-    // 1. Lock the invite row.
-    const inviteRows = await tx.execute<{
-      id: string;
-      server_id: string;
-      max_uses: number | null;
-      current_uses: number;
-      expires_at: Date | null;
-    }>(sql`
-      SELECT id, server_id, max_uses, current_uses, expires_at
-      FROM ${invites}
-      WHERE code = ${code}
-      FOR UPDATE
-    `);
-    type LockedInvite = {
-      id: string;
-      server_id: string;
-      max_uses: number | null;
-      current_uses: number;
-      expires_at: Date | null;
-    };
-    const normalizedRows = Array.isArray(inviteRows)
-      ? inviteRows as unknown as LockedInvite[]
-      : (inviteRows as unknown as { rows?: LockedInvite[] }).rows ?? [];
-    const invite = normalizedRows[0];
+    // 1. Lock the invite row. Through the query builder, not a raw
+    //    `tx.execute(sql…)`: a raw result skips Drizzle's column mapping,
+    //    so `expires_at` arrived as the driver's STRING and the expiry check
+    //    below threw (`getTime is not a function`) — every invite with an
+    //    expiry failed to redeem with a 500.
+    const [invite] = await tx
+      .select({
+        id: invites.id,
+        serverId: invites.serverId,
+        maxUses: invites.maxUses,
+        currentUses: invites.currentUses,
+        expiresAt: invites.expiresAt,
+      })
+      .from(invites)
+      .where(eq(invites.code, code))
+      .limit(1)
+      .for('update');
     if (!invite) {
       return { ok: false as const, error: 'not_found' as RedeemInviteError };
     }
@@ -319,7 +311,7 @@ export async function redeemInvite(
       .select({ expiresAt: serverBans.expiresAt })
       .from(serverBans)
       .where(
-        and(eq(serverBans.serverId, invite.server_id), eq(serverBans.userId, userId))
+        and(eq(serverBans.serverId, invite.serverId), eq(serverBans.userId, userId))
       )
       .limit(1);
     if (banRows.length > 0 && (!banRows[0]?.expiresAt || banRows[0].expiresAt.getTime() > Date.now())) {
@@ -330,7 +322,7 @@ export async function redeemInvite(
     const existingMember = await tx
       .select({ id: memberships.id })
       .from(memberships)
-      .where(and(eq(memberships.userId, userId), eq(memberships.serverId, invite.server_id)))
+      .where(and(eq(memberships.userId, userId), eq(memberships.serverId, invite.serverId)))
       .limit(1);
     if (existingMember.length > 0) {
       return { ok: false as const, error: 'already_member' as RedeemInviteError };
@@ -342,14 +334,14 @@ export async function redeemInvite(
     // refuses such a policy before it gets here; an invite must not be a
     // way around the queue.
     const executor = tx as unknown as DbClient;
-    const needsApproval = await isNewMemberApprovalRequired(executor, invite.server_id, userId);
+    const needsApproval = await isNewMemberApprovalRequired(executor, invite.serverId, userId);
     if (needsApproval) {
-      const open = await getOpenJoinRequest(executor, invite.server_id, userId);
+      const open = await getOpenJoinRequest(executor, invite.serverId, userId);
       if (open?.status === 'pending') {
-        return { ok: false as const, error: 'pending_approval' as const, serverId: invite.server_id, request: open, created: false };
+        return { ok: false as const, error: 'pending_approval' as const, serverId: invite.serverId, request: open, created: false };
       }
       if (open) {
-        return { ok: false as const, error: 'join_rejected' as const, serverId: invite.server_id, retryAfter: joinRequestRetryAfter(open) };
+        return { ok: false as const, error: 'join_rejected' as const, serverId: invite.serverId, retryAfter: joinRequestRetryAfter(open) };
       }
     }
     // Invite-use burning: an earlier request of this user through this
@@ -360,30 +352,30 @@ export async function redeemInvite(
     // queues; this way `maxUses` is "how many people may ask through it".
     const alreadyHoldsUse =
       needsApproval &&
-      (await hasFiledThroughInvite(executor, { serverId: invite.server_id, userId, inviteCode: code }));
+      (await hasFiledThroughInvite(executor, { serverId: invite.serverId, userId, inviteCode: code }));
 
     // 4. Expired?
-    if (invite.expires_at && invite.expires_at.getTime() < Date.now()) {
+    if (invite.expiresAt && invite.expiresAt.getTime() < Date.now()) {
       return { ok: false as const, error: 'expired' as RedeemInviteError };
     }
     // Exhausted? (Not for a requester whose own earlier request took the use.)
-    if (!alreadyHoldsUse && invite.max_uses !== null && invite.current_uses >= invite.max_uses) {
+    if (!alreadyHoldsUse && invite.maxUses !== null && invite.currentUses >= invite.maxUses) {
       return { ok: false as const, error: 'exhausted' as RedeemInviteError };
     }
 
     if (needsApproval) {
       const filed = await fileJoinRequest(executor, {
-        serverId: invite.server_id,
+        serverId: invite.serverId,
         userId,
         source: 'invite',
         inviteCode: code,
         note: options.note ?? null,
       });
       if (filed.kind === 'limited') {
-        return { ok: false as const, error: 'join_request_limit' as const, serverId: invite.server_id };
+        return { ok: false as const, error: 'join_request_limit' as const, serverId: invite.serverId };
       }
       if (filed.kind === 'rejected') {
-        return { ok: false as const, error: 'join_rejected' as const, serverId: invite.server_id, retryAfter: filed.retryAfter };
+        return { ok: false as const, error: 'join_rejected' as const, serverId: invite.serverId, retryAfter: filed.retryAfter };
       }
       // A request filed by THIS redeem takes one use of the invite (the
       // row is locked above), so one code cannot flood the queue past
@@ -398,7 +390,7 @@ export async function redeemInvite(
       return {
         ok: false as const,
         error: 'pending_approval' as const,
-        serverId: invite.server_id,
+        serverId: invite.serverId,
         request: filed.request,
         created: filed.created,
       };
@@ -410,7 +402,7 @@ export async function redeemInvite(
     const everyoneRows = await tx
       .select({ id: roles.id })
       .from(roles)
-      .where(and(eq(roles.serverId, invite.server_id), eq(roles.name, EVERYONE_ROLE_NAME)))
+      .where(and(eq(roles.serverId, invite.serverId), eq(roles.name, EVERYONE_ROLE_NAME)))
       // Role names are not unique: the real @everyone is the lowest, oldest.
       .orderBy(asc(roles.position), asc(roles.createdAt))
       .limit(1);
@@ -422,11 +414,11 @@ export async function redeemInvite(
     // 6. Insert the membership. security-review AUTHZ-002: a returning
     //    member starts with the timeout / server mute they left with —
     //    leave + redeem used to hand them a clean row.
-    const sanction = await getMemberSanction(executor, invite.server_id, userId);
+    const sanction = await getMemberSanction(executor, invite.serverId, userId);
     const [member] = await tx
       .insert(memberships)
       .values({
-        serverId: invite.server_id,
+        serverId: invite.serverId,
         userId,
         roleId: everyoneId,
         ...membershipValuesFromSanction(sanction),
@@ -451,7 +443,7 @@ export async function redeemInvite(
     return {
       ok: true as const,
       membershipId: member.id,
-      serverId: invite.server_id,
+      serverId: invite.serverId,
       roleId: everyoneId,
     };
   });

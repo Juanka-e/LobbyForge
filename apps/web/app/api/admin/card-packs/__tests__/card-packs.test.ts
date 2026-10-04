@@ -26,7 +26,11 @@ const dbFns = {
   logAction: vi.fn().mockResolvedValue(undefined),
 };
 
-vi.mock('@lobbyforge/db', () => dbFns);
+vi.mock('@lobbyforge/db', async () => ({
+  ...dbFns,
+  // The real classifier: it must also see a code Drizzle wrapped in `cause`.
+  isPgUniqueViolation: (await vi.importActual<typeof import('@lobbyforge/db')>('@lobbyforge/db')).isPgUniqueViolation,
+}));
 
 vi.mock('@/lib/security-headers', () => ({
   withApiSecurity: (handler: unknown) => handler,

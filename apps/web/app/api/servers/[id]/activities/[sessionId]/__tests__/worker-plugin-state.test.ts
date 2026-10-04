@@ -45,6 +45,12 @@ const dbFns = vi.hoisted(() => ({
     store.row = { ...store.row, state: structuredClone(state), revision: rev + 1 };
     return { ok: true, row: structuredClone(store.row) };
   }),
+  // The session's write lock hands its callback the row as it stands now.
+  withGameSessionWriteLock: vi.fn(
+    async (_db: unknown, _id: string, fn: (tx: unknown, row: unknown) => Promise<unknown>) =>
+      fn({ __mockTx: true }, structuredClone(store.row))
+  ),
+  GameSessionBusyError: class GameSessionBusyError extends Error {},
   users: { id: 'users.id', displayName: 'users.display_name' },
 }));
 vi.mock('@lobbyforge/db', () => dbFns);
@@ -211,20 +217,24 @@ describe('worker-backed plugin: state survives between actions', () => {
     });
   });
 
-  it('the CAS retry re-migrates the fresh row (awaited inside the loop)', async () => {
+  it('a row another action wrote while this one waited for the lock is re-migrated (awaited)', async () => {
     seedRow('counter', { count: 0, log: [] });
-    // Someone else commits first: revision 3 → 4 with count 5.
-    dbFns.setGameSessionStateCAS.mockImplementationOnce(async () => {
-      store.row = { ...store.row, state: { count: 5, log: ['other'] }, revision: 4 };
-      return { ok: false, row: structuredClone(store.row) };
-    });
+    // Someone else commits first: revision 3 → 4 with count 5, between the
+    // route's first read and its turn under the session's write lock.
+    dbFns.withGameSessionWriteLock.mockImplementationOnce(
+      async (_db: unknown, _id: string, fn: (tx: unknown, row: unknown) => Promise<unknown>) => {
+        store.row = { ...store.row, state: { count: 5, log: ['other'] }, revision: 4 };
+        return fn({ __mockTx: true }, structuredClone(store.row));
+      }
+    );
 
     const res = await act({ type: 'bump' });
     expect(res.status).toBe(200);
     const calls = handleActionCalls();
-    expect(calls).toHaveLength(2);
-    expect(calls[1]!.state).toEqual({ count: 5, log: ['other'], schema: 2 });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.state).toEqual({ count: 5, log: ['other'], schema: 2 });
     expect(store.row.state).toEqual({ count: 6, log: ['other', 'bump'], schema: 2 });
+    expect(dbFns.setGameSessionStateCAS).toHaveBeenCalledTimes(1);
   });
 
   it('GET returns the migrated state, not {}', async () => {

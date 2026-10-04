@@ -37,6 +37,12 @@ function parseArgs(argv) {
     else if (arg === '--help' || arg === '-h') options.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
+  // A pre-release version (0.2.0-rc.8) belongs to the beta channel unless
+  // --channel says otherwise: `lfctl update check` shows this value, and
+  // "stable" on an rc was misleading.
+  if (!argv.includes('--channel') && typeof options.version === 'string' && options.version.includes('-')) {
+    options.channel = 'beta';
+  }
   return options;
 }
 
@@ -68,7 +74,7 @@ async function main() {
   if (options.help || !options.version) {
     console.log(
       'Usage: node scripts/release-manifest.mjs --version <semver> [--changelog docs/CHANGELOG.md] ' +
-        '[--channel stable] [--minimum-version <semver>] [--git-sha <sha>] [--image-digest <ref@sha256:...>] ' +
+        '[--channel stable|beta (default: beta for a pre-release version)] [--minimum-version <semver>] [--git-sha <sha>] [--image-digest <ref@sha256:...>] ' +
         '[--out release-manifest.json] [--key-file <pem>] [--allow-unsigned]\n' +
       'Signing key: --key-file <pem> or LF_RELEASE_SIGNING_KEY env (Ed25519 PKCS#8 PEM).\n' +
       'Signing is fail-closed: without a key the script errors unless --allow-unsigned.'

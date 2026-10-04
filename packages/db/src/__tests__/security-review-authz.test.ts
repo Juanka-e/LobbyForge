@@ -209,7 +209,7 @@ describe('moderation state survives the membership — security-review AUTHZ-002
 
   it('invite redeem gives a returning member their stored timeout and mute', async () => {
     const { db, chains } = recordingDb([
-      [{ id: 'inv-1', server_id: 'srv-1', max_uses: null, current_uses: 0, expires_at: null }], // lock
+      [{ id: 'inv-1', serverId: 'srv-1', maxUses: null, currentUses: 0, expiresAt: null }], // lock
       [], // ban
       [], // existing membership
       [{ ownerUserId: 'owner-1' }], // approval: server owner
@@ -257,7 +257,7 @@ describe('access policy approval — security-review AUTHZ-004', () => {
   it('invite redeem files a join request instead of a membership while the server requires approval', async () => {
     const request = { id: 'jr-1', serverId: 'srv-1', userId: 'u-1', status: 'pending' };
     const { db, chains } = recordingDb([
-      [{ id: 'inv-1', server_id: 'srv-1', max_uses: null, current_uses: 0, expires_at: null }],
+      [{ id: 'inv-1', serverId: 'srv-1', maxUses: null, currentUses: 0, expiresAt: null }],
       [], // ban
       [], // existing membership
       [{ ownerUserId: 'owner-1' }],

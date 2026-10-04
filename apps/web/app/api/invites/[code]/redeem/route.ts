@@ -146,12 +146,32 @@ async function handlePost(req: Request, ctx: { params: Promise<{ code: string }>
           { status: 429 }
         );
     }
-  } catch {
+  } catch (err) {
+    // The 500 used to be silent, which hid a redeem bug for every invite
+    // with an expiry. Logged without the invite code or the user id.
+    console.error('[invites/redeem] redeem failed:', describeRedeemError(err));
     return NextResponse.json(
       { error: 'Failed to redeem invite' },
       { status: 500 }
     );
   }
+}
+
+/**
+ * One JSON-quoted log line for an unexpected redeem failure (JSON keeps a
+ * hostile value from forging log lines). A Drizzle query error embeds the
+ * query and its parameters — the invite code among them — in its own
+ * message, so the driver error it wraps is described instead.
+ */
+function describeRedeemError(err: unknown): string {
+  const source = err instanceof Error && err.cause instanceof Error ? err.cause : err;
+  if (!(source instanceof Error)) return JSON.stringify({ error: typeof source });
+  const code = (source as { code?: unknown }).code;
+  return JSON.stringify({
+    error: source.name,
+    ...(typeof code === 'string' ? { code } : {}),
+    message: source.message,
+  });
 }
 
 export const POST = withApiSecurity(handlePost, {

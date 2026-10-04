@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { createContext, useContext, type ReactNode } from 'react';
 import { useT } from '@/lib/i18n/client';
+import { SCROLL_REGION_FOCUS_CLASS } from '@/lib/scroll-region';
 import SettingsModalFrame from './SettingsModalFrame';
 
 /**
@@ -69,6 +70,10 @@ export default function SettingsShell({ scope, children }: { scope: 'community' 
   const pathname = usePathname();
   const nav = scope === 'community' ? COMMUNITY_NAV : USER_NAV;
   const title = t(scope === 'community' ? 'settings.nav.communityTitle' : 'settings.nav.userTitle');
+  const isActive = (item: NavItem) =>
+    pathname === item.href ||
+    (item.href !== '/settings' && item.href !== '/admin/settings' && pathname.startsWith(`${item.href}/`));
+  const activeItem = nav.find(isActive);
 
   // Route layouts own the canonical shell. Keep legacy page-level wrappers
   // harmless while those pages are migrated independently.
@@ -87,9 +92,7 @@ export default function SettingsShell({ scope, children }: { scope: 'community' 
         </div>
         <nav className="flex gap-1 overflow-x-auto p-2 md:block md:space-y-1 md:p-3" aria-label={title}>
           {nav.map((item) => {
-            const active =
-              pathname === item.href ||
-              (item.href !== '/settings' && item.href !== '/admin/settings' && pathname.startsWith(`${item.href}/`));
+            const active = isActive(item);
             return (
               <Link
                 key={item.href}
@@ -105,7 +108,13 @@ export default function SettingsShell({ scope, children }: { scope: 'community' 
           })}
         </nav>
       </aside>
-      <main className="min-h-0 min-w-0 flex-1 overflow-y-auto px-5 py-8 md:px-10 md:py-10 lg:px-14">
+      {/* The scrolling region takes keyboard focus, named after the open
+          section (see SCROLL_REGION_FOCUS_CLASS for why and how). */}
+      <main
+        tabIndex={0}
+        aria-label={activeItem ? t(activeItem.labelKey) : title}
+        className={`min-h-0 min-w-0 flex-1 overflow-y-auto px-5 py-8 md:px-10 md:py-10 lg:px-14 ${SCROLL_REGION_FOCUS_CLASS}`}
+      >
         <div className="mx-auto w-full max-w-5xl">{children}</div>
       </main>
     </div>

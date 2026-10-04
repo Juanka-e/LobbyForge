@@ -14,6 +14,17 @@ pnpm lfctl update plan --manifest infra/update/release-manifest.example.json --j
 pnpm lfctl backup verify --manifest infra/update/backup-manifest.example.json
 ```
 
+Without `--manifest`, `update check/plan/apply` read the `release-manifest.json`
+asset of the newest release of the channel, found through the GitHub API
+(`/repos/{owner}/{repo}/releases`; drafts and releases without the asset are
+skipped, the highest version wins). `--channel stable`, the default, takes full
+releases only; any other channel (`beta`, `rc`, `nightly`) also takes
+pre-releases. GitHub's `/releases/latest` was used before and skips
+pre-releases, so it answered 404 while every release was one. Forks set
+`LOBBYFORGE_RELEASE_REPO=<owner>/<repo>`; `LOBBYFORGE_RELEASE_MANIFEST` or
+`--manifest` still name a manifest directly. The manifest found is verified
+exactly like one given by hand.
+
 `update apply` and `update rollback` are intentionally locked for now. They
 return a non-zero exit code until the self-host script runner can execute the
 allowlisted plan after verifying:

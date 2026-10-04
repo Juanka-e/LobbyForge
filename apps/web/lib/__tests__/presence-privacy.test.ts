@@ -39,6 +39,36 @@ describe('applyPresencePrivacy', () => {
     expect(result.lastSeen).toBe(0);
   });
 
+  it('a hidden status hides the voice room and the activity too (final test pass)', () => {
+    // Activity sharing with everyone does not override a hidden status:
+    // "Playing Quiz" or a channel id would say the user is online, and where.
+    const result = applyPresencePrivacy(
+      basePresence,
+      privacy({ onlineStatusVisibility: 'nobody', activityVisibility: 'everyone' }),
+      { isSelf: false, isServerMember: true }
+    );
+    expect(result).toEqual({ userId: 'target-user', status: 'hidden', channelId: null, lastSeen: 0 });
+  });
+
+  it('a status hidden from non-members also hides the channel from them, not from members', () => {
+    const settings = privacy({ onlineStatusVisibility: 'server_members' });
+    const stranger = applyPresencePrivacy(basePresence, settings, { isSelf: false, isServerMember: false });
+    expect(stranger).toMatchObject({ status: 'hidden', channelId: null, lastSeen: 0 });
+    expect(stranger.activity).toBeUndefined();
+    const member = applyPresencePrivacy(basePresence, settings, { isSelf: false, isServerMember: true });
+    expect(member).toMatchObject({ status: 'online', channelId: 'channel-1', lastSeen: 1_000 });
+  });
+
+  it('the user still sees their own channel and activity with a hidden status', () => {
+    const self = applyPresencePrivacy(
+      basePresence,
+      privacy({ onlineStatusVisibility: 'nobody', activityVisibility: 'nobody' }),
+      { isSelf: true, isServerMember: true }
+    );
+    expect(self).toMatchObject({ status: 'online', channelId: 'channel-1', lastSeen: 1_000 });
+    expect(self.activity).toMatchObject({ kind: 'game' });
+  });
+
   it('keeps own status visible even when visibility is nobody', () => {
     const result = applyPresencePrivacy(
       basePresence,

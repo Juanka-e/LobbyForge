@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import {
   addPlayerToSession,
+  GameSessionBusyError,
   getGameSessionById,
   getServerById,
   getUserPermissions,
@@ -9,6 +10,7 @@ import {
   listPlayersForSession,
   logAction,
   setGameSessionStateCAS,
+  withGameSessionWriteLock,
 } from '@lobbyforge/db';
 import { CorePermission, hasPermission } from '@lobbyforge/core';
 import { shouldAuditAction, type GamePluginActionPolicy } from '@lobbyforge/plugin-sdk';
@@ -387,54 +389,83 @@ async function handlePost(
       ? ((await plugin.migrateState(row.state)) as Record<string, unknown>)
       : row.state;
 
-    // Compare-and-swap with optimistic concurrency. On each retry the
-    // reducer is RE-RUN against the fresh state — computing nextState once
-    // outside the loop would just move the lost-update one revision later.
+    // Read → reduce → write, serialized per session. Concurrent actions used
+    // to race on an optimistic CAS with 3 attempts: of 8 players rolling dice
+    // at once, only 3–4 got through and the rest saw a 409. Under the
+    // session's write lock (a transaction-scoped Postgres advisory lock, see
+    // withGameSessionWriteLock) the reducer runs on the row as it stands, so
+    // its write cannot lose a race with another action — every web process
+    // takes the same lock. The CAS stays: it refuses a terminal row (a
+    // concurrent END, which does not take the lock) and any writer that
+    // skips the lock.
     const expectedRevision = (row as { revision?: number }).revision ?? 0;
-    const MAX_CAS_RETRIES = 3;
-    let casResult: { ok: boolean; row: { id: string; state: Record<string, unknown>; status: string; revision: number } | null } = { ok: false, row: null };
-    let currentState = migratedState;
-    let currentRev = expectedRevision;
-    let committedState: Record<string, unknown> | null = null;
-    // Reducers return the SAME object for a refused or no-op action.
-    let stateChanged = false;
-
-    for (let attempt = 0; attempt < MAX_CAS_RETRIES; attempt++) {
-      // Run the reducer against the CURRENT state on every attempt.
-      const attemptState = await callHandleAction(plugin, ctx2, currentState, prepared.action) as Record<string, unknown>;
-      casResult = await setGameSessionStateCAS(getDb(), sessionId, currentRev, attemptState) as typeof casResult;
-      if (casResult.ok) {
-        committedState = attemptState;
-        stateChanged = attemptState !== currentState;
-        committed = true;
-        break;
-      }
-      // Concurrent modification — re-read, re-migrate; the reducer runs
-      // again at the top of the next iteration.
-      if (!casResult.row) {
-        await releaseClaim();
-        return NextResponse.json({ error: 'Session not found during CAS retry.' }, { status: 404 });
-      }
-      // beta-review: the CAS refuses terminal sessions (status is part of
-      // its WHERE), so a concurrent END wins — stop instead of retrying.
-      if (isTerminalSessionStatus(casResult.row.status)) {
-        await releaseClaim();
-        return NextResponse.json({ error: 'Activity has ended.' }, { status: 409 });
-      }
-      currentRev = casResult.row.revision;
-      currentState = plugin.migrateState
-        ? ((await plugin.migrateState(casResult.row.state)) as Record<string, unknown>)
-        : casResult.row.state;
-    }
-
-    if (!casResult.ok || !committedState) {
-      // Retryable conflict — release so the client may retry the same id.
+    type CommittedRow = { id: string; state: Record<string, unknown>; status: string; revision: number };
+    type LockedOutcome =
+      | { kind: 'committed'; state: Record<string, unknown>; changed: boolean; row: CommittedRow }
+      | { kind: 'gone' }
+      | { kind: 'ended' }
+      | { kind: 'conflict'; revision: number };
+    let outcome: LockedOutcome;
+    try {
+      outcome = await withGameSessionWriteLock(getDb(), sessionId, async (tx, fresh): Promise<LockedOutcome> => {
+        if (!fresh) return { kind: 'gone' };
+        // beta-review: a terminal session is read-only — an END that landed
+        // while this action waited wins.
+        if (isTerminalSessionStatus(fresh.status)) return { kind: 'ended' };
+        const freshRevision = (fresh as { revision?: number }).revision ?? 0;
+        // Nobody wrote since the read above: reuse its migration (a worker
+        // RPC for a marketplace plugin). Otherwise migrate the fresh state.
+        const currentState =
+          freshRevision === expectedRevision
+            ? migratedState
+            : plugin.migrateState
+              ? ((await plugin.migrateState(fresh.state)) as Record<string, unknown>)
+              : fresh.state;
+        const nextState = (await callHandleAction(plugin, ctx2, currentState, prepared.action)) as Record<string, unknown>;
+        const cas = (await setGameSessionStateCAS(tx, sessionId, freshRevision, nextState)) as {
+          ok: boolean;
+          row: CommittedRow | null;
+        };
+        if (cas.ok && cas.row) {
+          // Reducers return the SAME object for a refused or no-op action.
+          return { kind: 'committed', state: nextState, changed: nextState !== currentState, row: cas.row };
+        }
+        if (!cas.row) return { kind: 'gone' };
+        if (isTerminalSessionStatus(cas.row.status)) return { kind: 'ended' };
+        return { kind: 'conflict', revision: cas.row.revision };
+      });
+    } catch (err) {
+      // The lock was not granted in time (a slow reducer ahead in the
+      // queue): retryable, like a conflict.
+      if (!(err instanceof GameSessionBusyError)) throw err;
       await releaseClaim();
       return NextResponse.json(
-        { error: 'Conflict: too many concurrent actions. Please retry.', revision: currentRev },
+        { error: 'Conflict: too many concurrent actions. Please retry.', retryable: true },
         { status: 409 }
       );
     }
+
+    if (outcome.kind === 'gone') {
+      await releaseClaim();
+      return NextResponse.json({ error: 'Activity not found' }, { status: 404 });
+    }
+    if (outcome.kind === 'ended') {
+      await releaseClaim();
+      return NextResponse.json({ error: 'Activity has ended.' }, { status: 409 });
+    }
+    if (outcome.kind === 'conflict') {
+      // Retryable conflict — release so the client may retry the same id.
+      await releaseClaim();
+      return NextResponse.json(
+        { error: 'Conflict: too many concurrent actions. Please retry.', revision: outcome.revision, retryable: true },
+        { status: 409 }
+      );
+    }
+    // The transaction committed: from here on a failure must keep the claim
+    // (V5-007) so a retry reconciles instead of re-running the reducer.
+    committed = true;
+    const committedState = outcome.state;
+    const stateChanged = outcome.changed;
 
     // Push the committed state to any open SSE subscriptions on this session.
     // Fire-and-forget — a Redis blip must not fail the action.
@@ -464,8 +495,8 @@ async function handlePost(
     publishActivityStateChange({
       serverId,
       sessionId,
-      status: (casResult.row as { status?: string })?.status ?? row.status,
-      revision: (casResult.row as { revision?: number })?.revision,
+      status: outcome.row.status,
+      revision: outcome.row.revision,
       publicSummary: Object.keys(publicSummary).length > 0 ? publicSummary : undefined,
     });
     // security-review PLUG-001: audit only actions that changed state AND

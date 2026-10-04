@@ -94,7 +94,8 @@
     --lf-border-subtle: #c9d3e0;
     --lf-text-primary: #101826;
     --lf-text-secondary: #3d4a5c;
-    --lf-text-muted: #6b7787;
+    /* 4.8:1 on surface-dim, 4.6:1 on surface-container (WCAG AA); #6b7787 was 4.05 / 3.87. */
+    --lf-text-muted: #5f6b7b;
     /* Only the FIRST paint uses these. The accent is a user preference
        that `AppearanceRuntime` writes inline on <html>, which outranks
        every rule here — see `deriveAccent`, which adapts whatever the

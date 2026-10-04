@@ -411,6 +411,10 @@ jobs:
           # 0045 bot protection: defaults for rows the previous image wrote,
           # partial updates, and the CHECKs that keep a plaintext secret out.
           TEST_DATABASE_URL="postgres://postgres:t@127.0.0.1:$PORT/d" pnpm vitest run src/__tests__/captcha.integration.test.ts
+          # Activity actions: read → reduce → write serialized per session by
+          # a transaction-scoped advisory lock — concurrent writers from two
+          # pools all apply, a held lock times out, a throw rolls back.
+          TEST_DATABASE_URL="postgres://postgres:t@127.0.0.1:$PORT/d" pnpm vitest run src/__tests__/game-session-lock.integration.test.ts
           docker rm -f lf-pg-test
 
   # LF-023: end-to-end against the REAL compose stack — Postgres, Redis,

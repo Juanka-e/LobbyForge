@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { instanceReports } from '@lobbyforge/db';
+import { getRegistryInstanceByInstanceId, instanceReports } from '@lobbyforge/db';
 import { requireMaterializedSession } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
 import { directoryWritesUnavailable } from '@/lib/directory-verification';
@@ -16,7 +16,8 @@ const ReportSchema = z.object({
 
 /**
  * POST /api/directory/{id}/report — file a complaint about a discovery
- * directory instance. Auth/guest-aware, rate-limited.
+ * directory instance (`{id}` is its directory instance id). Auth/guest-aware,
+ * rate-limited; 404 for an id the directory does not know.
  */
 async function handlePost(
   req: Request,
@@ -40,6 +41,12 @@ async function handlePost(
 
   try {
     const db = getDb();
+    // Only an entry the directory knows can be reported: a made-up id used
+    // to be stored as a report about nothing, flooding the moderation queue.
+    const entry = await getRegistryInstanceByInstanceId(db, instanceId);
+    if (!entry) {
+      return NextResponse.json({ error: 'Directory entry not found' }, { status: 404 });
+    }
     await db.insert(instanceReports).values({
       instanceId,
       reporterUserId,

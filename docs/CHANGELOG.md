@@ -2,6 +2,25 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Fixes from the full end-to-end pass - 2026-10-04
+
+- **Invites with an expiry redeem again.** The redeem locked the invite with a raw `tx.execute`, which returns `expires_at` as a string, so every invite with an expiry (redeem and sign-up through it) failed with a 500. The lock now goes through the query builder; the route logs unexpected failures (JSON-quoted, without the code). Real-Postgres test: valid → redeemed, expired → refused.
+- **Concurrent activity actions all apply.** 8 players rolling at once used to get 3–4 successes and 409s for the rest (3 optimistic CAS attempts). Read → reduce → write now runs under a per-session transaction-scoped advisory lock (`withGameSessionWriteLock`), with an in-memory queue per connection pool in front of it; a 409 is left only for a lock not granted within 10 s.
+- **Directory reports** answer 404 for an id the directory does not know.
+- **A hidden online status** also hides the voice channel and the activity; the per-channel presence list leaves such users out.
+- **`lfctl update check` without `--manifest`** finds the newest release of the channel through the GitHub API (`/releases/latest` skips pre-releases and answered 404). `--channel stable` takes full releases only; `--channel beta` follows pre-releases. Forks: `LOBBYFORGE_RELEASE_REPO`.
+- **k6 load test:** target from `BASE_URL` / `LF_E2E_BASE_URL`, an Origin header on POSTs, bounded guest creation, and a clear stop when bot protection asks for a challenge (run it with `LOBBYFORGE_CAPTCHA_PROVIDER=none`).
+- **Activity conflicts retry in the client.** A 409 marked retryable is sent again with the same `actionId` (jittered backoff, about 2 s at most). Only if every attempt loses does a translated message appear.
+- **Join page errors are translated:** expired, used up, banned, rate limited, or generic. Raw status text is no longer shown.
+- **A voice click made while the lobby is still looking up the session** waits for the lookup instead of showing "Session not ready". The settled guest is read from a ref, so a click just before React re-renders sees it. After a failed lookup, the next click looks again, so "try again" works without a reload.
+- **Release manifests for a pre-release version** (`0.2.0-rc.8`) now say `channel: "beta"` instead of `"stable"`; `--channel` still overrides it.
+- **Accessibility:**
+  - offline members fade only their avatar, so names keep their contrast;
+  - the light theme's `text-muted` is `#5f6b7b` (AA on every light surface it sits on; it was 3.9–4.3:1);
+  - the settings and server pages' scroll regions can be focused by keyboard;
+  - an offline member's dot reads "Offline" instead of the self-status "Invisible".
+- **Postgres error codes are read through Drizzle's wrapper** (`pgErrorCode` / `isPgUniqueViolation` in `@lobbyforge/db`). The invite-code collision retry never fired, because Drizzle 0.45 puts the driver error in `cause`.
+
 ## [Unreleased] - Bot protection - 2026-10-04
 
 ### Bot protection (`docs/CAPTCHA.md`)

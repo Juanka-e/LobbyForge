@@ -254,6 +254,41 @@ describe('POST /api/invites/[code]/redeem', () => {
     });
   });
 
+  it('logs an unexpected failure (JSON-quoted, without the invite code) and answers 500', async () => {
+    // A Drizzle query error carries the query parameters in its own message;
+    // only the driver error it wraps may reach the log.
+    const driverError = Object.assign(new TypeError('invite.expires_at.getTime is not a function\nforged line'), {
+      code: 'XX000',
+    });
+    redeemInvite.mockRejectedValue(
+      new Error(`Failed query: select ... params: ${CODE},00000000-0000-0000-0000-000000000099`, { cause: driverError })
+    );
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const { POST } = await import('../redeem/route.js');
+      const res = await POST(
+        new Request(`https://example.test/api/invites/${CODE}/redeem`, {
+          method: 'POST',
+          headers: { cookie: makeCookie() },
+        }),
+        { params: Promise.resolve({ code: CODE }) }
+      );
+      expect(res.status).toBe(500);
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      const [prefix, detail] = errorSpy.mock.calls[0] as [string, string];
+      expect(prefix).toBe('[invites/redeem] redeem failed:');
+      expect(JSON.parse(detail)).toEqual({
+        error: 'TypeError',
+        code: 'XX000',
+        message: 'invite.expires_at.getTime is not a function\nforged line',
+      });
+      expect(detail).not.toContain('\n');
+      expect(detail).not.toContain(CODE);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
   it('returns 401 when no cookie is present', async () => {
     const { POST } = await import('../redeem/route.js');
     const res = await POST(

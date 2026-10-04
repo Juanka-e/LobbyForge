@@ -308,11 +308,16 @@ What your bot posts is your responsibility.
    - It overwrites \`actorFields\` with the caller's id.
    - It runs \`validateAction\`, then \`migrateState\`, then your pure
      \`handleAction\`.
-4. The new state is written with a compare-and-swap on \`revision\`: up to
-   3 attempts (\`MAX_CAS_RETRIES\`), each re-running the reducer on the
-   fresh state, then a \`409\`. If the reducer returned the *same object*,
-   the action counts as refused: the state is still written back, but
-   nothing joins the roster and no audit row is written.
+4. Actions on one session run one at a time: the reducer runs and the new
+   state is written while the host holds the session's write lock (a
+   transaction-scoped Postgres advisory lock, \`withGameSessionWriteLock\`
+   in \`packages/db/src/queries/gameSessions.ts\`), on the state as it
+   stands, so concurrent actions all apply in turn. The write is still a
+   compare-and-swap on \`revision\`, which refuses an ended session. If the
+   lock is not granted within 10 s, the answer is a retryable \`409\`. If
+   the reducer returned the *same object*, the action counts as refused:
+   the state is still written back, but nothing joins the roster and no
+   audit row is written.
 5. A change notice goes out on Redis. It carries no state. The SSE route
    and the WebSocket gateway then load the row and **project it per
    viewer** with \`projectActivityState\`
@@ -946,7 +951,7 @@ camera or screen share.
 | What | Limit | Where |
 |---|---|---|
 | Activity actions | 30 / min **per client IP**: a LAN party behind one NAT shares it | \`activity-action\` limit in \`actions/route.ts\`; IP key from \`rateLimitKey\` in \`security-headers.ts\` |
-| Concurrent actions | CAS on \`revision\`, 3 attempts, then \`409\` (clients retry) | \`MAX_CAS_RETRIES\` in \`actions/route.ts\` |
+| Concurrent actions | applied one at a time per session; a \`409\` (clients retry) only when the session's write lock is not granted within 10 s | \`GAME_SESSION_LOCK_TIMEOUT_MS\` in \`packages/db/src/queries/gameSessions.ts\` |
 | Activity starts | 10 / min per IP; **one running activity per voice/stage channel** | \`activities-create\` limit and \`getActiveGameSessionForChannel\` check in \`channels/[channelId]/activities/route.ts\` |
 | Activity reads | GET 60 / min, SSE opens 30 / min per IP; SSE poll fallback 5 s | \`activity-get\` in \`[sessionId]/route.ts\`, \`activity-stream\` in \`stream/route.ts\`, \`POLL_FALLBACK_MS\` in \`activity-bus.ts:196\` |
 | Action body | 1 MiB | \`DEFAULT_MAX_BODY_BYTES\` in \`security-headers.ts\` |

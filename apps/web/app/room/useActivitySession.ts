@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getRealtimeClient } from '@/lib/realtime-client';
+import { postActivityAction } from '@/lib/activity-action-retry';
+import { useT } from '@/lib/i18n/client';
 
 /**
  * Live state for one activity session, shared by every surface that
@@ -19,6 +21,10 @@ import { getRealtimeClient } from '@/lib/realtime-client';
  *    after it always sees CONNECTING and never CLOSED — the polling
  *    fallback could never engage. It is re-checked on a timer instead,
  *    and stops once the socket is open.
+ *  - When several players act at once, the server can refuse some of
+ *    them with a retryable 409. `dispatch` retries those itself, with the
+ *    same `actionId` (see `lib/activity-action-retry.ts`), and shows an
+ *    error only when every attempt failed.
  */
 
 export interface ActivityDetail {
@@ -44,6 +50,7 @@ export function useActivitySession({
   /** Called when the session no longer exists (ended elsewhere). */
   onEnded: () => void;
 }) {
+  const t = useT();
   const [detail, setDetail] = useState<ActivityDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -157,35 +164,31 @@ export function useActivitySession({
       setBusy(true);
       setError(null);
       try {
-        const res = await fetch(`/api/servers/${serverId}/activities/${sessionId}/actions`, {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          // LF-002: a fresh idempotency key per dispatch, so a transport
-          // retry of THIS request is de-duplicated server-side.
-          body: JSON.stringify({ actionId: crypto.randomUUID(), ...action }),
-        });
-        if (res.status === 409) {
+        const result = await postActivityAction(
+          `/api/servers/${serverId}/activities/${sessionId}/actions`,
+          // LF-002: one idempotency key per dispatch. Every automatic retry
+          // of a concurrency conflict reuses it, so the action runs once.
+          { actionId: crypto.randomUUID(), ...action }
+        );
+        if (result.kind === 'duplicate') {
           // The action was already committed by an earlier attempt; there
           // is no response replay, so re-read instead of showing an error.
-          const conflict = (await res.json().catch(() => ({}))) as { duplicate?: boolean };
-          if (conflict.duplicate) {
-            const current = await fetch(`/api/servers/${serverId}/activities/${sessionId}`, {
-              credentials: 'same-origin',
-              cache: 'no-store',
-            });
-            if (current.ok) {
-              const data = (await current.json()) as { activity: ActivityDetail };
-              setDetail(data.activity);
-            }
-            return true;
+          const current = await fetch(`/api/servers/${serverId}/activities/${sessionId}`, {
+            credentials: 'same-origin',
+            cache: 'no-store',
+          });
+          if (current.ok) {
+            const data = (await current.json()) as { activity: ActivityDetail };
+            setDetail(data.activity);
           }
+          return true;
         }
-        if (!res.ok) {
-          const body = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(body.error ?? `The action was rejected (${res.status})`);
+        if (result.kind === 'error') {
+          // A conflict gets here only once every retry lost the race too.
+          if (result.conflict) throw new Error(t('room.activity.conflict'));
+          throw new Error(result.error ?? `The action was rejected (${result.status})`);
         }
-        const data = (await res.json()) as { activity: { state: Record<string, unknown>; status: string } };
+        const data = result.data as { activity: { state: Record<string, unknown>; status: string } };
         setDetail((prev) =>
           prev ? { ...prev, state: data.activity.state, status: data.activity.status } : prev
         );
@@ -197,7 +200,7 @@ export function useActivitySession({
         setBusy(false);
       }
     },
-    [serverId, sessionId]
+    [serverId, sessionId, t]
   );
 
   const end = useCallback(async (): Promise<boolean> => {

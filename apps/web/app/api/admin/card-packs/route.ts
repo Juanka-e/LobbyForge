@@ -12,6 +12,7 @@ import {
   getCardById,
   deleteCardPack,
   logAction,
+  isPgUniqueViolation,
   type CardPackRow,
   type CardRow,
   type DbClient,
@@ -168,9 +169,8 @@ async function insertCardWithOrdinalRetry(
       // Classify by SQLSTATE first (23505 = unique_violation); the
       // message substrings are only a fallback — driver wording and
       // constraint names can change across versions.
-      const pgCode = (err as { code?: string }).code;
       const isUniqueViolation =
-        pgCode === '23505' ||
+        isPgUniqueViolation(err) ||
         message.includes('cards_pack_id_ordinal_unique') ||
         message.includes('duplicate key value violates unique constraint');
       if (!isUniqueViolation) throw err;

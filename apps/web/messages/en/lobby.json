@@ -33,6 +33,7 @@
   "lobby.roster.empty": "No members yet.",
   "lobby.roster.guest": "Guest",
   "lobby.roster.offlineGroup": "Offline - {count}",
+  "lobby.roster.offlineStatus": "Offline",
   "lobby.roster.onlineGroup": "Online - {count}",
   "lobby.roster.unblock": "Unblock",
   "lobby.roster.unblockAria": "Unblock this user",

@@ -282,11 +282,17 @@ export async function registerAccount(api: APIRequestContext, { data = {}, heade
 export async function signIn(api: APIRequestContext, { data = {}, headers }: AuthRequest = {}): Promise<APIResponse> {
   let res: APIResponse | null = null;
   let fields: CaptchaFields = {};
+  let relieved = false;
   for (let attempt = 0; attempt < 4; attempt += 1) {
     res = await api.post('/api/auth/login', { headers, data: { ...data, ...fields } });
     if (res.status() === 429) {
-      if (await relieve(res, LOGIN_BUCKETS)) continue;
-      return res;
+      // The per-account lock answers exactly like the address limiter (no
+      // account enumeration): relieve the shared address bucket once; a
+      // second 429 is the account's own lock and is the answer.
+      if (relieved || !(await relieve(res, LOGIN_BUCKETS))) return res;
+      relieved = true;
+      fields = {}; // a solved challenge is single-use
+      continue;
     }
     const refusal = await refusalOf(res);
     if (refusal === 'captcha_required' || refusal === 'captcha_unavailable') {
