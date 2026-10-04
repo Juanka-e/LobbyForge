@@ -2,6 +2,43 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Bot protection - 2026-10-04
+
+### Bot protection (`docs/CAPTCHA.md`)
+- **Built-in ALTCHA is on by default** for open sign-up (including the official hub) and for creating a NEW guest identity.
+  - The browser solves a small PBKDF2/SHA-256 proof of work, with no third party, no cookie and no internet needed.
+  - On a plain-HTTP origin, where Web Crypto is missing, a pure-JS solver takes over, so LAN installs keep working.
+- **Sign-in is adaptive.** A challenge appears only after 3 failures for the account (configurable), when the client address is over its threshold, or in attack mode. A browser holding a device cookie that still matches the current password hash is never asked.
+- **Optional providers:** Cloudflare Turnstile and Google reCAPTCHA (v2 checkbox, v2 invisible or v3 score).
+  - Keys come from `LOBBYFORGE_CAPTCHA_*` or from the admin card. The secret is stored with AES-256-GCM and never goes back to a browser.
+  - If the provider is unreachable, the instance falls back to ALTCHA. An attacker cannot choose the fallback while the provider is healthy, or trigger it with a refused secret.
+- **Admin → Settings → Authentication → Bot protection:**
+  - provider choice;
+  - each surface switched on or off (sign-up, invite sign-up, new guests, sign-in: never / when suspicious / always);
+  - difficulty, Turnstile appearance and the reCAPTCHA v3 score;
+  - attack mode, automatic (over 50 failed sign-ins in 10 minutes, for 30 minutes) or manual;
+  - a "Test configuration" button;
+  - a privacy dialog with a ready paragraph for the privacy notice (en/tr).
+  
+  Saving is audited as `instance.captcha_updated`, with field names only.
+- **An invite never removes the check.** On an open instance it can only add protection; otherwise a member could mint an unlimited invite and skip the challenge.
+- **Phase-0 limits:**
+  - a separate new-guest limit (10/h per address, or a 200/h instance-wide backstop when addresses are unknown);
+  - a `website` honeypot;
+  - a single-use form token with a 2-second minimum fill time;
+  - single-use ALTCHA solutions, bound to their surface.
+- **Behind the scenes:**
+  - `middleware.ts` runs in the Node runtime and adds an external provider's CSP origins to every page while that provider is active. Client-side navigation keeps the first page's CSP.
+  - The middleware serves cached settings and refreshes them in the background.
+- **Doctor:** checks for missing or undecryptable keys, refused secrets, test keys in production and Redis, plus `secure_origin` (critical when ALTCHA is active on a plain-HTTP origin).
+- **Upgrading:** migration 0045 turns ALTCHA on for sign-up and new guests. `LOBBYFORGE_CAPTCHA_PROVIDER=none` restores the old behaviour.
+
+### Other
+- **Signed-out settings pages** redirect to `/login?next=…` instead of minting a guest. `/login` returns there after any sign-in method; `next` is limited to same-origin paths.
+- **Auto-guest flows** (room page, lobby voice) show a "One quick check" dialog instead of failing.
+- **The voice roster "⋮" menu** renders in a portal, so a running sidebar animation can no longer cover it.
+- **Email verification research:** `docs/EMAIL_VERIFICATION_RESEARCH_2026-10.md` covers the decision and plan; nothing is built yet.
+
 ## [Unreleased] - Bot API v2 and sandboxed marketplace - 2026-10-03
 
 ### Accounts and sessions
