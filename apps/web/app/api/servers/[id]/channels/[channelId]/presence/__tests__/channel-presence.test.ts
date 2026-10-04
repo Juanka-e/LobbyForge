@@ -74,6 +74,27 @@ describe('GET /api/servers/[id]/channels/[channelId]/presence', () => {
     expect(json.presences).toHaveLength(1);
   });
 
+  it('leaves out users whose status is hidden from the viewer: the list itself names the channel', async () => {
+    getServerById.mockResolvedValue({ ownerUserId: UID });
+    getChannelById.mockResolvedValue({ serverId: SERVER_ID });
+    // The privacy projection (mocked as identity) marked the second user hidden.
+    getUserPresenceInChannel.mockResolvedValue([
+      { userId: UID, status: 'online', channelId: CHANNEL_ID, lastSeen: 1 },
+      { userId: 'hidden-user', status: 'hidden', channelId: null, lastSeen: 0 },
+    ]);
+    getUserSettings.mockResolvedValue(null);
+    const { GET } = await import('../route.js');
+    const res = await GET(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}/presence`, {
+        headers: { cookie: makeCookie() },
+      }),
+      ctx()
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { presences: Array<{ userId: string }> };
+    expect(json.presences.map((p) => p.userId)).toEqual([UID]);
+  });
+
   it('returns 404 when the channel does not belong to the server', async () => {
     getServerById.mockResolvedValue({ ownerUserId: UID });
     getChannelById.mockResolvedValue({ serverId: '00000000-0000-0000-0000-0000000000DD' });

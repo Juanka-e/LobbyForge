@@ -18,7 +18,7 @@ export type ViewerRelation = {
 
 export type PublicPresenceSnapshot = Omit<UserPresenceSnapshot, 'status' | 'activity' | 'channelId'> & {
   status: UserPresenceSnapshot['status'] | 'hidden';
-  /** null when the presence's channel is not visible to the viewer. */
+  /** null when the presence's channel is not visible to the viewer, or the status is hidden. */
   channelId: string | null;
   activity?: UserPresenceSnapshot['activity'];
 };
@@ -51,14 +51,20 @@ export function applyPresencePrivacy(
   relation: ViewerRelation
 ): PublicPresenceSnapshot {
   const canViewOnlineStatus = canViewScope(privacy.onlineStatusVisibility, relation);
+  // A hidden status hides everything that would show the user is online:
+  // the voice room they sit in, the heartbeat and what they are doing.
+  // The final test pass found `status: "hidden"` next to the live
+  // `channelId`, which put a hidden user in their voice room for everyone.
   const canViewActivity =
+    canViewOnlineStatus &&
     canViewScope(privacy.activityVisibility, relation) &&
     canViewActivityKind(presence.activity, privacy);
 
   const canViewChannel =
-    relation.isSelf ||
-    !relation.visibleChannelIds ||
-    relation.visibleChannelIds.has(presence.channelId);
+    canViewOnlineStatus &&
+    (relation.isSelf ||
+      !relation.visibleChannelIds ||
+      relation.visibleChannelIds.has(presence.channelId));
 
   const next: PublicPresenceSnapshot = {
     userId: presence.userId,
