@@ -143,13 +143,16 @@ cd LobbyForge && bash install.sh
 # certificate instead? See docs/DEPLOY_CLOUDFLARE.md.
 
 # Updates — every GitHub release publishes a SIGNED release-manifest.json
-# that pins the immutable image digest. Defaults just work: the manifest
-# URL and the committed official public key are picked up automatically.
-node scripts/lfctl.mjs update check    # what's available (signature verified)
-node scripts/lfctl.mjs update plan     # review the plan
-node scripts/lfctl.mjs update apply --yes   # auto-backup + gates + signed-digest deploy + migrate + health
+# that pins the immutable image digest. lfctl finds the newest release of
+# the channel through the GitHub API and verifies it with the committed
+# official public key. `--channel stable` (the default) takes full releases
+# only; while every release is a pre-release (-rc.N), add --channel beta.
+node scripts/lfctl.mjs update check --channel beta   # what's available (signature verified)
+node scripts/lfctl.mjs update plan --channel beta    # review the plan
+node scripts/lfctl.mjs update apply --channel beta --yes   # auto-backup + gates + signed-digest deploy + migrate + health
 node scripts/lfctl.mjs update rollback     # restore the previous recorded image + version
-# Forks: override with --manifest <url> / --public-key <pem> or
+# Forks: LOBBYFORGE_RELEASE_REPO=<owner>/<repo>, or override with
+# --manifest <url> / --public-key <pem> or
 # LOBBYFORGE_RELEASE_MANIFEST / LOBBYFORGE_RELEASE_PUBLIC_KEY_PEM.
 ```
 

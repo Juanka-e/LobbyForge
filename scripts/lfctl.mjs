@@ -10,9 +10,14 @@ import { fileURLToPath } from 'node:url';
 
 const DEFAULT_CHANNEL = 'stable';
 // 21st-audit: check/plan/apply work with NO arguments — the documented
-// chain must run verbatim. Forks point this (or per-invocation --manifest)
-// at their own releases.
-const DEFAULT_MANIFEST_URL = 'https://github.com/Juanka-e/LobbyForge/releases/latest/download/release-manifest.json';
+// chain must run verbatim. With no --manifest, the newest release of the
+// channel is looked up through the GitHub API (resolveReleaseManifestUrl).
+// GitHub's /releases/latest skips pre-releases, so it answered 404 while
+// every release was one. Forks set LOBBYFORGE_RELEASE_REPO (or pass
+// --manifest).
+const DEFAULT_RELEASE_REPO = 'Juanka-e/LobbyForge';
+const RELEASE_MANIFEST_ASSET = 'release-manifest.json';
+const DEFAULT_GITHUB_API = 'https://api.github.com';
 // The official release public key ships in the repo — pinned by default so
 // unsigned/tampered manifests fail closed out of the box.
 const DEFAULT_PUBLIC_KEY_PATH = 'infra/update/release-public.pem';
@@ -76,9 +81,12 @@ Usage:
       [--once | --interval <seconds>] [--json]
 
 Notes:
-  update check/plan/apply default to the official latest release manifest
-  (${DEFAULT_MANIFEST_URL}); override with --manifest or
-  LOBBYFORGE_RELEASE_MANIFEST (forks).
+  update check/plan/apply default to the release-manifest.json of the newest
+  release of the channel in ${DEFAULT_RELEASE_REPO} (looked up through the
+  GitHub API). --channel stable (the default) takes full releases only; any
+  other channel (beta, rc, nightly) also takes pre-releases. Override with
+  --manifest or LOBBYFORGE_RELEASE_MANIFEST; forks set
+  LOBBYFORGE_RELEASE_REPO=<owner>/<repo>.
   Signature verification defaults to the committed official public key
   (${DEFAULT_PUBLIC_KEY_PATH}, resolved from this checkout, not the cwd);
   override with --public-key. update apply refuses to run without a key.
@@ -288,12 +296,96 @@ function compareVersions(a, b) {
   return comparePrerelease(left.prerelease, right.prerelease);
 }
 
-async function loadManifest(source) {
+/** `stable` takes full releases only; any other channel (beta, rc, nightly…) also takes pre-releases. */
+function channelAllowsPrereleases(channel) {
+  return typeof channel === 'string' && channel !== '' && channel !== DEFAULT_CHANNEL;
+}
+
+function tryParseVersion(tag) {
+  try {
+    parseVersion(tag);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The release a channel follows, from a GitHub `/releases` listing: not a
+ * draft, carrying release-manifest.json, a pre-release only when the
+ * channel allows it — the highest version among them (a backport published
+ * after a newer release must not win), or the listing's newest when no tag
+ * is a version. Returns null when nothing fits.
+ */
+function pickChannelRelease(releases, channel) {
+  const allowPrereleases = channelAllowsPrereleases(channel);
+  const eligible = [];
+  for (const release of releases) {
+    if (!release || typeof release !== 'object' || release.draft) continue;
+    if (release.prerelease && !allowPrereleases) continue;
+    const asset = Array.isArray(release.assets)
+      ? release.assets.find((a) => a && a.name === RELEASE_MANIFEST_ASSET && typeof a.browser_download_url === 'string')
+      : undefined;
+    if (!asset) continue;
+    eligible.push({
+      tag: typeof release.tag_name === 'string' ? release.tag_name : '',
+      prerelease: Boolean(release.prerelease),
+      manifestUrl: asset.browser_download_url,
+    });
+  }
+  const versioned = eligible.filter((r) => tryParseVersion(r.tag));
+  if (versioned.length > 0) {
+    return versioned.reduce((best, r) => (compareVersions(r.tag, best.tag) > 0 ? r : best));
+  }
+  return eligible[0] ?? null; // GitHub lists newest first
+}
+
+async function resolveReleaseManifestUrl(channel) {
+  const repo = process.env.LOBBYFORGE_RELEASE_REPO || DEFAULT_RELEASE_REPO;
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) {
+    throw new Error(`LOBBYFORGE_RELEASE_REPO must be <owner>/<repo>, got ${JSON.stringify(repo)}.`);
+  }
+  // LFCTL_GITHUB_API: GitHub Enterprise, or a local stand-in in the tests.
+  const api = (process.env.LFCTL_GITHUB_API || DEFAULT_GITHUB_API).replace(/\/+$/, '');
+  const listing = `${api}/repos/${repo}/releases?per_page=100`;
+  const res = await fetch(listing, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'lobbyforge-lfctl',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+  });
+  if (!res.ok) throw new Error(`Release lookup failed: HTTP ${res.status} from ${listing}`);
+  const releases = await res.json();
+  if (!Array.isArray(releases)) throw new Error(`Release lookup failed: ${listing} did not return a list.`);
+
+  const picked = pickChannelRelease(releases, channel);
+  if (!picked) {
+    const newestPrerelease = channelAllowsPrereleases(channel) ? null : pickChannelRelease(releases, 'beta');
+    if (newestPrerelease) {
+      throw new Error(
+        `No stable release with ${RELEASE_MANIFEST_ASSET} in ${repo} yet; the newest release, ` +
+          `${newestPrerelease.tag || '(untagged)'}, is a pre-release. Follow pre-releases with ` +
+          '--channel beta, or pass --manifest <path-or-url>.'
+      );
+    }
+    throw new Error(
+      `No release with ${RELEASE_MANIFEST_ASSET} found in ${repo} for channel ${JSON.stringify(channel)}. ` +
+        'Pass --manifest <path-or-url>.'
+    );
+  }
+  // stderr: --json output on stdout stays machine-readable.
+  console.error(`Release: ${picked.tag || '(untagged)'}${picked.prerelease ? ' (pre-release)' : ''} — ${picked.manifestUrl}`);
+  return picked.manifestUrl;
+}
+
+async function loadManifest(source, channel = DEFAULT_CHANNEL) {
   if (!source) {
     // 21st-audit: the documented `check → plan → apply` chain passes NO
-    // --manifest on the 2nd/3rd command — default to the official latest
-    // release asset instead of erroring out.
-    source = process.env.LOBBYFORGE_RELEASE_MANIFEST ?? DEFAULT_MANIFEST_URL;
+    // --manifest on the 2nd/3rd command — default to the newest release
+    // of the channel instead of erroring out. The manifest it names is
+    // verified like any other (signature, digest) by the callers.
+    source = process.env.LOBBYFORGE_RELEASE_MANIFEST || (await resolveReleaseManifestUrl(channel));
   }
 
   if (/^https?:\/\//i.test(source)) {
@@ -861,7 +953,7 @@ async function main() {
   // 21st-audit: the deployed version comes from the machine's own state
   // (.env.prod / deployment-state.json), not a hardcoded constant.
   options.currentVersion = await resolveCurrentVersion(options);
-  const manifest = await loadManifest(options.manifest);
+  const manifest = await loadManifest(options.manifest, options.channel);
   if (action === 'check') {
     const check = await buildCheck(manifest, options);
     if (options.json) console.log(JSON.stringify(check, null, 2));
