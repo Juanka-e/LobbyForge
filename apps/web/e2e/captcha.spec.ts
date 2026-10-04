@@ -70,6 +70,8 @@ const RUN = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}
 const PASSWORD = 'correct-horse-battery-staple';
 
 // Cloudflare Turnstile test keys (developers.cloudflare.com/turnstile/troubleshooting/testing/).
+/** The origin Turnstile's widget loads from, as it appears in the CSP. */
+const TURNSTILE_ORIGIN = 'https://challenges.cloudflare.com';
 const TURNSTILE_SITE_KEY_PASS = '1x00000000000000000000AA';
 const TURNSTILE_SECRET_PASS = '1x0000000000000000000000000000000AA';
 const TURNSTILE_SECRET_FAIL = '2x0000000000000000000000000000000AA';
@@ -669,7 +671,7 @@ test.describe('bot protection (CAPTCHA)', () => {
       const otherCsp = async () =>
         ((await owner.get(`${officialUrl}/landing`, { maxRedirects: 0 })).headers()['content-security-policy'] ?? '')
           .split(/[\s;]+/)
-          .includes('https://challenges.cloudflare.com');
+          .some((source) => source === TURNSTILE_ORIGIN);
       if (officialUrl) expect(await otherCsp(), 'the official process still on ALTCHA before the save').toBe(false);
       await card.getByRole('button', { name: 'Save bot protection' }).click();
       await expect(card.getByText('Bot protection saved.')).toBeVisible();
