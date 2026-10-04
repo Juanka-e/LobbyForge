@@ -29,7 +29,9 @@ describe('automatic guest creation under bot protection', () => {
   }
 
   it('lobby: joining voice after closing the dialog opens it again (never a dead control)', () => {
-    expect(lobby).toMatch(/if \(guestCheck === 'dismissed'\) \{\s*setGuestCheck\('open'\);\s*return;/);
+    // Read from a live ref: connectToChannel can check it after awaiting
+    // the session lookup (behaviour: LobbyVoiceSessionWait.test.tsx).
+    expect(lobby).toMatch(/if \(guestCheck(?:Ref\.current)? === 'dismissed'\) \{\s*setGuestCheck\('open'\);\s*return;/);
     expect(lobby).toContain("setError({ key: 'captcha.guest.dismissed' })");
     // The guest keeps the name the lobby would have given it.
     expect(lobby).toContain('body={{ displayNameSeed: localDisplayName || undefined }}');

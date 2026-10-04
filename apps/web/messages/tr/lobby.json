@@ -33,6 +33,7 @@
   "lobby.roster.empty": "Henüz üye yok.",
   "lobby.roster.guest": "Misafir",
   "lobby.roster.offlineGroup": "Çevrimdışı - {count}",
+  "lobby.roster.offlineStatus": "Çevrimdışı",
   "lobby.roster.onlineGroup": "Çevrimiçi - {count}",
   "lobby.roster.unblock": "Engeli kaldır",
   "lobby.roster.unblockAria": "Bu kullanıcının engelini kaldır",

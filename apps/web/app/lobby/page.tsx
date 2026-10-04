@@ -1502,23 +1502,25 @@ function MemberSection({
   dimmed?: boolean;
 }) {
   if (members.length === 0) return null;
+  // Same rule as LobbyMembersClient: offline rows fade the avatar and dot
+  // only, so the name keeps text-secondary's 4.5:1+ in every theme.
   return (
     <div className="mb-6">
-      <h3
-        className={
-          dimmed
-            ? 'font-label-xs uppercase tracking-wider mb-2 flex items-center gap-2 opacity-70 text-text-secondary'
-            : 'font-label-xs uppercase tracking-wider mb-2 flex items-center gap-2 text-text-secondary'
-        }
-      >
+      <h3 className="font-label-xs uppercase tracking-wider mb-2 flex items-center gap-2 text-text-secondary">
         <span>{label}</span>
         <div className="h-[1px] flex-1 bg-border-subtle" />
       </h3>
-      <ul className={dimmed ? 'space-y-1 opacity-60' : 'space-y-1'}>
+      <ul className="space-y-1">
         {members.map((m) => (
           <li key={m.id}>
-            <div className="flex items-center gap-3 px-2 py-1.5 rounded-md hover:bg-surface-container/50 cursor-pointer group opacity-80">
-              <div className="w-8 h-8 rounded-full bg-secondary-container relative flex-shrink-0 overflow-hidden">
+            <div className="flex items-center gap-3 px-2 py-1.5 rounded-md hover:bg-surface-container/50 cursor-pointer group">
+              <div
+                className={
+                  dimmed
+                    ? 'w-8 h-8 rounded-full bg-secondary-container relative flex-shrink-0 overflow-hidden opacity-50'
+                    : 'w-8 h-8 rounded-full bg-secondary-container relative flex-shrink-0 overflow-hidden'
+                }
+              >
                 <span className="absolute inset-0 flex items-center justify-center text-label-sm font-bold text-text-primary">
                   {m.name.charAt(0).toUpperCase()}
                 </span>

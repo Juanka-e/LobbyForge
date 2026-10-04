@@ -514,10 +514,21 @@ export function LobbyVoiceProvider({
     setMainViewMode('activity');
   }, []);
   const [guest, setGuest] = useState<Guest | null>(null);
+  // The latest guest known to this provider, written as soon as a lookup or
+  // the bot check settles — before React re-renders with `guest`.
+  const guestRef = useRef<Guest | null>(null);
   // Bot protection: a NEW guest may have to pass a challenge first
   // (docs/CAPTCHA.md §6). 'open' shows the dialog; 'dismissed' means the
   // person closed it, and joining a voice channel opens it again.
   const [guestCheck, setGuestCheck] = useState<'closed' | 'open' | 'dismissed'>('closed');
+  // Live copy for connectToChannel, which may read it after awaiting.
+  const guestCheckRef = useRef(guestCheck);
+  guestCheckRef.current = guestCheck;
+  // The mount-time session lookup while it is in flight (null once it has
+  // settled). It resolves to the guest, or to null when there is none: a
+  // challenge to pass, or a failure the lookup has already reported. A
+  // voice channel clicked right after the lobby loads waits on it.
+  const sessionLookupRef = useRef<Promise<Guest | null> | null>(null);
 
   const roomRef = useRef<Room | null>(null);
   const remoteAudioContainerRef = useRef<HTMLDivElement | null>(null);
@@ -635,9 +646,12 @@ export function LobbyVoiceProvider({
   //    missing - but the LiveKit token endpoint requires the cookie and
   //    we want a fresh /api/auth/guest GET to surface the uid without a
   //    page reload after first creation.
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
+  //    The settled guest also goes into `guestRef` at once: a click that
+  //    lands between the lookup settling and React committing `setGuest`
+  //    must not read a stale null.
+  const startSessionLookup = useCallback((isCancelled: () => boolean): Promise<Guest | null> => {
+    const cancelled = isCancelled;
+    const lookup = (async (): Promise<Guest | null> => {
       try {
         const probe = await fetch('/api/auth/guest', {
           method: 'GET',
@@ -645,8 +659,9 @@ export function LobbyVoiceProvider({
         });
         if (probe.ok) {
           const data = (await probe.json()) as { guest: Guest };
-          if (!cancelled) setGuest(data.guest);
-          return;
+          guestRef.current = data.guest;
+          if (!cancelled()) setGuest(data.guest);
+          return data.guest;
         }
         const res = await fetch('/api/auth/guest', {
           method: 'POST',
@@ -658,22 +673,57 @@ export function LobbyVoiceProvider({
           body: JSON.stringify({ displayNameSeed: localDisplayName || undefined }),
         });
         // A captcha refusal is not a failure to show: ask the person once,
-        // in a dialog, instead of retrying behind their back.
+        // in a dialog, instead of retrying behind their back. The ref is
+        // set too: a click waiting on this lookup reads it before React
+        // has re-rendered.
         if (await readCaptchaRefusal(res)) {
-          if (!cancelled) setGuestCheck('open');
-          return;
+          if (!cancelled()) {
+            guestCheckRef.current = 'open';
+            setGuestCheck('open');
+          }
+          return null;
         }
         if (!res.ok) throw new VoiceNoticeError({ key: 'lobby.voice.error.sessionFailed', params: { status: res.status } });
         const data = (await res.json()) as { guest: Guest };
-        if (!cancelled) setGuest(data.guest);
+        guestRef.current = data.guest;
+        if (!cancelled()) setGuest(data.guest);
+        return data.guest;
       } catch (err) {
-        if (!cancelled) setError(noticeFromError(err));
+        if (!cancelled()) setError(noticeFromError(err));
+        return null;
       }
     })();
+    sessionLookupRef.current = lookup;
+    void lookup.finally(() => {
+      if (sessionLookupRef.current === lookup) sessionLookupRef.current = null;
+    });
+    return lookup;
+  }, [localDisplayName]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void startSessionLookup(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, [localDisplayName]);
+  }, [startSessionLookup]);
+
+  /**
+   * The session the in-flight lookup settles on. Follows a newer lookup
+   * that replaced it while waiting (the display name changed, or React
+   * re-ran the effect).
+   */
+  const awaitSessionLookup = useCallback(async (): Promise<Guest | null> => {
+    let pending = sessionLookupRef.current;
+    let settled: Guest | null = null;
+    while (pending) {
+      settled = await pending;
+      const latest = sessionLookupRef.current;
+      if (!latest || latest === pending) break;
+      pending = latest;
+    }
+    return settled;
+  }, []);
 
   // Keep text-only lobby sessions present in Redis. The server render writes
   // an initial snapshot, but without a client heartbeat it expires after 90s.
@@ -821,14 +871,43 @@ export function LobbyVoiceProvider({
   const connectToChannel = useCallback(
     async (channelId: string) => {
       if (activeChannelId === channelId && roomRef.current) return;
-      if (!guest?.uid) {
-        // The session waits on the bot check the person closed: offer it again.
-        if (guestCheck === 'dismissed') {
-          setGuestCheck('open');
+      if (!guest?.uid && !guestRef.current?.uid) {
+        let ready = false;
+        // An earlier lookup failed and nothing is in flight: look again on
+        // this click, so "try again" really can work without a reload. (Not
+        // while the bot check is open or was closed: that path asks itself.)
+        if (!sessionLookupRef.current && guestCheckRef.current === 'closed') {
+          void startSessionLookup(() => false);
+        }
+        if (sessionLookupRef.current) {
+          // Clicked right after the lobby loaded, while the session lookup
+          // is still in flight: show this channel connecting and wait for
+          // the lookup, instead of calling an early click an error.
+          const waitToken = ++connectTokenRef.current;
+          setActiveChannelId(channelId);
+          setConnecting(true);
+          setError(null);
+          const settled = await awaitSessionLookup();
+          // Another click, or a disconnect, took over while we waited.
+          if (connectTokenRef.current !== waitToken) return;
+          ready = !!settled?.uid;
+          if (!ready) {
+            setActiveChannelId(null);
+            setConnecting(false);
+          }
+        }
+        if (!ready) {
+          // The bot check is on screen: it is already asking the person.
+          if (guestCheckRef.current === 'open') return;
+          // The session waits on the bot check the person closed: offer it again.
+          if (guestCheckRef.current === 'dismissed') {
+            setGuestCheck('open');
+            return;
+          }
+          // A failed lookup has already said why; keep that message.
+          setError((current) => current ?? { key: 'lobby.voice.error.sessionNotReady' });
           return;
         }
-        setError({ key: 'lobby.voice.error.sessionNotReady' });
-        return;
       }
 
       // Race guard: increment a token; if a newer connect call started
@@ -1143,7 +1222,8 @@ export function LobbyVoiceProvider({
     [
       activeChannelId,
       guest?.uid,
-      guestCheck,
+      awaitSessionLookup,
+      startSessionLookup,
       serverId,
       livekitUrl,
       localDisplayName,
@@ -1165,6 +1245,9 @@ export function LobbyVoiceProvider({
     roomRef.current = null;
     stopHeartbeat();
     setActiveChannelId(null);
+    // A connect this cancels (still fetching a token, or waiting for the
+    // session) returns without clearing it.
+    setConnecting(false);
     setParticipants([]);
     setJoinedScreenShares(new Set());
     setMicEnabled(false);
@@ -1836,6 +1919,7 @@ export function LobbyVoiceProvider({
         open={guestCheck === 'open'}
         body={{ displayNameSeed: localDisplayName || undefined }}
         onVerified={(verified) => {
+          guestRef.current = verified;
           setGuest(verified);
           setGuestCheck('closed');
           setError(null);

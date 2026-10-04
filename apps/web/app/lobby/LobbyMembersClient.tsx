@@ -330,24 +330,23 @@ function MemberSection({
   onClosePopover: () => void;
 }) {
   if (members.length === 0) return null;
+  // Offline rows are dimmed by their avatar and status dot only: an
+  // opacity on the list or the row took the text with it, down to 3.2:1.
+  // Text keeps a themed token that clears 4.5:1 on this panel in every
+  // theme (text-secondary; text-muted is only 4.05:1 on the light theme).
   return (
     <div className="mb-6">
-      <h3
-        className={
-          dimmed
-            ? 'font-label-xs uppercase tracking-wider mb-2 flex items-center gap-2 opacity-70 text-text-secondary'
-            : 'font-label-xs uppercase tracking-wider mb-2 flex items-center gap-2 text-text-secondary'
-        }
-      >
+      <h3 className="font-label-xs uppercase tracking-wider mb-2 flex items-center gap-2 text-text-secondary">
         {roleIcon ? <span className="material-symbols-outlined text-[14px]" style={{ color: roleColor ?? undefined }} aria-hidden>{roleIcon}</span> : null}
         <span style={{ color: roleColor ?? undefined }}>{label}</span>
         <div className="h-[1px] flex-1 bg-border-subtle" />
       </h3>
-      <ul className={dimmed ? 'space-y-1 opacity-60' : 'space-y-1'}>
+      <ul className="space-y-1">
         {members.map((m) => (
           <MemberRow
             key={m.id}
             member={m}
+            dimmed={dimmed}
             currentUserId={currentUserId}
             isOpen={openUserId === m.id}
             onOpen={(rect) => onOpen(m, rect)}
@@ -361,12 +360,15 @@ function MemberSection({
 
 function MemberRow({
   member,
+  dimmed,
   currentUserId,
   isOpen,
   onOpen,
   onClose,
 }: {
   member: Member;
+  /** In the offline group: fade the avatar and status dot, never the text. */
+  dimmed?: boolean;
   currentUserId: string | null;
   isOpen: boolean;
   onOpen: (rect: DOMRect) => void;
@@ -387,20 +389,14 @@ function MemberRow({
 
   return (
     <li>
-      <div
-        className={
-          member.status === 'in-voice'
-            ? 'flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-surface-container/50 group'
-            : 'flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-surface-container/50 group opacity-80'
-        }
-      >
+      <div className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-surface-container/50 group">
         <button
           type="button"
           data-user-popover-anchor
           onClick={handleClick}
           className="min-w-0 flex flex-1 items-center gap-3 text-left"
         >
-          <div className="relative size-8 flex-shrink-0">
+          <div className={dimmed ? 'relative size-8 flex-shrink-0 opacity-50' : 'relative size-8 flex-shrink-0'} data-member-avatar>
             <div
               className={member.grayscale ? 'size-8 overflow-hidden rounded-full bg-secondary-container grayscale' : 'size-8 overflow-hidden rounded-full bg-secondary-container'}
               style={roleColor ? { boxShadow: `0 0 0 2px ${roleColor}` } : undefined}
@@ -418,7 +414,7 @@ function MemberRow({
                 aria-label={t(PRESENCE_LABEL_KEYS[member.presence ?? 'online'])}
               />
             ) : (
-              <span className="absolute -bottom-px -right-px grid size-3 place-items-center rounded-full border-2 border-surface-dim bg-surface-container" aria-label={t(PRESENCE_LABEL_KEYS.offline)}><span className="size-1 rounded-full bg-text-muted" /></span>
+              <span className="absolute -bottom-px -right-px grid size-3 place-items-center rounded-full border-2 border-surface-dim bg-surface-container" aria-label={t('lobby.roster.offlineStatus')}><span className="size-1 rounded-full bg-text-muted" /></span>
             )}
           </div>
           <div className="min-w-0 flex flex-col">
@@ -433,7 +429,7 @@ function MemberRow({
               {member.name}
             </span>
             {member.isGuest ? (
-              <span className="text-[10px] text-text-muted font-medium truncate">{t('lobby.roster.guest')}</span>
+              <span className="text-[10px] text-text-secondary font-medium truncate">{t('lobby.roster.guest')}</span>
             ) : null}
           </div>
         </button>

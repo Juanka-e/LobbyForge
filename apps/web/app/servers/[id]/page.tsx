@@ -21,10 +21,11 @@
  */
 'use client';
 
-import { Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Suspense, useCallback, useEffect, useId, useMemo, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { CreateChannelModal, type CreateChannelInput } from '@/components/modals/CreateChannelModal';
 import { useT } from '@/lib/i18n/client';
+import { SCROLL_REGION_FOCUS_CLASS } from '@/lib/scroll-region';
 import type { Translator } from '@/lib/i18n/core';
 import SettingsModalFrame from '../../SettingsModalFrame';
 import { rich } from '@/lib/i18n/rich';
@@ -232,6 +233,7 @@ function ServerSettingsLoading() {
 
 function ServerHome({ serverId, initialTab }: { serverId: string; initialTab: Tab }) {
   const t = useT();
+  const tabHeadingId = useId();
   const [tab, setTab] = useState<Tab>(initialTab);
   const [error, setError] = useState<string | null>(null);
   const [server, setServer] = useState<Server | null>(null);
@@ -356,10 +358,16 @@ function ServerHome({ serverId, initialTab }: { serverId: string; initialTab: Ta
       </nav>
       </aside>
 
-      <main className="min-h-0 min-w-0 flex-1 overflow-y-auto px-5 py-8 md:px-10 md:py-10 lg:px-14">
+      {/* Focusable scroll region, named by the open tab's heading (see
+          SCROLL_REGION_FOCUS_CLASS). */}
+      <main
+        tabIndex={0}
+        aria-labelledby={tabHeadingId}
+        className={`min-h-0 min-w-0 flex-1 overflow-y-auto px-5 py-8 md:px-10 md:py-10 lg:px-14 ${SCROLL_REGION_FOCUS_CLASS}`}
+      >
         <div className="mx-auto w-full max-w-5xl">
           <header className="mb-7">
-            <h2 className="text-balance text-2xl font-semibold text-text-primary">{t(TAB_META[tab].labelKey)}</h2>
+            <h2 id={tabHeadingId} className="text-balance text-2xl font-semibold text-text-primary">{t(TAB_META[tab].labelKey)}</h2>
             {server ? (
               <p className="mt-1 truncate text-xs text-text-muted">
                 {server.id}
