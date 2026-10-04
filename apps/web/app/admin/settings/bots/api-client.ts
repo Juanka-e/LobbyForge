@@ -31,11 +31,26 @@ const PERMISSION_KEYS: Record<string, string> = {
   manage_game_session: 'bots.permission.manage_game_session',
   manage_music_queue: 'bots.permission.manage_music_queue',
   read_audit_log: 'bots.permission.read_audit_log',
+  slash_commands: 'bots.permission.slash_commands',
+  read_members: 'bots.permission.read_members',
+  receive_events: 'bots.permission.receive_events',
+};
+
+/** What a Bot API v2 permission lets the bot do, in one line (BOT_API_V2 §1.2). */
+const PERMISSION_HINT_KEYS: Record<string, string> = {
+  slash_commands: 'bots.permissionHint.slash_commands',
+  read_members: 'bots.permissionHint.read_members',
+  receive_events: 'bots.permissionHint.receive_events',
 };
 
 export function permissionLabel(t: Translator, permission: string): string {
   const key = PERMISSION_KEYS[permission];
   return key ? t(key) : permission;
+}
+
+export function permissionHint(t: Translator, permission: string): string | null {
+  const key = PERMISSION_HINT_KEYS[permission];
+  return key ? t(key) : null;
 }
 
 export function describeFailure(t: Translator, status: number, body: ErrorBody): string {

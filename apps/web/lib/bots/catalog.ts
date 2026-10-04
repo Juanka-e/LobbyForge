@@ -19,6 +19,10 @@ export const BOT_PERMISSIONS = [
   'manage_game_session',
   'manage_music_queue',
   'read_audit_log',
+  // Bot API v2 (docs/BOT_API_V2.md §1.2).
+  'slash_commands',
+  'read_members',
+  'receive_events',
 ] as const;
 
 export type BotPermissionId = (typeof BOT_PERMISSIONS)[number];
@@ -27,8 +31,49 @@ export function isBotPermission(value: unknown): value is BotPermissionId {
   return typeof value === 'string' && (BOT_PERMISSIONS as readonly string[]).includes(value);
 }
 
-/** Permissions the Bot API v1 honours today; the rest are kept for what comes next. */
-export const BOT_API_PERMISSIONS: readonly BotPermissionId[] = ['read_messages', 'send_messages'];
+/**
+ * Permissions the Bot API honours today (v1 messages + v2 commands, member
+ * events and the event stream); the rest are kept for what comes next and
+ * the settings page marks them "coming soon".
+ */
+export const BOT_API_PERMISSIONS: readonly BotPermissionId[] = [
+  'read_messages',
+  'send_messages',
+  'slash_commands',
+  'read_members',
+  'receive_events',
+];
+
+// ── Bot API v2 vocabulary (client-safe: the composer and admin UI use it) ──
+
+/** Slash command and option names: lowercase letters, digits, `_` and `-`. */
+export const COMMAND_NAME_PATTERN = /^[a-z0-9_-]{1,32}$/;
+export const COMMAND_DESCRIPTION_MAX_LENGTH = 100;
+export const MAX_COMMANDS_PER_BOT = 50;
+export const MAX_COMMAND_OPTIONS = 25;
+export const MAX_OPTION_CHOICES = 25;
+export const COMMAND_STRING_OPTION_MAX_LENGTH = 1000;
+/** An interaction can be answered (and followed up) for this long after it was created. */
+export const INTERACTION_TTL_MS = 15 * 60_000;
+export const MAX_INTERACTION_FOLLOWUPS = 5;
+
+/**
+ * Events a bot can receive (docs/BOT_API_V2.md §4.2). `ready` exists only on
+ * the stream; an outgoing endpoint can subscribe to everything else.
+ */
+export const BOT_EVENT_NAMES = [
+  'message_create',
+  'message_update',
+  'message_delete',
+  'member_join',
+  'member_leave',
+  'interaction_create',
+  'channel_access_changed',
+] as const;
+export type BotEventName = (typeof BOT_EVENT_NAMES)[number];
+
+export const MAX_WEBHOOKS_PER_CHANNEL = 10;
+export const WEBHOOK_NAME_MAX_LENGTH = 32;
 
 export const CUSTOM_BOT_TYPE = 'custom';
 export const BUILT_IN_TYPES = ['welcome', 'moderation'] as const;

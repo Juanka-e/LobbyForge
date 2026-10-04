@@ -6,6 +6,7 @@ import { withApiSecurity } from '@/lib/security-headers';
 import { auditBotAction, jsonErrors, requireBotManager, toBotJson } from '@/lib/bots/admin';
 import { CUSTOM_BOT_TYPE, findUngrantableBotPermissions, isBotPermission } from '@/lib/bots/permissions';
 import { generateBotToken } from '@/lib/bots/token';
+import { notifyBotChanged } from '@/lib/bots/events';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -63,6 +64,8 @@ async function handlePost(req: Request, ctx: RouteContext): Promise<NextResponse
   const { token, hash } = generateBotToken(bot.id);
   const updated = await setBotTokenHash(getDb(), bot.id, hash);
   if (!updated) return NOT_FOUND();
+  // Bot API v2: an event stream opened with the old token must close.
+  if (bot.tokenHash) notifyBotChanged({ serverId, botId: bot.id, reason: 'token_changed' });
   auditBotAction({
     serverId,
     actorUserId: auth.manager.uid,
@@ -87,6 +90,7 @@ async function handleDelete(req: Request, ctx: RouteContext): Promise<NextRespon
 
   const updated = await setBotTokenHash(getDb(), bot.id, null);
   if (!updated) return NOT_FOUND();
+  notifyBotChanged({ serverId, botId: bot.id, reason: 'token_changed' });
   auditBotAction({ serverId, actorUserId: auth.manager.uid, action: 'bot.token.revoke', bot: updated });
   return NextResponse.json(
     { bot: toBotJson(updated, { includeSettings: true }) },

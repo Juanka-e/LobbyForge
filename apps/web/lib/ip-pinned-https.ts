@@ -53,6 +53,15 @@ export async function fetchIpPinned(
     signal?: AbortSignal;
     maxStreamBytes?: number;
     userAgent?: string;
+    /**
+     * Bot API v2 event deliveries POST a signed JSON body. GET without a
+     * body stays the default, so the installer / directory callers are
+     * unchanged. Redirects are never followed either way (`https.request`
+     * does not), so a 3xx cannot bounce a request to an unchecked host.
+     */
+    method?: 'GET' | 'POST';
+    headers?: Record<string, string>;
+    body?: string | Buffer;
   } = {}
 ): Promise<{ ok: boolean; status: number; body: Buffer; arrayBuffer: ArrayBuffer }> {
   const timeoutMs = options.timeoutMs ?? 10_000;
@@ -102,7 +111,12 @@ export async function fetchIpPinned(
       {
         agent,
         timeout: timeoutMs,
-        headers: { 'user-agent': options.userAgent ?? 'LobbyForge/1.0' },
+        method: options.method ?? 'GET',
+        headers: {
+          ...(options.headers ?? {}),
+          'user-agent': options.userAgent ?? 'LobbyForge/1.0',
+          ...(options.body !== undefined ? { 'content-length': String(Buffer.byteLength(options.body)) } : {}),
+        },
       },
       (res) => {
         if (headersTimer) clearTimeout(headersTimer);
@@ -141,6 +155,7 @@ export async function fetchIpPinned(
       cleanup();
       reject(err);
     });
-    req.end();
+    if (options.body !== undefined) req.end(options.body);
+    else req.end();
   });
 }

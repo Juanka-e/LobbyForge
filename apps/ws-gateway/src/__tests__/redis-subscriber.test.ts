@@ -9,6 +9,7 @@ import {
   __resetSubscriberState,
   __setConnectionFactory,
   __subscriberStats,
+  acquireRedisChannel,
   acquireTopicSubscription,
   type SubscriberConnection,
 } from '../redis-subscriber.js';
@@ -116,6 +117,24 @@ describe('shared redis subscriber', () => {
     connections[0]!.emitMessage('lf:test:chat:srv-1:a', 'raw');
     expect(ok).toHaveBeenCalledTimes(1);
     warn.mockRestore();
+  });
+
+  it('raw bot-events channels ride the SAME connection with the same refcounting', () => {
+    const onBot = vi.fn();
+    const chat = acquireTopicSubscription('chat:srv-1:a', () => undefined);
+    const a = acquireRedisChannel('lf:test:bot-events:b1', onBot);
+    const b = acquireRedisChannel('lf:test:bot-events:b1', onBot);
+    const conn = connections[0]!;
+    expect(connections).toHaveLength(1);
+    expect(conn.subscribe).toHaveBeenCalledWith('lf:test:bot-events:b1');
+    expect(conn.subscribe).toHaveBeenCalledTimes(2);
+    conn.emitMessage('lf:test:bot-events:b1', '{"event":"member_join"}');
+    expect(onBot).toHaveBeenCalledTimes(2);
+    a.release();
+    expect(conn.unsubscribe).not.toHaveBeenCalled();
+    b.release();
+    expect(conn.unsubscribe).toHaveBeenCalledWith('lf:test:bot-events:b1');
+    chat.release();
   });
 
   it('never opens a connection for an unparseable topic', () => {

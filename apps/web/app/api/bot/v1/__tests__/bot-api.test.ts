@@ -12,6 +12,13 @@ const getActiveBotById = vi.fn();
 const getChannelById = vi.fn();
 const isChannelOpenToBots = vi.fn();
 const listBotAccessibleChannels = vi.fn();
+// Bot API v2 §1.1: every route asks the ONE access rule in @lobbyforge/db.
+const getBotReachableChannel = vi.fn();
+const listBotReachableChannels = vi.fn();
+const listBotEventTargets = vi.fn();
+const listBotChannelAccessForServer = vi.fn();
+/** Explicit channel grants of the test bot ([] = none: the v1 rule). */
+let grants: string[] = [];
 const listMessagesForChannel = vi.fn();
 const listUserDisplayNames = vi.fn();
 const createMessage = vi.fn();
@@ -24,6 +31,10 @@ vi.mock('@lobbyforge/db', () => ({
   getChannelById,
   isChannelOpenToBots,
   listBotAccessibleChannels,
+  getBotReachableChannel,
+  listBotReachableChannels,
+  listBotEventTargets,
+  listBotChannelAccessForServer,
   listMessagesForChannel,
   listUserDisplayNames,
   createMessage,
@@ -100,6 +111,8 @@ async function routes() {
 beforeEach(() => {
   vi.resetModules();
   token = generateBotToken(BOT_ID).token;
+  grants = [];
+  for (const fn of [getBotReachableChannel, listBotReachableChannels, listBotEventTargets, listBotChannelAccessForServer]) fn.mockReset();
   for (const fn of [getActiveBotById, getChannelById, isChannelOpenToBots, listBotAccessibleChannels, listMessagesForChannel, listUserDisplayNames, createMessage, logAction, touchBotLastUsed, publishChatMessage, maintenanceResponseForRequest]) {
     fn.mockReset();
   }
@@ -107,6 +120,20 @@ beforeEach(() => {
   getChannelById.mockImplementation(async (_db: unknown, id: string) => CHANNELS[id] ?? null);
   isChannelOpenToBots.mockImplementation(async (_db: unknown, id: string) => id !== PRIVATE);
   listBotAccessibleChannels.mockResolvedValue([CHANNELS[GENERAL]]);
+  // The §1.1 rule over the fixtures: own server, text-like, then explicit
+  // grants if any, else no role gate (PRIVATE is the gated one).
+  const reaches = (bot: { serverId: string }, id: string) => {
+    const c = CHANNELS[id];
+    if (!c || c.serverId !== bot.serverId || !['text', 'announcement'].includes(c.type)) return null;
+    if (grants.length > 0) return grants.includes(c.id) ? c : null;
+    return c.id === PRIVATE ? null : c;
+  };
+  getBotReachableChannel.mockImplementation(async (_db: unknown, bot: { serverId: string }, id: string) => reaches(bot, id));
+  listBotReachableChannels.mockImplementation(async (_db: unknown, bot: { serverId: string }) =>
+    Object.keys(CHANNELS).map((id) => reaches(bot, id)).filter(Boolean)
+  );
+  listBotEventTargets.mockResolvedValue([]);
+  listBotChannelAccessForServer.mockResolvedValue(new Map());
   listUserDisplayNames.mockResolvedValue(new Map([[MEMBER, 'Ayşe']]));
   logAction.mockResolvedValue(undefined);
   touchBotLastUsed.mockResolvedValue(undefined);
@@ -284,7 +311,15 @@ describe('GET /channels', () => {
     expect(await res.json()).toEqual({
       channels: [{ id: GENERAL, name: 'general', type: 'text', position: 0, topic: null }],
     });
-    expect(listBotAccessibleChannels).toHaveBeenCalledWith(expect.anything(), SERVER);
+    expect(listBotReachableChannels).toHaveBeenCalledWith(expect.anything(), { id: BOT_ID, serverId: SERVER });
+  });
+
+  it('lists exactly the granted channels once an admin chose some — a role-gated one included', async () => {
+    const { channels } = await routes();
+    grants = [PRIVATE];
+    const res = await channels.GET(request('GET', '/channels'), noCtx);
+    expect(res.status).toBe(200);
+    expect((await res.json()).channels.map((c: { id: string }) => c.id)).toEqual([PRIVATE]);
   });
 });
 
@@ -304,6 +339,17 @@ describe('GET /channels/{id}/messages', () => {
       expect(res.status).toBe(404);
     }
     expect(listMessagesForChannel).not.toHaveBeenCalled();
+    // Every lookup went through the one access helper, as this bot.
+    expect(getBotReachableChannel).toHaveBeenCalledWith(expect.anything(), { id: BOT_ID, serverId: SERVER }, PRIVATE);
+  });
+
+  it('follows explicit grants: a granted role-gated channel opens, an ungranted open one closes', async () => {
+    const { messages } = await routes();
+    grants = [PRIVATE];
+    listMessagesForChannel.mockResolvedValue([]);
+    listUserDisplayNames.mockResolvedValue(new Map());
+    expect((await messages.GET(request('GET', `/channels/${PRIVATE}/messages`), messagesCtx(PRIVATE))).status).toBe(200);
+    expect((await messages.GET(request('GET', `/channels/${GENERAL}/messages`), messagesCtx(GENERAL))).status).toBe(404);
   });
 
   it('validates limit and before', async () => {

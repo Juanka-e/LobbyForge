@@ -85,7 +85,7 @@ async function loadAndAuthorize(
   requireMembership: boolean,
   applyVisibility = false
 ): Promise<
-  | { ok: true; channel: ChannelRow; isOwner: boolean }
+  | { ok: true; channel: ChannelRow; isOwner: boolean; ownerUserId: string | null }
   | { ok: false; response: NextResponse }
 > {
   if (!serverId || !channelId) {
@@ -130,7 +130,7 @@ async function loadAndAuthorize(
       return { ok: false, response: NextResponse.json({ error: 'Channel not found' }, { status: 404 }) };
     }
   }
-  return { ok: true, channel, isOwner };
+  return { ok: true, channel, isOwner, ownerUserId: server.ownerUserId ?? null };
 }
 
 async function handleGet(req: Request, ctx: RouteContext): Promise<NextResponse> {
@@ -202,6 +202,14 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
         );
       }
       await setChannelRoleOverrides(getDb(), channelId, body.visibleToRoleIds);
+      if (body.visibleToRoleIds.length > 0) {
+        // Bot API v2 §1.1: a private channel may only be granted to a bot
+        // by someone who can manage channels — drop grants made by anyone
+        // else (audited; the bots are told). Before the invalidation below,
+        // so the bot streams recompute without them.
+        const { dropGrantsAfterRestriction } = await import('@/lib/bots/channel-changes');
+        await dropGrantsAfterRestriction({ serverId, ownerUserId: access.ownerUserId, channelId, actorUserId: session.uid });
+      }
       // LF-SEC-003: a visibility change must re-check who may keep
       // live subscriptions on this channel.
       const { publishAccessInvalidation } = await import('@/lib/access-invalidation');
@@ -258,6 +266,10 @@ async function handleDelete(req: Request, ctx: RouteContext): Promise<NextRespon
     const auth = await authorizeServerPermission(session.uid, serverId, CorePermission.MANAGE_CHANNELS);
     if (!auth.ok) return auth.response;
 
+    // Bot API v2 §1.1: the bots granted this channel lose it with the
+    // channel (the rows cascade) — read who they are first.
+    const channelChanges = await import('@/lib/bots/channel-changes');
+    const botIds = await channelChanges.listBotsGrantedChannel(channelId);
     await deleteChannel(getDb(), channelId);
     void logAction(getDb(), {
       serverId,
@@ -266,6 +278,9 @@ async function handleDelete(req: Request, ctx: RouteContext): Promise<NextRespon
       targetType: 'channel',
       targetId: channelId,
     }).catch((err) => console.error('[audit] channel.delete failed:', (err as Error).message));
+    // A `selected` bot that just lost its last channel reaches nothing; tell
+    // the gateway and the bots' endpoints, drop the fan-out cache.
+    await channelChanges.afterChannelDeleted({ serverId, channelId, botIds, actorUserId: session.uid });
     return NextResponse.json({ ok: true }, { headers: { 'Cache-Control': 'no-store' } });
   } catch {
     return NextResponse.json(

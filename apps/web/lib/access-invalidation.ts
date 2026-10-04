@@ -43,6 +43,17 @@ export type AccessInvalidationEvent =
       kind: 'dm-access';
       channelId: string;
       reason: 'blocked' | 'unblocked';
+    }
+  | {
+      /**
+       * Bot API v2 §4.3: a bot's channel access, permissions, enabled state
+       * or token changed — the gateway recomputes (or closes) that bot's
+       * event stream. Browser subscriptions are never affected.
+       */
+      kind: 'bot-access';
+      serverId: string;
+      botId: string;
+      reason: 'channel_access_changed' | 'permissions_changed' | 'enabled_changed' | 'token_changed' | 'deleted';
     };
 
 /**

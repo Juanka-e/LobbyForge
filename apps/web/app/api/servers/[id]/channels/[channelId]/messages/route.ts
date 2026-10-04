@@ -21,6 +21,7 @@ import { authorizeChannelMessageAccess } from '@/lib/message-authorization';
 import { publishChatMessage } from '@/lib/chat-bus';
 import { moderateMessage, moderationBlockedBody } from '@/lib/bots/moderation';
 import { readMessageBot } from '@/lib/bots/message-meta';
+import { emitMessageEvent } from '@/lib/bots/events';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -39,6 +40,10 @@ const RESERVED_METADATA_KEYS = new Set([
   'trust',
   'signature',
   'moderation',
+  // Bot API v2: written only by the server — a bot's command answer and an
+  // incoming webhook's post. A member must not be able to forge either.
+  'interaction',
+  'webhook',
 ]);
 
 function validateUserMetadata(metadata: Record<string, unknown> | undefined): NextResponse | null {
@@ -265,6 +270,20 @@ async function handlePost(
         metadata: created.metadata,
         replyToId: created.replyToId,
         createdAt: created.createdAt.toISOString(),
+      },
+    });
+    // Bot API v2: bots' outgoing event endpoints (fire-and-forget, cached
+    // per server — no query per bot).
+    emitMessageEvent({
+      serverId,
+      channel: { id: access.context.channel.id, type: access.context.channel.type },
+      event: 'message_create',
+      message: {
+        id: created.id,
+        content: created.content,
+        createdAt: created.createdAt.toISOString(),
+        replyToId: created.replyToId,
+        userId: session.uid,
       },
     });
     void logAction(getDb(), {

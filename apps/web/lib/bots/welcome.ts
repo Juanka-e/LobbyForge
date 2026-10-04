@@ -10,10 +10,12 @@
  * ping @everyone. A raid (many joins at once) is capped at
  * WELCOME_RATE greetings per server; joins beyond it simply go unwelcomed.
  */
-import { getServerById, getUserById, listBotAccessibleChannels } from '@lobbyforge/db';
+import { getServerById, getUserById } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { distributedRateLimit, type RateLimitConfig } from '@/lib/security-headers';
 import { getBuiltInBot } from './cache';
+import { listBotChannels } from './access';
+import { emitMemberEvent } from './events';
 import { postBotMessage } from './messages';
 import { parseWelcomeSettings } from './settings';
 import { defaultBotText, renderBotTemplate } from './templates';
@@ -21,6 +23,10 @@ import { defaultBotText, renderBotTemplate } from './templates';
 export const WELCOME_RATE: RateLimitConfig = { windowMs: 60_000, maxRequests: 10 };
 
 export async function notifyMemberJoined(input: { serverId: string; userId: string }): Promise<void> {
+  // Bot API v2: every join path already calls this hook, so it is also
+  // where bots with `read_members` hear about the newcomer (fire-and-forget,
+  // whether or not a Welcome Bot exists).
+  emitMemberEvent({ serverId: input.serverId, userId: input.userId, event: 'member_join' });
   try {
     const bot = await getBuiltInBot(input.serverId, 'welcome');
     if (!bot || !bot.enabled) return;
@@ -32,8 +38,7 @@ export async function notifyMemberJoined(input: { serverId: string; userId: stri
     }
 
     const settings = parseWelcomeSettings(bot.settings);
-    const channelId =
-      settings.channelId ?? (await listBotAccessibleChannels(getDb(), input.serverId))[0]?.id ?? null;
+    const channelId = settings.channelId ?? (await listBotChannels(bot))[0]?.id ?? null;
     if (!channelId) return;
 
     const [member, server] = await Promise.all([

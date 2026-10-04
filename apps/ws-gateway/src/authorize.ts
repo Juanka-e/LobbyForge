@@ -34,7 +34,7 @@ export function isUuid(value: string): boolean {
 export type AuthorizeResult =
   | {
       ok: true;
-      kind: 'activity-state' | 'chat' | 'presence' | 'dm';
+      kind: 'activity-state' | 'chat' | 'presence' | 'dm' | 'user';
       serverId: string;
       resourceId: string;
       /** beta-review: the channel the topic lives in (chat / activity-state). */
@@ -50,6 +50,14 @@ export async function authorizeTopicSubscribe(
   const parsed = parseTopic(topic);
   if (!parsed) return { ok: false, reason: 'unknown_topic' };
   if (!isUuid(parsed.serverId) || !isUuid(parsed.resourceId)) return { ok: false, reason: 'unknown_topic' };
+
+  // Bot API v2 §4.3: `user:{uid}` carries one user's private events
+  // (ephemeral interaction answers) — only that user's own session may
+  // listen. No database lookup: the session uid is the whole rule.
+  if (parsed.kind === 'user') {
+    if (parsed.resourceId !== userId) return { ok: false, reason: 'forbidden' };
+    return { ok: true, kind: 'user', serverId: parsed.resourceId, resourceId: parsed.resourceId };
+  }
 
   // DM topics: the CANONICAL DM policy (LF-SEC-006) — a participant of
   // a channel where either side has blocked the other cannot subscribe,

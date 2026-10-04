@@ -78,7 +78,9 @@ export type Topic =
   | `activity-state:${string}:${string}`
   | `chat:${string}:${string}`
   | `presence:${string}`
-  | `dm:${string}`;
+  | `dm:${string}`
+  /** Events for one signed-in user only — ephemeral bot answers (BOT_API_V2 §4.3). */
+  | `user:${string}`;
 
 type Handler<T = unknown> = (data: T) => void;
 

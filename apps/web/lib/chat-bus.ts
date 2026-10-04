@@ -80,6 +80,65 @@ export function publishChatMessage(input: {
 }
 
 /**
+ * Bot API v2 §4.2: edits and deletes travel on the same channel topic so
+ * the gateway can give bots `message_update` / `message_delete`. The
+ * envelopes carry only ids — the gateway reloads an edited message itself
+ * (and checks the bot's access) instead of trusting a payload, and a
+ * deleted message has nothing left to send. `botId` is the AUTHOR bot, so
+ * a bot never hears about its own messages. Browser consumers only act on
+ * `type: 'message'` and ignore these.
+ */
+interface ChatMessageUpdateEnvelope {
+  type: 'message_update';
+  message: { id: string; botId?: string };
+  at: string;
+}
+
+interface ChatMessageDeleteEnvelope {
+  type: 'message_delete';
+  id: string;
+  botId?: string;
+  at: string;
+}
+
+function publishEnvelope(serverId: string, channelId: string, payload: unknown): void {
+  sharedRedis.publish(topicName(serverId, channelId), JSON.stringify(payload)).catch((err) => {
+    console.warn(`[chat-bus] publish failed for ${channelId}: ${(err as Error).message}`);
+  });
+}
+
+/** A message's text changed. Fire-and-forget, like `publishChatMessage`. */
+export function publishChatMessageUpdate(input: {
+  serverId: string;
+  channelId: string;
+  messageId: string;
+  botId?: string | null;
+}): void {
+  const payload: ChatMessageUpdateEnvelope = {
+    type: 'message_update',
+    message: { id: input.messageId, ...(input.botId ? { botId: input.botId } : {}) },
+    at: new Date().toISOString(),
+  };
+  publishEnvelope(input.serverId, input.channelId, payload);
+}
+
+/** A message was deleted. Fire-and-forget. */
+export function publishChatMessageDelete(input: {
+  serverId: string;
+  channelId: string;
+  messageId: string;
+  botId?: string | null;
+}): void {
+  const payload: ChatMessageDeleteEnvelope = {
+    type: 'message_delete',
+    id: input.messageId,
+    ...(input.botId ? { botId: input.botId } : {}),
+    at: new Date().toISOString(),
+  };
+  publishEnvelope(input.serverId, input.channelId, payload);
+}
+
+/**
  * Subscribe to a single channel's message stream. The returned
  * `close()` function unsubscribes and tears down the Redis listener.
  * The Redis subscriber connection is shared across all callers for

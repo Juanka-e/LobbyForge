@@ -12,6 +12,7 @@ import {
   toBotJson,
 } from '@/lib/bots/admin';
 import { invalidateBotCache } from '@/lib/bots/cache';
+import { notifyBotChanged } from '@/lib/bots/events';
 import { BOT_PERMISSIONS, findUngrantableBotPermissions, isBuiltInType } from '@/lib/bots/permissions';
 import { CorePermission, hasPermission } from '@lobbyforge/core';
 
@@ -111,6 +112,15 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
   const updated = await updateBot(getDb(), bot.id, patch);
   if (!updated) return NOT_FOUND();
   invalidateBotCache(serverId);
+  // Bot API v2: the gateway re-checks (or closes) the bot's event stream,
+  // and the event fan-out forgets its cached copy of the bot.
+  if (patch.permissions !== undefined || patch.enabled !== undefined) {
+    notifyBotChanged({
+      serverId,
+      botId: bot.id,
+      reason: patch.permissions !== undefined ? 'permissions_changed' : 'enabled_changed',
+    });
+  }
   const onlyToggle = Object.keys(changes).length === 1 && 'enabled' in changes;
   auditBotAction({
     serverId,
@@ -132,6 +142,7 @@ async function handleDelete(req: Request, ctx: RouteContext): Promise<NextRespon
   if (!bot) return NOT_FOUND();
   if (!(await deleteBot(getDb(), bot.id))) return NOT_FOUND();
   invalidateBotCache(serverId);
+  notifyBotChanged({ serverId, botId: bot.id, reason: 'deleted' });
   auditBotAction({ serverId, actorUserId: auth.manager.uid, action: 'bot.delete', bot });
   return NextResponse.json({ ok: true }, { headers: { 'Cache-Control': 'no-store' } });
 }

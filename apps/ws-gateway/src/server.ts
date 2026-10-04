@@ -19,8 +19,10 @@ import { ClientMessageSchema, type ServerMessage } from './protocol.js';
 import { getDb } from './db.js';
 import { initAccessInvalidationListener, topicMatchesInvalidation } from './access-invalidation.js';
 import { shutdownSubscriber } from './redis-subscriber.js';
+import { createBotGateway, isBotGatewayPath } from './bot-gateway.js';
 
-import { projectActivityState } from '@lobbyforge/core';
+import { isCoreProjectedPlugin, projectActivityState } from '@lobbyforge/core';
+import { fetchHostProjection } from './host-projection.js';
 import { getGameSessionById, getPluginInstall } from '@lobbyforge/db';
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
@@ -109,7 +111,13 @@ async function forwardProjectedActivity(
     }
     const install = await getPluginInstall(getDb() as never, authz.serverId, row.pluginId).catch(() => null);
     const pluginId = install?.pluginId ?? row.pluginId;
-    const projected = projectActivityState(row.state, pluginId, viewerUserId);
+    // ADR-007: core projects the official plugins; any other id (a
+    // marketplace plugin projects itself in the plugin worker, which only
+    // web can reach) is projected by the web app. A failure throws → the
+    // lean event below, never unprojected state.
+    const projected = isCoreProjectedPlugin(pluginId)
+      ? projectActivityState(row.state, pluginId, viewerUserId)
+      : (await fetchHostProjection({ serverId: authz.serverId, sessionId: row.id, viewerUserId })).state;
     send(socket, {
       type: 'event',
       topic,
@@ -170,6 +178,8 @@ function recordSubscribe(state: ConnectionState): boolean {
 }
 
 const MAX_CONNECTIONS_PER_IP = parseInt(process.env.WS_MAX_CONN_PER_IP || '10', 10);
+/** Bot API v2: `/ws/bot` sockets (authenticated or not) have their own per-IP cap. */
+const MAX_BOT_CONNECTIONS_PER_IP = parseInt(process.env.WS_BOT_MAX_CONN_PER_IP || '10', 10);
 
 /** LF-SEC-009: how long a live socket tolerates an unreachable
  * revocation store before it is closed (fail-closed with grace). */
@@ -227,14 +237,18 @@ const ipSlotReleasers = new WeakMap<http.IncomingMessage, () => void>();
  * WS close, error); it is single-fire so the handler's early releases
  * cannot double-decrement.
  */
-function claimIpSlot(req: http.IncomingMessage): boolean {
+function claimIpSlot(req: http.IncomingMessage, scope: 'browser' | 'bot' = 'browser'): boolean {
   // An already-destroyed socket will never emit 'close' again — the
   // upgrade is dead anyway; do not count it.
   if (req.socket.destroyed) return false;
-  const ip = clientIpFor(req);
+  const address = clientIpFor(req);
+  // Bot sockets are counted apart, so bots cannot lock browsers on the
+  // same address out (and the other way round).
+  const ip = scope === 'bot' ? `bot:${address}` : address;
+  const max = scope === 'bot' ? MAX_BOT_CONNECTIONS_PER_IP : MAX_CONNECTIONS_PER_IP;
   const count = ipConnectionCounts.get(ip) ?? 0;
-  if (count >= MAX_CONNECTIONS_PER_IP) {
-    console.warn(`[ws-gateway] rejecting connection from ${ip}: ${count} active (max ${MAX_CONNECTIONS_PER_IP})`);
+  if (count >= max) {
+    console.warn(`[ws-gateway] rejecting ${scope} connection from ${address}: ${count} active (max ${max})`);
     return false;
   }
   ipConnectionCounts.set(ip, count + 1);
@@ -256,6 +270,11 @@ export function __ipConnectionCount(ip: string): number {
   return ipConnectionCounts.get(ip) ?? 0;
 }
 
+/** Test/introspection: live `/ws/bot` slot count for an address. */
+export function __botIpConnectionCount(ip: string): number {
+  return ipConnectionCounts.get(`bot:${ip}`) ?? 0;
+}
+
 export function createGateway(): { wss: WebSocketServer; server: http.Server; close: () => Promise<void> } {
   // Create an HTTP server first — it serves the /health endpoint for
   // Docker healthchecks (the WS-only server returns 426 for plain HTTP).
@@ -273,14 +292,31 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
     server: httpServer, // Share the HTTP server — WS upgrades + /health on one port.
     perMessageDeflate: false,
     maxPayload: 64 * 1024, // 64 KB — reject oversized messages
-    verifyClient: (info: { origin: string; secure: boolean; req: import('http').IncomingMessage }) => {
-      if (!isAllowedWsOrigin(info.origin)) return false;
+    verifyClient: (
+      info: { origin: string; secure: boolean; req: import('http').IncomingMessage },
+      done: (result: boolean, code?: number, message?: string) => void
+    ) => {
+      // Bot API v2 §4.1: `/ws/bot` needs no cookie and no Origin — the bot
+      // token is the credential (sent on the upgrade or in `identify`), so
+      // a cross-site page gains nothing. Its sockets have their own cap.
+      if (isBotGatewayPath(info.req.url)) {
+        if (claimIpSlot(info.req, 'bot')) done(true);
+        else done(false, 429, 'Too Many Requests');
+        return;
+      }
+      if (!isAllowedWsOrigin(info.origin)) {
+        done(false, 401);
+        return;
+      }
       // Per-IP connection cap — prevents DoS via unauthenticated WS floods.
       // SEC-004: LAST XFF entry (the trusted-proxy-observed hop), never
       // the first (client-controllable in a forwarded chain).
-      return claimIpSlot(info.req);
+      done(claimIpSlot(info.req), 401);
     },
   });
+
+  // Bot API v2 §4: bot connections on `/ws/bot`.
+  const botGateway = createBotGateway({ getDb });
 
   httpServer.listen(getEnvPort(), getEnvHost());
 
@@ -290,6 +326,8 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
   // catches anything the (lossy) Pub/Sub invalidation missed. Shares
   // the invalidation sweep's re-check + removal logic.
   const periodicReauth = setInterval(() => {
+    // Bot feeds: re-validate the bot row and recompute its channel set.
+    void botGateway.refreshAll();
     for (const client of wss.clients) {
       const state = connections.get(client);
       if (!state?.guest) continue;
@@ -373,6 +411,8 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
           });
       }
     }
+    // Bot sockets: ping + `heartbeat` frame; two missed pings terminate.
+    botGateway.heartbeat();
   }, HEARTBEAT_INTERVAL_MS);
 
   // LF-SEC-003: event-driven access invalidation. When the web app
@@ -381,6 +421,9 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
   // remove the ones that no longer pass — REST and realtime must lose
   // access at the same moment.
   const stopInvalidationListener = initAccessInvalidationListener((event) => {
+    // Bot API v2: `bot-access` (and channel/server policy) recompute bot feeds.
+    botGateway.onInvalidation(event);
+    if (event.kind === 'bot-access') return;
     for (const client of wss.clients) {
       const state = connections.get(client);
       if (!state?.guest) continue;
@@ -402,7 +445,7 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
             send(client, {
               type: 'access_revoked',
               topic,
-              reason: event.reason,
+              reason: event.reason ?? event.kind,
               at: new Date().toISOString(),
             });
           }
@@ -417,6 +460,12 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
     // double-decrement when 'close', 'error' and the raw-socket 'close'
     // all fire for the same connection.
     const releaseIpSlot = ipSlotReleasers.get(req) ?? (() => undefined);
+
+    // Bot API v2 §4.1: token-authenticated bot feed — never a cookie.
+    if (isBotGatewayPath(req.url)) {
+      botGateway.handleConnection(socket, req, clientIpFor(req), releaseIpSlot);
+      return;
+    }
 
     const cookieHeader = req.headers.cookie;
     const auth = validateGuestFromHeaders(cookieHeader);
@@ -634,6 +683,7 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
       clearInterval(heartbeat);
       clearInterval(periodicReauth);
       stopInvalidationListener();
+      botGateway.close();
       shutdownSubscriber();
       for (const client of wss.clients) {
         try {

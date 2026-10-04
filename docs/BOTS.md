@@ -10,6 +10,7 @@ allow.
 - [Permissions](#permissions)
 - [Tokens](#tokens)
 - [Bot API v1](#bot-api-v1)
+- [Bot API v2: slash commands, events, webhooks](#bot-api-v2-slash-commands-events-webhooks)
 - [Built-in bots](#built-in-bots)
 - [Managing bots](#managing-bots)
 - [How bots appear](#how-bots-appear)
@@ -50,6 +51,9 @@ manage roles, members, channels, invites or other bots, whatever it holds.
 | `read_messages` | list channels, read recent messages | Bot API v1 |
 | `send_messages` | list channels, post messages | Bot API v1, built-in bots |
 | `moderate_messages` | filter members' messages | Moderation Bot |
+| `slash_commands` | register slash commands, answer interactions | Bot API v2 |
+| `read_members` | member join/leave events, member lookups | Bot API v2 |
+| `receive_events` | the event stream and an outgoing event endpoint | Bot API v2 |
 | `join_voice`, `publish_audio` | voice (reserved) | not yet |
 | `read_presence` | who is online (reserved) | not yet |
 | `manage_game_session`, `manage_music_queue` | activities, music (reserved) | not yet |
@@ -61,7 +65,8 @@ matching API ships; the settings page marks them *(coming soon)*.
 **No escalation.** A member who manages bots (the *Manage Community*
 permission) can only give a bot permissions they hold themselves:
 `read_messages` needs *Read Message History*, `send_messages` needs *Send
-Messages*, `moderate_messages` needs *Manage Messages*, `read_audit_log` needs
+Messages*, `moderate_messages` needs *Manage Messages*, `slash_commands` needs *Send
+Messages*, `read_audit_log` needs
 *View Audit Log*, `join_voice` / `publish_audio` need *Join Voice Rooms* /
 *Speak*, the activity and music permissions need *Start Activities*. The owner
 and administrators may grant any of them. Removing a permission, or keeping
@@ -178,6 +183,27 @@ A bot's budget is keyed on the bot itself, so nobody can use it up without
 the token. Client addresses are only as reliable as the instance's
 `LOBBYFORGE_TRUSTED_PROXY` setting — behind nginx set it to
 `x-forwarded-for`, as for the rest of the app.
+
+## Bot API v2: slash commands, events, webhooks
+
+v1 stays as it is. v2 adds, all scoped per channel:
+
+- **Slash commands** — a bot registers commands (`PUT /api/bot/v2/commands`);
+  members run them from the composer with `/`. The bot answers each run
+  (an *interaction*) publicly or only to the member who ran it.
+- **Event stream** — the bot connects to the gateway at `/ws/bot`
+  (`Authorization: Bot <token>` or an `identify` message) and receives
+  `message_*`, `member_*` and `interaction_create` events instead of
+  polling.
+- **Outgoing event endpoint** — or the instance POSTs the same events to the
+  bot's HTTPS URL, signed with HMAC-SHA256 (`X-LobbyForge-Signature`).
+- **Incoming webhooks** — a channel's webhook URL lets an outside service
+  (CI, a game server) post into that channel without a bot.
+- **Channel access** — a bot can be limited to chosen channels (or granted a
+  private one by someone who may see it).
+
+The full contract — routes, payloads, limits, close codes, signing — is in
+[BOT_API_V2.md](BOT_API_V2.md); the SDK (`LobbyForgeBot`) wraps all of it.
 
 ## Built-in bots
 

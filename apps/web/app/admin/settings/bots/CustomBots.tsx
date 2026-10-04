@@ -12,7 +12,8 @@ import {
   type BotPermissionId,
 } from '@/lib/bots/catalog';
 import { BotAvatar, BotBadge, TrustBadge } from '@/app/lobby/BotIdentity';
-import { botApi, permissionLabel, type BotResponse } from './api-client';
+import { botApi, permissionHint, permissionLabel, type BotResponse } from './api-client';
+import { BotIntegrations } from './BotIntegrations';
 import {
   Alert,
   Card,
@@ -59,6 +60,7 @@ function PermissionPicker({
       {BOT_PERMISSIONS.map((permission) => {
         const id = `${idPrefix}-${permission}`;
         const checked = value.includes(permission);
+        const hint = permissionHint(t, permission);
         return (
           <label key={permission} htmlFor={id} className="flex cursor-pointer items-start gap-2 text-sm text-text-primary">
             <input
@@ -66,6 +68,7 @@ function PermissionPicker({
               type="checkbox"
               checked={checked}
               disabled={disabled}
+              aria-describedby={hint ? `${id}-hint` : undefined}
               onChange={(event) =>
                 onChange(event.target.checked ? [...value, permission] : value.filter((p) => p !== permission))
               }
@@ -75,6 +78,11 @@ function PermissionPicker({
               {permissionLabel(t, permission)}
               {!BOT_API_PERMISSIONS.includes(permission) ? (
                 <span className="ml-1 text-xs text-text-muted">{t('bots.custom.reserved')}</span>
+              ) : null}
+              {hint ? (
+                <span id={`${id}-hint`} className="block text-xs text-text-muted">
+                  {hint}
+                </span>
               ) : null}
             </span>
           </label>
@@ -91,6 +99,7 @@ export function CustomBots({
   onChange,
   onRemoved,
   onToken,
+  channels = [],
 }: {
   bots: BotJson[];
   serverId: string | null;
@@ -98,6 +107,8 @@ export function CustomBots({
   onChange: (bot: BotJson) => void;
   onRemoved: (botId: string) => void;
   onToken: (reveal: { botName: string; token: string }) => void;
+  /** Ungated text channels — the channel-access fallback list. */
+  channels?: Array<{ id: string; name: string }>;
 }) {
   const t = useT();
   const [name, setName] = useState('');
@@ -361,6 +372,10 @@ export function CustomBots({
                       {t('bots.custom.delete')}
                     </button>
                   </div>
+                ) : null}
+
+                {serverId ? (
+                  <BotIntegrations bot={bot} serverId={serverId} canMutate={canMutate} fallbackChannels={channels} />
                 ) : null}
               </li>
             );

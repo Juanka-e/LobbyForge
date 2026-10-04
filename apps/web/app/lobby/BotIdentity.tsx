@@ -71,6 +71,9 @@ const PERMISSION_KEY: Record<string, string> = {
   manage_game_session: 'bots.permission.manage_game_session',
   manage_music_queue: 'bots.permission.manage_music_queue',
   read_audit_log: 'bots.permission.read_audit_log',
+  slash_commands: 'bots.permission.slash_commands',
+  read_members: 'bots.permission.read_members',
+  receive_events: 'bots.permission.receive_events',
 };
 
 export function botPermissionLabelKey(permission: string): string | null {

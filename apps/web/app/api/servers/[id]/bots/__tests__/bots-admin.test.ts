@@ -26,6 +26,16 @@ const isChannelOpenToBots = vi.fn();
 const getBuiltInBotForServer = vi.fn();
 
 vi.mock('@lobbyforge/db', () => ({
+  // Bot API v2 §1.1: the channel rule lives in @lobbyforge/db; emulate it
+  // over this file's channel mocks (no explicit grants → the v1 rule).
+  getBotReachableChannel: async (db: unknown, bot: { serverId: string }, id: string) => {
+    const channel = await getChannelById(db, id);
+    if (!channel || channel.serverId !== bot.serverId || !['text', 'announcement'].includes(channel.type)) return null;
+    return (await isChannelOpenToBots(db, id)) ? channel : null;
+  },
+  listBotReachableChannels: async () => [],
+  listBotEventTargets: async () => [],
+  listBotChannelAccessForServer: async () => new Map(),
   BOT_MESSAGE_CHANNEL_TYPES: ['text', 'announcement'],
   getServerById,
   isServerMember,

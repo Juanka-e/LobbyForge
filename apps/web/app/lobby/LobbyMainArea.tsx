@@ -5,11 +5,13 @@ import { LobbyVoiceView } from './LobbyVoiceView';
 import { LobbyDmView } from './LobbyDmView';
 import { LobbyActivityView } from './LobbyActivityView';
 import { LobbyLiveRoster } from './LobbyLiveRoster';
-import { MentionInput, type MentionUser } from './MentionInput';
+import { LobbyComposer } from './LobbyComposer';
 import { useT } from '@/lib/i18n/client';
-import { moderationBlockedMessageKey } from '@/lib/bots/catalog';
 import { BotAvatar, BotBadge } from './BotIdentity';
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { WebhookAvatar, WebhookBadge } from './WebhookIdentity';
+import { InteractionAnnouncer, InteractionHeader } from './slash/InteractionRows';
+import { useUserInteractionFeed } from './slash/useUserInteractionFeed';
+import { useEffect, useMemo, useState } from 'react';
 
 /**
  * LobbyMainArea — entry point. Splits into Live or Demo based on canVoice
@@ -29,6 +31,10 @@ interface ChatMessage {
   pinned?: boolean;
   /** Set when a bot wrote the message — rendered with the BOT badge. */
   bot?: { id: string | null; name: string; type: string } | null;
+  /** A bot's answer to a slash command: "↳ <user> used /<command>". */
+  interaction?: { id: string; commandName: string; invokedBy: { id: string | null; name: string | null } } | null;
+  /** Posted by an incoming channel webhook — rendered with the WEBHOOK badge. */
+  webhook?: { id: string | null; name: string; displayName: string } | null;
 }
 
 interface Channel {
@@ -79,6 +85,9 @@ export function LobbyMainArea({ data, canVoice }: { data: LobbyData; canVoice: b
 function LobbyMainAreaLive({ data }: { data: LobbyData }) {
   const t = useT();
   const voice = useLobbyVoice();
+  // Ephemeral bot answers reach this member on their own topic, whatever
+  // the centre column is showing.
+  useUserInteractionFeed(data.isLive ? data.currentUserId : null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showPinned, setShowPinned] = useState(false);
   const [notificationsMuted, setNotificationsMuted] = useState(false);
@@ -100,6 +109,10 @@ function LobbyMainAreaLive({ data }: { data: LobbyData }) {
         avatarUrl: m.avatarUrl,
       })),
     [data.members]
+  );
+  const composerChannels = useMemo(
+    () => [...data.textChannels, ...data.voiceChannels],
+    [data.textChannels, data.voiceChannels]
   );
 
   useEffect(() => {
@@ -177,13 +190,15 @@ function LobbyMainAreaLive({ data }: { data: LobbyData }) {
         }
       />
       <MessagesArea data={data} activeChannelId={activeChannelId} channelName={channelName} searchQuery={searchQuery} showPinned={showPinned} />
-      <Composer
+      <LobbyComposer
         channelName={channelName}
         serverId={data.serverId}
         channelId={activeChannelId}
         live={data.isLive}
         members={memberMentions}
+        channels={composerChannels}
       />
+      <InteractionAnnouncer />
     </main>
   );
 }
@@ -198,7 +213,7 @@ function LobbyMainAreaDemo({ data }: { data: LobbyData }) {
     <main className="flex-1 flex flex-col bg-background min-w-0 relative text-[14px] animate-fade-in-up">
       <ChannelHeader channelName={channelName} searchQuery={searchQuery} onSearchChange={setSearchQuery} showPinned={showPinned} onTogglePinned={() => setShowPinned((value) => !value)} notificationsMuted={notificationsMuted} onToggleNotifications={() => setNotificationsMuted((value) => !value)} serverId={data.serverId} voiceChannelId={data.activeVoiceChannel?.id ?? null} />
       <MessagesArea data={data} activeChannelId={data.activeTextChannel?.id ?? null} channelName={channelName} searchQuery={searchQuery} showPinned={showPinned} />
-      <Composer
+      <LobbyComposer
         channelName={channelName}
         serverId={data.serverId}
         channelId={data.activeTextChannel?.id ?? null}
@@ -282,9 +297,12 @@ function MessagesArea({ data, activeChannelId, channelName, searchQuery, showPin
   const knownNames = useMemo(() => {
     const names: Record<string, string> = {};
     if (data.currentUserId) names[data.currentUserId] = data.currentDisplayName;
+    // Members too: the "↳ <user> used /<command>" header names whoever ran
+    // the command, who need not have written anything in the loaded window.
+    for (const member of data.members ?? []) names[member.id] = member.name;
     for (const m of data.messages) if (m.authorId) names[m.authorId] = m.author;
     return names;
-  }, [data.currentUserId, data.currentDisplayName, data.messages]);
+  }, [data.currentUserId, data.currentDisplayName, data.messages, data.members]);
 
   // When switching channels, we show the SSR messages for the initial
   // channel, and for other channels we show a loading state until the
@@ -338,18 +356,26 @@ function Message({ message }: { message: ChatMessage }) {
   }
   const authorColorClass = message.authorColor === 'primary' ? 'text-primary' : 'text-text-primary';
   return (
-    <div data-chat-message data-bot-message={message.bot ? 'true' : undefined} className="flex gap-4 group hover:bg-surface-container/30 p-2 -mx-2 rounded-lg transition-colors">
+    <div data-chat-message data-bot-message={message.bot ? 'true' : undefined} data-webhook-message={message.webhook ? 'true' : undefined} className="flex gap-4 group hover:bg-surface-container/30 p-2 -mx-2 rounded-lg transition-colors">
       {message.bot ? (
         <BotAvatar size="md" className="mt-1" />
+      ) : message.webhook ? (
+        <WebhookAvatar className="mt-1" />
       ) : (
         <div data-chat-avatar className="chat-avatar w-10 h-10 rounded-full bg-secondary-container flex-shrink-0 mt-1 flex items-center justify-center font-bold text-text-primary">
           {message.author.charAt(0).toUpperCase()}
         </div>
       )}
-      <div className="flex flex-col w-full">
+      <div className="flex flex-col w-full min-w-0">
+        {message.bot && message.interaction ? (
+          <InteractionHeader
+            user={message.interaction.invokedBy.name ?? t('lobbyMain.chat.unknownUser')}
+            command={message.interaction.commandName}
+          />
+        ) : null}
         <div className="flex items-baseline gap-2">
           <span className={`font-label-sm font-medium ${authorColorClass} hover:underline cursor-pointer`}>{message.author}</span>
-          {message.bot ? <BotBadge className="self-center" /> : null}
+          {message.bot ? <BotBadge className="self-center" /> : message.webhook ? <WebhookBadge className="self-center" /> : null}
           <span className="font-label-xs text-[11px] text-text-secondary">{message.timestamp}</span>
         </div>
         <p className="font-body-md text-text-secondary mt-1 whitespace-pre-wrap">{message.body}</p>
@@ -372,114 +398,5 @@ function ChannelWelcome({ channelName }: { channelName: string }) {
         {t('lobbyMain.channel.welcomeBody', { name: channelName })}
       </p>
     </div>
-  );
-}
-
-function Composer({
-  channelName,
-  serverId,
-  channelId,
-  live,
-  members,
-}: {
-  channelName: string;
-  serverId: string | null;
-  channelId: string | null;
-  live: boolean;
-  members: MentionUser[];
-}) {
-  const t = useT();
-  const [value, setValue] = useState('');
-  const [status, setStatus] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
-  const lastTypingRef = useRef<number>(0);
-
-  // Typing indicator: send a heartbeat every 3s while the user types.
-  function handleTyping() {
-    if (!live || !serverId || !channelId) return;
-    const now = Date.now();
-    if (now - lastTypingRef.current < 3000) return;
-    lastTypingRef.current = now;
-    void fetch(`/api/servers/${serverId}/channels/${channelId}/typing`, {
-      method: 'POST',
-      credentials: 'same-origin',
-    }).catch(() => {});
-  }
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const content = value.trim();
-    if (!content || sending) return;
-    if (!live || !serverId || !channelId) {
-      setStatus(t('lobbyMain.composer.demo'));
-      return;
-    }
-    setSending(true);
-    setStatus(null);
-    try {
-      const res = await fetch(`/api/servers/${serverId}/channels/${channelId}/messages`, {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
-      });
-      if (!res.ok) {
-        const detail = (await res.json().catch(() => ({}))) as { error?: string; code?: string; rule?: string };
-        // The Moderation Bot's refusal is explained in the reader's language.
-        if (detail.code === 'blocked_by_moderation') {
-          throw new Error(t(moderationBlockedMessageKey(detail.rule)));
-        }
-        throw new Error(detail.error ?? t('lobbyMain.composer.failed', { status: res.status }));
-      }
-      const created = (await res.json()) as { message?: { id: string; content: string; userId: string | null; createdAt: string } };
-      setValue('');
-      setStatus(t('lobbyMain.composer.sent'));
-      if (created.message) {
-        window.dispatchEvent(
-          new CustomEvent('lf-message-sent', {
-            detail: { channelId, message: created.message },
-          })
-        );
-      }
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSending(false);
-    }
-  }
-
-  return (
-    <form onSubmit={submit} className="px-6 pb-6 pt-2 bg-background z-10">
-      <div className="bg-surface-container-low border border-border-subtle rounded-lg flex items-center px-4 py-2 focus-within:ring-1 focus-within:ring-primary focus-within:border-primary transition-all shadow-sm">
-        <button type="button" disabled title={t('lobbyMain.composer.attachments')} className="w-8 h-8 rounded-full flex items-center justify-center mr-2 text-text-muted opacity-50">
-          <span className="material-symbols-outlined text-[20px]">add_circle</span>
-        </button>
-        <MentionInput
-          value={value}
-          onChange={(v) => {
-            setValue(v);
-            if (status === t('lobbyMain.composer.sent')) setStatus(null);
-            if (v.trim()) handleTyping();
-          }}
-          members={members}
-          placeholder={t('lobbyMain.composer.placeholder', { name: channelName })}
-          disabled={sending}
-        />
-        <div className="flex items-center gap-1 ml-2">
-          <button type="button" disabled title={t('lobbyMain.composer.gifts')} className="w-8 h-8 rounded flex items-center justify-center text-text-muted opacity-50">
-            <span className="material-symbols-outlined text-[20px]">card_giftcard</span>
-          </button>
-          <button type="button" disabled title={t('lobbyMain.composer.gifs')} className="w-8 h-8 rounded flex items-center justify-center text-text-muted opacity-50">
-            <span className="material-symbols-outlined text-[20px]">gif_box</span>
-          </button>
-          <button type="submit" disabled={!value.trim() || sending} title={t('lobbyMain.composer.send')} className="w-8 h-8 rounded flex items-center justify-center hover:text-text-primary hover:bg-surface-container transition-colors text-text-secondary disabled:cursor-not-allowed disabled:opacity-40">
-            <span className="material-symbols-outlined text-[20px]">send</span>
-          </button>
-        </div>
-      </div>
-      {status ? (
-        <p className="mt-1 text-xs text-text-muted px-2">{status}</p>
-      ) : null}
-    </form>
   );
 }

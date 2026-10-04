@@ -214,6 +214,11 @@ function normalizeBaseUrl(raw: unknown): string {
   return url.toString().replace(/\/+$/, '');
 }
 
+/** A UUID string (ids in Bot API paths). */
+export function isUuidLike(value: unknown): value is string {
+  return typeof value === 'string' && UUID_PATTERN.test(value);
+}
+
 function assertChannelId(channelId: unknown): asserts channelId is string {
   if (typeof channelId !== 'string' || !UUID_PATTERN.test(channelId)) {
     throw new BotValidationError('channelId must be a channel UUID');
@@ -257,7 +262,22 @@ export function toBotApiError(status: number, body: unknown, headers: Headers = 
   return new BotApiError(message, status, code ?? 'http_error', details);
 }
 
-export function createBotClient(options: BotClientOptions): BotApiClient {
+/** HTTP methods the Bot API uses. */
+export type BotHttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
+
+/**
+ * The transport shared by the v1 client and `LobbyForgeBot` (v2): token
+ * header, timeout, no redirects, typed errors. Not part of the public
+ * surface — use `createBotClient` or `LobbyForgeBot`.
+ */
+export interface BotHttp {
+  /** Normalized instance URL, without a trailing slash. */
+  readonly baseUrl: string;
+  /** `path` is relative to `/api/bot/{version}`; a 204 / empty body resolves to `{}`. */
+  request(method: BotHttpMethod, path: string, body?: unknown): Promise<Record<string, unknown>>;
+}
+
+export function createBotHttp(options: BotClientOptions, apiVersion: 'v1' | 'v2' = 'v1'): BotHttp {
   const baseUrl = normalizeBaseUrl(options?.baseUrl);
   if (!isBotTokenFormat(options?.token)) {
     throw new BotValidationError('token is not a LobbyForge bot token (expected lfb_…)');
@@ -270,12 +290,12 @@ export function createBotClient(options: BotClientOptions): BotApiClient {
   const timeoutMs =
     typeof options.timeoutMs === 'number' && options.timeoutMs > 0 ? options.timeoutMs : DEFAULT_TIMEOUT_MS;
 
-  async function request(method: 'GET' | 'POST', path: string, body?: unknown): Promise<Record<string, unknown>> {
+  async function request(method: BotHttpMethod, path: string, body?: unknown): Promise<Record<string, unknown>> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     let response: Response;
     try {
-      response = await fetchImpl(`${baseUrl}/api/bot/v1${path}`, {
+      response = await fetchImpl(`${baseUrl}/api/bot/${apiVersion}${path}`, {
         method,
         headers: {
           Authorization: `Bot ${token}`,
@@ -311,22 +331,34 @@ export function createBotClient(options: BotClientOptions): BotApiClient {
     return asRecord(parsed);
   }
 
-  function expectArray(body: Record<string, unknown>, key: string): unknown[] {
-    const value = body[key];
-    if (!Array.isArray(value)) {
-      throw new BotNetworkError(`The Bot API response has no "${key}" list`, 'invalid_response');
-    }
-    return value;
-  }
+  return { baseUrl, request };
+}
 
-  function expectObject(body: Record<string, unknown>, key: string): Record<string, unknown> {
-    const value = body[key];
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      throw new BotNetworkError(`The Bot API response has no "${key}"`, 'invalid_response');
-    }
-    return value as Record<string, unknown>;
+/** `body[key]` as a list, or an `invalid_response` error. */
+export function expectArray(body: Record<string, unknown>, key: string): unknown[] {
+  const value = body[key];
+  if (!Array.isArray(value)) {
+    throw new BotNetworkError(`The Bot API response has no "${key}" list`, 'invalid_response');
   }
+  return value;
+}
 
+/** `body[key]` as an object, or an `invalid_response` error. */
+export function expectObject(body: Record<string, unknown>, key: string): Record<string, unknown> {
+  const value = body[key];
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new BotNetworkError(`The Bot API response has no "${key}"`, 'invalid_response');
+  }
+  return value as Record<string, unknown>;
+}
+
+export function createBotClient(options: BotClientOptions): BotApiClient {
+  return createMessageApi(createBotHttp(options, 'v1'));
+}
+
+/** The message endpoints (`me`, `channels`, read/post) on either API version. */
+export function createMessageApi(http: BotHttp): BotApiClient {
+  const { request } = http;
   return {
     async getMe() {
       const body = await request('GET', '/me');
