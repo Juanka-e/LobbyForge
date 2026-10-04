@@ -377,7 +377,7 @@ function categorizeAction(action: string): Category {
   if (action.startsWith('channel.')) return 'channels';
   if (action.startsWith('message.')) return 'messages';
   if (action.startsWith('activity.')) return 'activities';
-  if (action.startsWith('update.') || action.startsWith('server.')) return 'system';
+  if (action.startsWith('update.') || action.startsWith('server.') || action.startsWith('instance.')) return 'system';
   return 'other';
 }
 

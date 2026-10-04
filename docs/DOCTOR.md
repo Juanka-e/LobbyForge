@@ -83,6 +83,8 @@ The function is pure and exhaustive over the tier — Vitest covers all branches
 | `livekit_signaling` | services | info | `livekitReachable === false` ⇒ `CRITICAL` |
 | `turn_configured` | media | info | TURN missing **and** UDP looks blocked ⇒ `WARNING` |
 | `trusted_proxy` | network | info | production with `LOBBYFORGE_TRUSTED_PROXY` unset, `none` or unrecognised ⇒ `WARNING` (every client shares one rate-limit bucket; the message carries the fix). Added by `collectDoctorReport` from the environment via `buildTrustedProxyCheck` |
+| `secure_origin` | network | info | a declared public origin (`NEXT_PUBLIC_BASE_URL`, `LOBBYFORGE_APP_ORIGIN`) on plain `http://` with a non-localhost host ⇒ `CRITICAL` while ALTCHA is the active bot-protection provider (it needs Web Crypto; sign-ups fall back to a slow pure-JS solver), `WARNING` otherwise (microphone / camera need HTTPS or localhost too). Added by `collectDoctorReport` via `buildSecureOriginCheck` |
+| `captcha` / `captcha_*` | services | info | Bot protection ([CAPTCHA.md](./CAPTCHA.md) §8), added by `collectDoctorReport` via `lib/captcha/doctor.ts`: external provider without a key (`captcha_keys`), undecryptable secret (`captcha_secret`), siteverify bad secret / unreachable (`captcha_siteverify`), test keys in production (`captcha_test_keys`) ⇒ `WARNING`; Redis down in production, so ALTCHA cannot block replays (`captcha_replay_store`) ⇒ `CRITICAL`; unknown `LOBBYFORGE_CAPTCHA_PROVIDER` (`captcha_env`) or unreadable settings (`captcha_settings`) ⇒ `WARNING`. One info line `captcha` when all is well |
 
 `null` reachability always renders as `ok: true, level: 'info'` with the message *"… has not been probed yet"*. This is what keeps the very first 60-second ping from being noisy.
 

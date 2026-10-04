@@ -54,7 +54,10 @@
  * (it identifies the browser, not a session), but not a password change.
  */
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { getUserCredentialsByEmail } from '@lobbyforge/db';
+import { deviceSignInPathOpen } from '@/lib/auth-throttle';
 import { readCookie, signSessionCookie, verifySessionCookie } from '@/lib/cookies';
+import { getDb } from '@/lib/db';
 
 export const DEVICE_COOKIE_NAME = 'lf_device';
 /** 180 days, for the cookie and for each entry (from its own `iat`). */
@@ -251,4 +254,30 @@ export function buildDeviceCookie(
       secure: options.secure ?? process.env.NODE_ENV === 'production',
     }
   ).setCookieHeader;
+}
+
+type Credentials = Awaited<ReturnType<typeof getUserCredentialsByEmail>>;
+
+/**
+ * Bot protection (docs/CAPTCHA.md §2): may this sign-in skip the adaptive
+ * challenge as the owner's own browser? Only when the device path is really
+ * in force — the claim's own failure bucket has not tripped (checked first,
+ * without a lookup) AND the claim holds against the account's CURRENT
+ * password hash (`deviceClaimHolds`). A MAC-valid entry from before a
+ * password change, or from a device that has been guessing, does not.
+ *
+ * The password hash needs the account, so a request with a usable claim
+ * looks it up here, before the attempt is counted; `lookedUp`/`user` let
+ * the route reuse that row instead of reading it twice. A claim only exists
+ * for an account that signed in on this browser, so this adds no lookup for
+ * anyone else (a bot without one, a locked-out device) and tells nothing
+ * about which emails exist.
+ */
+export async function trustedDeviceFor(
+  email: string,
+  claim: DeviceClaim | null
+): Promise<{ trusted: boolean; lookedUp: false } | { trusted: boolean; lookedUp: true; user: Credentials }> {
+  if (!claim || !(await deviceSignInPathOpen(email, claim.nonce))) return { trusted: false, lookedUp: false };
+  const user = await getUserCredentialsByEmail(getDb(), email);
+  return { trusted: deviceClaimHolds(claim, email, user && !user.deletedAt ? user.passwordHash : null), lookedUp: true, user };
 }

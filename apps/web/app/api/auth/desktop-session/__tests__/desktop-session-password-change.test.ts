@@ -84,6 +84,8 @@ vi.mock('@/lib/security-headers', () => ({
   withApiSecurity: (handler: unknown) => handler,
   resolveClientAddress: () => '203.0.113.7',
 }));
+// Bot protection is covered by lib/captcha/__tests__ — a pass-through here.
+vi.mock('@/lib/captcha/guard', () => ({ guardSignInCaptcha: async () => null, noteSignInFailure: async () => undefined }));
 vi.mock('@/lib/session-tracker', () => ({
   recordSession: vi.fn(async () => undefined),
   revokeOtherSessions: vi.fn(async () => 0),

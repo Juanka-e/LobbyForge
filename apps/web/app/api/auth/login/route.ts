@@ -10,7 +10,9 @@ import {
   confirmSignInDevice,
   finishSignInAttempt,
 } from '@/lib/auth-throttle';
-import { buildDeviceCookie, deviceClaimHolds, readDeviceClaim } from '@/lib/device-cookie';
+import { guardSignInCaptcha, noteSignInFailure } from '@/lib/captcha/guard';
+import { CaptchaBodyFields } from '@/lib/captcha/types';
+import { buildDeviceCookie, deviceClaimHolds, readDeviceClaim, trustedDeviceFor } from '@/lib/device-cookie';
 import { DUMMY_PASSWORD_HASH, verifyPassword } from '@/lib/password';
 import { resolveClientAddress, withApiSecurity } from '@/lib/security-headers';
 import { recordSession } from '@/lib/session-tracker';
@@ -21,6 +23,8 @@ export const runtime = 'nodejs';
 const LoginSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(254),
   password: z.string().min(1).max(128),
+  // Bot protection (docs/CAPTCHA.md §4.3): asked for adaptively.
+  ...CaptchaBodyFields,
 });
 
 async function handlePost(req: Request): Promise<NextResponse> {
@@ -39,11 +43,21 @@ async function handlePost(req: Request): Promise<NextResponse> {
   // lock the owner out of their own devices.
   const cookieHeader = req.headers.get('cookie');
   const device = readDeviceClaim(cookieHeader, parsed.data.email);
+
+  // Bot protection — adaptive sign-in (docs/CAPTCHA.md §2): the challenge
+  // is asked for after repeated failures on this account or address, in
+  // attack mode, or always (by setting) — never from a TRUSTED device for
+  // this account. Checked BEFORE the attempt is counted, so a request
+  // refused here costs the account nothing.
+  const trusted = await trustedDeviceFor(parsed.data.email, device);
+  const refused = await guardSignInCaptcha(req, parsed.data, { email: parsed.data.email, hasDeviceClaim: trusted.trusted });
+  if (refused) return refused;
+
   const subject = { email: parsed.data.email, deviceNonce: device?.nonce ?? null };
   const begun = await beginSignInAttempt(subject);
   if (!begun.allowed) return accountLockedResponse(begun.retryAfterSeconds);
 
-  const user = await getUserCredentialsByEmail(getDb(), parsed.data.email);
+  const user = trusted.lookedUp ? trusted.user : await getUserCredentialsByEmail(getDb(), parsed.data.email);
   // A device cookie entry is bound to the password it was issued under: once
   // the password has changed, it no longer earns a bucket of its own and the
   // attempt is charged to the account counter, still before the password is
@@ -62,6 +76,8 @@ async function handlePost(req: Request): Promise<NextResponse> {
     // saw — SEC-004), not the first X-Forwarded-For entry, which the client
     // writes itself and could use to forge log lines.
     console.warn(`[security] failed login: email=${parsed.data.email.slice(0, 3)}*** ip=${JSON.stringify(resolveClientAddress(req))}`);
+    // Feeds the address signal and attack mode of adaptive sign-in.
+    await noteSignInFailure(req);
     return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 });
   }
   await finishSignInAttempt(subject, attempt.path);
@@ -103,5 +119,7 @@ async function handlePost(req: Request): Promise<NextResponse> {
 export const POST = withApiSecurity(handlePost, {
   allowedMethods: ['POST'],
   sessionRevocation: 'bypass',
+  // Room for a CAPTCHA token (up to 4096 characters).
+  maxBodyBytes: 12 * 1024,
   rateLimit: { identifier: 'auth-local-login', config: { windowMs: 15 * 60_000, maxRequests: 10 } },
 });

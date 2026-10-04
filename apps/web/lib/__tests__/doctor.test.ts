@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import { AlertLevel, DoctorCategory, type SystemStats } from '@lobbyforge/core';
-import { buildChecksFromStats, collectSystemStats } from '../doctor.js';
+import { buildChecksFromStats, buildSecureOriginCheck, collectSystemStats } from '../doctor.js';
 
 const healthyStats: SystemStats = {
   cpuCount: 4,
@@ -264,4 +264,90 @@ describe('service probes use the app\'s own configuration', () => {
     expect(https?.level).toBe(AlertLevel.WARNING);
     delete process.env.NEXT_PUBLIC_BASE_URL;
   }, 15000);
+});
+
+// Bot protection (docs/CAPTCHA.md §8): the report carries the CAPTCHA checks,
+// fed with the Redis probe's result (ALTCHA's replay store).
+describe('bot protection checks in the report', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.doMock('@/lib/db', () => ({ getDb: () => ({ execute: vi.fn(async () => [{ ok: 1 }]) }) }));
+    vi.doMock('@/lib/redis', () => ({ redis: { ping: vi.fn().mockRejectedValue(new Error('ECONNREFUSED')) } }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status: 200 }));
+  });
+
+  it('appends the checks from lib/captcha/doctor with the redis reachability', async () => {
+    const collectCaptchaChecks = vi.fn(async () => [
+      { id: 'captcha_replay_store', category: DoctorCategory.SERVICES, ok: false, level: AlertLevel.CRITICAL, message: 'x' },
+    ]);
+    vi.doMock('@/lib/captcha/doctor', () => ({ collectCaptchaChecks, isAltchaActive: async () => true }));
+    const { collectDoctorReport } = await import('../doctor.js');
+    const { report } = await collectDoctorReport();
+    expect(collectCaptchaChecks).toHaveBeenCalledWith({ redisReachable: false });
+    expect(report.checks.find((c) => c.id === 'captcha_replay_store')?.level).toBe(AlertLevel.CRITICAL);
+  }, 15000);
+
+  it('a failure inside the CAPTCHA checks never breaks the report', async () => {
+    vi.doMock('@/lib/captcha/doctor', () => ({
+      collectCaptchaChecks: vi.fn().mockRejectedValue(new Error('boom')),
+      isAltchaActive: vi.fn().mockRejectedValue(new Error('boom')),
+    }));
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { collectDoctorReport } = await import('../doctor.js');
+    const { report } = await collectDoctorReport();
+    expect(report.checks.find((c) => c.id === 'redis')).toBeDefined();
+    expect(report.checks.some((c) => c.id.startsWith('captcha'))).toBe(false);
+  }, 15000);
+});
+
+// A secure context is required for Web Crypto (ALTCHA, docs/CAPTCHA.md) and
+// for microphone / camera (voice): HTTPS or localhost.
+describe('secure_origin', () => {
+  it('warns about a plain-http public origin that is not localhost', () => {
+    for (const env of [{ baseUrl: 'http://lobby.example.com' }, { appOrigin: 'http://192.168.1.6:19520' }, { baseUrl: 'https://ok.example', appOrigin: 'http://lan.example' }]) {
+      const check = buildSecureOriginCheck(env);
+      expect(check, JSON.stringify(env)).toMatchObject({ id: 'secure_origin', category: DoctorCategory.NETWORK, ok: false, level: AlertLevel.WARNING });
+      expect(check.message).toMatch(/HTTPS/);
+    }
+    expect(buildSecureOriginCheck({ appOrigin: 'http://lan.example:8080/path' }).detail).toEqual({ origins: ['http://lan.example:8080'], altchaActive: false });
+  });
+
+  it('is CRITICAL while ALTCHA is the active provider (it needs Web Crypto)', () => {
+    const check = buildSecureOriginCheck({ baseUrl: 'http://192.168.1.6:19520', altchaActive: true });
+    expect(check).toMatchObject({ ok: false, level: AlertLevel.CRITICAL, detail: { altchaActive: true } });
+    expect(check.message).toMatch(/ALTCHA/);
+    // HTTPS / localhost stay fine whatever the provider.
+    expect(buildSecureOriginCheck({ baseUrl: 'https://lobby.example', altchaActive: true })).toMatchObject({ ok: true, level: AlertLevel.INFO });
+    expect(buildSecureOriginCheck({ appOrigin: 'http://localhost:19520', altchaActive: true })).toMatchObject({ ok: true });
+  });
+
+  it('the report asks lib/captcha whether ALTCHA is active', async () => {
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_BASE_URL = 'http://lan.example';
+    vi.doMock('@/lib/db', () => ({ getDb: () => ({ execute: vi.fn(async () => [{ ok: 1 }]) }) }));
+    vi.doMock('@/lib/redis', () => ({ redis: { ping: vi.fn().mockResolvedValue('PONG') } }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status: 200 }));
+    vi.doMock('@/lib/captcha/doctor', () => ({ collectCaptchaChecks: async () => [], isAltchaActive: async () => true }));
+    try {
+      const { collectDoctorReport } = await import('../doctor.js');
+      const { report } = await collectDoctorReport();
+      expect(report.checks.find((c) => c.id === 'secure_origin')?.level).toBe(AlertLevel.CRITICAL);
+    } finally {
+      delete process.env.NEXT_PUBLIC_BASE_URL;
+    }
+  }, 15000);
+
+  it('accepts HTTPS and localhost, and says so when nothing is declared', () => {
+    for (const env of [
+      { baseUrl: 'https://lobby.example.com' },
+      { appOrigin: 'http://localhost:19520' },
+      { appOrigin: 'http://127.0.0.1:3000', baseUrl: 'http://app.localhost' },
+      { baseUrl: 'http://[::1]:3000' },
+      { baseUrl: 'not a url' },
+      {},
+      { baseUrl: '  ' },
+    ]) {
+      expect(buildSecureOriginCheck(env), JSON.stringify(env)).toMatchObject({ ok: true, level: AlertLevel.INFO });
+    }
+  });
 });

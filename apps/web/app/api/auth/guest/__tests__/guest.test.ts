@@ -14,6 +14,19 @@ vi.mock('@/lib/session-tracker', () => ({
 }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
 vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));
+// The new-guest bucket (docs/CAPTCHA.md §7) has its own suite
+// (lib/captcha/__tests__/limits.test.ts); here it is a pair of spies.
+const peekAddressLimit = vi.fn();
+const hitAddressLimit = vi.fn();
+vi.mock('@/lib/captcha/limits', () => ({
+  NEW_GUEST_LIMIT: { identifier: 'guest-new', windowMs: 3_600_000, perAddress: 10, unknownBackstop: 200 },
+  peekAddressLimit,
+  hitAddressLimit,
+}));
+// Bot protection has its own suites (lib/captcha/__tests__); here the guard
+// is a spy that lets everything through unless a test says otherwise.
+const guardCaptchaSurface = vi.fn();
+vi.mock('@/lib/captcha/guard', () => ({ guardCaptchaSurface }));
 
 async function loadRoute() {
   return import('../route.js');
@@ -32,6 +45,9 @@ beforeEach(() => {
   // Defaults: registration allowed, no prior session.
   authorizeGuestRegistration.mockResolvedValue({ ok: true });
   isSessionRevoked.mockResolvedValue(false);
+  guardCaptchaSurface.mockReset().mockResolvedValue(null);
+  peekAddressLimit.mockReset().mockResolvedValue(null);
+  hitAddressLimit.mockReset().mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -210,5 +226,87 @@ describe('POST /api/auth/guest — absolute session lifetime', () => {
     const session = await sessionOf(res);
     expect(session?.gid).toBe('g_'.padEnd(34, 'a'));
     expect(session?.auth_time).toBeGreaterThanOrEqual(now);
+  });
+});
+
+// Bot protection (docs/CAPTCHA.md §2, §4.4, §7): only a NEW guest identity
+// is challenged and counted in its own 10-per-hour bucket; a refresh is not.
+describe('POST /api/auth/guest — bot protection', () => {
+  async function post(body: Record<string, unknown> = {}, cookie?: string) {
+    const { POST } = await loadRoute();
+    return POST(
+      new Request('https://example.test/api/auth/guest', {
+        method: 'POST',
+        headers: cookie ? { cookie } : {},
+        body: JSON.stringify(body),
+      }),
+      {}
+    );
+  }
+
+  it('a new identity goes through the guard (surface guest) with the body’s captcha fields', async () => {
+    findOrCreateGuestUser.mockResolvedValue({ id: '00000000-0000-0000-0000-000000000002', displayName: 'Guest ABCD' });
+    const body = { captchaToken: 'tok', captchaProvider: 'altcha', formToken: 'ft', website: '' };
+    const res = await post(body);
+    expect(res.status).toBe(200);
+    expect(guardCaptchaSurface).toHaveBeenCalledWith(expect.any(Request), expect.objectContaining(body), 'guest');
+  });
+
+  it('a refusal from the guard is returned as is, and no user row is created', async () => {
+    guardCaptchaSurface.mockResolvedValue(new Response(JSON.stringify({ error: 'captcha_required' }), { status: 400 }));
+    const res = await post();
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'captcha_required' });
+    expect(findOrCreateGuestUser).not.toHaveBeenCalled();
+    expect(hitAddressLimit).not.toHaveBeenCalled(); // the round trip costs nothing
+    expect(res.headers.get('set-cookie')).toBeNull();
+  });
+
+  it('a refresh with a valid cookie is never challenged nor counted as a new guest', async () => {
+    const res = await post({}, makeCookie());
+    expect(res.status).toBe(200);
+    expect(guardCaptchaSurface).not.toHaveBeenCalled();
+    expect(peekAddressLimit).not.toHaveBeenCalled();
+    expect(hitAddressLimit).not.toHaveBeenCalled();
+  });
+
+  it('a revoked cookie counts as no cookie: challenged like a new guest', async () => {
+    isSessionRevoked.mockResolvedValue(true);
+    findOrCreateGuestUser.mockResolvedValue({ id: '00000000-0000-0000-0000-000000000003', displayName: 'Guest EFGH' });
+    await post({}, makeCookie());
+    expect(guardCaptchaSurface).toHaveBeenCalledTimes(1);
+  });
+
+  it('the access policy answers first — no challenge where guests cannot get in', async () => {
+    authorizeGuestRegistration.mockResolvedValue({ ok: false, status: 403, error: 'Guest access is disabled' });
+    const res = await post();
+    expect(res.status).toBe(403);
+    expect(guardCaptchaSurface).not.toHaveBeenCalled();
+  });
+
+  it('new guests have their own bucket, counted once the identity is about to be created', async () => {
+    findOrCreateGuestUser.mockResolvedValue({ id: '00000000-0000-0000-0000-000000000004', displayName: 'Guest IJKL' });
+    await post();
+    expect(peekAddressLimit).toHaveBeenCalledWith(expect.any(Request), expect.objectContaining({ identifier: 'guest-new' }));
+    expect(hitAddressLimit).toHaveBeenCalledWith(expect.any(Request), expect.objectContaining({ identifier: 'guest-new' }));
+    hitAddressLimit.mockResolvedValue(new Response(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429 }));
+    const res = await post();
+    expect(res.status).toBe(429);
+    expect(findOrCreateGuestUser).toHaveBeenCalledTimes(1);
+  });
+
+  it('a full bucket is refused BEFORE the challenge, so a solved token is not spent on it', async () => {
+    peekAddressLimit.mockResolvedValue(new Response(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429 }));
+    const res = await post({ captchaToken: 'solved', formToken: 'ft' });
+    expect(res.status).toBe(429);
+    expect(guardCaptchaSurface).not.toHaveBeenCalled();
+    expect(hitAddressLimit).not.toHaveBeenCalled();
+    expect(findOrCreateGuestUser).not.toHaveBeenCalled();
+  });
+
+  it('keeps the schema strict: only the contract’s fields are added', async () => {
+    expect((await post({ captchaToken: 'x'.repeat(4097) })).status).toBe(400);
+    expect((await post({ captchaProvider: 'hcaptcha' })).status).toBe(400);
+    expect((await post({ captcha: 'x' })).status).toBe(400);
   });
 });

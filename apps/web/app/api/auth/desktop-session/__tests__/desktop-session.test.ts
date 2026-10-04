@@ -45,6 +45,10 @@ vi.mock('@/lib/password', () => ({
 vi.mock('@/lib/security-headers', () => ({
   withApiSecurity: (handler: unknown) => handler,
 }));
+// Bot protection has its own suites (lib/captcha/__tests__); here the guard
+// is a spy that lets everything through unless a test says otherwise.
+const { guardSignInCaptcha, noteSignInFailure } = vi.hoisted(() => ({ guardSignInCaptcha: vi.fn(), noteSignInFailure: vi.fn() }));
+vi.mock('@/lib/captcha/guard', () => ({ guardSignInCaptcha, noteSignInFailure }));
 
 const { recordSession } = vi.hoisted(() => ({ recordSession: vi.fn() }));
 vi.mock('@/lib/session-tracker', () => ({ recordSession }));
@@ -61,6 +65,8 @@ beforeEach(() => {
     fn.mockReset();
   }
   recordSession.mockResolvedValue(undefined);
+  guardSignInCaptcha.mockReset().mockResolvedValue(null);
+  noteSignInFailure.mockReset().mockResolvedValue(undefined);
   redisSet.mockResolvedValue('OK');
   redisDel.mockResolvedValue(1);
   redisGetdel.mockResolvedValue(null);
@@ -301,5 +307,77 @@ describe('desktop session handoff — security-review AUTH-001 credential bindin
     const res = await complete({ code: `user:${'0'.repeat(40)}`, state: STATE });
     expect(res.status).toBe(400);
     expect(redisGetdel).not.toHaveBeenCalled();
+  });
+});
+
+// Bot protection (docs/CAPTCHA.md §2): the desktop handoff start is a
+// sign-in door like /api/auth/login — the same adaptive guard, before the
+// attempt is counted or the account looked up.
+describe('POST /api/auth/desktop-session (start) — bot protection', () => {
+  const USER = { id: 'u-1', email: 'o@x.test', displayName: 'Owner', passwordHash: 'scrypt$real', deletedAt: null };
+
+  it('asks the sign-in guard with the email and whether a device cookie is present', async () => {
+    getUserCredentialsByEmail.mockResolvedValue(USER);
+    verifyPassword.mockResolvedValue(true);
+    const res = await start({ email: 'O@x.test', password: 'pw', captchaToken: 'tok', captchaProvider: 'altcha' });
+    expect(res.status).toBe(200);
+    expect(guardSignInCaptcha).toHaveBeenCalledWith(
+      expect.any(Request),
+      expect.objectContaining({ captchaToken: 'tok', captchaProvider: 'altcha' }),
+      { email: 'o@x.test', hasDeviceClaim: false }
+    );
+  });
+
+  async function startWithCookie(cookie: string, password = 'pw') {
+    const { POST } = await import('../route.js');
+    return POST(
+      new Request('http://localhost/api/auth/desktop-session', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie },
+        body: JSON.stringify({ email: 'o@x.test', password }),
+      }),
+      {}
+    );
+  }
+
+  it('only a trusted device skips the challenge: not one from before a password change, not one that has been guessing', async () => {
+    const { buildDeviceCookie } = await import('@/lib/device-cookie');
+    const { resetAccountAttemptsForTests } = await import('@/lib/auth-throttle');
+    resetAccountAttemptsForTests();
+    getUserCredentialsByEmail.mockResolvedValue(USER);
+    const trusted = buildDeviceCookie(null, 'o@x.test', USER.passwordHash)!.split(';', 1)[0]!;
+    const stale = buildDeviceCookie(null, 'o@x.test', 'scrypt$old')!.split(';', 1)[0]!;
+
+    verifyPassword.mockResolvedValue(true);
+    await startWithCookie(trusted);
+    expect(guardSignInCaptcha).toHaveBeenLastCalledWith(expect.any(Request), expect.anything(), { email: 'o@x.test', hasDeviceClaim: true });
+    await startWithCookie(stale);
+    expect(guardSignInCaptcha).toHaveBeenLastCalledWith(expect.any(Request), expect.anything(), { email: 'o@x.test', hasDeviceClaim: false });
+
+    // The trusted device guesses 10 times: its bucket trips, and it no longer skips.
+    verifyPassword.mockResolvedValue(false);
+    for (let i = 0; i < 10; i += 1) expect((await startWithCookie(trusted, 'wrong')).status).toBe(401);
+    await startWithCookie(trusted, 'wrong');
+    expect(guardSignInCaptcha).toHaveBeenLastCalledWith(expect.any(Request), expect.anything(), { email: 'o@x.test', hasDeviceClaim: false });
+    resetAccountAttemptsForTests();
+  });
+
+  it('a refusal comes back before the lookup or the password check', async () => {
+    guardSignInCaptcha.mockResolvedValue(new Response(JSON.stringify({ error: 'captcha_required' }), { status: 400 }));
+    const res = await start({ email: 'o@x.test', password: 'pw' });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'captcha_required' });
+    expect(getUserCredentialsByEmail).not.toHaveBeenCalled();
+    expect(verifyPassword).not.toHaveBeenCalled();
+  });
+
+  it('a wrong password feeds the sign-in failure signals; a right one does not', async () => {
+    getUserCredentialsByEmail.mockResolvedValue(USER);
+    verifyPassword.mockResolvedValue(false);
+    expect((await start({ email: 'o@x.test', password: 'bad' })).status).toBe(401);
+    expect(noteSignInFailure).toHaveBeenCalledTimes(1);
+    verifyPassword.mockResolvedValue(true);
+    expect((await start({ email: 'o@x.test', password: 'pw' })).status).toBe(200);
+    expect(noteSignInFailure).toHaveBeenCalledTimes(1);
   });
 });

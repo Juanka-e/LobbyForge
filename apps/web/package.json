@@ -34,6 +34,8 @@
     "@lobbyforge/ui": "workspace:*",
     "@lobbyforge/vampire-village": "workspace:*",
     "@lobbyforge/watch-party": "workspace:*",
+    "altcha": "3.2.3",
+    "altcha-lib": "2.5.0",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.2",
     "ioredis": "^5.11.1",

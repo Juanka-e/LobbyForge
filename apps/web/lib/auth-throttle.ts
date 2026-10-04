@@ -275,6 +275,53 @@ export async function finishSignInAttempt(subject: SignInSubject, path: SignInPa
 }
 
 /**
+ * Bot protection (docs/CAPTCHA.md §2, adaptive sign-in): how many sign-in
+ * attempts are on this account's counter right now, WITHOUT counting one.
+ * A success clears the counter, so this is the number of recent failures
+ * (plus any attempt still in flight). Read before `beginSignInAttempt`, it
+ * decides whether the attempt needs a challenge; unknown emails read like
+ * known ones (same derived key). Null when the store is unavailable.
+ */
+export async function peekSignInAttempts(email: string): Promise<number | null> {
+  const key = accountAttemptKey({ scope: 'sign-in', email });
+  if (!useRedis()) {
+    const entry = memory.get(key);
+    return entry && entry.resetAt > Date.now() ? entry.count : 0;
+  }
+  try {
+    const { redis } = await import('@/lib/redis');
+    return Number(await redis.get(key)) || 0;
+  } catch (error) {
+    console.error('[auth] account attempt counter unavailable', (error as Error).message);
+    return null;
+  }
+}
+
+/**
+ * Bot protection: is the DEVICE path still in force for this (account,
+ * device nonce) — has its own failure bucket not tripped? Read without
+ * counting, before `beginSignInAttempt` (which would put an attempt on the
+ * device path exactly when this is true). False when the store is down.
+ */
+export async function deviceSignInPathOpen(email: string, deviceNonce: string): Promise<boolean> {
+  const key = deviceAttemptKey(email, deviceNonce);
+  let count: number;
+  if (!useRedis()) {
+    const entry = memory.get(key);
+    count = entry && entry.resetAt > Date.now() ? entry.count : 0;
+  } else {
+    try {
+      const { redis } = await import('@/lib/redis');
+      count = Number(await redis.get(key)) || 0;
+    } catch (error) {
+      console.error('[auth] device attempt counter unavailable', (error as Error).message);
+      return false;
+    }
+  }
+  return count < SIGN_IN_DEVICE_LIMIT.maxAttempts;
+}
+
+/**
  * The refusal — the same body and headers as the per-IP limiter's 429
  * (`rateLimitResponse`), identical for known and unknown accounts.
  */

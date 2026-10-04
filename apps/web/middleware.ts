@@ -25,8 +25,35 @@ import type { NextRequest } from 'next/server';
  */
 const PLUGIN_UI_ROUTE = /^\/api\/plugin-ui\/[^/]+\/[^/]+\/[^/]/;
 
-export function middleware(request: NextRequest) {
+/**
+ * Bot protection (docs/CAPTCHA.md §9): while an external CAPTCHA provider
+ * (Turnstile, reCAPTCHA) is configured, its origins go on EVERY page
+ * response — a client-side navigation keeps the CSP of the document it
+ * started on, so adding them only to the widget pages would block the
+ * widget after a `next/link` hop. Nothing is added for ALTCHA or `none`.
+ * `lib/captcha/csp.ts` decides, from the 5 s settings cache this (Node.js
+ * runtime) middleware shares with the routes. API routes and static files
+ * never load that module.
+ */
+async function captchaSources(pathname: string): Promise<{ script: string[]; frame: string[]; connect: string[] }> {
+  const empty = { script: [], frame: [], connect: [] };
+  if (pathname === '/api' || pathname.startsWith('/api/') || pathname.startsWith('/_next/')) return empty;
+  try {
+    const { captchaCspSourcesForPath } = await import('@/lib/captcha/csp');
+    return await captchaCspSourcesForPath(pathname);
+  } catch (error) {
+    console.error('[csp] captcha sources unavailable', (error as Error).message);
+    return empty;
+  }
+}
+
+const withSources = (sources: string[]) => (sources.length > 0 ? ` ${sources.join(' ')}` : '');
+
+export async function middleware(request: NextRequest) {
   if (PLUGIN_UI_ROUTE.test(request.nextUrl.pathname)) return NextResponse.next();
+  // The raw path: `nextUrl` rewrites `/_next/data/…` requests to the page they
+  // belong to, and those are data, not documents.
+  const captcha = await captchaSources(new URL(request.url).pathname);
 
   const nonce = crypto.randomUUID().replace(/-/g, '');
   const requestId = crypto.randomUUID().slice(0, 8);
@@ -67,12 +94,12 @@ export function middleware(request: NextRequest) {
 
   const csp = [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}'${isProduction ? '' : " 'unsafe-eval'"}`,
+    `script-src 'self' 'nonce-${nonce}'${withSources(captcha.script)}${isProduction ? '' : " 'unsafe-eval'"}`,
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self' data:",
     "img-src 'self' data: blob:",
     "media-src 'self' blob:",
-    `connect-src ${fullConnect}`,
+    `connect-src ${fullConnect}${withSources(captcha.connect)}`,
     // 'self': marketplace plugin UIs, served by /api/plugin-ui into
     // <iframe sandbox="allow-scripts"> (ADR-007) — opaque origin, own CSP.
     // Every app page refuses to be framed (frame-ancestors 'none' below), so
@@ -83,7 +110,9 @@ export function middleware(request: NextRequest) {
     // *.youtube…. This grants framing only: no script, style or connection
     // from that origin runs in our page — the player lives in its own origin
     // and is driven over postMessage, checked both ways.
-    "frame-src 'self' https://www.youtube-nocookie.com",
+    // + the active external CAPTCHA provider's frame origins, on pages, only
+    // while Turnstile or reCAPTCHA is configured (docs/CAPTCHA.md §9).
+    "frame-src 'self' https://www.youtube-nocookie.com" + withSources(captcha.frame),
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
@@ -120,6 +149,11 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
+  // Node.js runtime (stable since Next 15.5; a `middleware.ts` without this
+  // still defaults to the Edge runtime in Next 16): the CAPTCHA CSP reads
+  // the instance settings, which needs the database client and the
+  // process-wide settings cache the route handlers fill.
+  runtime: 'nodejs',
   // Run on all routes except static assets.
   matcher: [
     '/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)',

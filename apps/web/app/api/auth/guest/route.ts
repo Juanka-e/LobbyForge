@@ -8,6 +8,9 @@ import {
   readGuestSession,
 } from '@/lib/guest-session';
 import { getDb } from '@/lib/db';
+import { guardCaptchaSurface } from '@/lib/captcha/guard';
+import { NEW_GUEST_LIMIT, hitAddressLimit, peekAddressLimit } from '@/lib/captcha/limits';
+import { CaptchaBodyFields } from '@/lib/captcha/types';
 import { authorizeGuestRegistration } from '@/lib/instance-access';
 import { withApiSecurity } from '@/lib/security-headers';
 import { isSessionRevoked, recordSession } from '@/lib/session-tracker';
@@ -23,7 +26,21 @@ const GuestRequestSchema = z.object({
   // In that case we keep the gid + uid from the cookie and just refresh the name.
   rebind: z.boolean().optional(),
   inviteCode: z.string().length(12).optional(),
+  // Bot protection (docs/CAPTCHA.md §4.3) — only looked at when this request
+  // would create a NEW guest identity.
+  ...CaptchaBodyFields,
 }).strict();
+
+/**
+ * Phase 0 (docs/CAPTCHA.md §7): NEW guest identities get their own bucket —
+ * 10 per hour per client address, or a 200 / hour instance-wide backstop
+ * when addresses are unknown (no trusted proxy) — on top of the route's
+ * 30/min, which a refresh keeps sharing as before. Checked (without
+ * counting) BEFORE the challenge, so a solved token is not spent on a
+ * request the limit refuses anyway; counted once the new identity is about
+ * to be created, so the `captcha_required` round trip costs nothing.
+ * (`lib/captcha/limits.ts`.)
+ */
 
 function getSessionSecret(): string {
   const secret = process.env.LOBBYFORGE_SESSION_SECRET;
@@ -77,6 +94,19 @@ async function handlePost(req: Request): Promise<NextResponse> {
   }
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status });
+  }
+
+  // Bot protection: only a NEW guest identity needs the challenge — a valid
+  // guest cookie (refresh, re-bind) never does (docs/CAPTCHA.md §2). The
+  // access policy above runs first: a challenge is pointless where guests
+  // cannot get in at all, and it is a read, not the row this protects.
+  if (!existing) {
+    const full = await peekAddressLimit(req, NEW_GUEST_LIMIT);
+    if (full) return full;
+    const refused = await guardCaptchaSurface(req, body, 'guest');
+    if (refused) return refused;
+    const limited = await hitAddressLimit(req, NEW_GUEST_LIMIT);
+    if (limited) return limited;
   }
 
   let identity = existing
@@ -170,6 +200,8 @@ async function handleGet(req: Request): Promise<NextResponse> {
 export const POST = withApiSecurity(handlePost, {
   allowedMethods: ['POST'],
   sessionRevocation: 'bypass',
+  // Room for a CAPTCHA token (up to 4096 characters).
+  maxBodyBytes: 12 * 1024,
   rateLimit: { identifier: 'auth-guest-post', config: { windowMs: 60_000, maxRequests: 30 } },
 });
 

@@ -26,6 +26,8 @@ vi.mock('@/lib/security-headers', () => ({
   resolveClientAddress: () => '203.0.113.7',
 }));
 vi.mock('@/lib/session-tracker', () => ({ recordSession }));
+// Bot protection is covered by lib/captcha/__tests__ — a pass-through here.
+vi.mock('@/lib/captcha/guard', () => ({ guardSignInCaptcha: async () => null, noteSignInFailure: async () => undefined }));
 vi.mock('@/lib/desktop-handoff-codes', () => ({
   DESKTOP_HANDOFF_TTL_SECONDS: 300,
   credentialFingerprint: () => 'fingerprint',

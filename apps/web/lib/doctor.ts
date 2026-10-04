@@ -163,9 +163,94 @@ export async function collectDoctorReport(): Promise<{ report: DoctorReport; sta
       nodeEnv: process.env.NODE_ENV,
       trustedProxy: process.env.LOBBYFORGE_TRUSTED_PROXY,
     }),
+    buildSecureOriginCheck({
+      baseUrl: process.env.NEXT_PUBLIC_BASE_URL,
+      appOrigin: process.env.LOBBYFORGE_APP_ORIGIN,
+      altchaActive: await altchaActiveForDoctor(),
+    }),
+    // Bot protection (docs/CAPTCHA.md §8): keys, secret, siteverify, test
+    // keys in production, and ALTCHA's replay store (Redis).
+    ...(await collectCaptchaDoctorChecks(stats.redisReachable)),
   ];
   const report = buildDoctorReport(checks, stats);
   return { report, stats };
+}
+
+async function altchaActiveForDoctor(): Promise<boolean> {
+  try {
+    const { isAltchaActive } = await import('@/lib/captcha/doctor');
+    return await isAltchaActive();
+  } catch {
+    return true;
+  }
+}
+
+async function collectCaptchaDoctorChecks(redisReachable: boolean | null): Promise<DoctorCheck[]> {
+  try {
+    const { collectCaptchaChecks } = await import('@/lib/captcha/doctor');
+    return await collectCaptchaChecks({ redisReachable });
+  } catch (err) {
+    console.error('[doctor] bot protection checks unavailable:', (err as Error).message);
+    return [];
+  }
+}
+
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+function isLoopbackHost(hostname: string): boolean {
+  return LOOPBACK_HOSTS.has(hostname) || hostname.endsWith('.localhost') || /^127\.\d+\.\d+\.\d+$/.test(hostname);
+}
+
+/**
+ * Browsers only give a page Web Crypto (`crypto.subtle` — the built-in
+ * ALTCHA bot-protection challenge, docs/CAPTCHA.md) and microphone / camera
+ * (voice) in a secure context: HTTPS, or localhost. A declared public origin
+ * on plain `http://` with any other host breaks voice for every visitor —
+ * a WARNING — and, while ALTCHA is the active provider, makes sign-up and
+ * new guests depend on the slow pure-JavaScript fallback solver — CRITICAL.
+ * Pure: the caller passes the environment and whether ALTCHA is active.
+ */
+export function buildSecureOriginCheck(env: { baseUrl?: string; appOrigin?: string; altchaActive?: boolean }): DoctorCheck {
+  const base = { id: 'secure_origin', category: DoctorCategory.NETWORK };
+  const declared = [env.baseUrl, env.appOrigin].map((value) => value?.trim()).filter((value): value is string => Boolean(value));
+  if (declared.length === 0) {
+    return { ...base, ok: true, level: AlertLevel.INFO, message: 'No public origin declared (NEXT_PUBLIC_BASE_URL / LOBBYFORGE_APP_ORIGIN) — nothing to check.' };
+  }
+  const insecure = new Set<string>();
+  for (const value of declared) {
+    try {
+      const url = new URL(value);
+      if (url.protocol === 'http:' && !isLoopbackHost(url.hostname)) insecure.add(url.origin);
+    } catch {
+      // not a URL; other checks report unusable values
+    }
+  }
+  if (insecure.size === 0) {
+    return { ...base, ok: true, level: AlertLevel.INFO, message: 'The public origin is HTTPS (or localhost), a secure context.' };
+  }
+  const origins = [...insecure].join(', ');
+  const fix = 'Serve the instance over HTTPS (or use it on localhost only).';
+  if (env.altchaActive) {
+    return {
+      ...base,
+      ok: false,
+      level: AlertLevel.CRITICAL,
+      message:
+        `${origins} is plain HTTP, and the built-in ALTCHA bot protection is active. Browsers allow Web Crypto only on HTTPS or localhost, ` +
+        'so every sign-up and new guest has to solve the challenge with the much slower pure-JavaScript fallback, and microphone / camera (voice) ' +
+        `do not work at all. ${fix}`,
+      detail: { origins: [...insecure], altchaActive: true },
+    };
+  }
+  return {
+    ...base,
+    ok: false,
+    level: AlertLevel.WARNING,
+    message:
+      `${origins} is plain HTTP. Browsers allow microphone / camera (voice) and Web Crypto only on HTTPS or localhost, ` +
+      `so visitors cannot talk. ${fix}`,
+    detail: { origins: [...insecure], altchaActive: false },
+  };
 }
 
 const TRUSTED_PROXY_FIX =

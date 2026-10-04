@@ -10,6 +10,8 @@ import {
   serverPolicyRegistrationRefusal,
 } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
+import { guardCaptchaSurface } from '@/lib/captcha/guard';
+import { CaptchaBodyFields } from '@/lib/captcha/types';
 import { isOfficialDeployment } from '@/lib/deployment-mode';
 import { buildGuestSessionCookie, createGuestIdentity } from '@/lib/guest-session';
 import { getSessionSecret } from '@/lib/api-auth';
@@ -28,6 +30,8 @@ const RegisterSchema = z.object({
   displayName: DisplayNameSchema,
   password: z.string().min(12, 'Password must be at least 12 characters.').max(128),
   inviteCode: z.string().trim().max(16).optional(),
+  // Bot protection (docs/CAPTCHA.md §4.3): token, provider, form token, honeypot.
+  ...CaptchaBodyFields,
 }).strict();
 
 type RegisterInput = z.infer<typeof RegisterSchema>;
@@ -41,12 +45,28 @@ async function handlePost(req: Request): Promise<NextResponse> {
     );
   }
 
-  if (isOfficialDeployment()) return registerOfficialAccount(req, parsed.data);
+  // Bot protection, before any account work or password hashing (§4.4).
+  // The official hub has no invite sign-up: always `register`.
+  if (isOfficialDeployment()) {
+    const refused = await guardCaptchaSurface(req, parsed.data, 'register');
+    if (refused) return refused;
+    return registerOfficialAccount(req, parsed.data);
+  }
 
   const settings = await getEffectiveInstanceAccessSettings(getDb());
   if (settings.registrationMode === 'closed') {
     return NextResponse.json({ error: 'New registrations are closed.' }, { status: 403 });
   }
+
+  // An invite code picks the `invite_register` surface — which can only ADD
+  // protection: on an open instance (where @everyone may create unlimited
+  // invites) an invite sign-up is challenged when `register` OR
+  // `invite_register` is on; only an invite-only instance lets
+  // `invite_register` alone decide (docs/CAPTCHA.md §2).
+  const refused = await guardCaptchaSurface(req, parsed.data, parsed.data.inviteCode ? 'invite_register' : 'register', {
+    registrationMode: settings.registrationMode,
+  });
+  if (refused) return refused;
 
   const rawInviteCode = parsed.data.inviteCode || '';
   const inviteCode = rawInviteCode ? normalizeInviteCode(rawInviteCode) : null;
@@ -168,6 +188,7 @@ async function signedInResponse(
 export const POST = withApiSecurity(handlePost, {
   allowedMethods: ['POST'],
   sessionRevocation: 'bypass',
-  maxBodyBytes: 4 * 1024,
+  // Room for a CAPTCHA token (up to 4096 characters) next to the form.
+  maxBodyBytes: 12 * 1024,
   rateLimit: { identifier: 'auth-local-register', config: { windowMs: 15 * 60_000, maxRequests: 5 } },
 });

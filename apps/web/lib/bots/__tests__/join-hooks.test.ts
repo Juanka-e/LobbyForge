@@ -32,6 +32,8 @@ vi.mock('@lobbyforge/db', () => ({
 }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
 vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));
+// Bot protection is covered by lib/captcha/__tests__ — a pass-through here.
+vi.mock('@/lib/captcha/guard', () => ({ guardCaptchaSurface: async () => null }));
 vi.mock('@/lib/invite-code', () => ({ normalizeInviteCode: (code: string) => code }));
 vi.mock('@/lib/password', () => ({ hashPassword: async () => 'scrypt$hash' }));
 vi.mock('@/lib/deployment-mode', () => ({ isOfficialDeployment: () => false }));
