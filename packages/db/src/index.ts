@@ -18,6 +18,12 @@ export * from './queries/voiceModeration.js';
 export * from './queries/memberSanctions.js';
 export * from './queries/joinRequests.js';
 export * from './queries/bots.js';
+// Bot API v2 (0044).
+export * from './queries/botChannelAccess.js';
+export * from './queries/botCommands.js';
+export * from './queries/botInteractions.js';
+export * from './queries/channelWebhooks.js';
+export * from './queries/botEventEndpoints.js';
 export * from './queries/userSettings.js';
 export { updateMemberNickname } from './queries/memberships.js';
 export { updateUserKeybinds } from './queries/userSettings.js';
