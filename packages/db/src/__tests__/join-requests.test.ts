@@ -186,12 +186,12 @@ describe('fileJoinRequest', () => {
 
 describe('redeemInvite under an approval policy', () => {
   const lockedInvite = (over: Record<string, unknown> = {}) => [
-    { id: 'inv-1', server_id: 'srv-1', max_uses: 1, current_uses: 0, expires_at: null, ...over },
+    { id: 'inv-1', serverId: 'srv-1', maxUses: 1, currentUses: 0, expiresAt: null, ...over },
   ];
 
   it('returns the pending request — even when its own use exhausted the invite — and consumes nothing', async () => {
     const { db, chains } = recordingDb([
-      lockedInvite({ current_uses: 1 }),
+      lockedInvite({ currentUses: 1 }),
       [], // ban
       [], // existing membership
       [{ ownerUserId: 'owner-1' }],
@@ -225,7 +225,7 @@ describe('redeemInvite under an approval policy', () => {
 
   it('an exhausted invite files no new request', async () => {
     const { db, chains } = recordingDb([
-      lockedInvite({ current_uses: 1 }),
+      lockedInvite({ currentUses: 1 }),
       [],
       [],
       [{ ownerUserId: 'owner-1' }],
@@ -266,7 +266,7 @@ describe('redeemInvite under an approval policy', () => {
 
   it('asking again through the same code (after a withdraw) takes no use — even when that use was the last', async () => {
     const { db, chains } = recordingDb([
-      lockedInvite({ current_uses: 1 }), // exhausted by this user's own earlier request
+      lockedInvite({ currentUses: 1 }), // exhausted by this user's own earlier request
       [],
       [],
       [{ ownerUserId: 'owner-1' }],
@@ -289,7 +289,7 @@ describe('redeemInvite under an approval policy', () => {
 
   it('another user still finds a code exhausted by someone else', async () => {
     const { db, chains } = recordingDb([
-      lockedInvite({ current_uses: 1 }),
+      lockedInvite({ currentUses: 1 }),
       [],
       [],
       [{ ownerUserId: 'owner-1' }],

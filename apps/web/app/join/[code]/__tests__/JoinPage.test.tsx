@@ -139,3 +139,130 @@ describe('/join/[code] under an approval policy', () => {
     expect(await screen.findByText('İsteğin geri çekilemedi. Birazdan yeniden dene.')).toBeTruthy();
   });
 });
+
+/**
+ * Final-test finding (UX): a refused redeem showed developer text such as
+ * "redeem → 500 Failed to redeem invite". Each refusal is now a
+ * translated message, with no status code or server text in the page.
+ */
+describe('/join/[code] when the redeem is refused', () => {
+  type InviteState = { isExpired: boolean; isExhausted: boolean } | 'gone';
+  let inviteReads = 0;
+
+  /** The first invite read is the page load; later reads follow a refusal. */
+  function stubRefusal(answer: () => Response | Promise<Response>, afterRefusal: InviteState = { isExpired: false, isExhausted: false }) {
+    inviteReads = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init: RequestInit = {}) => {
+        calls.push({ url, method: init.method ?? 'GET', body: undefined });
+        if (url === `/api/invites/${CODE}`) {
+          inviteReads += 1;
+          if (inviteReads === 1) return Response.json(invite(false));
+          if (afterRefusal === 'gone') return Response.json({ error: 'Invite not found' }, { status: 404 });
+          return Response.json({ invite: { ...invite(false).invite, ...afterRefusal } });
+        }
+        if (url === '/api/auth/guest') return Response.json({ guest: { gid: 'g_1', uid: 'user-1', name: 'Ada' } });
+        if (url === `/api/servers/${SERVER}/join-requests/mine`) return Response.json({ request: null });
+        if (url === `/api/invites/${CODE}/redeem`) return answer();
+        return Response.json({}, { status: 404 });
+      })
+    );
+  }
+
+  async function accept(locale = 'en') {
+    renderPage(locale);
+    const button = await screen.findByRole('button', { name: locale === 'tr' ? 'Daveti kabul et' : 'Accept invite' });
+    await vi.waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(button);
+    return button as HTMLButtonElement;
+  }
+
+  /** Nothing developer-facing reached the page. */
+  function expectNoDetails() {
+    expect(screen.queryByText(/redeem|→|\b(4\d\d|5\d\d)\b|Failed to|Invite is unavailable|banned from this server/)).toBeNull();
+  }
+
+  it('a server error is a friendly retry message', async () => {
+    stubRefusal(() => Response.json({ error: 'Failed to redeem invite' }, { status: 500 }));
+    await accept();
+    expect(await screen.findByText("Something went wrong and the invite wasn't accepted. Try again in a moment.")).toBeTruthy();
+    expectNoDetails();
+  });
+
+  it('an invite that expired since the page loaded says so, and the button turns off', async () => {
+    stubRefusal(() => Response.json({ error: 'Invite is unavailable' }, { status: 403 }), { isExpired: true, isExhausted: false });
+    const button = await accept();
+    expect(await screen.findByText('This invite has expired. Ask whoever sent it for a new one.')).toBeTruthy();
+    await vi.waitFor(() => expect(button.disabled).toBe(true));
+    expectNoDetails();
+  });
+
+  it('an invite used up since the page loaded says so', async () => {
+    stubRefusal(() => Response.json({ error: 'Invite is unavailable' }, { status: 403 }), { isExpired: false, isExhausted: true });
+    await accept();
+    expect(await screen.findByText('This invite has been used as many times as it allows. Ask for a new one.')).toBeTruthy();
+  });
+
+  it('an invite revoked since the page loaded says so', async () => {
+    stubRefusal(() => Response.json({ error: 'Invite is unavailable' }, { status: 403 }), 'gone');
+    await accept();
+    expect(await screen.findByText('This invite was revoked.')).toBeTruthy();
+  });
+
+  it("the route's ban refusal is a ban message, without the server text", async () => {
+    stubRefusal(() => Response.json({ error: 'You are banned from this server' }, { status: 403 }));
+    await accept();
+    expect(await screen.findByText("You can't join this server because you've been banned from it.")).toBeTruthy();
+    expect(inviteReads).toBe(1);
+    expectNoDetails();
+  });
+
+  it('a 403 from the origin guard is not mistaken for a ban', async () => {
+    stubRefusal(() => Response.json({ error: 'Invalid request origin' }, { status: 403 }));
+    await accept();
+    expect(await screen.findByText("Something went wrong and the invite wasn't accepted. Try again in a moment.")).toBeTruthy();
+    expect(screen.queryByText(/banned/)).toBeNull();
+    expectNoDetails();
+  });
+
+  it('a ban the route names with a code needs no second look at the invite', async () => {
+    stubRefusal(() => Response.json({ error: 'You are banned from this server', code: 'banned' }, { status: 403 }));
+    await accept();
+    expect(await screen.findByText("You can't join this server because you've been banned from it.")).toBeTruthy();
+    expect(inviteReads).toBe(1);
+  });
+
+  it('the rate limiter is a wait-and-retry message', async () => {
+    stubRefusal(() => Response.json({ error: 'Rate limit exceeded', retryAfter: 30 }, { status: 429 }));
+    await accept();
+    expect(await screen.findByText('Too many attempts. Wait a minute, then try again.')).toBeTruthy();
+    expectNoDetails();
+  });
+
+  it('a network failure is the friendly retry message too', async () => {
+    stubRefusal(() => Promise.reject(new TypeError('Failed to fetch')));
+    await accept();
+    expect(await screen.findByText("Something went wrong and the invite wasn't accepted. Try again in a moment.")).toBeTruthy();
+    expectNoDetails();
+  });
+
+  it('is translated', async () => {
+    stubRefusal(() => Response.json({ error: 'Failed to redeem invite' }, { status: 500 }));
+    await accept('tr');
+    expect(await screen.findByText('Bir şeyler ters gitti, davet kabul edilmedi. Birazdan yeniden dene.')).toBeTruthy();
+  });
+
+  it('a failed invite load shows no response body', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url === `/api/invites/${CODE}`) return Response.json({ error: 'boom', stack: 'at x' }, { status: 500 });
+        return Response.json({}, { status: 401 });
+      })
+    );
+    renderPage();
+    expect(await screen.findByText("This invite couldn't be loaded. Try again in a moment.")).toBeTruthy();
+    expect(screen.queryByText(/boom|stack|\{/)).toBeNull();
+  });
+});

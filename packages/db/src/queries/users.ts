@@ -7,6 +7,7 @@
  */
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
+import { isPgUniqueViolation } from '../pg-errors.js';
 import { membershipRoles, memberships, roles, servers, users } from '../schema.js';
 import { redeemInvite, type RedeemInviteError } from './invites.js';
 import { EVERYONE_ROLE_NAME } from './roles.js';
@@ -403,12 +404,8 @@ export async function updateUserProfile(
   return updated[0];
 }
 
-function isUniqueViolation(err: unknown): boolean {
-  if (!err || typeof err !== 'object') return false;
-  const e = err as { code?: string };
-  // Postgres SQLSTATE for unique_violation is '23505'.
-  return e.code === '23505';
-}
+// Postgres unique_violation (23505), also when Drizzle wraps the driver error.
+const isUniqueViolation = isPgUniqueViolation;
 
 // Internal helper exposed for tests that need to verify the unique-violation
 // detection without going through the Drizzle error shape.

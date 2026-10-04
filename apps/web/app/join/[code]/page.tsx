@@ -23,6 +23,7 @@ import { CaptchaField } from '@/components/captcha/CaptchaField';
 import { guestFailureMessage } from '@/components/captcha/guest-failure';
 import { useCaptchaGate } from '@/components/captcha/useCaptchaGate';
 import { useT } from '@/lib/i18n/client';
+import { REDEEM_FAILURE_KEYS, classifyRedeemFailure, failureFromInvite } from '@/lib/invite-redeem-error';
 
 /** Same limit as the API (JOIN_REQUEST_NOTE_MAX_LENGTH). */
 const NOTE_MAX_LENGTH = 500;
@@ -103,12 +104,17 @@ export default function JoinPage({ params }: { params: Promise<{ code: string }>
           credentials: 'same-origin',
         });
         if (!res.ok) {
-          if (res.status === 404) {
-            setMetaError(t('auth.join.unknownCode'));
-          } else {
-            const detail = await res.json().catch(() => ({}));
-            setMetaError(t('auth.join.loadFailed', { detail: JSON.stringify(detail) }));
-          }
+          if (cancelled) return;
+          // In words, never the response body (it used to be shown as JSON).
+          setMetaError(
+            t(
+              res.status === 404
+                ? 'auth.join.unknownCode'
+                : res.status === 429
+                  ? 'auth.join.error.rateLimited'
+                  : 'auth.join.loadFailed'
+            )
+          );
           setStatus({ kind: 'idle' });
           return;
         }
@@ -116,9 +122,9 @@ export default function JoinPage({ params }: { params: Promise<{ code: string }>
         if (cancelled) return;
         setMeta(data.invite);
         setStatus({ kind: 'idle' });
-      } catch (err) {
+      } catch {
         if (cancelled) return;
-        setMetaError((err as Error).message);
+        setMetaError(t('auth.join.loadFailed'));
         setStatus({ kind: 'idle' });
       }
     })();
@@ -201,6 +207,41 @@ export default function JoinPage({ params }: { params: Promise<{ code: string }>
 
   const formatDate = useCallback((iso: string) => new Date(iso).toLocaleString(t.locale), [t.locale]);
 
+  /**
+   * A refused redeem, in words (see lib/invite-redeem-error.ts). A bare
+   * 403/410 that is not a ban re-reads the invite to say whether it has
+   * expired, been used up or been revoked since the page loaded — and the
+   * fresh metadata disables the button for it.
+   */
+  const showRedeemFailure = useCallback(
+    async (status: number, detail: RedeemResponse) => {
+      let failure = classifyRedeemFailure(status, detail.code, detail.error);
+      if (failure === 'checkInvite') {
+        failure = 'generic';
+        if (code) {
+          try {
+            const res = await fetch(`/api/invites/${encodeURIComponent(code)}`, {
+              method: 'GET',
+              credentials: 'same-origin',
+            });
+            if (res.status === 404) {
+              failure = failureFromInvite(null);
+              setMetaError(t('auth.join.unknownCode'));
+            } else if (res.ok) {
+              const data = (await res.json()) as { invite: InviteMeta };
+              failure = failureFromInvite(data.invite);
+              setMeta(data.invite);
+            }
+          } catch {
+            // Could not tell which: the generic message stands.
+          }
+        }
+      }
+      setStatus({ kind: 'error', message: t(REDEEM_FAILURE_KEYS[failure]) });
+    },
+    [code, t]
+  );
+
   const acceptInvite = useCallback(async () => {
     if (!code) return;
     if (!guest) {
@@ -217,23 +258,6 @@ export default function JoinPage({ params }: { params: Promise<{ code: string }>
           ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note: trimmedNote }) }
           : {}),
       });
-      if (res.status === 401) {
-        setStatus({ kind: 'error', message: t('auth.join.sessionExpired') });
-        return;
-      }
-      if (res.status === 409) {
-        setStatus({ kind: 'error', message: t('auth.join.alreadyMember') });
-        return;
-      }
-      if (res.status === 410) {
-        const detail = (await res.json().catch(() => ({}))) as RedeemResponse;
-        setStatus({ kind: 'error', message: detail.error ?? t('auth.join.noLongerValid') });
-        return;
-      }
-      if (res.status === 404) {
-        setStatus({ kind: 'error', message: t('auth.join.revoked') });
-        return;
-      }
       // The server reviews new members: the request now waits for a moderator.
       if (res.status === 202) {
         setJoinRequest({ status: 'pending' });
@@ -247,11 +271,10 @@ export default function JoinPage({ params }: { params: Promise<{ code: string }>
           setStatus({ kind: 'idle' });
           return;
         }
-        if (res.status === 429 && detail.code === 'join_request_limit') {
-          setStatus({ kind: 'error', message: t('auth.join.requestLimit') });
-          return;
-        }
-        throw new Error(`redeem → ${res.status} ${detail.error ?? ''}`);
+        // Expired, used up, revoked, banned, rate limited, session gone,
+        // already a member, or a server error: each in words, no details.
+        await showRedeemFailure(res.status, detail);
+        return;
       }
       const data = (await res.json()) as RedeemResponse;
       if (data.membership) {
@@ -265,10 +288,12 @@ export default function JoinPage({ params }: { params: Promise<{ code: string }>
       } else {
         setStatus({ kind: 'error', message: t('auth.join.noMembership') });
       }
-    } catch (err) {
-      setStatus({ kind: 'error', message: (err as Error).message });
+    } catch {
+      // A network failure: the browser's own text ("Failed to fetch") is
+      // no help to a visitor either.
+      setStatus({ kind: 'error', message: t('auth.join.error.generic') });
     }
-  }, [code, guest, meta?.requiresApproval, meta?.serverName, note, t]);
+  }, [code, guest, meta?.requiresApproval, meta?.serverName, note, showRedeemFailure, t]);
 
   const cancelRequest = useCallback(async () => {
     if (!serverId) return;
