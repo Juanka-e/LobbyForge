@@ -22,6 +22,8 @@ dil. "Kanalına katıl", "Ayarlarını kaydet".
 | Kick | Sunucudan at | |
 | Mute (self) | Mikrofonu kapat | Durum: "Mikrofon kapalı" |
 | Server mute (moderator) | Sunucuda sustur | Durum: "Susturuldun" |
+| Disconnect from voice (moderator) | Ses bağlantısını kes | Engel yok, hemen geri katılabilir. Kendi çıkışın: "Bağlantıyı kes" |
+| Voice security (denetim kaydı filtresi) | Ses güvenliği | |
 | Deafen | Sağırlaştır | |
 | Moderation | Moderasyon | |
 | Audit log | Denetim kaydı | |
@@ -75,6 +77,11 @@ dil. "Kanalına katıl", "Ayarlarını kaydet".
 | Maintenance mode | Bakım modu | |
 | Doctor (tanılama aracı) | Tanılama | |
 | Token | token | Çevrilmez; ek alır: "token'ı" |
+| Slash command | Eğik çizgi komutu | Türkçe Discord'daki gibi. Kısa yerde: "komut" |
+| Webhook (incoming) | webhook / Gelen webhook | Çevrilmez; ek alır: "webhook'u", "webhook'lar" |
+| Event (Bot API) | Olay | "Olayları al", "Olay uç noktası" |
+| Endpoint | Uç nokta | |
+| Only you can see this | Bunu yalnızca sen görebilirsin | Geçici (ephemeral) bot yanıtları |
 
 **Kısaltmalar:** saniye "sn", dakika "dk", saat "sa", gün "g", hafta "hf".
 

@@ -13,6 +13,15 @@ describe('isAppHeaderHidden', () => {
     }
   });
 
+  it('steps aside for the Developers section on both deployments, and only for it', () => {
+    for (const official of [true, false]) {
+      for (const path of ['/developers', '/developers/bots', '/developers/bot-api-v2']) {
+        expect(isAppHeaderHidden(path, official), `${path} official=${official}`).toBe(true);
+      }
+      expect(isAppHeaderHidden('/developersx', official)).toBe(false);
+    }
+  });
+
   it('steps aside for the hub pages on the official hub', () => {
     for (const path of ['/discover', '/discover/instance-1', '/discover/go', '/instances/new', '/connect']) {
       expect(isAppHeaderHidden(path, true), path).toBe(true);

@@ -19,6 +19,7 @@
     "test:e2e:ui": "playwright test --ui",
     "lint": "eslint \"src/**/*.{ts,tsx}\" \"app/**/*.{ts,tsx}\" \"components/**/*.{ts,tsx}\" \"lib/**/*.ts\"",
     "dev": "next dev --port 19520",
+    "docs:generate": "node scripts/generate-developer-docs.mjs",
     "start": "next start --port 3000"
   },
   "dependencies": {

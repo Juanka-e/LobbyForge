@@ -6,9 +6,13 @@
  * this list existed the global header stacked on top of those headers.
  */
 
-/** Pages with their own chrome in every deployment. */
-const OWN_CHROME_EXACT = new Set(['/landing', '/home', '/download', '/marketplace', '/register', '/login', '/setup']);
-const OWN_CHROME_PREFIXES = ['/lobby', '/admin', '/settings', '/servers/'];
+/**
+ * Pages with their own chrome in every deployment. The Developers section
+ * is hub chrome on the official hub and its own standalone frame on a
+ * self-hosted instance (`app/(developers)/layout.tsx`).
+ */
+const OWN_CHROME_EXACT = new Set(['/landing', '/home', '/download', '/marketplace', '/register', '/login', '/setup', '/developers']);
+const OWN_CHROME_PREFIXES = ['/lobby', '/admin', '/settings', '/servers/', '/developers/'];
 
 /**
  * Official-hub pages drawn in the hub chrome. `/discover` and `/instances`

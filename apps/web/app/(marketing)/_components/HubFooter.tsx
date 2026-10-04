@@ -20,8 +20,10 @@ export default async function HubFooter() {
       id: 'hub-footer-developers',
       title: t('hub.footer.developers'),
       links: [
+        { kind: 'internal', href: '/developers', label: t('hub.footer.developerDocs') },
+        { kind: 'internal', href: '/developers/bots', label: t('hub.footer.botApi') },
+        { kind: 'internal', href: '/developers/plugins', label: t('hub.footer.pluginSdk') },
         { kind: 'external', href: LOBBYFORGE_REPO.docsUrl, label: t('hub.footer.documentation') },
-        { kind: 'external', href: LOBBYFORGE_REPO.pluginSdkUrl, label: t('hub.footer.pluginSdk') },
         { kind: 'external', href: LOBBYFORGE_REPO.url, label: 'GitHub' },
       ],
     },
