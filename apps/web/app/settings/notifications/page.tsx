@@ -1,7 +1,10 @@
 ﻿'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import type { Route } from 'next';
+import { useRouter } from 'next/navigation';
 import SettingsShell from '@/app/SettingsShell';
+import { currentPagePath, signInHref } from '@/lib/sign-in-return';
 import SettingsStickyFooter, { type SettingsStatus } from '@/app/settings/SettingsStickyFooter';
 import { useT } from '@/lib/i18n/client';
 import { rich } from '@/lib/i18n/rich';
@@ -114,6 +117,7 @@ function mergeNotifications(value: unknown): NotificationPreferences {
 
 export default function NotificationsSettingsPage() {
   const t = useT();
+  const router = useRouter();
   const [prefs, setPrefs] = useState<NotificationPreferences>(DEFAULT_NOTIFICATIONS);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [status, setStatus] = useState<SettingsStatus>({ key: 'settings.footer.loading' });
@@ -136,12 +140,10 @@ export default function NotificationsSettingsPage() {
           data = await jsonFetch<SettingsResponse>('/api/settings/me');
         } catch (err) {
           if (!(err as Error).message.startsWith('HTTP 401')) throw err;
-          await jsonFetch('/api/auth/guest', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({}),
-          });
-          data = await jsonFetch<SettingsResponse>('/api/settings/me');
+          // Signed out: sign in and come back here. Settings never mint a
+          // guest (bot protection would refuse one; docs/CAPTCHA.md §6).
+          if (!cancelled) router.replace(signInHref(currentPagePath()) as Route);
+          return;
         }
         if (!cancelled) {
           const merged = mergeNotifications(data.settings.notifications);
@@ -158,7 +160,7 @@ export default function NotificationsSettingsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !('Notification' in window)) {

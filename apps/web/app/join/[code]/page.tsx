@@ -19,6 +19,9 @@
 'use client';
 
 import { useCallback, useEffect, useId, useState } from 'react';
+import { CaptchaField } from '@/components/captcha/CaptchaField';
+import { guestFailureMessage } from '@/components/captcha/guest-failure';
+import { useCaptchaGate } from '@/components/captcha/useCaptchaGate';
 import { useT } from '@/lib/i18n/client';
 
 /** Same limit as the API (JOIN_REQUEST_NOTE_MAX_LENGTH). */
@@ -69,6 +72,10 @@ export default function JoinPage({ params }: { params: Promise<{ code: string }>
   const [joinRequest, setJoinRequest] = useState<JoinRequestState | null>(null);
   const [note, setNote] = useState('');
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
+  // Whether the session probe has answered: only a visitor with no session
+  // creates a NEW guest, which is what the guest surface protects.
+  const [probed, setProbed] = useState(false);
+  const guestGate = useCaptchaGate({ surface: 'guest', expectChallenge: probed && !guest });
 
   // Unwrap the dynamic route param on mount. Next 15 ships `params` as a
   // Promise; we resolve it once and store the result.
@@ -131,6 +138,8 @@ export default function JoinPage({ params }: { params: Promise<{ code: string }>
         setGuest(data.guest);
       } catch {
         // Silent — guest is optional until the user clicks "Accept".
+      } finally {
+        setProbed(true);
       }
     })();
   }, []);
@@ -166,23 +175,29 @@ export default function JoinPage({ params }: { params: Promise<{ code: string }>
     };
   }, [serverId, signedInUid]);
 
+  const { submit: submitGuest } = guestGate;
   const createGuest = useCallback(async () => {
     setStatus({ kind: 'busy' });
-    try {
-      const res = await fetch('/api/auth/guest', {
+    const result = await submitGuest((fields) =>
+      fetch('/api/auth/guest', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inviteCode: code }),
-      });
-      if (!res.ok) throw new Error(`POST /api/auth/guest → ${res.status}`);
-      const data = (await res.json()) as { guest: Guest };
-      setGuest(data.guest);
-      setStatus({ kind: 'ok', message: t('auth.join.signedInAs', { name: data.guest.name }) });
-    } catch (err) {
-      setStatus({ kind: 'error', message: (err as Error).message });
+        body: JSON.stringify({ inviteCode: code, ...fields }),
+      })
+    );
+    if (result.kind !== 'response') {
+      setStatus({ kind: 'error', message: t(result.kind === 'blocked' ? result.messageKey : 'captcha.error.network') });
+      return;
     }
-  }, [code, t]);
+    const guestData = result.body.guest as Guest | undefined;
+    if (!result.response.ok || !guestData) {
+      setStatus({ kind: 'error', message: guestFailureMessage(t, result.response.status, result.body) });
+      return;
+    }
+    setGuest(guestData);
+    setStatus({ kind: 'ok', message: t('auth.join.signedInAs', { name: guestData.name }) });
+  }, [code, submitGuest, t]);
 
   const formatDate = useCallback((iso: string) => new Date(iso).toLocaleString(t.locale), [t.locale]);
 
@@ -378,6 +393,11 @@ export default function JoinPage({ params }: { params: Promise<{ code: string }>
                   gid: guest.gid,
                 })
               : t('auth.join.noGuest')
+          }
+          extra={
+            <div className="relative grid gap-2">
+              <CaptchaField gate={guestGate} />
+            </div>
           }
           actions={
             <button type="button" onClick={createGuest} disabled={busy} className={secondaryButtonClass}>

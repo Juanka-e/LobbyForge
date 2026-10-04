@@ -1,9 +1,14 @@
 'use client';
 
+import type { Route } from 'next';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { HUB_HOME_PATH } from '@/lib/hub-routes';
 import { useId, useState, type FormEvent } from 'react';
 import { LinkIcon } from '@/app/(marketing)/_components/icons';
+import { CaptchaField } from '@/components/captcha/CaptchaField';
+import { reportFormValidity } from '@/components/captcha/form-validity';
+import { useCaptchaGate } from '@/components/captcha/useCaptchaGate';
 import { useT } from '@/lib/i18n/client';
 import { rich } from '@/lib/i18n/rich';
 import { completeDesktopHandoff } from '../desktop-handoff';
@@ -20,12 +25,15 @@ export default function OfficialSignInForm({
   googleEnabled,
   desktopLoginState,
   initialError,
+  nextPath = HUB_HOME_PATH,
 }: {
   googleEnabled: boolean;
   /** Native shell's pending handoff state (?desktopLoginState=…). */
   desktopLoginState?: string;
   /** A known `?error=` code from an auth redirect, already in words. */
   initialError: string | null;
+  /** Where to go once signed in — `?next=`, already checked by the page. */
+  nextPath?: string;
 }) {
   const t = useT();
   const router = useRouter();
@@ -34,24 +42,31 @@ export default function OfficialSignInForm({
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(initialError);
+  // Adaptive sign-in: the challenge appears only after `captcha_required`.
+  const gate = useCaptchaGate({ surface: 'login', prefetch: false });
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // noValidate: the captcha checkbox must not block the send (form-validity.ts).
+    if (!reportFormValidity(event.currentTarget)) return;
     setBusy(true);
     setError(null);
-    const response = await fetch('/api/auth/login', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email: email.trim(), password }),
-    }).catch(() => null);
-    if (!response) {
-      setError(t('auth.official.error.network'));
+    const result = await gate.submit((fields) =>
+      fetch('/api/auth/login', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password, ...fields }),
+      })
+    );
+    if (result.kind !== 'response') {
+      setError(t(result.kind === 'blocked' ? result.messageKey : 'auth.official.error.network'));
       setBusy(false);
       return;
     }
+    const { response } = result;
     if (!response.ok) {
-      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      const body = result.body as { error?: string };
       setError(signInErrorMessage(t, response.status, body.error));
       setBusy(false);
       return;
@@ -62,7 +77,7 @@ export default function OfficialSignInForm({
     ) {
       return;
     }
-    router.replace('/home');
+    router.replace(nextPath as Route);
     router.refresh();
   }
 
@@ -79,7 +94,7 @@ export default function OfficialSignInForm({
         </p>
       ) : null}
 
-      <form onSubmit={submit} aria-busy={busy} className="flex flex-col gap-[22px]">
+      <form onSubmit={submit} aria-busy={busy} noValidate className="flex flex-col gap-[22px]">
         <div className="flex flex-col gap-2">
           <label htmlFor={`${ids}-email`} className={authLabel}>
             {t('auth.login.email')}
@@ -104,6 +119,7 @@ export default function OfficialSignInForm({
           autoComplete="current-password"
           placeholder={t('auth.official.signIn.passwordPlaceholder')}
         />
+        <CaptchaField gate={gate} />
         <button type="submit" disabled={busy} className={authSubmit}>
           {busy ? t('auth.login.pleaseWait') : t('auth.login.signIn')}
         </button>
@@ -117,7 +133,7 @@ export default function OfficialSignInForm({
 
       <div className="flex flex-col gap-3">
         {googleEnabled ? (
-          <a href="/api/auth/oauth/google?redirect=%2Fhome" className={authAlternative}>
+          <a href={`/api/auth/oauth/google?redirect=${encodeURIComponent(nextPath)}`} className={authAlternative}>
             <GoogleMark />
             {t('auth.login.google')}
           </a>

@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Route } from 'next';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { getEffectiveInstanceAccessSettings, getInstanceBootstrapStatus } from '@lobbyforge/db';
@@ -9,6 +9,7 @@ import { isOfficialDeployment } from '@/lib/deployment-mode';
 import { officialAuthDestination } from '@/lib/hub-routes';
 import { isGoogleOAuthConfigured } from '@/lib/oauth-google';
 import { getTranslator } from '@/lib/i18n/server';
+import { signInReturnPath } from '@/lib/sign-in-return';
 import LoginForm from './LoginForm';
 import { loginErrorKey } from './login-errors';
 import OfficialSignInPage from './_official/OfficialSignInPage';
@@ -26,29 +27,34 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ invite?: string; mode?: string; desktopLoginState?: string; error?: string }>;
+  searchParams: Promise<{ invite?: string; mode?: string; desktopLoginState?: string; error?: string; next?: string }>;
 }) {
   if (isOfficialDeployment()) {
-    // The official hub's own accounts: signed in already → the hub home.
+    // The official hub's own accounts: signed in already → the page they
+    // were sent here from (`?next=`), else the hub home.
+    const { desktopLoginState, error, next } = await searchParams;
+    const returnTo = signInReturnPath(next, null);
     const session = await getActiveSession((await cookies()).toString(), getSessionSecret());
     const destination = officialAuthDestination(Boolean(session?.uid));
-    if (destination) redirect(destination);
-    const { desktopLoginState, error } = await searchParams;
-    return <OfficialSignInPage errorCode={error} desktopLoginState={desktopLoginState} />;
+    if (destination) redirect((returnTo ?? destination) as Route);
+    return <OfficialSignInPage errorCode={error} desktopLoginState={desktopLoginState} nextPath={returnTo ?? undefined} />;
   }
 
   const setup = await getInstanceBootstrapStatus(getDb());
   if (!setup.bootstrapComplete) redirect('/setup');
 
+  const { invite = '', desktopLoginState, mode, error: errorCode, next } = await searchParams;
+  // Where to go once signed in: the page that sent the visitor here
+  // (`?next=`, same-origin paths only), else the lobby.
+  const nextPath = signInReturnPath(next, '/lobby');
   const cookieStore = await cookies();
   const session = await getActiveSession(cookieStore.toString(), getSessionSecret());
-  if (session?.uid) redirect('/lobby');
+  if (session?.uid) redirect(nextPath as Route);
 
   const settings = await getEffectiveInstanceAccessSettings(getDb());
   // The first screen a visitor sees, before they have picked a language:
   // the translator follows their browser's Accept-Language.
   const t = await getTranslator();
-  const { invite = '', desktopLoginState, mode, error: errorCode } = await searchParams;
   // beta-review: the auth routes redirect here with ?error=… but the page
   // never showed it (e.g. a closed-registration Google sign-in looked like
   // a silent no-op).
@@ -87,7 +93,7 @@ export default async function LoginPage({
         {googleEnabled ? (
           <div className="mb-4">
             <a
-              href="/api/auth/oauth/google"
+              href={nextPath === '/lobby' ? '/api/auth/oauth/google' : `/api/auth/oauth/google?redirect=${encodeURIComponent(nextPath)}`}
               className="flex w-full items-center justify-center gap-3 rounded-lg border border-border-subtle bg-surface px-4 py-2.5 text-sm font-medium text-text-primary hover:bg-surface-container transition-colors"
             >
               <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
@@ -111,7 +117,8 @@ export default async function LoginPage({
           registrationMode={settings.registrationMode}
           initialInviteCode={invite}
           initialMode={mode === 'register' ? 'register' : 'login'}
-          desktopLoginState={desktopLoginState} />
+          desktopLoginState={desktopLoginState}
+          nextPath={nextPath} />
 
         <p className="mt-7 text-center text-xs text-text-muted">
           {rich(t('auth.login.poweredBy'), {

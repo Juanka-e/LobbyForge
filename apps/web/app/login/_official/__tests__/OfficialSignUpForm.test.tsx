@@ -1,13 +1,16 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render as rtlRender, screen } from '@testing-library/react';
+import { render as rtlRender, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactElement, ReactNode } from 'react';
+import { altchaWidget, bodiesFor, captchaConfig, solveAltcha } from '@/components/captcha/__tests__/captcha-test-utils';
 import { I18nProvider } from '@/lib/i18n/client';
 import { providerPropsFor } from '@/lib/i18n/catalogue';
 import OfficialSignUpForm from '../OfficialSignUpForm';
 
 const nav = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn() }));
+const altchaLoader = vi.hoisted(() => ({ loadAltcha: vi.fn(async () => {}), registerAltchaStrings: vi.fn() }));
+vi.mock('@/components/captcha/altcha-loader', () => altchaLoader);
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: nav.replace, refresh: nav.refresh }),
@@ -54,7 +57,9 @@ describe('OfficialSignUpForm', () => {
     await fillForm(user);
     await user.click(screen.getByRole('button', { name: 'Create account' }));
     expect(fetchMock).toHaveBeenCalledWith('/api/auth/register', expect.objectContaining({ method: 'POST' }));
-    const [, init] = fetchMock.mock.calls[0]!;
+    // The form also reads its bot-protection config; this mock answers that
+    // with no usable config, so no captcha fields go out.
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === '/api/auth/register')!;
     expect(JSON.parse(init.body)).toEqual({
       email: 'ada@example.com',
       password: 'correct-horse-battery',
@@ -99,8 +104,48 @@ describe('OfficialSignUpForm', () => {
     expect(nav.replace).not.toHaveBeenCalled();
   });
 
+  it('lets the captcha checkbox wait, but still requires the agreement', async () => {
+    fetchMock.mockResolvedValue(json({ user: { id: 'u1' } }, 201));
+    const user = userEvent.setup();
+    render(<OfficialSignUpForm />);
+    // The browser's own validation is off (the widget's checkbox would block an early submit)…
+    expect(screen.getByRole('button', { name: 'Create account' }).closest('form')).toHaveAttribute('novalidate');
+    // …so the form checks its own fields: no agreement, nothing sent.
+    await fillForm(user, { agree: false });
+    await user.click(screen.getByRole('button', { name: 'Create account' }));
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/auth/register')).toBe(false);
+  });
+
   it('links back to signing in', () => {
     render(<OfficialSignUpForm />);
     expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/login');
+  });
+
+  it('shows the sign-up challenge and sends its token with the formToken', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-04T10:00:00Z'));
+    try {
+      fetchMock.mockImplementation(async (url: string) =>
+        url === '/api/auth/captcha?surface=register'
+          ? json(captchaConfig({ surface: 'register' }), 200)
+          : json({ user: { id: 'u1' } }, 201)
+      );
+      const user = userEvent.setup();
+      render(<OfficialSignUpForm />);
+      await waitFor(() => expect(altchaWidget()).not.toBeNull());
+      expect(altchaWidget()!.getAttribute('challenge')).toBe('/api/auth/captcha/challenge?surface=register');
+      await fillForm(user);
+      vi.setSystemTime(new Date('2026-10-04T10:00:05Z'));
+      await solveAltcha('pow-signup');
+      await user.click(screen.getByRole('button', { name: 'Create account' }));
+      await waitFor(() => expect(nav.replace).toHaveBeenCalledWith('/home'));
+      expect(bodiesFor(fetchMock, '/api/auth/register')[0]).toMatchObject({
+        captchaToken: 'pow-signup',
+        captchaProvider: 'altcha',
+        formToken: '1790000000000.register.mac',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

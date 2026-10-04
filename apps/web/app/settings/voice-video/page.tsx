@@ -1,7 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { Route } from 'next';
+import { useRouter } from 'next/navigation';
 import SettingsShell from '@/app/SettingsShell';
+import { currentPagePath, signInHref } from '@/lib/sign-in-return';
 import SettingsStickyFooter, { type SettingsStatus } from '@/app/settings/SettingsStickyFooter';
 import { useT } from '@/lib/i18n/client';
 import type { Translator } from '@/lib/i18n/core';
@@ -124,6 +127,7 @@ function constraintsForCamera(prefs: VoiceVideoPreferences): MediaTrackConstrain
 
 export default function VoiceVideoSettingsPage() {
   const t = useT();
+  const router = useRouter();
   const [prefs, setPrefs] = useState<VoiceVideoPreferences>(DEFAULT_VOICE_VIDEO_PREFERENCES);
   const [savedSnapshot, setSavedSnapshot] = useState<VoiceVideoPreferences>(DEFAULT_VOICE_VIDEO_PREFERENCES);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
@@ -213,12 +217,10 @@ export default function VoiceVideoSettingsPage() {
           data = await jsonFetch<SettingsResponse>('/api/settings/me');
         } catch (err) {
           if (!(err as Error).message.startsWith('HTTP 401')) throw err;
-          await jsonFetch('/api/auth/guest', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({}),
-          });
-          data = await jsonFetch<SettingsResponse>('/api/settings/me');
+          // Signed out: sign in and come back here. Settings never mint a
+          // guest (bot protection would refuse one; docs/CAPTCHA.md §6).
+          if (!cancelled) router.replace(signInHref(currentPagePath()) as Route);
+          return;
         }
         if (cancelled) return;
         const merged = mergeVoiceVideoPreferences(data.settings.audio);
@@ -236,7 +238,7 @@ export default function VoiceVideoSettingsPage() {
       stopCamera();
       stopMicTest();
     };
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (typeof navigator === 'undefined' || !navigator.permissions) return;

@@ -12,9 +12,12 @@ import { authLink } from './styles';
 export default async function OfficialSignInPage({
   errorCode,
   desktopLoginState,
+  nextPath,
 }: {
   errorCode?: string;
   desktopLoginState?: string;
+  /** `?next=`, already checked: where to go once signed in (else the hub home). */
+  nextPath?: string;
 }) {
   const t = await getTranslator();
   const errorKey = loginErrorKey(errorCode);
@@ -57,6 +60,7 @@ export default async function OfficialSignInPage({
         googleEnabled={isGoogleOAuthConfigured()}
         desktopLoginState={desktopLoginState}
         initialError={errorKey ? t(errorKey) : null}
+        nextPath={nextPath}
       />
     </OfficialAuthLayout>
   );

@@ -34,6 +34,8 @@ import {
   type RemoteTrackPublication,
 } from 'livekit-client';
 import { resolveBrowserLiveKitUrl } from '@/lib/public-endpoints';
+import { GuestVerificationDialog } from '@/components/captcha/GuestVerificationDialog';
+import { readCaptchaRefusal } from '@/components/captcha/types';
 import { getPlugin } from '@/lib/plugin-registry';
 import { useT } from '@/lib/i18n/client';
 import type { Translator } from '@/lib/i18n/core';
@@ -124,6 +126,9 @@ function RoomView({ roomName }: { roomName: string }) {
   const [deafened, setDeafened] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [audioBlocked, setAudioBlocked] = useState(false);
+  // A NEW guest may need the bot check first (docs/CAPTCHA.md §6): shown
+  // in a dialog; closed, it leaves a button to open it again.
+  const [guestCheck, setGuestCheck] = useState<'closed' | 'open' | 'dismissed'>('closed');
 
   const roomRef = useRef<Room | null>(null);
   // beta-review: this page used to never attach remote audio — Hushle
@@ -155,6 +160,13 @@ function RoomView({ roomName }: { roomName: string }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({}),
         });
+        if (await readCaptchaRefusal(res)) {
+          if (!cancelled) {
+            setGuestCheck('open');
+            setStatus({ kind: 'idle' });
+          }
+          return;
+        }
         if (!res.ok) throw new Error(tRef.current('room.error.guest', { status: res.status }));
         const data = (await res.json()) as { guest: Guest };
         if (!cancelled) {
@@ -511,6 +523,26 @@ function RoomView({ roomName }: { roomName: string }) {
       )}
 
       <StatusLine status={status} />
+      {guestCheck === 'dismissed' && !guest ? (
+        <div role="status" className="mt-4 flex max-w-[640px] flex-wrap items-center gap-3 text-sm text-text-secondary">
+          <span>{t('captcha.guest.dismissed')}</span>
+          <button
+            type="button"
+            onClick={() => setGuestCheck('open')}
+            className="rounded-md bg-primary-container px-3 py-2 font-semibold text-on-primary-container hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          >
+            {t('captcha.guest.verify')}
+          </button>
+        </div>
+      ) : null}
+      <GuestVerificationDialog
+        open={guestCheck === 'open'}
+        onVerified={(verified) => {
+          setGuest(verified);
+          setGuestCheck('closed');
+        }}
+        onDismiss={() => setGuestCheck('dismissed')}
+      />
       <p style={{ color: '#9aa3ad', marginTop: 16, fontSize: 13 }}>
         {t('room.presenceNote', {
           ttl: PRESENCE_TTL_SECONDS,
