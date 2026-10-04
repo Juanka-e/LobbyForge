@@ -21,6 +21,10 @@
     "./ui": {
       "types": "./dist/ui/index.d.ts",
       "import": "./dist/ui/index.js"
+    },
+    "./frame": {
+      "types": "./dist/frame/index.d.ts",
+      "import": "./dist/frame/index.js"
     }
   },
   "scripts": {

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
 import { rich } from '@/lib/i18n/rich';
+import DeveloperDocsLink from '@/app/(developers)/developers/_components/DeveloperDocsLink';
 
 export interface CardView {
   id: string;
@@ -277,6 +278,7 @@ export default function PluginsClient({
       <header className="mb-6">
         <h1 className="text-2xl font-semibold text-text-primary">{t('admin.plugins.title')}</h1>
         <p className="mt-1 text-sm text-text-secondary">{t('admin.plugins.intro')}</p>
+        <DeveloperDocsLink topic="plugins" className="mt-2" />
       </header>
 
       {loadError ? (

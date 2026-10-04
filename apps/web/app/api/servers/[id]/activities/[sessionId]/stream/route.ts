@@ -34,7 +34,7 @@ import {
   rateLimitResponse,
 } from '@/lib/security-headers';
 import { getPluginServer } from '@/lib/plugin-server-registry';
-import { projectActivityState } from '@/lib/activity-projection';
+import { ProjectionCache, projectStateForViewer } from '@/lib/plugin-projection';
 import { isSessionRevoked } from '@/lib/session-tracker';
 import { authorizeSessionChannelVisibility } from '@/lib/permissions';
 import { denyActivityStreamAccess } from '@/lib/activity-stream-authorization';
@@ -145,7 +145,23 @@ async function handleStream(
 
     // LF-001: EVERYONE gets the projection — including the host. A host who
     // isn't the current explainer must not see the secret card (anti-cheat).
-    const projectedInitial = projectActivityState(initialState, row.pluginId, session.uid);
+    // ADR-007: marketplace plugins project in the plugin worker; one state
+    // revision is projected once per stream (the cache).
+    const projectionCache = new ProjectionCache();
+    const readCtx = {
+      sessionId: row.id,
+      serverId: row.serverId,
+      hostUserId: row.createdBy ?? null,
+    };
+    const projectedInitial = await projectStateForViewer({
+      plugin,
+      pluginId: row.pluginId,
+      state: initialState,
+      viewerUserId: session.uid,
+      ctx: readCtx,
+      cache: projectionCache,
+      revision: (row as { revision?: number }).revision,
+    });
 
     const encoder = new TextEncoder();
     let closed = false;
@@ -198,7 +214,19 @@ async function handleStream(
                   controller.enqueue(encoder.encode(sse('state', { status: msg.status, state: null, at: msg.at })));
                   return;
                 }
-                const projectedMsg = projectActivityState(fresh.state, row.pluginId, session.uid);
+                // Same path as the snapshot: migrate (a marketplace plugin's
+                // projectState expects its current shape), then project.
+                const freshPlugin = getPluginServer(row.pluginId);
+                const freshState = freshPlugin?.migrateState ? await freshPlugin.migrateState(fresh.state) : fresh.state;
+                const projectedMsg = await projectStateForViewer({
+                  plugin: freshPlugin,
+                  pluginId: row.pluginId,
+                  state: freshState,
+                  viewerUserId: session.uid,
+                  ctx: readCtx,
+                  cache: projectionCache,
+                  revision: (fresh as { revision?: number }).revision,
+                });
                 controller.enqueue(
                   encoder.encode(
                     sse('state', {

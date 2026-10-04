@@ -8,6 +8,7 @@ import type { Translator } from '@/lib/i18n/core';
 import { PluginSurface } from '../room/PluginSurface';
 import { findOpenActivity, useActivitySession } from '../room/useActivitySession';
 import { useLobbyVoice } from './LobbyVoiceProvider';
+import { PluginFrameSurface } from './PluginFrame';
 import type { InstalledApp } from './page';
 
 /** How often the picker looks for a session someone else started. */
@@ -311,7 +312,20 @@ export function LobbyActivityView({
                   fallback={<NoPlayerSurface pluginId={detail.pluginId} />}
                 />
               ) : (
-                <NoPlayerSurface pluginId={detail.pluginId} />
+                // A marketplace plugin: its own UI, sandboxed (ADR-007), fed
+                // the state the activity API projected for this viewer and
+                // dispatching through the same session hook as the panels.
+                <PluginFrameSurface
+                  key={detail.pluginId}
+                  pluginId={detail.pluginId}
+                  appName={appName ?? detail.pluginId}
+                  state={detail.state}
+                  viewerId={currentUserId ?? ''}
+                  hostUserId={detail.createdBy}
+                  players={panelPlayers}
+                  dispatch={dispatch}
+                  fallback={<NoPlayerSurface pluginId={detail.pluginId} />}
+                />
               )}
               {error ? (
                 <p role="alert" className="mt-4 text-xs text-danger">

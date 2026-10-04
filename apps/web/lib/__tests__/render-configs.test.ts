@@ -242,4 +242,25 @@ describe('scripts/render-configs.sh — LiveKit webhook (AUTHZ-006 follow-up)', 
     const nginx = read('nginx');
     expect(nginx).toMatch(/location \^~ \/api\/livekit\/webhook \{\s*return 404;\s*\}/);
   });
+
+  it('nginx keeps incoming bot-webhook tokens (in the path) out of the access log, proxied like the app', () => {
+    const nginx = read('nginx');
+    const block = nginx.match(/location \^~ \/api\/webhooks\/ \{([^}]*)\}/);
+    expect(block).not.toBeNull();
+    const body = block![1]!;
+    expect(body).toMatch(/^\s*access_log off;/m);
+    // The same proxy directives as the catch-all app location, line for line.
+    const app = nginx.match(/# Next\.js app\n\s*location \/ \{([^}]*)\}/);
+    expect(app).not.toBeNull();
+    const directives = (text: string) =>
+      text
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith('#') && line !== 'access_log off;');
+    expect(directives(body)).toEqual(directives(app![1]!));
+    expect(body).toContain('proxy_set_header X-Forwarded-For $remote_addr;');
+    // It comes before the catch-all and is the only location for that prefix.
+    expect(nginx.indexOf('location ^~ /api/webhooks/')).toBeLessThan(nginx.indexOf('# Next.js app'));
+    expect(nginx.match(/location [^{]*\/api\/webhooks/g)).toHaveLength(1);
+  });
 });

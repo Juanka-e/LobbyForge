@@ -11,12 +11,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ACTIVE_POINTER_FILE,
   DEFAULT_PLUGIN_INSTALL_DIR,
+  MAX_SERVER_JS_BYTES,
   activateStagedBundle,
+  checkSandboxBundle,
   computeBundleDigest,
   listActivePlugins,
   pluginInstallDir,
   pruneSupersededVersions,
   readActivePointer,
+  readInstalledSandboxManifest,
   writeActivePointer,
 } from '../plugin-install-layout';
 
@@ -102,67 +105,86 @@ describe('active record', () => {
   });
 });
 
+/** A sdk "sandbox-v1" bundle (ADR-007): manifest.json + server.js. */
+function sandboxBundle(
+  version: string,
+  source = 'globalThis.plugin = {};',
+  manifest: Record<string, unknown> = {},
+  extra: Record<string, string> = {}
+): Record<string, string> {
+  return {
+    'manifest.json': JSON.stringify({
+      id: 'game',
+      name: 'Game',
+      version,
+      sdk: 'sandbox-v1',
+      ui: false,
+      actionPolicies: { go: { role: 'member' } },
+      ...manifest,
+    }),
+    'server.js': source,
+    ...extra,
+  };
+}
+
 describe('activateStagedBundle', () => {
   it('fresh install: moves the bundle into <version>/, describes that exact version, records it', async () => {
     const describe = describeOk();
-    const result = await activateStagedBundle({
-      root,
-      pluginId: 'game',
-      version: '1.0.0',
-      stagingDir: stage('game', VECTOR_FILES),
-      describe,
-    });
-    expect(result).toMatchObject({ ok: true, path: join(root, 'game', '1.0.0'), digest: VECTOR_DIGEST });
-    expect(describe).toHaveBeenCalledWith({ pluginId: 'game', version: '1.0.0', digest: VECTOR_DIGEST });
-    expect(readActivePointer(root, 'game')).toEqual({ pluginId: 'game', version: '1.0.0', digest: VECTOR_DIGEST });
+    const stagingDir = stage('game', sandboxBundle('1.0.0'));
+    const digest = computeBundleDigest(stagingDir);
+    const result = await activateStagedBundle({ root, pluginId: 'game', version: '1.0.0', stagingDir, describe });
+    expect(result).toMatchObject({ ok: true, path: join(root, 'game', '1.0.0'), digest });
+    expect(describe).toHaveBeenCalledWith({ pluginId: 'game', version: '1.0.0', digest });
+    expect(readActivePointer(root, 'game')).toEqual({ pluginId: 'game', version: '1.0.0', digest });
+    expect(readInstalledSandboxManifest(root, 'game', '1.0.0').actionPolicies).toEqual({ go: { role: 'member' } });
   });
 
   it('upgrade 1.9.0 → 1.10.0: the old version stays active until the new one is recorded, then is pruned', async () => {
     await activateStagedBundle({
-      root, pluginId: 'game', version: '1.9.0', stagingDir: stage('game', { 'index.js': 'v1.9' }), describe: describeOk(),
+      root, pluginId: 'game', version: '1.9.0', stagingDir: stage('game', sandboxBundle('1.9.0', 'v1.9')), describe: describeOk(),
     });
     const describe = vi.fn(async (ref: { pluginId: string; version: string; digest: string }) => {
       // While the worker loads the candidate, 1.9.0 is still the record and on disk.
       expect(readActivePointer(root, 'game')?.version).toBe('1.9.0');
-      expect(existsSync(join(root, 'game', '1.9.0', 'index.js'))).toBe(true);
+      expect(existsSync(join(root, 'game', '1.9.0', 'server.js'))).toBe(true);
       return { id: ref.pluginId, name: 'Game' };
     });
     const result = await activateStagedBundle({
-      root, pluginId: 'game', version: '1.10.0', stagingDir: stage('game', { 'index.js': 'v1.10' }), describe,
+      root, pluginId: 'game', version: '1.10.0', stagingDir: stage('game', sandboxBundle('1.10.0', 'v1.10')), describe,
     });
     expect(result.ok).toBe(true);
     expect(readActivePointer(root, 'game')?.version).toBe('1.10.0');
     expect(pruneSupersededVersions(root, 'game', '1.10.0')).toEqual(['1.9.0']);
     expect(readdirSync(join(root, 'game')).sort()).toEqual(['1.10.0', ACTIVE_POINTER_FILE]);
-    expect(readFileSync(join(root, 'game', '1.10.0', 'index.js'), 'utf8')).toBe('v1.10');
+    expect(readFileSync(join(root, 'game', '1.10.0', 'server.js'), 'utf8')).toBe('v1.10');
   });
 
   it('a worker refusal rolls back: the previous version stays recorded and on disk', async () => {
     await activateStagedBundle({
-      root, pluginId: 'game', version: '1.0.0', stagingDir: stage('game', { 'index.js': 'good' }), describe: describeOk(),
+      root, pluginId: 'game', version: '1.0.0', stagingDir: stage('game', sandboxBundle('1.0.0', 'good')), describe: describeOk(),
     });
     const result = await activateStagedBundle({
       root,
       pluginId: 'game',
       version: '2.0.0',
-      stagingDir: stage('game', { 'index.js': 'broken' }),
+      stagingDir: stage('game', sandboxBundle('2.0.0', 'broken')),
       describe: vi.fn(async () => {
-        throw new Error('plugin bundle does not export a valid plugin');
+        throw new Error('server.js must set globalThis.plugin');
       }),
     });
     expect(result).toMatchObject({ ok: false });
-    expect((result as { error: string }).error).toContain('does not export a valid plugin');
+    expect((result as { error: string }).error).toContain('globalThis.plugin');
     expect(readActivePointer(root, 'game')?.version).toBe('1.0.0');
     expect(existsSync(join(root, 'game', '2.0.0'))).toBe(false);
-    expect(readFileSync(join(root, 'game', '1.0.0', 'index.js'), 'utf8')).toBe('good');
+    expect(readFileSync(join(root, 'game', '1.0.0', 'server.js'), 'utf8')).toBe('good');
   });
 
-  it('refuses a manifest id that is not the catalog id', async () => {
+  it('refuses a worker that reports another plugin id', async () => {
     const result = await activateStagedBundle({
       root,
       pluginId: 'game',
       version: '1.0.0',
-      stagingDir: stage('game', { 'index.js': 'x' }),
+      stagingDir: stage('game', sandboxBundle('1.0.0')),
       describe: vi.fn(async () => ({ id: 'someone-else', name: 'X' })),
     });
     expect(result).toMatchObject({ ok: false });
@@ -170,44 +192,78 @@ describe('activateStagedBundle', () => {
     expect(existsSync(join(root, 'game', '1.0.0'))).toBe(false);
   });
 
-  it('refuses a bundle whose index.js is not at its root (the worker could never load it)', async () => {
-    const stagingDir = stage('game', { 'dist/index.js': 'nested' });
-    const describe = describeOk();
-    const result = await activateStagedBundle({ root, pluginId: 'game', version: '1.0.0', stagingDir, describe });
-    expect(result).toMatchObject({ ok: false });
-    expect(describe).not.toHaveBeenCalled();
-    expect(existsSync(stagingDir)).toBe(false);
+  it('ADR-007: refuses what is not a sandbox-v1 bundle for this catalog entry, before the worker sees it', async () => {
+    const cases: Array<[string, Record<string, string>, RegExp]> = [
+      ['a legacy Node bundle', { 'index.js': 'export const plugin = {};' }, /legacy Node bundle.*sandbox-v1/],
+      ['server.js nested in a folder', { 'manifest.json': sandboxBundle('1.0.0')['manifest.json']!, 'dist/server.js': '' }, /missing server\.js/],
+      ['no manifest', { 'server.js': '' }, /missing manifest\.json/],
+      ['a manifest without sdk', sandboxBundle('1.0.0', '', { sdk: undefined }), /"sdk" must be "sandbox-v1"/],
+      ['a manifest for another plugin', sandboxBundle('1.0.0', '', { id: 'other' }), /does not match the catalog id/],
+      ['a manifest for another version', sandboxBundle('9.9.9'), /does not match the catalog version 1\.0\.0/],
+      ['an invalid action policy', sandboxBundle('1.0.0', '', { actionPolicies: { go: { role: 'owner' } } }), /role must be/],
+      ['ui: true without ui/index.html', sandboxBundle('1.0.0', '', { ui: true }), /no ui\/index\.html/],
+      ['a server.js over the cap', sandboxBundle('1.0.0', 'x'.repeat(MAX_SERVER_JS_BYTES + 1)), /larger than/],
+    ];
+    for (const [name, files, message] of cases) {
+      const stagingDir = stage('game', files);
+      const describe = describeOk();
+      const result = await activateStagedBundle({ root, pluginId: 'game', version: '1.0.0', stagingDir, describe });
+      expect(result, name).toMatchObject({ ok: false });
+      expect((result as { error: string }).error, name).toMatch(message);
+      expect(describe, name).not.toHaveBeenCalled();
+      expect(existsSync(stagingDir), name).toBe(false);
+    }
+    expect(readActivePointer(root, 'game')).toBeNull();
+  });
+
+  it('accepts ui: true with ui/index.html', async () => {
+    const stagingDir = stage('game', sandboxBundle('1.0.0', '', { ui: true }, { 'ui/index.html': '<!doctype html>' }));
+    const result = await activateStagedBundle({ root, pluginId: 'game', version: '1.0.0', stagingDir, describe: describeOk() });
+    expect(result.ok).toBe(true);
+    expect(checkSandboxBundle(join(root, 'game', '1.0.0'), 'game', '1.0.0')).toMatchObject({ ok: true, manifest: { ui: true } });
   });
 
   it('reinstalling the active version with the same bytes keeps the folder', async () => {
     await activateStagedBundle({
-      root, pluginId: 'game', version: '1.0.0', stagingDir: stage('game', VECTOR_FILES), describe: describeOk(),
+      root, pluginId: 'game', version: '1.0.0', stagingDir: stage('game', sandboxBundle('1.0.0')), describe: describeOk(),
     });
-    const stagingDir = stage('game', VECTOR_FILES);
+    const stagingDir = stage('game', sandboxBundle('1.0.0'));
+    const digest = computeBundleDigest(stagingDir);
     const result = await activateStagedBundle({ root, pluginId: 'game', version: '1.0.0', stagingDir, describe: describeOk() });
-    expect(result).toMatchObject({ ok: true, digest: VECTOR_DIGEST });
+    expect(result).toMatchObject({ ok: true, digest });
     expect(existsSync(stagingDir)).toBe(false);
-    expect(computeBundleDigest(join(root, 'game', '1.0.0'))).toBe(VECTOR_DIGEST);
+    expect(computeBundleDigest(join(root, 'game', '1.0.0'))).toBe(digest);
   });
 
   it('reinstalling the active version with different bytes restores the old folder on refusal', async () => {
     await activateStagedBundle({
-      root, pluginId: 'game', version: '1.0.0', stagingDir: stage('game', { 'index.js': 'old' }), describe: describeOk(),
+      root, pluginId: 'game', version: '1.0.0', stagingDir: stage('game', sandboxBundle('1.0.0', 'old')), describe: describeOk(),
     });
     const before = readActivePointer(root, 'game');
     const result = await activateStagedBundle({
       root,
       pluginId: 'game',
       version: '1.0.0',
-      stagingDir: stage('game', { 'index.js': 'new' }),
+      stagingDir: stage('game', sandboxBundle('1.0.0', 'new')),
       describe: vi.fn(async () => {
         throw new Error('worker down');
       }),
     });
     expect(result.ok).toBe(false);
     expect(readActivePointer(root, 'game')).toEqual(before);
-    expect(readFileSync(join(root, 'game', '1.0.0', 'index.js'), 'utf8')).toBe('old');
+    expect(readFileSync(join(root, 'game', '1.0.0', 'server.js'), 'utf8')).toBe('old');
     expect(computeBundleDigest(join(root, 'game', '1.0.0'))).toBe(before?.digest);
+  });
+});
+
+describe('readInstalledSandboxManifest', () => {
+  it('reads the validated manifest of an installed version, and throws on anything else', () => {
+    writeTree(join(root, 'game', '1.0.0'), sandboxBundle('1.0.0'));
+    expect(readInstalledSandboxManifest(root, 'game', '1.0.0')).toMatchObject({ id: 'game', sdk: 'sandbox-v1' });
+    writeTree(join(root, 'game', '2.0.0'), { 'index.js': '' });
+    expect(() => readInstalledSandboxManifest(root, 'game', '2.0.0')).toThrow(/legacy Node bundle/);
+    expect(() => readInstalledSandboxManifest(root, '../game', '1.0.0')).toThrow();
+    expect(() => readInstalledSandboxManifest(root, 'game', '1.0')).toThrow();
   });
 });
 

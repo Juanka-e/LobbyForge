@@ -8,3 +8,4 @@ export * from './doctor.js';
 export * from './cookies.js';
 export * from './guest-session.js';
 export * from './activity-projection.js';
+export * from './internal-signature.js';

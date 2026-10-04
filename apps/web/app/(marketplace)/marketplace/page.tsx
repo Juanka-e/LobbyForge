@@ -5,7 +5,7 @@ import { getDb } from '@/lib/db';
 import { isOfficialDeployment } from '@/lib/deployment-mode';
 import type { Translator } from '@/lib/i18n/core';
 import { getTranslator } from '@/lib/i18n/server';
-import { container, eyebrow, focusRing } from '@/app/(marketing)/_components/styles';
+import { container, eyebrow, focusRing, textLink } from '@/app/(marketing)/_components/styles';
 import MarketplaceGrid from './MarketplaceGrid';
 import ActivityMark from '@/app/(marketing)/_components/ActivityMark';
 import { playerRange } from '@/lib/hub-format';
@@ -67,6 +67,9 @@ export default async function MarketplacePage({
             {t('hub.marketplace.title')}
           </h1>
           <p className="text-pretty text-lg leading-[1.6] text-text-secondary">{t('hub.marketplace.subtitle')}</p>
+          <Link href="/developers" className={`${textLink} self-start text-[15px]`}>
+            {t('hub.marketplace.developers')}
+          </Link>
         </header>
         <BuiltInActivities t={t} />
         <h2 className="mb-5 mt-14 text-xl font-semibold text-text-primary">{t('hub.marketplace.community.title')}</h2>
@@ -98,7 +101,12 @@ export default async function MarketplacePage({
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-6 py-8">{catalog}</main>
+      <main className="mx-auto max-w-6xl px-6 py-8">
+        <Link href="/developers" className={`${textLink} mb-6 inline-block text-sm`}>
+          {t('hub.marketplace.developers')}
+        </Link>
+        {catalog}
+      </main>
     </div>
   );
 }

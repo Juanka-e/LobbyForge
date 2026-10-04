@@ -1,0 +1,16 @@
+{
+  "id": "sandbox-buzzer",
+  "name": "Sandbox Buzzer",
+  "version": "0.1.0",
+  "sdk": "sandbox-v1",
+  "ui": true,
+  "minPlayers": 1,
+  "maxPlayers": 50,
+  "locales": ["en", "tr"],
+  "actionPolicies": {
+    "open-round": { "role": "host" },
+    "buzz": { "role": "member", "actorFields": ["playerId"], "joinsRoster": true },
+    "reveal": { "role": "host" },
+    "reset": { "role": "host" }
+  }
+}

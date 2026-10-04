@@ -28,9 +28,10 @@ describe('MarketplaceGrid empty states', () => {
     expect(screen.getByRole('heading', { name: 'No community plugins yet' })).toBeInTheDocument();
     // The built-in activities have their own section above this one.
     expect(screen.getByText(/once they pass review/)).toBeInTheDocument();
+    // The guide is rendered on the site's Developers section.
     expect(screen.getByRole('link', { name: 'Read the plugin publishing guide' })).toHaveAttribute(
       'href',
-      expect.stringContaining('PLUGIN_PUBLISHING.md')
+      '/developers/publishing'
     );
   });
 });

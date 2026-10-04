@@ -1,4 +1,4 @@
-# Plugin SDK — Aşama 3 / Plugin SDK minimal
+# Plugin SDK
 
 The `@lobbyforge/plugin-sdk` package is the contract between the web app
 (plugin host) and the plugins in `plugins/*`. It exports:
@@ -48,6 +48,10 @@ import {
 
 // Test helper (subpath export):
 import { createTestHarness, type TestHarnessOptions } from '@lobbyforge/plugin-sdk/testing';
+
+// Marketplace plugin UIs in the sandboxed iframe (subpath export, no React,
+// no dependencies) — see "Marketplace plugin UI (sandboxed iframe)":
+import { connect, type FrameInitMessage } from '@lobbyforge/plugin-sdk/frame';
 ```
 
 The `PluginPermission` constant is an enum-like object whose values
@@ -485,6 +489,127 @@ Tones: `accent` (the user's accent — primary actions), `game` (amber —
 games and live state), `success`, `danger`, `info`, `neutral`. Colour is
 never the only signal: pair it with text, an icon or a count.
 
+## Marketplace plugin UI (sandboxed iframe)
+
+Official plugins are trusted code and render React panels in the app.
+A **marketplace** plugin (`sdk: "sandbox-v1"`, ADR-007) is not trusted, so
+it brings its own UI as plain web files and the lobby runs them in a
+sandbox:
+
+```
+my-plugin/
+├── manifest.json        # … "sdk": "sandbox-v1", "ui": true
+├── server.js            # globalThis.plugin = { createInitialState, handleAction, projectState?, … }
+└── ui/
+    ├── index.html       # the entry; everything under ui/ is served
+    ├── app.js
+    ├── style.css
+    └── lobbyforge-frame.js   # the frame client, copied in (no CDN in the sandbox)
+```
+
+### What the sandbox is
+
+The lobby renders `<iframe sandbox="allow-scripts">` — no `allow-same-origin`,
+forms, popups, modals, top navigation or downloads — from
+`/api/plugin-ui/{pluginId}/{version}/index.html`. The frame therefore has an
+**opaque origin** (`self.origin === "null"`): it cannot read the app's
+cookies, storage or DOM, the session cookie is not sent with its requests,
+and `localStorage`/`document.cookie` throw.
+
+The route serves only the **active** version of an installed plugin that
+declares `ui: true`, only files under `ui/`, and only these extensions, each
+with a fixed type: `html js mjs css json png jpg jpeg gif webp svg woff woff2`.
+Every file carries this CSP:
+
+```
+default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline';
+img-src 'self' data:; font-src 'self'; connect-src 'none';
+frame-ancestors 'self'; base-uri 'none'; form-action 'none'; sandbox allow-scripts
+```
+
+So: **no network** (`fetch`, XHR, WebSocket and remote images are blocked —
+the frame cannot send what it is shown anywhere), no inline `<script>`
+(put code in files; inline `style` is fine), only the app may frame it, and
+the page stays sandboxed even if someone opens it directly. Navigating the
+frame elsewhere is stopped by the app's own `frame-src`. Assets are public
+and cached for a year (`immutable`, the version is in the path): ship a new
+version to change them. The HTML loads only as an iframe document, and the
+app's own pages can never load your scripts (Fetch Metadata), so do not
+link to your files from anywhere else.
+
+Everything the frame knows arrives in a message; everything it can do is an
+action the lobby sends **as the viewer**, through the normal actions route,
+under your manifest's `actionPolicies`. It can do nothing the viewer could
+not do by sending actions.
+
+### Protocol v1
+
+Every message is a plain JSON object with `lf: 1` and a `type`.
+
+| Direction | Message | Fields |
+|---|---|---|
+| parent → frame | `init` | `viewer { userId, isHost }`, `players [{ userId, name, isHost }]`, `locale`, `theme { scheme: 'dark'\|'dim'\|'light', vars: { '--lf-surface': '#111722', … } }`, `state`, `revision` |
+| parent → frame | `state` | `state`, `revision` (rises with every change) |
+| frame → parent | `ready` | — |
+| frame → parent | `action` | `action { type, … }` |
+| frame → parent | `resize` | `height` (CSS px) |
+
+- The frame says `ready`; the parent answers with `init`. `init` comes again
+  whenever players, language or theme change — handle it idempotently.
+- `state` is the state **projected for this viewer** by your `projectState`
+  — never the full state. Without `projectState` every viewer gets the full
+  state, and the lobby shows players "This app doesn't hide information".
+- The parent accepts messages only from your iframe's window (origin
+  `"null"`), checks their shape, drops anything over **64 KiB**, forwards at
+  most **10 actions per second** (the rest are dropped and logged), clamps
+  heights to **200–1200 px**, and replaces any `actionId` you send with its
+  own idempotency key.
+
+The types and limits live in `@lobbyforge/plugin-sdk/frame`
+(`FrameInitMessage`, `FrameToHostMessage`, `FRAME_MAX_MESSAGE_BYTES`, …); the
+lobby validates against the same definitions.
+
+### The frame client
+
+```js
+import { connect } from './lobbyforge-frame.js'; // or '@lobbyforge/plugin-sdk/frame' with a bundler
+
+const lf = connect({
+  onInit({ viewer, players, locale, theme }) { /* who is looking, names, language */ },
+  onState(state, revision) { render(state); },   // also called right after every init
+});
+button.onclick = () => lf.dispatch({ type: 'buzz' });
+```
+
+`connect()` does the handshake (and repeats `ready` every 250 ms until the
+parent answers), listens only to its parent window, applies the theme —
+every `--lf-*` variable on `:root`, plus `data-lf-theme`, `color-scheme` and
+`lang` — and reports the content height with a ResizeObserver (measure
+another element with `autoResize: el`, or pass `false` and call
+`lf.resize(px)`). Style with the variables and a fallback, exactly like an
+official panel: `background: var(--lf-surface, #111722)`.
+
+The client is dependency-free and has no imports, so a plugin without a
+bundler copies it in:
+
+```sh
+node packages/plugin-sdk/scripts/vendor-frame-client.mjs path/to/ui/lobbyforge-frame.js
+```
+
+A `<script type="module">` works (the route sends
+`Access-Control-Allow-Origin: *`, which an opaque origin needs for modules
+and fonts; the files are public anyway).
+
+### The worked example
+
+`examples/plugins/sandbox-buzzer/ui/` is a complete frame: the host opens a
+round, everyone buzzes, the host reveals who was first. It shows the
+handshake, host-only controls (the server's `host` policy is what actually
+enforces them), its own English and Turkish strings chosen from
+`init.locale`, theme variables, and a state where the buzz order stays hidden
+until the reveal because `projectState` hides it. `apps/web/e2e-sandbox/`
+runs it, and a probe that attacks the sandbox from inside, in a real browser.
+
 ## State versioning + migrators (M19)
 
 `GamePlugin.migrateState?: (raw: unknown) => TState` is the
@@ -638,6 +763,9 @@ and `dice-bot` for small, complete panels.
 - `packages/plugin-sdk/src/index.ts` — the `GamePlugin` type.
 - `packages/plugin-sdk/src/locale.ts` — the shared locale helper.
 - `packages/plugin-sdk/src/testing.ts` — the `createTestHarness` helper.
+- `packages/plugin-sdk/src/frame/` — frame protocol v1 and the frame client;
+  `apps/web/app/lobby/PluginFrame.tsx` (the lobby's side) and
+  `apps/web/lib/plugin-ui-assets.ts` (the asset route and its headers).
 - `plugins/hushle/src/index.ts` + `renderClient.tsx` — first fully-UI'd plugin; see
   [`docs/HUSHLE.md`](./HUSHLE.md) for the full Hushle walkthrough.
 - `apps/web/lib/plugin-registry.ts` — the host's compiled-in plugin list.

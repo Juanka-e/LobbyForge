@@ -1,17 +1,24 @@
 /**
- * LF-SEC-010: the isolated plugin-worker runtime. These tests spin the
- * REAL HTTP server on an ephemeral port with a temp plugins directory
- * containing a fixture bundle, and drive it with real fetch calls —
- * the same path the web app's client takes in production.
+ * The plugin worker (ADR-007): sandbox-v1 bundles run in QuickJS. These
+ * tests spin the REAL HTTP server on an ephemeral port with a temp install
+ * directory and drive it with real fetch calls, the path the web app's
+ * client takes; plugin code runs in the real executor threads.
+ *
+ * Escape attempts: no `process`, `require`, `import()`, Function-constructor
+ * trick, timers or network reach anything; an infinite loop, a long native
+ * loop, a memory bomb, a stack bomb and a huge result each fail the CALL
+ * and leave the worker healthy; ctx.random() runs out instead of falling
+ * back to anything predictable.
  */
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { AddressInfo } from 'node:net';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createPluginWorkerServer } from '../index.js';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { closeSandboxPool, createPluginWorkerServer, cryptoRandomFloats } from '../index.js';
 import { computeBundleDigest } from '../bundle.js';
 
 const RPC_TOKEN = 'test-worker-token';
+const BUDGET_MS = 1000;
 
 let server: ReturnType<typeof createPluginWorkerServer>;
 let baseUrl: string;
@@ -19,278 +26,248 @@ let pluginsDir: string;
 /** `<id>@<version>` → digest of that fixture folder. */
 const digests = new Map<string, string>();
 
-const FIXTURE_PLUGIN = `
-export const plugin = {
-  manifest: {
-    id: 'fixture-plugin',
-    name: 'Fixture',
-    version: '1.0.0',
-    type: 'game',
-    minAppVersion: '0.1.0',
-    permissions: [],
-    locales: ['en'],
-    entryClient: './client.js',
-  },
-  createInitialState: (ctx) => ({
-    actor: ctx.actorUserId,
-    players: ctx.players.list(),
-    storageProbe: null,
-  }),
-  handleAction: (ctx, state, action) => ({
-    ...state,
-    lastAction: action,
-    voice: ctx.voice.getParticipants(),
-  }),
-  migrateState: (raw) => ({ migrated: true, raw }),
-  renderClient: () => null,
-};
-`;
+function manifest(id: string, version = '1.0.0', extra: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    id,
+    name: `Fixture ${id}`,
+    version,
+    sdk: 'sandbox-v1',
+    ui: false,
+    actionPolicies: { bump: { role: 'member', actorFields: ['playerId'], joinsRoster: true }, reveal: { role: 'host' } },
+    ...extra,
+  });
+}
 
-// 17th-audit: adversarial plugins for the child-process executor.
-const IPC_NULL_PLUGIN = `
-export const plugin = {
-  manifest: {
-    id: 'ipc-null-plugin', name: 'IPC Null', version: '1.0.0', type: 'game',
-    minAppVersion: '0.1.0', permissions: [], locales: ['en'], entryClient: './client.js',
-  },
-  createInitialState: () => {
-    process.send(null); // hostile: crashes unvalidated parent handler
-    return {};
-  },
-  handleAction: (ctx, state) => state,
-  migrateState: (raw) => raw,
-  renderClient: () => null,
-};
-`;
-
-const EXIT_ZERO_PLUGIN = `
-export const plugin = {
-  manifest: {
-    id: 'exit-zero-plugin', name: 'Exit Zero', version: '1.0.0', type: 'game',
-    minAppVersion: '0.1.0', permissions: [], locales: ['en'], entryClient: './client.js',
-  },
-  createInitialState: () => {
-    process.exit(0); // hostile: clean exit without sending a result
-  },
-  handleAction: (ctx, state) => state,
-  migrateState: (raw) => raw,
-  renderClient: () => null,
-};
-`;
-
-const FAKE_RESULT_PLUGIN = `
-export const plugin = {
-  manifest: {
-    id: 'fake-result-plugin', name: 'Fake Result', version: '1.0.0', type: 'game',
-    minAppVersion: '0.1.0', permissions: [], locales: ['en'], entryClient: './client.js',
-  },
-  createInitialState: () => {
-    // hostile: fabricate an executor protocol result before the real one
-    process.send({ result: { hacked: true } });
-    return { real: true };
-  },
-  handleAction: (ctx, state) => state,
-  migrateState: (raw) => raw,
-  renderClient: () => null,
-};
-`;
-
-// 9th-audit finding 5: a synchronous infinite loop must be KILLED by
-// the executor-thread terminate, not merely out-raced.
-const HANG_PLUGIN = `
-export const plugin = {
-  manifest: {
-    id: 'hang-plugin',
-    name: 'Hang',
-    version: '1.0.0',
-    type: 'game',
-    minAppVersion: '0.1.0',
-    permissions: [],
-    locales: ['en'],
-    entryClient: './client.js',
-  },
-  createInitialState: () => {
-    while (true) { /* blocks the executor event loop forever */ }
-  },
-  handleAction: (ctx, state) => state,
-  migrateState: (raw) => raw,
-  renderClient: () => null,
-};
-`;
-
-const STORAGE_PLUGIN = `
-export const plugin = {
-  manifest: {
-    id: 'storage-plugin',
-    name: 'Storage',
-    version: '1.0.0',
-    type: 'game',
-    minAppVersion: '0.1.0',
-    permissions: [],
-    locales: ['en'],
-    entryClient: './client.js',
-  },
-  createInitialState: async (ctx) => ({
-    stored: await ctx.storage.get('probe'),
-  }),
-  handleAction: (ctx, state) => state,
-  migrateState: (raw) => raw,
-  renderClient: () => null,
-};
-`;
-
-// Version selection: two installed versions whose names sort the wrong
-// way alphabetically ("1.10.0" < "1.9.0"). Each reports its own folder.
-const versionedPlugin = (version: string) => `
-export const plugin = {
-  manifest: {
-    id: 'versioned-plugin', name: 'Versioned', version: '${version}', type: 'game',
-    minAppVersion: '0.1.0', permissions: [], locales: ['en'], entryClient: './client.js',
-  },
-  createInitialState: () => ({ ranVersion: '${version}' }),
-  handleAction: (ctx, state) => state,
-  migrateState: (raw) => raw,
-  renderClient: () => null,
-};
-`;
-
-// A bundle that left `react` external: nothing resolves it from the
-// install directory (the package name is made up so no hoisted copy can
-// satisfy it on a dev box either).
-const EXTERNAL_IMPORT_PLUGIN = `
-import { jsx } from 'lobbyforge-test-missing-package-xyz/jsx-runtime';
-export const plugin = {
-  manifest: { id: 'external-import-plugin', name: 'External', version: '1.0.0' },
-  createInitialState: () => ({ el: jsx }),
-  handleAction: (ctx, state) => state,
-};
-`;
-
-const NO_REDUCER_PLUGIN = `
-export const plugin = { manifest: { id: 'no-reducer-plugin', name: 'No reducer', version: '1.0.0' } };
-`;
-
-function writePlugin(id: string, body: string, version = '1.0.0'): void {
+function writePlugin(id: string, source: string, version = '1.0.0', files: Record<string, string> = {}): void {
   const dir = join(pluginsDir, id, version);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'index.js'), body);
+  const all = { 'manifest.json': manifest(id, version), 'server.js': source, ...files };
+  for (const [name, body] of Object.entries(all)) writeFileSync(join(dir, name), body);
   digests.set(`${id}@${version}`, computeBundleDigest(dir));
 }
 
-/** The exact-bundle fields every RPC now carries. */
+/** A plugin whose createInitialState returns `body` (an expression). */
+const probe = (body: string, extra = '') => `${extra}
+globalThis.plugin = {
+  createInitialState: function (ctx) { return (${body}); },
+  handleAction: function (ctx, state) { return state; },
+};`;
+
+const FIXTURE = `
+var loads = 0;
+loads += 1;
+globalThis.plugin = {
+  createInitialState: function (ctx) {
+    return { loads: loads, players: ctx.players, now: ctx.now, locale: ctx.locale, sessionId: ctx.sessionId,
+             serverId: ctx.serverId, hostId: ctx.hostId, actorId: ctx.actorId, r: ctx.random(), m: Math.random() };
+  },
+  handleAction: function (ctx, state, action) {
+    if (action.type === 'noop') return state;
+    return Object.assign({}, state, { count: (state.count || 0) + 1, last: action, actor: ctx.actorId });
+  },
+  validateAction: function (action) {
+    if (action.type === 'bad') return 'bad action';
+    if (action.type === 'weird') return 42;
+    return null;
+  },
+  projectState: function (state, viewerId, ctx) {
+    return { secret: viewerId === state.owner ? state.secret : null, viewer: viewerId, sessionId: ctx.sessionId, hostId: ctx.hostId,
+             ctxKeys: Object.keys(ctx).sort() };
+  },
+  migrateState: function (raw) { return Object.assign({ schema: 2 }, raw); },
+};`;
+
+const MINIMAL = `globalThis.plugin = {
+  createInitialState: function () { return { n: 0 }; },
+  handleAction: function (ctx, state) { return state; },
+};`;
+
+const versioned = (version: string) => `globalThis.plugin = {
+  createInitialState: function () { return { ranVersion: '${version}' }; },
+  handleAction: function (ctx, state) { return state; },
+};`;
+
+beforeAll(async () => {
+  // INSIDE the package (vite root): CI temp dirs can carry short-name
+  // path segments (RUNNER~1).
+  pluginsDir = resolve(__dirname, '..', '..', '.plugin-fixtures', 'worker');
+  rmSync(pluginsDir, { recursive: true, force: true });
+  writePlugin('fixture-plugin', FIXTURE);
+  writePlugin('minimal-plugin', MINIMAL);
+  writePlugin('versioned-plugin', versioned('1.9.0'), '1.9.0');
+  writePlugin('versioned-plugin', versioned('1.10.0'), '1.10.0');
+  writePlugin('no-reducer-plugin', 'globalThis.plugin = { createInitialState: function () { return {}; } };');
+  writePlugin('no-plugin', 'var x = 1;');
+  writePlugin('load-throws', 'throw new Error("boom at load");');
+  writePlugin('load-random', 'var seed = Math.random(); globalThis.plugin = { createInitialState: function () { return {}; }, handleAction: function (c, s) { return s; } };');
+  writePlugin(
+    'escape-probe',
+    probe(`{
+      process: typeof process, require: typeof require, module: typeof module, exports: typeof exports,
+      fetch: typeof fetch, XMLHttpRequest: typeof XMLHttpRequest, WebAssembly: typeof WebAssembly,
+      setTimeout: typeof setTimeout, setInterval: typeof setInterval, queueMicrotask: typeof queueMicrotask,
+      console: typeof console, std: typeof std, os: typeof os, Atomics: typeof Atomics,
+      SharedArrayBuffer: typeof SharedArrayBuffer, Deno: typeof Deno, Bun: typeof Bun,
+      ctorTrick: (function () { try { return globalThis.constructor.constructor('return typeof process')(); } catch (e) { return 'threw'; } })(),
+      fnTrick: (function () { try { return Function('return typeof require + typeof process')(); } catch (e) { return 'threw'; } })(),
+      evalTrick: (function () { try { return eval('typeof process'); } catch (e) { return 'threw'; } })(),
+      globalKeys: Object.getOwnPropertyNames(globalThis).filter(function (k) { return /process|require|fetch|host|lf|std|os/i.test(k); }),
+      dynamicImport: importState
+    }`, `var importState = 'not attempted';
+try {
+  var p = import('node:fs');
+  importState = 'pending';
+  p.then(function () { importState = 'loaded'; }, function () { importState = 'rejected'; });
+} catch (e) { importState = 'threw'; }`)
+  );
+  writePlugin('require-plugin', probe(`{ fs: require('fs') }`));
+  writePlugin('hang-plugin', probe(`(function () { while (true) {} })()`));
+  writePlugin(
+    'native-hang-plugin',
+    probe(`(function () { var a = []; for (var i = 0; i < 200000; i++) a.push(-i); while (true) a.sort(); })()`)
+  );
+  writePlugin('memory-plugin', probe(`(function () { var a = []; while (true) a.push(new Array(100000).fill(1.5)); })()`));
+  writePlugin('stack-plugin', probe(`(function f(n) { return f(n + 1) + 1; })(0)`));
+  writePlugin('huge-output-plugin', probe(`{ blob: 'x'.repeat(5 * 1024 * 1024) }`));
+  writePlugin('random-drain-plugin', probe(`(function () { var out = []; for (var i = 0; i < 5; i++) out.push(ctx.random()); return { out: out }; })()`));
+  writePlugin(
+    'random-swallow-plugin',
+    probe(`(function () { var n = 0; try { for (;;) { ctx.random(); n++; } } catch (e) { return { drawn: n }; } })()`)
+  );
+  writePlugin('promise-plugin', probe(`Promise.resolve({ later: true })`));
+  writePlugin('array-state-plugin', probe(`[1, 2, 3]`));
+  writePlugin(
+    'tamper-plugin',
+    probe(`{ ok: true }`, `JSON.stringify = function () { return '{"r":{"forged":true}}'; }; JSON.parse = function () { return {}; };`)
+  );
+  // A legacy Node bundle: index.js only.
+  const legacyDir = join(pluginsDir, 'legacy-node', '1.0.0');
+  mkdirSync(legacyDir, { recursive: true });
+  writeFileSync(join(legacyDir, 'index.js'), 'export const plugin = {};');
+  digests.set('legacy-node@1.0.0', computeBundleDigest(legacyDir));
+
+  delete process.env.PLUGINS_DIR;
+  process.env.LOBBYFORGE_PLUGIN_INSTALL_DIR = pluginsDir;
+  process.env.PLUGIN_CALL_BUDGET_MS = String(BUDGET_MS);
+  process.env.PLUGIN_WORKER_TOKEN = RPC_TOKEN;
+  server = createPluginWorkerServer();
+  await new Promise<void>((resolveListen) => server.listen(0, '127.0.0.1', () => resolveListen()));
+  const addr = server.address() as AddressInfo;
+  baseUrl = `http://127.0.0.1:${addr.port}`;
+});
+
+beforeEach(() => {
+  delete process.env.PLUGIN_RANDOM_VALUES;
+});
+
+afterAll(async () => {
+  server.close();
+  await closeSandboxPool();
+  rmSync(pluginsDir, { recursive: true, force: true });
+});
+
+/** The exact-bundle fields every RPC carries. */
 function bundle(pluginId: string, version = '1.0.0') {
   const digest = digests.get(`${pluginId}@${version}`) ?? '0'.repeat(64);
   return { pluginId, version, digest };
 }
 
-beforeAll(async () => {
-  // INSIDE the package (vite root): CI temp dirs can carry short-name
-  // path segments (RUNNER~1) that break the module runner's file URLs.
-  pluginsDir = resolve(__dirname, '..', '..', '.plugin-fixtures', 'worker');
-  rmSync(pluginsDir, { recursive: true, force: true });
-  writePlugin('fixture-plugin', FIXTURE_PLUGIN);
-  writePlugin('hang-plugin', HANG_PLUGIN);
-  writePlugin('ipc-null-plugin', IPC_NULL_PLUGIN);
-  writePlugin('exit-zero-plugin', EXIT_ZERO_PLUGIN);
-  writePlugin('fake-result-plugin', FAKE_RESULT_PLUGIN);
-  writePlugin('storage-plugin', STORAGE_PLUGIN);
-  writePlugin('versioned-plugin', versionedPlugin('1.9.0'), '1.9.0');
-  writePlugin('versioned-plugin', versionedPlugin('1.10.0'), '1.10.0');
-  writePlugin('external-import-plugin', EXTERNAL_IMPORT_PLUGIN);
-  writePlugin('no-reducer-plugin', NO_REDUCER_PLUGIN);
-  delete process.env.PLUGINS_DIR;
-  process.env.LOBBYFORGE_PLUGIN_INSTALL_DIR = pluginsDir;
-  process.env.PLUGIN_CALL_BUDGET_MS = '2000'; // fast terminate in tests
-  process.env.PLUGIN_WORKER_TOKEN = RPC_TOKEN;
-  process.env.PLUGIN_HOST_ORIGIN = 'http://127.0.0.1:1'; // unreachable by design
-  process.env.PLUGIN_STORAGE_TOKEN = 'storage-token';
-  server = createPluginWorkerServer();
-  await new Promise<void>((resolveListen) =>
-    server.listen(0, '127.0.0.1', () => resolveListen())
-  );
-  const addr = server.address() as AddressInfo;
-  baseUrl = `http://127.0.0.1:${addr.port}`;
-});
-
-afterAll(() => {
-  server.close();
-  rmSync(pluginsDir, { recursive: true, force: true });
-});
-
-async function rpc(body: unknown, headers: Record<string, string> = {}): Promise<Response> {
-  const res = await fetch(`${baseUrl}/rpc`, {
+async function rpc(body: unknown): Promise<Response> {
+  return fetch(`${baseUrl}/rpc`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-lf-worker-token': RPC_TOKEN, ...headers },
+    headers: { 'content-type': 'application/json', 'x-lf-worker-token': RPC_TOKEN },
     body: JSON.stringify(body),
   });
-  if (res.status >= 400) {
-    // Diagnostics: the 400 body names the exact cause (Invalid JSON /
-    // readBody error / Unknown op) — CI-only failures are debuggable
-    // from the assertion message alone.
-    const text = await res.clone().text().catch(() => '<unreadable>');
-    console.error(`[rpc-diag] 400 from op=${String((body as { op?: string }).op)}: ${text}`);
-  }
-  return res;
+}
+
+async function rpcJson<T = Record<string, unknown>>(body: unknown): Promise<{ status: number; body: T }> {
+  const res = await rpc(body);
+  return { status: res.status, body: (await res.json()) as T };
+}
+
+async function expectHealthy(): Promise<void> {
+  const health = await fetch(`${baseUrl}/health`);
+  expect(health.status).toBe(200);
 }
 
 const CTX = {
-  actorUserId: 'user-1',
+  actorId: 'user-1',
   players: [
     { id: 'user-1', name: 'Alice' },
     { id: 'user-2', name: 'Bob' },
   ],
-  voiceParticipants: ['user-1'],
+  now: 1_700_000_000_000,
+  locale: 'tr',
+  sessionId: 'sess-1',
   serverId: 'srv-1',
-  pluginId: 'fixture-plugin',
+  hostId: 'user-1',
 };
 
 describe('plugin-worker RPC', () => {
   it('health endpoint answers (compose healthcheck path)', async () => {
     const res = await fetch(`${baseUrl}/health`);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { ok: boolean; service: string };
+    const body = (await res.json()) as { service: string; runtime: string };
     expect(body.service).toBe('plugin-worker');
+    expect(body.runtime).toBe('quickjs-sandbox-v1');
   });
 
   it('rejects RPC without the shared token', async () => {
     const res = await fetch(`${baseUrl}/rpc`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ op: 'list' }),
+      body: JSON.stringify({ op: 'describe', ...bundle('fixture-plugin') }),
     });
     expect(res.status).toBe(401);
   });
 
-  it('describe reports the manifest of the exact bundle requested', async () => {
-    const res = await rpc({ op: 'describe', ...bundle('fixture-plugin') });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { plugin: { id: string; name: string; version: string } };
-    expect(body.plugin).toEqual({ id: 'fixture-plugin', name: 'Fixture', version: '1.0.0' });
+  it('describe returns the MANIFEST policies plus which functions server.js defines', async () => {
+    const { status, body } = await rpcJson<{ plugin: Record<string, unknown> }>({ op: 'describe', ...bundle('fixture-plugin') });
+    expect(status).toBe(200);
+    expect(body.plugin).toEqual({
+      id: 'fixture-plugin',
+      name: 'Fixture fixture-plugin',
+      version: '1.0.0',
+      sdk: 'sandbox-v1',
+      ui: false,
+      locales: ['en'],
+      actionPolicies: { bump: { role: 'member', actorFields: ['playerId'], joinsRoster: true }, reveal: { role: 'host' } },
+      hasValidateAction: true,
+      hasProjection: true,
+      hasMigrateState: true,
+    });
+    const minimal = await rpcJson<{ plugin: Record<string, unknown> }>({ op: 'describe', ...bundle('minimal-plugin') });
+    expect(minimal.body.plugin).toMatchObject({ hasValidateAction: false, hasProjection: false, hasMigrateState: false });
   });
 
-  it('describe refuses a bundle without a reducer (shape check in the executor)', async () => {
-    const res = await rpc({ op: 'describe', ...bundle('no-reducer-plugin') });
-    expect(res.status).toBe(500);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toContain('does not export a valid plugin');
+  it('describe refuses a server.js without the required functions (422)', async () => {
+    for (const id of ['no-reducer-plugin', 'no-plugin']) {
+      const { status, body } = await rpcJson<{ error: string }>({ op: 'describe', ...bundle(id) });
+      expect(status, id).toBe(id === 'no-plugin' ? 500 : 422);
+      expect(body.error).toMatch(/globalThis\.plugin/);
+    }
   });
 
-  it('the old `list` op is gone (it picked the alphabetically last version folder)', async () => {
-    const res = await rpc({ op: 'list' });
-    expect(res.status).toBe(400);
+  it('a server.js that throws at load fails the call with its message', async () => {
+    const { status, body } = await rpcJson<{ error: string }>({ op: 'describe', ...bundle('load-throws') });
+    expect(status).toBe(500);
+    expect(body.error).toContain('boom at load');
+  });
+
+  it('a legacy Node bundle (index.js) is refused (422)', async () => {
+    const { status, body } = await rpcJson<{ error: string }>({ op: 'describe', ...bundle('legacy-node') });
+    expect(status).toBe(422);
+    expect(body.error).toMatch(/legacy Node bundle/);
   });
 
   it('runs EXACTLY the requested version: 1.9.0 and 1.10.0 each run their own folder', async () => {
-    const older = await rpc({ op: 'createInitialState', ...bundle('versioned-plugin', '1.9.0'), ctx: CTX });
-    expect(older.status).toBe(200);
-    expect(((await older.json()) as { result: { ranVersion: string } }).result.ranVersion).toBe('1.9.0');
-    const newer = await rpc({ op: 'createInitialState', ...bundle('versioned-plugin', '1.10.0'), ctx: CTX });
-    expect(newer.status).toBe(200);
-    expect(((await newer.json()) as { result: { ranVersion: string } }).result.ranVersion).toBe('1.10.0');
+    const older = await rpcJson<{ result: { ranVersion: string } }>({ op: 'createInitialState', ...bundle('versioned-plugin', '1.9.0'), ctx: CTX });
+    expect(older.body.result.ranVersion).toBe('1.9.0');
+    const newer = await rpcJson<{ result: { ranVersion: string } }>({ op: 'createInitialState', ...bundle('versioned-plugin', '1.10.0'), ctx: CTX });
+    expect(newer.body.result.ranVersion).toBe('1.10.0');
   });
 
   it('refuses a digest that does not match the folder (409, nothing runs)', async () => {
-    // The 1.9.0 folder with the 1.10.0 digest: the host meant other files.
     const res = await rpc({
       op: 'createInitialState',
       pluginId: 'versioned-plugin',
@@ -299,146 +276,262 @@ describe('plugin-worker RPC', () => {
       ctx: CTX,
     });
     expect(res.status).toBe(409);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toMatch(/digest mismatch/);
+    expect(((await res.json()) as { error: string }).error).toMatch(/digest mismatch/);
   });
 
-  it('refuses a request without an exact version and digest (400)', async () => {
+  it('refuses a request without an exact version and digest, and path-like refs (400)', async () => {
+    const digest = bundle('fixture-plugin').digest;
     for (const body of [
       { op: 'createInitialState', pluginId: 'fixture-plugin', ctx: CTX },
       { op: 'migrateState', pluginId: 'fixture-plugin', version: '1.0.0', raw: {} },
-      { op: 'describe', pluginId: 'fixture-plugin', version: 'latest', digest: bundle('fixture-plugin').digest },
+      { op: 'describe', pluginId: 'fixture-plugin', version: 'latest', digest },
+      { op: 'describe', pluginId: '../fixture-plugin', version: '1.0.0', digest },
+      { op: 'describe', pluginId: 'fixture-plugin', version: '../../etc', digest },
     ]) {
-      const res = await rpc(body);
-      expect(res.status).toBe(400);
+      expect((await rpc(body)).status).toBe(400);
     }
   });
 
-  it('refuses path-like plugin ids and versions (400)', async () => {
-    const digest = bundle('fixture-plugin').digest;
-    for (const ref of [
-      { pluginId: '../fixture-plugin', version: '1.0.0', digest },
-      { pluginId: 'fixture-plugin', version: '../../etc', digest },
-    ]) {
-      const res = await rpc({ op: 'describe', ...ref });
-      expect(res.status).toBe(400);
+  it('a version or plugin that is not installed → 404', async () => {
+    expect((await rpc({ op: 'describe', ...bundle('versioned-plugin', '2.0.0') })).status).toBe(404);
+    expect((await rpc({ op: 'createInitialState', ...bundle('nope'), ctx: CTX })).status).toBe(404);
+  });
+
+  it('createInitialState gets plain-data ctx: players, now, locale, ids and CSPRNG random', async () => {
+    const { status, body } = await rpcJson<{ result: Record<string, unknown> }>({
+      op: 'createInitialState',
+      ...bundle('fixture-plugin'),
+      ctx: { ...CTX, players: [...CTX.players, { id: 42, name: 'not a string id' }], locale: '../../x' },
+    });
+    expect(status).toBe(200);
+    expect(body.result).toMatchObject({
+      loads: 1,
+      players: CTX.players,
+      now: CTX.now,
+      locale: 'en', // an invalid locale falls back
+      sessionId: 'sess-1',
+      serverId: 'srv-1',
+      hostId: 'user-1',
+      actorId: 'user-1',
+    });
+    for (const key of ['r', 'm'] as const) {
+      expect(typeof body.result[key]).toBe('number');
+      expect(body.result[key]).toBeGreaterThanOrEqual(0);
+      expect(body.result[key]).toBeLessThan(1);
     }
   });
 
-  it('a version that is not installed → 404', async () => {
-    const res = await rpc({ op: 'describe', ...bundle('versioned-plugin', '2.0.0') });
-    expect(res.status).toBe(404);
+  it('every call gets a fresh VM: top-level state does not survive between calls', async () => {
+    for (let i = 0; i < 2; i++) {
+      const { body } = await rpcJson<{ result: { loads: number } }>({ op: 'createInitialState', ...bundle('fixture-plugin'), ctx: CTX });
+      expect(body.result.loads).toBe(1);
+    }
   });
 
-  it('an unresolvable package import names the fix (bundle every dependency)', async () => {
-    const res = await rpc({ op: 'describe', ...bundle('external-import-plugin') });
-    expect(res.status).toBe(500);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toContain('bundle every dependency');
-  });
-
-  it('createInitialState receives ONLY the snapshot ctx (no host objects)', async () => {
-    const res = await rpc({ op: 'createInitialState', ...bundle('fixture-plugin'), ctx: CTX });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { result: { actor: string; players: string[] } };
-    expect(body.result.actor).toBe('user-1');
-    expect(body.result.players).toEqual(['user-1', 'user-2']);
-  });
-
-  it('handleAction round-trips state + action with voice snapshot', async () => {
-    const res = await rpc({
+  it('handleAction round-trips state + action; returning the same state reports unchanged', async () => {
+    const changed = await rpcJson<{ result: Record<string, unknown> }>({
       op: 'handleAction',
       ...bundle('fixture-plugin'),
       ctx: CTX,
-      state: { actor: 'user-1' },
-      action: { type: 'reveal' },
+      state: { count: 1 },
+      action: { type: 'bump', playerId: 'user-2' },
     });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { result: { lastAction: { type: string }; voice: string[] } };
-    expect(body.result.lastAction.type).toBe('reveal');
-    expect(body.result.voice).toEqual(['user-1']);
+    expect(changed.status).toBe(200);
+    expect(changed.body.result).toEqual({ count: 2, last: { type: 'bump', playerId: 'user-2' }, actor: 'user-1' });
+
+    const refused = await rpcJson({ op: 'handleAction', ...bundle('fixture-plugin'), ctx: CTX, state: { count: 1 }, action: { type: 'noop' } });
+    expect(refused).toEqual({ status: 200, body: { unchanged: true } });
+
+    expect((await rpc({ op: 'handleAction', ...bundle('fixture-plugin'), ctx: CTX, state: {}, action: 'bump' })).status).toBe(400);
   });
 
-  it('migrateState runs in the worker', async () => {
-    const res = await rpc({ op: 'migrateState', ...bundle('fixture-plugin'), raw: { old: 1 } });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { result: { migrated: boolean; raw: { old: number } } };
-    expect(body.result.migrated).toBe(true);
-    expect(body.result.raw.old).toBe(1);
+  it('validateAction: an error string, null, or a 500 for anything else', async () => {
+    expect(await rpcJson({ op: 'validateAction', ...bundle('fixture-plugin'), action: { type: 'bad' } })).toEqual({
+      status: 200,
+      body: { result: 'bad action' },
+    });
+    expect(await rpcJson({ op: 'validateAction', ...bundle('fixture-plugin'), action: { type: 'bump' } })).toEqual({
+      status: 200,
+      body: { result: null },
+    });
+    const weird = await rpcJson<{ error: string }>({ op: 'validateAction', ...bundle('fixture-plugin'), action: { type: 'weird' } });
+    expect(weird.status).toBe(500);
+    expect(weird.body.error).toMatch(/error string or null/);
+    // A plugin without validateAction accepts everything.
+    expect(await rpcJson({ op: 'validateAction', ...bundle('minimal-plugin'), action: { type: 'x' } })).toEqual({
+      status: 200,
+      body: { result: null },
+    });
   });
 
-  it('unknown plugin → 404', async () => {
-    const res = await rpc({ op: 'createInitialState', ...bundle('nope'), ctx: CTX });
-    expect(res.status).toBe(404);
+  it('projectState runs per viewer; its ctx has no players, no locale and no random draws', async () => {
+    const state = { owner: 'user-2', secret: 'the card' };
+    const owner = await rpcJson<{ result: Record<string, unknown> }>({
+      op: 'projectState',
+      ...bundle('fixture-plugin'),
+      state,
+      viewerId: 'user-2',
+      ctx: CTX,
+    });
+    expect(owner.body.result).toEqual({
+      secret: 'the card',
+      viewer: 'user-2',
+      sessionId: 'sess-1',
+      hostId: 'user-1',
+      // random() is always defined by the VM; with no values it throws.
+      ctxKeys: ['hostId', 'now', 'random', 'serverId', 'sessionId'],
+    });
+    const other = await rpcJson<{ result: Record<string, unknown> }>({
+      op: 'projectState',
+      ...bundle('fixture-plugin'),
+      state,
+      viewerId: 'user-1',
+      ctx: CTX,
+    });
+    expect(other.body.result.secret).toBeNull();
+    // Without projectState the state is returned as is (public).
+    const minimal = await rpcJson({ op: 'projectState', ...bundle('minimal-plugin'), state, viewerId: 'user-1', ctx: CTX });
+    expect(minimal).toEqual({ status: 200, body: { result: state } });
   });
 
-  it('storage capabilities fail CLOSED when the host endpoint is unreachable', async () => {
-    const res = await rpc({ op: 'createInitialState', ...bundle('storage-plugin'), ctx: CTX });
-    // The fixture awaits ctx.storage.get → the proxy cannot reach the
-    // host → the call errors as a 500, never silently succeeds.
-    expect(res.status).toBe(500);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toContain('storage-plugin');
+  it('migrateState runs in the sandbox; without it the raw state comes back', async () => {
+    expect(await rpcJson({ op: 'migrateState', ...bundle('fixture-plugin'), raw: { old: 1 } })).toEqual({
+      status: 200,
+      body: { result: { schema: 2, old: 1 } },
+    });
+    expect(await rpcJson({ op: 'migrateState', ...bundle('minimal-plugin'), raw: { old: 1 } })).toEqual({
+      status: 200,
+      body: { result: { old: 1 } },
+    });
   });
 
-  it('malformed JSON → 400', async () => {
+  it('a state op must return an object; a Promise is refused (calls are synchronous)', async () => {
+    const arrayState = await rpcJson<{ error: string }>({ op: 'createInitialState', ...bundle('array-state-plugin'), ctx: CTX });
+    expect(arrayState.status).toBe(500);
+    expect(arrayState.body.error).toMatch(/must return an object/);
+    const promised = await rpcJson<{ error: string }>({ op: 'createInitialState', ...bundle('promise-plugin'), ctx: CTX });
+    expect(promised.status).toBe(500);
+    expect(promised.body.error).toMatch(/synchronous/);
+  });
+
+  it('malformed JSON and unknown ops → 400', async () => {
     const res = await fetch(`${baseUrl}/rpc`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-lf-worker-token': RPC_TOKEN },
       body: 'not-json',
     });
     expect(res.status).toBe(400);
+    expect((await rpc({ op: 'explode', ...bundle('fixture-plugin') })).status).toBe(400);
+    expect((await rpc({ op: 'list' })).status).toBe(400);
+  });
+});
+
+describe('the sandbox holds', () => {
+  it('nothing from the host is reachable: process, require, fetch, timers, Function/eval tricks, import()', async () => {
+    const { status, body } = await rpcJson<{ result: Record<string, unknown> }>({
+      op: 'createInitialState',
+      ...bundle('escape-probe'),
+      ctx: CTX,
+    });
+    expect(status).toBe(200);
+    const r = body.result;
+    for (const key of [
+      'process', 'require', 'module', 'exports', 'fetch', 'XMLHttpRequest', 'WebAssembly', 'setTimeout',
+      'setInterval', 'queueMicrotask', 'console', 'std', 'os', 'Atomics', 'SharedArrayBuffer', 'Deno', 'Bun',
+    ]) {
+      expect(r[key], key).toBe('undefined');
+    }
+    expect(r.ctorTrick).toBe('undefined');
+    expect(r.fnTrick).toBe('undefinedundefined');
+    expect(r.evalTrick).toBe('undefined');
+    expect(r.globalKeys).toEqual([]);
+    // No module loader: a dynamic import never loads anything.
+    expect(['pending', 'rejected', 'threw']).toContain(r.dynamicImport);
   });
 
-  it('9th-audit: an infinite-loop plugin is TERMINATED, not hung forever', async () => {
-    const res = await rpc({ op: 'createInitialState', ...bundle('hang-plugin'), ctx: CTX });
-    expect(res.status).toBe(500);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toMatch(/budget|terminated/i);
-    // The worker SERVICE itself must still be healthy afterwards.
-    const health = await fetch(`${baseUrl}/health`);
-    expect(health.status).toBe(200);
-  }, 30_000);
+  it('require() is a ReferenceError inside the VM', async () => {
+    const { status, body } = await rpcJson<{ error: string }>({ op: 'createInitialState', ...bundle('require-plugin'), ctx: CTX });
+    expect(status).toBe(500);
+    expect(body.error).toMatch(/ReferenceError: '?require'? is not defined/);
+  });
 
-  it('17th-audit: process.send(null) does NOT crash the parent (strict IPC validation)', async () => {
-    const res = await rpc({ op: 'createInitialState', ...bundle('ipc-null-plugin'), ctx: CTX });
-    // The parent must survive and return an error, not crash.
-    expect(res.status).toBe(500);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toContain('Invalid executor IPC message');
-    // Parent health check — service is alive.
-    const health = await fetch(`${baseUrl}/health`);
-    expect(health.status).toBe(200);
-  }, 15_000);
+  it('Math.random() at load time throws (use ctx.random() inside a call)', async () => {
+    const { status, body } = await rpcJson<{ error: string }>({ op: 'describe', ...bundle('load-random') });
+    expect(status).toBe(500);
+    expect(body.error).toMatch(/ctx\.random/);
+  });
 
-  it('17th-audit: process.exit(0) settles the Promise (no hang)', async () => {
+  it('a plugin cannot forge the host envelope by replacing JSON built-ins', async () => {
+    const { status, body } = await rpcJson({ op: 'createInitialState', ...bundle('tamper-plugin'), ctx: CTX });
+    expect(status).toBe(200);
+    expect(body).toEqual({ result: { ok: true } });
+  });
+
+  it('an infinite loop is interrupted at the budget; the worker stays healthy', async () => {
     const start = Date.now();
-    const res = await rpc({ op: 'createInitialState', ...bundle('exit-zero-plugin'), ctx: CTX });
-    const elapsed = Date.now() - start;
-    // Must settle within the budget, not hang forever.
-    expect(elapsed).toBeLessThan(15_000);
-    expect(res.status).toBe(500);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toContain('exited before producing a result');
+    const { status, body } = await rpcJson<{ error: string }>({ op: 'createInitialState', ...bundle('hang-plugin'), ctx: CTX });
+    expect(status).toBe(500);
+    expect(body.error).toMatch(/budget/);
+    expect(Date.now() - start).toBeLessThan(BUDGET_MS + 2_000);
+    await expectHealthy();
   }, 20_000);
 
-  it('17th-audit: fake process.send({result}) does not hijack the real result', async () => {
-    const res = await rpc({ op: 'createInitialState', ...bundle('fake-result-plugin'), ctx: CTX });
-    // The FIRST valid message the parent receives is the fake result
-    // with {hacked: true}. The parent settles on it — this documents
-    // the known limitation (the plugin shares the IPC primitive). The
-    // mitigation is that the SCOPED capability still constrains what
-    // the plugin can DO with a fake result (it only controls its own
-    // return value to the web app, not other plugins' data).
-    expect(res.status).toBe(200); // parent doesn't crash
-    const body = (await res.json()) as { result: unknown };
-    // The result is whatever the parent received first — either the
-    // fake or the real one. Both prove the parent survived.
-    expect(body.result).toBeDefined();
-  }, 15_000);
+  it('a long NATIVE loop (sort) that ignores the interrupt is killed with its thread', async () => {
+    const start = Date.now();
+    const { status, body } = await rpcJson<{ error: string }>({ op: 'createInitialState', ...bundle('native-hang-plugin'), ctx: CTX });
+    expect(status).toBe(500);
+    expect(body.error).toMatch(/budget/);
+    expect(Date.now() - start).toBeLessThan(BUDGET_MS + 3_000);
+    await expectHealthy();
+    // A replacement thread serves the next call.
+    const next = await rpcJson({ op: 'createInitialState', ...bundle('minimal-plugin'), ctx: CTX });
+    expect(next).toEqual({ status: 200, body: { result: { n: 0 } } });
+  }, 20_000);
 
-  it('unknown op → 400', async () => {
-    const res = await rpc({ op: 'explode' });
-    expect(res.status).toBe(400);
+  it('a memory bomb hits the 32 MB limit', async () => {
+    const { status, body } = await rpcJson<{ error: string }>({ op: 'createInitialState', ...bundle('memory-plugin'), ctx: CTX });
+    expect(status).toBe(500);
+    expect(body.error).toMatch(/memory limit|budget/);
+    await expectHealthy();
+  }, 20_000);
+
+  it('unbounded recursion hits the stack limit', async () => {
+    const { status, body } = await rpcJson<{ error: string }>({ op: 'createInitialState', ...bundle('stack-plugin'), ctx: CTX });
+    expect(status).toBe(500);
+    expect(body.error).toMatch(/stack limit/);
+    await expectHealthy();
+  }, 20_000);
+
+  it('a result over 4 MiB is refused (413)', async () => {
+    const { status, body } = await rpcJson<{ error: string }>({ op: 'createInitialState', ...bundle('huge-output-plugin'), ctx: CTX });
+    expect(status).toBe(413);
+    expect(body.error).toMatch(/size cap/);
+  }, 20_000);
+
+  it('ctx.random() fails the call when the host-provided values run out', async () => {
+    process.env.PLUGIN_RANDOM_VALUES = '4';
+    const drained = await rpcJson<{ error: string }>({ op: 'createInitialState', ...bundle('random-drain-plugin'), ctx: CTX });
+    expect(drained.status).toBe(500);
+    expect(drained.body.error).toMatch(/random values .* used up/);
+    // Catching the error does not help: the call still fails.
+    const swallowed = await rpcJson<{ error: string }>({ op: 'createInitialState', ...bundle('random-swallow-plugin'), ctx: CTX });
+    expect(swallowed.status).toBe(500);
+    expect(swallowed.body.error).toMatch(/used up/);
+    process.env.PLUGIN_RANDOM_VALUES = '5';
+    const enough = await rpcJson<{ result: { out: number[] } }>({ op: 'createInitialState', ...bundle('random-drain-plugin'), ctx: CTX });
+    expect(enough.status).toBe(200);
+    expect(enough.body.result.out).toHaveLength(5);
+  });
+});
+
+describe('cryptoRandomFloats', () => {
+  it('returns uniform-looking floats in [0, 1)', () => {
+    const values = cryptoRandomFloats(2000);
+    expect(values).toHaveLength(2000);
+    expect(values.every((v) => v >= 0 && v < 1)).toBe(true);
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    expect(mean).toBeGreaterThan(0.4);
+    expect(mean).toBeLessThan(0.6);
+    expect(new Set(values).size).toBe(2000);
   });
 });

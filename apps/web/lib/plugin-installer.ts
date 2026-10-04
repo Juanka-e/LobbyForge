@@ -9,6 +9,12 @@ import { gunzipSync } from 'node:zlib';
  * see plugin-install-layout.ts) and loaded by the plugin-worker by exact
  * version + digest. Only then is it recorded as active; the superseded
  * version folder is deleted afterwards. Plugin code is never imported here.
+ *
+ * ADR-007: only `sdk: "sandbox-v1"` bundles install — `manifest.json` and
+ * `server.js` at the archive root (checked in the tar scan, before
+ * extraction), a valid manifest whose id and version match the catalog
+ * entry (checked on the extracted files, plugin-install-layout.ts). Legacy
+ * Node bundles (`index.js`) are refused.
  */
 
 import { mkdirSync, rmSync, writeFileSync, readdirSync, lstatSync } from 'node:fs';
@@ -284,6 +290,32 @@ function isUnsafeTarPath(entry: TarEntry): boolean {
   );
 }
 
+/**
+ * The regular files that land at the bundle root once tar strips the first
+ * path component (`--strip-components=1`): `./server.js` and
+ * `bundle/server.js` both become `server.js`; a bare `server.js` is dropped.
+ */
+export function bundleRootFiles(entries: TarEntry[]): Set<string> {
+  const root = new Set<string>();
+  for (const entry of entries) {
+    // '0' and NUL (old tar) are regular files, as in the scan below.
+    if (entry.typeflag !== '0' && entry.typeflag !== '\0') continue;
+    const parts = entry.name.split('/').filter((part) => part !== '');
+    if (parts.length === 2) root.add(parts[1]!);
+  }
+  return root;
+}
+
+/** Why a scanned archive is not a sandbox-v1 bundle, or null when it has the root files. */
+export function missingSandboxRootFiles(entries: TarEntry[]): string | null {
+  const root = bundleRootFiles(entries);
+  if (root.has('manifest.json') && root.has('server.js')) return null;
+  if (root.has('index.js')) {
+    return 'This is a legacy Node bundle (index.js). Marketplace plugins now run sandboxed: rebuild it as sdk "sandbox-v1" (manifest.json + server.js at the archive root, see docs/PLUGIN_PUBLISHING.md).';
+  }
+  return 'Bundle must contain manifest.json and server.js at the archive root (entries ./manifest.json and ./server.js) — not a sandbox-v1 LobbyForge plugin.';
+}
+
 export function parseTarHeaders(uncompressed: Buffer): TarEntry[] {
   const entries: TarEntry[] = [];
   let offset = 0;
@@ -292,10 +324,10 @@ export function parseTarHeaders(uncompressed: Buffer): TarEntry[] {
     // All-zero header = end of archive.
     if (header.every((b) => b === 0)) break;
 
-    const name = header.subarray(0, 100).toString('utf8').replace(/ [\s\S]*$/, '');
+    const name = header.subarray(0, 100).toString('utf8').replace(/\x00[\s\S]*$/, '');
     // ustar (POSIX "ustar\0" and GNU "ustar ") carries a path prefix at offset 345.
     const isUstar = header.subarray(257, 262).toString('latin1') === 'ustar';
-    const prefix = isUstar ? header.subarray(345, 500).toString('utf8').replace(/ [\s\S]*$/, '') : '';
+    const prefix = isUstar ? header.subarray(345, 500).toString('utf8').replace(/\x00[\s\S]*$/, '') : '';
     const sizeField = header.subarray(124, 136);
     const typeflag = String.fromCharCode(header[156]!);
     let size: number;
@@ -306,7 +338,7 @@ export function parseTarHeaders(uncompressed: Buffer): TarEntry[] {
         size = size * 256 + sizeField[i]!;
       }
     } else {
-      const octal = sizeField.toString('utf8').replace(/[  ]/g, '');
+      const octal = sizeField.toString('utf8').replace(/[\x00 ]/g, '');
       size = parseInt(octal, 8) || 0;
     }
     entries.push({
@@ -368,7 +400,7 @@ async function extractTarball(tarPath: string, destDir: string): Promise<void> {
     if (totalBytes > MAX_TOTAL_BYTES) {
       throw new Error(`Tarball exceeds ${MAX_TOTAL_BYTES} bytes uncompressed — possible tar bomb.`);
     }
-    const isRegular = entry.typeflag === '0' || entry.typeflag === ' ';
+    const isRegular = entry.typeflag === '0' || entry.typeflag === '\x00';
     const isDir = entry.typeflag === '5';
     if (!isRegular && !isDir) {
       throw new Error(
@@ -379,6 +411,10 @@ async function extractTarball(tarPath: string, destDir: string): Promise<void> {
       throw new Error(`Tarball contains an unsafe path: ${entry.name}. Rejected.`);
     }
   }
+  // ADR-007: refuse anything but a sandbox-v1 bundle before extracting it
+  // (activation re-checks the extracted files and the manifest).
+  const rootError = missingSandboxRootFiles(entries);
+  if (rootError) throw new Error(rootError);
 
   // 3. Extract with hardened flags.
   await execFileAsync('tar', [
@@ -451,7 +487,7 @@ export function scanTarEntries(
     if (totalBytes > MAX_TOTAL_BYTES) {
       return { ok: false, error: `Tarball exceeds ${MAX_TOTAL_BYTES} bytes uncompressed — possible tar bomb.` };
     }
-    const isRegular = entry.typeflag === '0' || entry.typeflag === ' ';
+    const isRegular = entry.typeflag === '0' || entry.typeflag === '\x00';
     const isDir = entry.typeflag === '5';
     if (!isRegular && !isDir) {
       return { ok: false, error: `Tarball contains a non-regular file entry: ${entry.name} (type "${entry.typeflag}"). Rejected.` };

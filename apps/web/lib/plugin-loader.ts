@@ -11,18 +11,22 @@
  * version + digest; the worker-backed plugin objects it gets back are kept
  * in an in-memory map so the hot path (getPlugin) stays synchronous.
  *
- * Bundle contract (docs/EXTENDING.md §3.5):
- *   - `index.js` (ESM) at the bundle root, exporting `plugin` or `default`.
- *   - Self-contained: the worker provides no packages to bundles, so
- *     `react` and `@lobbyforge/plugin-sdk` are bundled in, not external.
- *   - `manifest.id` equals the catalog `pluginId`.
+ * Bundle contract (ADR-007, docs/PLUGIN_PUBLISHING.md): sdk "sandbox-v1" —
+ *   - `manifest.json` (id, name, version, sdk, actionPolicies, ui, …) and
+ *     `server.js` at the bundle root, optional `ui/`;
+ *   - `server.js` is plain JavaScript that assigns `globalThis.plugin`; it
+ *     runs in the worker's QuickJS VM, with no imports and no Node APIs;
+ *   - the manifest id and version equal the catalog entry's.
+ *   Legacy Node bundles (`index.js`) no longer load: describe fails, the
+ *   plugin stays unloaded and the error is logged.
  *
  * Security:
  *   - Disabled unless LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED=true, and then only
  *     through the worker (LOBBYFORGE_PLUGIN_WORKER_URL) — fail closed.
  *   - Only approved, digest-pinned catalog entries are installed (install
  *     API), and the worker re-verifies the files' digest before running them.
- *   - ADR-001: the worker isolates reviewed code, not hostile code.
+ *   - Action policies come from the manifest the web app reads and
+ *     validates itself (plugin-worker-client.ts describeWorkerPlugin).
  */
 import type { RegisteredGamePlugin } from '@lobbyforge/plugin-sdk';
 import {
@@ -33,14 +37,31 @@ import {
 } from './plugin-worker-client';
 import { listActivePlugins, pluginInstallDir, readActivePointer } from './plugin-install-layout';
 
-/** In-memory map of dynamically-loaded plugins, keyed by manifest.id. */
-const dynamicPlugins = new Map<string, RegisteredGamePlugin>();
+/**
+ * Loader state, kept on `globalThis` — NOT in module scope. Next compiles
+ * this module into several server chunks (instrumentation, route handlers,
+ * pages, the root server chunk), each with its own copy of module-level
+ * variables; instrumentation filled its copy at boot and every route saw
+ * an empty one, so an installed marketplace plugin was "loaded" yet
+ * unknown everywhere (found by the e2e run). One process-wide object fixes
+ * that.
+ */
+interface DynamicPluginState {
+  /** Dynamically-loaded plugins, keyed by manifest.id. */
+  plugins: Map<string, RegisteredGamePlugin>;
+  /** True once warmInstalledPlugins() has completed (or found nothing). */
+  warmed: boolean;
+  /** The pluginIds that were successfully loaded, in load order. */
+  loadedIds: string[];
+}
 
-/** True once warmInstalledPlugins() has completed (or found nothing). */
-let warmed = false;
+const STATE_KEY = '__lobbyforgeDynamicPlugins__';
 
-/** The list of pluginIds that were successfully loaded. */
-const loadedPluginIds: string[] = [];
+function loaderState(): DynamicPluginState {
+  const holder = globalThis as typeof globalThis & { [STATE_KEY]?: DynamicPluginState };
+  holder[STATE_KEY] ??= { plugins: new Map(), warmed: false, loadedIds: [] };
+  return holder[STATE_KEY];
+}
 
 function dynamicPluginsEnabled(): boolean {
   return process.env.LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED === 'true';
@@ -52,8 +73,9 @@ function dynamicPluginsEnabled(): boolean {
  * times — it skips if already warmed.
  */
 export async function warmInstalledPlugins(): Promise<void> {
-  if (warmed) return;
-  warmed = true;
+  const state = loaderState();
+  if (state.warmed) return;
+  state.warmed = true;
 
   // Dynamic plugin execution is disabled by default. Since LF-SEC-010
   // the ONLY enabled mode is the ISOLATED plugin-worker container —
@@ -97,8 +119,9 @@ export async function warmInstalledPlugins(): Promise<void> {
 
 /** Put (or replace) a worker-described plugin in the registry. */
 export function registerDynamicPlugin(info: WorkerPluginInfo): void {
-  dynamicPlugins.set(info.id, buildWorkerPlugin(info));
-  if (!loadedPluginIds.includes(info.id)) loadedPluginIds.push(info.id);
+  const state = loaderState();
+  state.plugins.set(info.id, buildWorkerPlugin(info));
+  if (!state.loadedIds.includes(info.id)) state.loadedIds.push(info.id);
 }
 
 /**
@@ -107,12 +130,12 @@ export function registerDynamicPlugin(info: WorkerPluginInfo): void {
  * then falls back to this.
  */
 export function getDynamicPlugin(id: string): RegisteredGamePlugin | null {
-  return dynamicPlugins.get(id) ?? null;
+  return loaderState().plugins.get(id) ?? null;
 }
 
 /** List all dynamically-loaded plugin ids (for diagnostics/logging). */
 export function listDynamicPluginIds(): string[] {
-  return [...loadedPluginIds];
+  return [...loaderState().loadedIds];
 }
 
 /**

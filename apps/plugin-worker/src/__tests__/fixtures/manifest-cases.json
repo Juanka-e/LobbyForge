@@ -1,0 +1,54 @@
+{
+  "_comment": "Shared by apps/plugin-worker/src/__tests__/manifest.test.ts and apps/web/lib/__tests__/sandbox-manifest.test.ts: both sandbox-v1 manifest validators must agree on every case.",
+  "base": {
+    "id": "case-game",
+    "name": "Case Game",
+    "version": "1.2.3",
+    "sdk": "sandbox-v1",
+    "ui": false,
+    "actionPolicies": {
+      "start": { "role": "host" },
+      "join": { "role": "member", "actorFields": ["playerId"], "joinsRoster": true },
+      "move": { "role": "player", "actorFields": ["playerId"], "audit": false }
+    }
+  },
+  "valid": [
+    { "name": "the base manifest", "patch": {} },
+    { "name": "empty actionPolicies", "patch": { "actionPolicies": {} } },
+    { "name": "ui true with locales and player counts", "patch": { "ui": true, "locales": ["en", "tr", "pt-BR"], "minPlayers": 2, "maxPlayers": 12 } },
+    { "name": "unknown top-level keys are ignored", "patch": { "description": "A game", "publisher": "Someone" } },
+    { "name": "prerelease semver", "patch": { "version": "2.0.0-beta.1" } },
+    { "name": "action types with dots and colons", "patch": { "actionPolicies": { "round:open": { "role": "host" }, "v2.move": { "role": "player" } } } }
+  ],
+  "invalid": [
+    { "name": "not an object", "manifest": ["sandbox-v1"] },
+    { "name": "missing sdk (legacy Node bundle)", "patch": { "sdk": null } },
+    { "name": "wrong sdk", "patch": { "sdk": "node-esm" } },
+    { "name": "id with a slash", "patch": { "id": "../evil" } },
+    { "name": "id of one character", "patch": { "id": "a" } },
+    { "name": "id longer than 64", "patch": { "id": "a234567890123456789012345678901234567890123456789012345678901234x" } },
+    { "name": "empty name", "patch": { "name": "  " } },
+    { "name": "loose version", "patch": { "version": "1.0" } },
+    { "name": "ui missing", "patch": { "ui": null } },
+    { "name": "ui as a string", "patch": { "ui": "yes" } },
+    { "name": "actionPolicies missing", "patch": { "actionPolicies": null } },
+    { "name": "actionPolicies as an array", "patch": { "actionPolicies": [] } },
+    { "name": "unknown role", "patch": { "actionPolicies": { "start": { "role": "admin" } } } },
+    { "name": "missing role", "patch": { "actionPolicies": { "start": {} } } },
+    { "name": "unknown policy key (a typo)", "patch": { "actionPolicies": { "start": { "role": "host", "rol": "member" } } } },
+    { "name": "actorFields not an array", "patch": { "actionPolicies": { "join": { "role": "member", "actorFields": "playerId" } } } },
+    { "name": "actorFields overwriting type", "patch": { "actionPolicies": { "join": { "role": "member", "actorFields": ["type"] } } } },
+    { "name": "actorFields with __proto__", "patch": { "actionPolicies": { "join": { "role": "member", "actorFields": ["__proto__"] } } } },
+    { "name": "actorFields with a dotted path", "patch": { "actionPolicies": { "join": { "role": "member", "actorFields": ["a.b"] } } } },
+    { "name": "joinsRoster as a string", "patch": { "actionPolicies": { "join": { "role": "member", "joinsRoster": "true" } } } },
+    { "name": "audit as a number", "patch": { "actionPolicies": { "start": { "role": "host", "audit": 0 } } } },
+    { "name": "action type __proto__", "json": "{\"id\":\"case-game\",\"name\":\"Case Game\",\"version\":\"1.2.3\",\"sdk\":\"sandbox-v1\",\"ui\":false,\"actionPolicies\":{\"__proto__\":{\"role\":\"member\"}}}" },
+    { "name": "action type constructor", "patch": { "actionPolicies": { "constructor": { "role": "member" } } } },
+    { "name": "action type with a space", "patch": { "actionPolicies": { "open round": { "role": "host" } } } },
+    { "name": "minPlayers zero", "patch": { "minPlayers": 0 } },
+    { "name": "maxPlayers above 500", "patch": { "maxPlayers": 501 } },
+    { "name": "minPlayers above maxPlayers", "patch": { "minPlayers": 5, "maxPlayers": 4 } },
+    { "name": "empty locales", "patch": { "locales": [] } },
+    { "name": "bad locale code", "patch": { "locales": ["EN_us"] } }
+  ]
+}

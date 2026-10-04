@@ -103,9 +103,13 @@ export function useActivitySession({
         );
       }
       // Someone new acted: the event carries no identities, so re-read the
-      // session for the player list (with names) the panel shows.
+      // session for the player list (with names) the panel shows. Also
+      // re-read when a change arrives WITHOUT state: the gateway sends the
+      // event stateless when it could not project it for this viewer (a
+      // sandboxed plugin's projection call failed), and the panel must not
+      // sit on the old state until the next action.
       const summary = (raw as { publicSummary?: { rosterChanged?: unknown } }).publicSummary;
-      if (summary?.rosterChanged === true) void fetchOnce();
+      if (summary?.rosterChanged === true || (event.status && !event.state)) void fetchOnce();
     };
 
     void fetchOnce();

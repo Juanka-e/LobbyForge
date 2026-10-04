@@ -34,7 +34,9 @@ import {
   type MessageRow,
 } from '@lobbyforge/db';
 import { CorePermission, hasPermission } from '@lobbyforge/core';
-import { listPluginSummaries } from '@/lib/plugin-registry';
+// Compiled-in AND installed marketplace plugins (ADR-007): a sandboxed
+// plugin needs a launch card like any other app.
+import { listPluginSummariesServer } from '@/lib/plugin-server-registry';
 import { getUserPresenceInChannel, getUserPresenceInServer, setUserPresence } from '@/lib/redis';
 import { LobbyVoiceProvider } from './LobbyVoiceProvider';
 import { LobbyVoiceChannels } from './LobbyVoiceChannels';
@@ -50,6 +52,7 @@ import MobileNav from './MobileNav';
 import { BlockListProvider } from './BlockListProvider';
 import { isLobbyDemoAllowed } from '@/lib/lobby-mode';
 import { canReadLobbyChannelMessages, resolveLobbyChannelView } from '@/lib/lobby-channel-access';
+import { listVoiceModerationTargets } from '@/lib/voice-moderation-targets';
 import { getRuntimeLiveKitUrl } from '@/lib/public-endpoints';
 import { projectServerPresenceForViewer } from '@/lib/presence-view';
 import { toPresenceStatus, type PresenceStatus } from '@/lib/presence-status';
@@ -61,6 +64,7 @@ import { projectDmChannel, projectMemberProfile } from '@/lib/profile-privacy';
 import { notifyMemberJoined } from '@/lib/bots/welcome';
 import { resolveAutoJoinServerId } from '@/lib/lobby-auto-join';
 import { readMessageBot } from '@/lib/bots/message-meta';
+import { readMessageInteraction, readMessageWebhook } from '@/lib/bots/interaction-meta';
 import { botTrustLevel, isBuiltInType } from '@/lib/bots/catalog';
 import type { LobbyBot } from './BotIdentity';
 
@@ -122,6 +126,10 @@ interface ChatMessage {
   pinned?: boolean;
   /** Set when a bot wrote the message — rendered with the BOT badge. */
   bot?: { id: string | null; name: string; type: string } | null;
+  /** Bot API v2: a bot's answer to a slash command ("↳ <user> used /<command>"). */
+  interaction?: { id: string; commandName: string; invokedBy: { id: string | null; name: string | null } } | null;
+  /** Bot API v2: a post from an incoming channel webhook (WEBHOOK badge). */
+  webhook?: { id: string | null; name: string; displayName: string } | null;
 }
 interface LobbyData {
   serverName: string;
@@ -151,6 +159,8 @@ interface LobbyData {
   canManageMessages: boolean;
   /** MUTE_MEMBERS: show the moderator server-mute control in the voice roster. */
   canMuteMembers: boolean;
+  /** With MUTE_MEMBERS: members this viewer outranks, offered "Disconnect from voice". */
+  voiceModerationTargetIds: string[];
   /** MANAGE_SERVER: unlocks the community menu's admin entries. */
   canManageServer: boolean;
   /**
@@ -344,6 +354,7 @@ function buildMessages(
     }
     const bot = readMessageBot(m);
     if (bot) {
+      const interaction = readMessageInteraction(m);
       return {
         id: m.id,
         authorId: null,
@@ -353,6 +364,27 @@ function buildMessages(
         body: m.content,
         pinned: typeof m.metadata.$pinnedAt === 'string',
         bot,
+        interaction: interaction && {
+          ...interaction,
+          invokedBy: {
+            id: interaction.invokedBy.id,
+            name: interaction.invokedBy.name
+              ?? (interaction.invokedBy.id ? authors.get(interaction.invokedBy.id)?.displayName ?? null : null),
+          },
+        },
+      } satisfies ChatMessage;
+    }
+    const webhook = readMessageWebhook(m);
+    if (webhook) {
+      return {
+        id: m.id,
+        authorId: null,
+        author: webhook.displayName || t('interactions.webhook.unnamed'),
+        timestamp: formatMessageTimestamp(m.createdAt, t),
+        createdAt: m.createdAt.toISOString(),
+        body: m.content,
+        pinned: typeof m.metadata.$pinnedAt === 'string',
+        webhook,
       } satisfies ChatMessage;
     }
     const author = m.userId ? authors.get(m.userId) : null;
@@ -525,6 +557,11 @@ async function loadLiveData(
   const messages = buildMessages(messageRows, authorMap, currentUserId, blockedIds, t);
   const canManageMessages = hasPermission(view.permissions, CorePermission.MANAGE_MESSAGES);
   const canMuteMembers = hasPermission(view.permissions, CorePermission.MUTE_MEMBERS);
+  // The roster's "Disconnect from voice" follows the route's hierarchy:
+  // only members this viewer outranks (never themselves or the owner).
+  const voiceModerationTargetIds = canMuteMembers
+    ? listVoiceModerationTargets({ members: memberSummaries, viewerUserId: currentUserId, ownerUserId })
+    : [];
   const canManageServer = hasPermission(view.permissions, CorePermission.MANAGE_SERVER);
 
   // Apps the community has installed AND enabled. Members see the same
@@ -532,7 +569,7 @@ async function loadLiveData(
   // answerable without admin access.
   const installedApps = await listPluginInstallsForServer(db, serverId)
     .then((installs) => {
-      const summaries = new Map(listPluginSummaries().map((p) => [p.id, p]));
+      const summaries = new Map(listPluginSummariesServer().map((p) => [p.id, p]));
       return installs.flatMap((install) => {
         if (!install.enabled) return [];
         const summary = summaries.get(install.pluginId);
@@ -580,6 +617,7 @@ async function loadLiveData(
     isLive: true,
     canManageMessages,
     canMuteMembers,
+    voiceModerationTargetIds,
     canManageServer,
     installedApps,
     bots: botRows.filter((bot) => bot.enabled).map(toLobbyBot),
@@ -754,6 +792,7 @@ export default async function LobbyPage({
     isLive: false,
     canManageMessages: false,
     canMuteMembers: false,
+    voiceModerationTargetIds: [],
     canManageServer: false,
     installedApps: [],
     bots: [],
@@ -1187,6 +1226,7 @@ async function Sidebar({
               initialActiveChannelId={activeVoiceId ?? null}
               currentUserId={data.currentUserId}
               canMuteMembers={data.canMuteMembers}
+              voiceModerationTargetIds={data.voiceModerationTargetIds}
             />
           ) : (
             <ChannelGroup

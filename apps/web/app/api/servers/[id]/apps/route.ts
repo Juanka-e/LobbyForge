@@ -8,8 +8,7 @@ import {
   upsertPluginInstall,
 } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
-import { listPluginSummaries } from '@/lib/plugin-registry';
-import { getPluginServer } from '@/lib/plugin-server-registry';
+import { getPluginServer, listPluginSummariesServer } from '@/lib/plugin-server-registry';
 import {
   CorePermission,
   requireMaterializedSession,
@@ -39,7 +38,7 @@ const DeleteAppSchema = z.object({
 }).strict();
 
 function appSummary(input: {
-  plugin: ReturnType<typeof listPluginSummaries>[number];
+  plugin: ReturnType<typeof listPluginSummariesServer>[number];
   install: Awaited<ReturnType<typeof getPluginInstall>>;
 }) {
   return {
@@ -64,7 +63,7 @@ async function handleGet(
 
   const installs = await listPluginInstallsForServer(getDb(), serverId);
   const installByPlugin = new Map(installs.map((install) => [install.pluginId, install]));
-  const apps = listPluginSummaries().map((plugin) =>
+  const apps = listPluginSummariesServer().map((plugin) =>
     appSummary({ plugin, install: installByPlugin.get(plugin.id) ?? null })
   );
 
@@ -118,7 +117,7 @@ async function handlePost(
   }).catch((err) => console.error('[audit] app.upsert failed:', (err as Error).message));
 
   return NextResponse.json(
-    { app: appSummary({ plugin: listPluginSummaries().find((p) => p.id === plugin.manifest.id)!, install }) },
+    { app: appSummary({ plugin: listPluginSummariesServer().find((p) => p.id === plugin.manifest.id)!, install }) },
     { status: 200, headers: { 'Cache-Control': 'no-store' } }
   );
 }

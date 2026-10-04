@@ -38,11 +38,26 @@ const DIGEST_B = 'b'.repeat(64);
 describe('plugin-loader SEC-008 gate', () => {
   beforeEach(() => {
     vi.resetModules();
+    // The loader keeps its state on globalThis (one copy per process, not
+    // per bundle chunk), so a fresh module no longer means fresh state.
+    delete (globalThis as Record<string, unknown>).__lobbyforgeDynamicPlugins__;
     layoutMocks.listActivePlugins.mockReset().mockReturnValue([]);
     layoutMocks.readActivePointer.mockReset().mockReturnValue(null);
     workerMocks.describeWorkerPlugin.mockReset();
     workerMocks.workerRuntimeConfigured.mockReset().mockReturnValue(false);
     delete process.env.LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED;
+  });
+
+  it('every copy of the module sees the plugins one copy loaded (Next splits it across chunks)', async () => {
+    const first = await import('../plugin-loader');
+    first.registerDynamicPlugin({ id: 'sandbox-buzzer', name: 'Buzzer', version: '1.0.0' } as never);
+    // A second, independent instance of the module — what a route handler
+    // chunk gets while instrumentation filled its own copy.
+    vi.resetModules();
+    const second = await import('../plugin-loader');
+    expect(second).not.toBe(first);
+    expect(second.listDynamicPluginIds()).toEqual(['sandbox-buzzer']);
+    expect(second.getDynamicPlugin('sandbox-buzzer')?.manifest.id).toBe('sandbox-buzzer');
   });
 
   it('warmInstalledPlugins reads NOTHING without the flag', async () => {

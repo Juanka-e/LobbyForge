@@ -42,14 +42,31 @@ describe('global web security policy', () => {
     expect(middleware).toContain("form-action 'self'");
   });
 
-  it('frames exactly one origin: the Watch Party player, YouTube’s privacy-enhanced embed', async () => {
-    // Pinned: no wildcard, no youtube.com, no second origin. The plugin
-    // builds its iframe from the same constant, so the two cannot drift.
+  it('frames itself (sandboxed plugin UI) and exactly one third-party origin: YouTube’s privacy-enhanced embed', async () => {
+    // Pinned: no wildcard, no youtube.com, no second third-party origin. The
+    // plugin builds its iframe from the same constant, so the two cannot drift.
+    // 'self' is the marketplace plugin frame (ADR-007).
     const { YOUTUBE_EMBED_ORIGIN } = await import('@lobbyforge/watch-party');
     const frameSources = [...middleware.matchAll(/"frame-src ([^"]*)"/g)].map((m) => m[1]);
-    expect(frameSources).toEqual(['https://www.youtube-nocookie.com']);
-    expect(YOUTUBE_EMBED_ORIGIN).toBe(frameSources[0]);
+    expect(frameSources).toEqual(["'self' https://www.youtube-nocookie.com"]);
+    expect(frameSources[0]!.split(' ')).toEqual(["'self'", YOUTUBE_EMBED_ORIGIN]);
     expect(middleware).not.toMatch(/child-src/);
+  });
+
+  it('leaves the plugin UI route to its own headers, and only that route', async () => {
+    const { NextRequest } = await import('next/server');
+    const { middleware: run } = await import('../../middleware');
+    // The route sets a sandbox CSP with frame-ancestors 'self'; Next appends
+    // route headers to middleware ones, so the app's 'none' must not be there.
+    const asset = run(new NextRequest('http://localhost:3000/api/plugin-ui/buzzer/1.0.0/index.html'));
+    expect(asset.headers.get('Content-Security-Policy')).toBeNull();
+    expect(asset.headers.get('X-Frame-Options')).toBeNull();
+    for (const path of ['/api/plugin-ui/', '/api/plugin-ui/buzzer', '/api/plugin-ui/buzzer/1.0.0/', '/api/plugin-uix/a/b/c']) {
+      const other = run(new NextRequest(`http://localhost:3000${path}`));
+      expect(other.headers.get('Content-Security-Policy'), path).toContain("frame-ancestors 'none'");
+      expect(other.headers.get('X-Frame-Options'), path).toBe('DENY');
+    }
+    expect(config).toContain("source: '/:path((?!api/plugin-ui/).*)'");
   });
 
   it('sends that frame-src on real responses, next to the anti-framing rules', async () => {
@@ -57,7 +74,7 @@ describe('global web security policy', () => {
     const { middleware: run } = await import('../../middleware');
     const response = run(new NextRequest('http://localhost:3000/lobby'));
     const directives = (response.headers.get('Content-Security-Policy') ?? '').split(';').map((d) => d.trim());
-    expect(directives).toContain('frame-src https://www.youtube-nocookie.com');
+    expect(directives).toContain("frame-src 'self' https://www.youtube-nocookie.com");
     expect(directives).toContain("frame-ancestors 'none'");
     expect(directives).toContain("object-src 'none'");
     expect(directives.find((d) => d.startsWith('script-src'))).not.toMatch(/youtube/);

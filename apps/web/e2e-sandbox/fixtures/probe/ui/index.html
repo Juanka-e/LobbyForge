@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>probe</title>
+    <!-- Blocked by script-src 'self' (no 'unsafe-inline'): the probe checks it never ran. -->
+    <script>window.__inline = true;</script>
+  </head>
+  <body>
+    <main id="out">probe</main>
+    <img id="local" src="dot.svg" alt="" width="4" height="4" />
+    <script type="module" src="probe.js"></script>
+  </body>
+</html>

@@ -12,7 +12,22 @@ import type { NextRequest } from 'next/server';
  * next.config.mjs via the headers() function, so we pass the nonce
  * through the `Content-Security-Policy` header directly here.
  */
+/**
+ * Marketplace plugin UI (ADR-007): `/api/plugin-ui/{pluginId}/{version}/…`
+ * answers with its OWN policy — CSP `sandbox allow-scripts`, no network,
+ * `frame-ancestors 'self'` — so the lobby can frame it. Next APPENDS a route
+ * handler's headers to the ones set here (next/dist/server/send-response.js)
+ * and a browser enforces every CSP it receives, so the app's
+ * `frame-ancestors 'none'` and `X-Frame-Options: DENY` would forbid the
+ * frame. That route therefore gets nothing from this middleware. Only the
+ * exact route shape is skipped; anything else under the prefix is a 404 page
+ * that keeps the app policy.
+ */
+const PLUGIN_UI_ROUTE = /^\/api\/plugin-ui\/[^/]+\/[^/]+\/[^/]/;
+
 export function middleware(request: NextRequest) {
+  if (PLUGIN_UI_ROUTE.test(request.nextUrl.pathname)) return NextResponse.next();
+
   const nonce = crypto.randomUUID().replace(/-/g, '');
   const requestId = crypto.randomUUID().slice(0, 8);
 
@@ -58,12 +73,17 @@ export function middleware(request: NextRequest) {
     "img-src 'self' data: blob:",
     "media-src 'self' blob:",
     `connect-src ${fullConnect}`,
+    // 'self': marketplace plugin UIs, served by /api/plugin-ui into
+    // <iframe sandbox="allow-scripts"> (ADR-007) — opaque origin, own CSP.
+    // Every app page refuses to be framed (frame-ancestors 'none' below), so
+    // 'self' admits nothing else. This also bounds where a plugin frame can
+    // navigate itself: the parent's frame-src governs those navigations.
     // Watch Party embeds YouTube's privacy-enhanced player (docs/WATCH_PARTY.md).
-    // Exactly ONE origin — no scheme wildcard, no youtube.com, no *.youtube…;
-    // nothing else may be framed. This grants framing only: no script, style
-    // or connection from that origin runs in our page — the player lives in
-    // its own origin and is driven over postMessage, checked both ways.
-    "frame-src https://www.youtube-nocookie.com",
+    // Exactly ONE third-party origin — no scheme wildcard, no youtube.com, no
+    // *.youtube…. This grants framing only: no script, style or connection
+    // from that origin runs in our page — the player lives in its own origin
+    // and is driven over postMessage, checked both ways.
+    "frame-src 'self' https://www.youtube-nocookie.com",
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",

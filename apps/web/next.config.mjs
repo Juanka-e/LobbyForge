@@ -59,7 +59,10 @@ const nextConfig = {
         value: 'max-age=63072000; includeSubDomains; preload',
       });
     }
-    return [{ source: '/:path*', headers }];
+    // Everything except marketplace plugin UI (ADR-007): /api/plugin-ui sets
+    // its own headers, and the lobby must be able to frame it — Next appends
+    // route headers to these, so a DENY here would win.
+    return [{ source: '/:path((?!api/plugin-ui/).*)', headers }];
   },
 };
 
