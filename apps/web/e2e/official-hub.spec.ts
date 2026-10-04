@@ -84,7 +84,8 @@ test.describe('official hub', () => {
     await expect(nav.getByRole('link', { name: 'Communities' })).toHaveAttribute('href', '/discover');
     await expect(nav.getByRole('link', { name: 'Marketplace' })).toHaveAttribute('href', '/marketplace');
     await expect(nav.getByRole('link', { name: 'Download' })).toHaveAttribute('href', '/download');
-    await expect(nav.getByRole('link', { name: 'Docs' })).toHaveAttribute('href', `${REPO_URL}/tree/main/docs`);
+    // The developer docs live on the hub itself now (/developers), not on GitHub.
+    await expect(nav.getByRole('link', { name: 'Developers' })).toHaveAttribute('href', '/developers');
     await expect(page.getByRole('link', { name: 'Sign in', exact: true })).toHaveAttribute('href', '/login');
     await expect(page.getByRole('link', { name: 'Get started' }).first()).toHaveAttribute('href', '/register');
 

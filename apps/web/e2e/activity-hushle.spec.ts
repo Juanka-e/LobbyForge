@@ -170,6 +170,22 @@ test.describe('Hushle through the lobby UI', () => {
     // A channel holds one open activity: end a leftover one so the hub offers a launch.
     await endOpenSessions();
 
+    // The host seats "everyone in the room", and a previous spec's players
+    // stay in the room's presence for up to 90 s after their browser closed
+    // (voice-ui-audio leaves three). Wait until nobody but the host is there.
+    test.setTimeout(180_000);
+    await expect
+      .poll(
+        async () => {
+          const res = await hostCtx.request.get(`/api/servers/${serverId}/channels/${voiceChannelId}/presence`);
+          if (!res.ok()) return -1;
+          const { presences } = (await res.json()) as { presences: Array<{ userId: string }> };
+          return presences.filter((p) => p.userId !== host.uid).length;
+        },
+        { timeout: 120_000, intervals: [3_000], message: 'the voice room empties of earlier specs’ players' }
+      )
+      .toBe(0);
+
     // ── Three guests, each invited into the server.
     const guest = async (): Promise<Seat> => {
       const ctx = await newUserContext(ownBrowser);
