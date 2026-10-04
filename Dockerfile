@@ -33,8 +33,11 @@ RUN pnpm --filter @lobbyforge/config build && \
 
 FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS runtime
 
-# PostgreSQL client tools for lfctl backup create/restore (pg_dump, pg_restore, psql)
-RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client && rm -rf /var/lib/apt/lists/*
+# PostgreSQL client tools for lfctl backup create/restore (pg_dump, pg_restore, psql).
+# libpcre2-8-0 is listed so apt upgrades it to the patched Debian build: the
+# base image lags behind Debian's pcre2 security fixes (CVE-2026-103111 and
+# earlier, fixed in 10.42-1+deb12u2).
+RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client libpcre2-8-0 && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable && corepack prepare pnpm@10.12.1 --activate
 WORKDIR /app

@@ -98,3 +98,6 @@ infra/nginx/conf.d/cf-real-ip.conf
 # Written by `next dev` (Next 16 agent hints); regenerated on every dev run.
 apps/web/AGENTS.md
 apps/web/CLAUDE.md
+
+# Install root the no-Docker plugin-frame suite builds on every run.
+apps/web/e2e-sandbox/.install/

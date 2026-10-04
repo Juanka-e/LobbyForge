@@ -1,6 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
 import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -19,7 +18,9 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..', '..', '..');
 export const PORT = 19598;
-export const INSTALL_DIR = join(tmpdir(), 'lf-plugin-frame-e2e');
+// Inside the checkout (gitignored), not the shared OS temp dir, where
+// another user could plant files before this run writes its own.
+export const INSTALL_DIR = join(here, '.install');
 const DIGEST = '0'.repeat(64);
 
 /** A sandbox-v1 bundle as the installer leaves it (the route re-validates it). */

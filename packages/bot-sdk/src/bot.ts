@@ -278,6 +278,11 @@ const RATE_LIMITED_MIN_DELAY_MS = 10_000;
 
 type ConnectWaiter = { resolve: () => void; reject: (error: Error) => void };
 
+/** One quoted line: an error message can come from the server, and a newline in it would fake a log entry. */
+function quoteForLog(value: unknown): string {
+  return JSON.stringify(value instanceof Error ? `${value.name}: ${value.message}` : String(value));
+}
+
 function closeError(code: number, reason: string, last: BotErrorMessage | null): BotApiError {
   const message = last?.message ?? (reason || `The event stream closed with code ${code}`);
   if (code === BotCloseCode.UNAUTHORIZED) return new BotAuthError(message, last?.code ?? 'unauthorized');
@@ -464,7 +469,7 @@ export class LobbyForgeBot {
   private emit<K extends LobbyForgeBotEventName>(event: K, payload: LobbyForgeBotEvents[K]): void {
     const set = this.listeners.get(event);
     if (!set || set.size === 0) {
-      if (event === 'error') console.error('[lobbyforge-bot]', payload);
+      if (event === 'error') console.error('[lobbyforge-bot] unhandled error:', quoteForLog(payload));
       return;
     }
     for (const listener of [...set]) {
@@ -482,7 +487,7 @@ export class LobbyForgeBot {
   private listenerFailed(event: LobbyForgeBotEventName, err: unknown): void {
     const error = err instanceof Error ? err : new Error(String(err));
     if (event === 'error') {
-      console.error('[lobbyforge-bot] error listener failed:', error);
+      console.error('[lobbyforge-bot] error listener failed:', quoteForLog(error));
       return;
     }
     this.emit('error', error);

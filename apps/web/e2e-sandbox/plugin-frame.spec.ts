@@ -55,9 +55,18 @@ function recordRequests(page: Page): Recorded[] {
   return seen;
 }
 
+/** The probe's outside target, matched on the parsed host. */
+function isExampleHost(url: string): boolean {
+  try {
+    return new URL(url).hostname === 'example.com';
+  } catch {
+    return false;
+  }
+}
+
 /** Nothing for example.com got a response: each attempt was blocked by CSP in the browser. */
 function expectNothingLeft(requests: Recorded[]) {
-  const external = requests.filter((r) => r.url.includes('example.com'));
+  const external = requests.filter((r) => isExampleHost(r.url));
   for (const r of external) {
     expect(r.status, r.url).toBeUndefined();
     expect(r.failure, r.url).toMatch(/csp/i);
@@ -235,8 +244,8 @@ test('the frame cannot navigate itself off the app: the parent’s frame-src sto
   await page.waitForTimeout(1500);
   expectNothingLeft(requests);
   expect(requests.some((r) => r.url.includes('leak=1') && r.status !== undefined)).toBe(false);
-  expect(page.frames().some((f) => f.url().startsWith('https://example.com'))).toBe(false);
-  console.info('[after navigation]', JSON.stringify(page.frames().map((f) => f.url())), JSON.stringify(requests.filter((r) => r.url.includes('example.com')).map((r) => ({ url: r.url, failure: r.failure }))));
+  expect(page.frames().some((f) => isExampleHost(f.url()))).toBe(false);
+  console.info('[after navigation]', JSON.stringify(page.frames().map((f) => f.url())), JSON.stringify(requests.filter((r) => isExampleHost(r.url)).map((r) => ({ url: r.url, failure: r.failure }))));
 });
 
 test('the app’s own pages cannot run a plugin file, and its HTML never opens top-level', async ({ page }) => {

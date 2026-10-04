@@ -52,7 +52,8 @@ function send(res, status, body) {
 /** Decide what to answer for one verified delivery. */
 function handle(delivery) {
   if (delivery.event !== 'interaction_create') {
-    console.info(`event ${delivery.event}`, delivery.data);
+    // JSON keeps whatever the payload holds on one line.
+    console.info('event %s', JSON.stringify({ event: delivery.event, data: delivery.data }));
     return undefined; // 204: acknowledged
   }
   const { interaction } = delivery.data;
