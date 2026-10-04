@@ -2,6 +2,186 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Bot API v2 and sandboxed marketplace - 2026-10-03
+
+### Accounts and sessions
+- Device cookies for the sign-in limit (OWASP "Slow Down Online Guessing
+  Attacks with Device Cookies"). Anyone who knew an address could keep its
+  owner locked out in 15-minute stretches. Now a successful sign-in on the
+  login form or the desktop handoff start sets `lf_device`: HttpOnly,
+  SameSite=Lax, Secure in production, 180 days. It is MAC'd with a key
+  derived from the session secret and holds up to 5 accounts per browser,
+  stored as an HMAC of the email plus a random nonce, never the address.
+  When an attempt carries a valid entry for the submitted email, it is
+  counted in that device's own bucket (10 failures / 15 min) and is not
+  refused by the account-wide lock. Its success never clears the account
+  counter. A device whose bucket fills is untrusted until its window ends
+  and falls back to the account counter. Each entry is also bound to the
+  account's password hash at issue time (an HMAC of the email and the
+  hash, under its own derived key), so a password change, which is also
+  how a user signs out everywhere, voids every device entry of that
+  account. The binding is checked after the account lookup and before
+  the password check. An attempt with a stale entry is charged to the
+  account-wide counter and refused while the account is locked, so
+  whoever signed in once with the old password keeps no bucket of guesses
+  for the remaining 180 days. A fresh sign-in issues a new entry, and the
+  check does the same work for unknown emails. Everything else is
+  unchanged: attempts without a valid cookie (none, forged, expired,
+  another account's) are counted before anything is looked up, unknown
+  and known emails get identical responses (unknown emails never earn a
+  cookie), key names are HMAC'd, and a Redis outage in production fails
+  closed. See "Device cookies" in `docs/GUEST_AUTH.md`.
+
+### Marketplace
+- Marketplace plugin code runs sandboxed (ADR-007, server side). A bundle
+  is now `sdk: "sandbox-v1"`: `manifest.json` + `server.js` (+ optional
+  `ui/`). `server.js` is plain JavaScript that assigns `globalThis.plugin`
+  and runs in a QuickJS WebAssembly VM (`quickjs-emscripten-core` +
+  `@jitl/quickjs-wasmfile-release-sync` 0.32.0, pinned) inside the plugin
+  worker: no `require`/`import`, `process`, file system, network, timers
+  or shared memory, and no host functions at all. Every call gets a fresh
+  WebAssembly instance, 32 MB of VM memory, a 256 KiB VM stack and the
+  call budget (`PLUGIN_CALL_BUDGET_MS`, now 2 s by default) as an
+  interrupt deadline; the result stays capped at 4 MiB. The interrupt is
+  checked between bytecodes, so a long native operation could overrun it
+  (measured: `sort()` in a loop ran 298 s past a 300 ms deadline) — calls
+  therefore run in a small pool of executor threads that are terminated
+  shortly after the budget. A runaway plugin fails its call, never the
+  worker. `ctx` is plain data: `players`, `now`, `random()` (drawn from
+  CSPRNG values the worker passes in; the call fails when they run out),
+  `locale`, `sessionId`, `serverId`, `hostId`, `actorId`. The per-call
+  Node child process (ADR-001) is gone.
+- Legacy Node bundles (`index.js`) no longer install or load. The
+  installer refuses an archive without `manifest.json` and `server.js` at
+  its root before extracting it, and validates the manifest (action
+  policies in the `GamePluginActionPolicy` shape, unknown policy keys
+  refused, id and version equal to the catalog entry's, `ui/index.html`
+  when `ui: true`). Digest pinning, the tar scan and `active.json` are
+  unchanged.
+- Marketplace plugins now get the official plugins' host features. The
+  manifest's `actionPolicies` apply on the actions route (member and
+  player actions, `actorFields`, `joinsRoster`, `audit`); the web app
+  reads them from its own copy of the files and refuses a worker that
+  reports different ones. `validateAction` runs before dispatch. A
+  reducer that returns its input state is a refused action (no roster
+  join, no audit), as for official plugins. `projectState(state,
+  viewerId, ctx)` gives per-viewer hidden state on every read path — the
+  activity GET, the SSE snapshot and state events, the actions response
+  and the WebSocket gateway; a failed projection never falls back to the
+  full state, and a plugin that is not loaded has its state withheld.
+  Without `projectState` the state is public and the lobby says so.
+- The gateway asks the web app for the projection of any plugin outside
+  core's rules (`isCoreProjectedPlugin` in `@lobbyforge/core`) through
+  the new internal `POST /api/internal/activity-projection`, signed with a
+  key derived from the session secret and re-checking the viewer's
+  access; if web cannot answer, the WebSocket event carries no state.
+- The plugin worker sits on its own internal network, `plugin-sandbox`,
+  which only `web` joins: no route to Postgres, Redis, LiveKit or the
+  gateway. It makes no outbound calls (no plugin storage in sandbox v1;
+  `PLUGIN_HOST_ORIGIN` is gone from its environment).
+- Example: `examples/plugins/sandbox-buzzer` (manifest, `server.js` whose
+  projection hides who buzzed first until the host reveals, and
+  `pack.mjs`, which writes a reproducible tarball and its SHA-256). See
+  `docs/PLUGIN_PUBLISHING.md`.
+- Marketplace plugins can ship their own UI, and it runs sandboxed
+  (ADR-007, client side). A bundle with `ui: true` and a `ui/` folder is
+  shown in the lobby in `<iframe sandbox="allow-scripts">` (no
+  `allow-same-origin`): an opaque origin that cannot read the app's
+  cookies, storage or DOM. The files come from the new public route
+  `GET /api/plugin-ui/{pluginId}/{version}/{...path}`, which serves only
+  the ACTIVE version of an installed plugin that declares a UI, only an
+  allowlist of extensions with fixed types, and refuses traversal. Its
+  CSP is ADR-007's (`default-src 'none'`, `connect-src 'none'`,
+  `frame-ancestors 'self'`, …) plus `sandbox allow-scripts`, so a plugin
+  page stays sandboxed even if opened directly, and the frame has no
+  network. Fetch Metadata keeps the files from being used anywhere else:
+  the HTML loads only as an iframe document, and the app's own pages can
+  never load a plugin script (the app's `script-src 'self'` would
+  otherwise make one a gadget). The app CSP gains `frame-src 'self'`; the
+  middleware and `next.config.mjs` leave that route to its own headers.
+- The lobby talks to the frame with postMessage protocol v1: `init` and
+  `state` (always the state already projected for the viewer) one way;
+  `ready`, `action` and `resize` the other. Messages are accepted only
+  from that iframe's window with origin `null`, checked with zod, capped
+  at 64 KiB, actions at 10 per second, heights at 200–1200 px. Actions go
+  through the same actions route and session as official panels. A plugin
+  without `projectState` gets a "This app doesn't hide information"
+  notice. `GET /api/plugin-ui/{pluginId}` (signed-in) tells the lobby
+  which version to frame and whether the plugin projects its state.
+- `@lobbyforge/plugin-sdk/frame`: a dependency-free frame client
+  (`connect({ onInit, onState })` → `dispatch`, `resize`), with the
+  handshake, auto-resize and host theme variables, plus the shared
+  protocol types and limits. `scripts/vendor-frame-client.mjs` copies it
+  into a plugin's `ui/` folder (no CDN inside the sandbox); a test keeps
+  the copy in the sandbox-buzzer example current. See "Marketplace plugin
+  UI (sandboxed iframe)" in `docs/PLUGIN_SDK.md`.
+
+### Bots (Bot API v2 review fixes)
+- A bot's channel access mode is stored (`bots.channel_access_mode`,
+  `'all'` | `'selected'`, in migration 0044). A bot limited to chosen
+  channels whose last channel is deleted or revoked now reaches NO
+  channel; before, "no grant rows" read as the v1 rule and widened it to
+  every open channel. The same holds for the gateway feed, the endpoint
+  fan-out and the composer's command list. The single-channel revoke no
+  longer refuses the last grant (`last_channel_access` is gone), and
+  concurrent revokes cannot widen anything. Deleting a channel audits and
+  notifies the bots that had it and drops the fan-out cache.
+- When a channel gets a role restriction, bot grants on it made by someone
+  who cannot manage channels are dropped (audited as `bot.channel_access`
+  with `reason: 'channel_restricted'`).
+- A bot can no longer undo a manager's command switch by deleting and
+  re-registering the command: the managers' `enabled` and channel
+  restriction are kept per bot and command name (`bot_command_overrides`).
+- An ephemeral answer is not delivered to an invoker who left, was banned
+  or lost the channel; the interaction fails (409 `interaction_failed`).
+  The gateway also re-checks channel access before forwarding
+  `interaction_create`.
+- Interactions are pruned: answers are cleared once expired, rows deleted
+  24 h after expiry. New indexes on `bot_interactions` (channel, command).
+- Webhook display names refuse every control / invisible-formatting /
+  separator character (bidi isolates U+2066–2069, U+061C, U+180E
+  included). nginx keeps `/api/webhooks/` out of the access log (the token
+  is in the path). Desktop notifications for bot and webhook messages say
+  "(BOT)" / "(WEBHOOK)". `verifySignature` clamps `toleranceSeconds` to
+  1–3600 (`Infinity` / `NaN` → 300).
+
+### Voice and moderation
+- Moderators can disconnect someone from voice, as in Discord:
+  `POST /api/servers/{id}/channels/{channelId}/members/{userId}/voice/disconnect`.
+  It needs **Mute Members** (there is no move-members permission) and the
+  same rank rule as kick, ban and server mute: the moderator must outrank
+  the target, nobody disconnects the owner, and disconnecting yourself is
+  refused with 400 `self_action` (leaving is your own Disconnect button).
+  It removes the member from that channel's LiveKit room, answers 404
+  `not_in_voice` if they are not in it, and writes a `voice.disconnect`
+  audit row. It does not block anyone and the token route does not refuse
+  them, so they can rejoin straight away. Their lobby says "You were
+  removed from the voice channel." In the voice roster, a "⋮" menu (or a
+  right-click) on a member offers **Disconnect from voice**, with no
+  confirmation step. It appears only for viewers with Mute Members and
+  only on members they outrank. Refusals are shown in the viewer's
+  language, using the `code` the route returns. The shared moderation
+  gate (`lib/member-authorization.ts`) now returns a `code` with every
+  refusal: `forbidden`, `insufficient_rank`, `target_is_owner`,
+  `self_action`, `target_not_member`, …
+- The audit log shows who the voice anti-cheat caught. Target users are
+  shown by name ("Mallory (0a1b2c3d…)", full id in the tooltip). Names are
+  looked up in one query that returns only the id and display name, never
+  avatars. `voice.track_rejected`, `voice.block_enforced` and
+  `voice.disconnect` rows get a one-line summary, for example "System
+  removed **Mallory** from #Main Lounge: audio published as camera — voice
+  blocked on this server for 10 minutes". The channel is named only if
+  the viewer can see it. A new **Voice security** filter collects these
+  three actions. The CSV export gains `target_name` and `summary` columns.
+- When a voice-blocked member rejoins with an old token, the webhook
+  writes a `voice.block_enforced` audit row (minutes left in
+  `retryAfterSeconds`). A reconnect loop can't flood the log: Redis
+  `SET NX EX` on `voice-block-enforced-audit:{server}:{user}` allows at
+  most one row per user, per server, per minute. If Redis is unavailable
+  the row is skipped and the removal still happens. A `voice.track_rejected`
+  row caught by its media type (a "video" camera track carrying
+  `audio/opus`) now records the `mimeType`.
+
 ## [Unreleased] - security follow-ups - 2026-10-03
 
 ### CI
