@@ -186,7 +186,9 @@ const config: Config = {
         },
         fadeInUp: {
           '0%': { opacity: '0', transform: 'translateY(10px)' },
-          '100%': { opacity: '1', transform: 'translateY(0)' },
+          // `none`: a lingering transform (animation `forwards`) creates a
+          // stacking context that covered the voice roster's menu.
+          '100%': { opacity: '1', transform: 'none' },
         },
         pulseSoft: {
           '0%, 100%': { opacity: '1' },

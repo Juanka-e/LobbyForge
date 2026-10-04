@@ -131,6 +131,28 @@ membership); the `POST` (the lobby's "Ask to join") is open only for the
 community the `/lobby` auto-join serves — elsewhere a newcomer asks
 through an invite.
 
+### Voice moderation
+
+| Method | Path | Body | Permission | Rate limit |
+|---|---|---|---|---|
+| `POST` | `/api/servers/{id}/channels/{channelId}/members/{userId}/voice/mute` | `{ muted: boolean }` | `MUTE_MEMBERS` | 20 / min |
+| `POST` | `/api/servers/{id}/channels/{channelId}/members/{userId}/voice/disconnect` | empty or `{}` | `MUTE_MEMBERS` | 20 / min |
+
+**Mute Members also allows disconnecting someone from a voice room.**
+There is no separate move-members permission. Discord grants
+"Disconnect" with Move Members, and the closest right LobbyForge has is
+the voice moderation it already grants with Mute Members. A disconnect
+takes nothing away: there is no block, and the member can rejoin
+straight away (see "Moderator disconnect" in
+[VOICE_ROOM.md](./VOICE_ROOM.md)). Both routes use the shared
+hierarchy gate (`authorizeModerationTarget`, operations `voice_mute` and
+`voice_disconnect`). The actor must strictly outrank the target, nobody
+acts on the owner, and acting on yourself is refused (400
+`self_action`). Refusals from the gate carry a `code`: `forbidden`,
+`insufficient_rank`, `target_is_owner`, `self_action`,
+`target_not_member`, `server_not_found`, `user_not_found`,
+`invalid_request`.
+
 ### Atomic Position Shifting (M15.6)
 
 `updateRole` now performs an atomic "move-and-shift" operation when the `position` is updated. It uses a database transaction to reorder sibling roles, ensuring no gaps or duplicates in the position sequence.

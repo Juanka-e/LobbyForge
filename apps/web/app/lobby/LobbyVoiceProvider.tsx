@@ -41,6 +41,7 @@ import {
 } from '@/lib/keybind-preferences';
 import { VOICE_TEST_STATE_EVENT, type VoiceTestKind } from '@/lib/voice-test-events';
 import { voiceBlockedNotice } from '@/lib/voice-block-notice';
+import { disconnectReasonNotice } from '@/lib/voice-disconnect-notice';
 import {
   isMicrophoneBlocked,
   publishBlockAtJoin,
@@ -315,21 +316,6 @@ const TIMED_OUT_NOTICE: VoiceNotice = { key: 'lobby.voice.error.timedOut' };
 
 function publishBlockedNotice(reason: PublishBlockedReason | null): VoiceNotice {
   return reason === 'timeout' ? TIMED_OUT_NOTICE : SERVER_MUTED_NOTICE;
-}
-
-function disconnectReasonNotice(reason: DisconnectReason | undefined): VoiceNotice | null {
-  switch (reason) {
-    case DisconnectReason.DUPLICATE_IDENTITY:
-      return { key: 'lobby.voice.error.duplicateSession' };
-    case DisconnectReason.PARTICIPANT_REMOVED:
-      return { key: 'lobby.voice.error.removed' };
-    case DisconnectReason.ROOM_DELETED:
-      return { key: 'lobby.voice.error.roomClosed' };
-    case DisconnectReason.SERVER_SHUTDOWN:
-      return { key: 'lobby.voice.error.serverRestarted' };
-    default:
-      return null;
-  }
 }
 
 function storedRemoteVolume(identity: string): number {
@@ -660,7 +646,10 @@ export function LobbyVoiceProvider({
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ displayName: localDisplayName || undefined }),
+          // The guest route's schema is strict and names this field
+          // `displayNameSeed`; `displayName` made every request carrying a
+          // name fail with 400.
+          body: JSON.stringify({ displayNameSeed: localDisplayName || undefined }),
         });
         if (!res.ok) throw new VoiceNoticeError({ key: 'lobby.voice.error.sessionFailed', params: { status: res.status } });
         const data = (await res.json()) as { guest: Guest };

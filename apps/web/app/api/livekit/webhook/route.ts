@@ -5,8 +5,13 @@ import { getDb } from '@/lib/db';
 import { getRoomServiceClient, requireLiveKitCredentials } from '@/lib/livekit';
 import { parseLiveKitRoomName } from '@/lib/livekit-room';
 import { withMachineApiSecurity } from '@/lib/security-headers';
-import { blockVoice, isVoiceBlocked, type VoiceBlockResult } from '@/lib/voice-block';
-import { isTrackInfoAllowed, protoTrackKind, protoTrackSource } from '@/lib/voice-track-policy';
+import { blockVoice, claimVoiceBlockEnforcedAudit, getVoiceBlock, type VoiceBlockResult } from '@/lib/voice-block';
+import {
+  isTrackInfoAllowed,
+  isTrackKindAllowedForSource,
+  protoTrackKind,
+  protoTrackSource,
+} from '@/lib/voice-track-policy';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -26,7 +31,9 @@ export const runtime = 'nodejs';
  * not revoke tokens. So the publisher is also blocked from voice on that
  * server for a while (lib/voice-block.ts — the token route refuses new
  * tokens), and on `participant_joined` a blocked identity is removed again
- * at once: that is a token minted before the block, still valid.
+ * at once: that is a token minted before the block, still valid. Both
+ * removals are audited (`voice.track_rejected`, `voice.block_enforced`) so
+ * moderators see who the check caught in the audit log.
  *
  * Called only by LiveKit over the compose network
  * (http://web:3000/api/livekit/webhook — `webhook:` in livekit.yaml, or
@@ -138,6 +145,10 @@ async function handlePost(req: Request): Promise<NextResponse> {
           room,
           source,
           type,
+          // Only when the declared type and source agree and the MEDIA was
+          // the problem (a "video" camera track carrying audio/opus): the
+          // audit log then says so instead of "video published as camera".
+          ...(offending.mimeType && isTrackKindAllowedForSource(type, source) ? { mimeType: offending.mimeType } : {}),
           ...(block ? { blockedSeconds: block.seconds } : {}),
         },
       });
@@ -152,8 +163,10 @@ async function handlePost(req: Request): Promise<NextResponse> {
 /**
  * `participant_joined` while blocked: the identity is connecting with a
  * token minted before the block (the token route refuses new ones). Remove
- * it at once. Only a server log line — the offence that caused the block
- * already wrote its audit row, and a reconnect loop must not flood the log.
+ * it at once, and write a lightweight `voice.block_enforced` audit row —
+ * at most one per user, per server, per minute (a Redis `SET NX EX` claim),
+ * so a reconnect loop cannot flood the log. No row when Redis cannot take
+ * the claim: the removal matters, the row does not.
  */
 async function handleParticipantJoined(event: WebhookEvent): Promise<NextResponse> {
   const room = event.room?.name ?? '';
@@ -163,9 +176,9 @@ async function handleParticipantJoined(event: WebhookEvent): Promise<NextRespons
     return NextResponse.json({ ok: true });
   }
 
-  let blocked: boolean;
+  let block: { retryAfterSeconds: number } | null;
   try {
-    blocked = await isVoiceBlocked(scope, identity);
+    block = await getVoiceBlock(scope, identity);
   } catch (err) {
     // Fail OPEN here, and answer 200 rather than asking for a retry:
     // LiveKit queues a room's webhooks one after another (keyed by room
@@ -175,7 +188,7 @@ async function handleParticipantJoined(event: WebhookEvent): Promise<NextRespons
     console.error('[livekit/webhook] voice block check failed:', (err as Error).message);
     return NextResponse.json({ ok: true });
   }
-  if (!blocked) {
+  if (!block) {
     return NextResponse.json({ ok: true });
   }
 
@@ -188,7 +201,36 @@ async function handleParticipantJoined(event: WebhookEvent): Promise<NextRespons
       return NextResponse.json({ error: 'Failed to remove participant' }, { status: 503 });
     }
   }
+  await auditBlockEnforced(scope, room, identity, block.retryAfterSeconds);
   return NextResponse.json({ ok: true, removed: true });
+}
+
+/** The deduplicated `voice.block_enforced` row; never throws. */
+async function auditBlockEnforced(
+  scope: { serverId: string; channelId: string },
+  room: string,
+  identity: string,
+  retryAfterSeconds: number
+): Promise<void> {
+  let claimed: boolean;
+  try {
+    claimed = await claimVoiceBlockEnforcedAudit(scope.serverId, identity);
+  } catch {
+    return; // Redis unavailable: skip the row silently.
+  }
+  if (!claimed) return;
+  try {
+    await logAction(getDb(), {
+      serverId: scope.serverId,
+      actorUserId: null,
+      action: 'voice.block_enforced',
+      targetType: 'user',
+      targetId: identity,
+      metadata: { channelId: scope.channelId, room, retryAfterSeconds },
+    });
+  } catch (err) {
+    console.error('[audit] voice block enforcement failed:', (err as Error).message);
+  }
 }
 
 /**

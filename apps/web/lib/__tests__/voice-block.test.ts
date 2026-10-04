@@ -51,9 +51,11 @@ vi.mock('@/lib/redis', () => ({
 }));
 
 import {
+  VOICE_BLOCK_ENFORCED_AUDIT_WINDOW_SECONDS,
   VOICE_BLOCK_LADDER_SECONDS,
   VOICE_BLOCK_STRIKE_WINDOW_SECONDS,
   blockVoice,
+  claimVoiceBlockEnforcedAudit,
   getVoiceBlock,
   isVoiceBlocked,
   voiceBlockKey,
@@ -190,5 +192,34 @@ describe('voice block — idempotency and explicit lengths', () => {
   it('treats a block key without expiry (set by hand) as blocked', async () => {
     store.set(voiceBlockKey(SERVER_ID, USER), { value: '1', expiresAt: null });
     expect(await getVoiceBlock({ serverId: SERVER_ID }, USER)).toEqual({ retryAfterSeconds: 10 * MIN });
+  });
+});
+
+describe('voice block — enforcement audit dedupe', () => {
+  it('lets one voice.block_enforced row through per user, per server, per minute', async () => {
+    expect(VOICE_BLOCK_ENFORCED_AUDIT_WINDOW_SECONDS).toBe(60);
+    expect(await claimVoiceBlockEnforcedAudit(SERVER_ID, USER)).toBe(true);
+    // A reconnect loop inside the window writes nothing more…
+    vi.advanceTimersByTime(30_000);
+    expect(await claimVoiceBlockEnforcedAudit(SERVER_ID, USER)).toBe(false);
+    expect(await claimVoiceBlockEnforcedAudit(SERVER_ID, USER)).toBe(false);
+    // …another server or another user is counted on its own…
+    expect(await claimVoiceBlockEnforcedAudit(OTHER_SERVER_ID, USER)).toBe(true);
+    expect(await claimVoiceBlockEnforcedAudit(SERVER_ID, '0a1b2c3d-0000-4000-8000-0000000000bb')).toBe(true);
+    // …and the next window gets a row again.
+    vi.advanceTimersByTime(31_000);
+    expect(await claimVoiceBlockEnforcedAudit(SERVER_ID, USER)).toBe(true);
+  });
+
+  it('uses its own key, apart from the block itself', async () => {
+    await claimVoiceBlockEnforcedAudit(SERVER_ID, USER);
+    expect([...store.keys()]).toEqual([`lf:test:voice-block-enforced-audit:${SERVER_ID}:${USER}`]);
+    expect(await isVoiceBlocked({ serverId: SERVER_ID }, USER)).toBe(false);
+  });
+
+  it('claims nothing without a server or user', async () => {
+    expect(await claimVoiceBlockEnforcedAudit('', USER)).toBe(false);
+    expect(await claimVoiceBlockEnforcedAudit(SERVER_ID, '')).toBe(false);
+    expect(store.size).toBe(0);
   });
 });

@@ -1,9 +1,14 @@
 'use client';
 
-import { Fragment, useEffect, useRef, useState, useCallback } from 'react';
+import { Fragment, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
 import { getRealtimeClient } from '@/lib/realtime-client';
 import { useT } from '@/lib/i18n/client';
+import type { Translator } from '@/lib/i18n/core';
+import { readMessageInteraction, readMessageWebhook, type MessageInteractionInfo, type MessageWebhookInfo } from '@/lib/bots/interaction-meta';
+import { interactionStore, useInteractionState } from '@/lib/bots/interaction-store';
 import { BotAvatar, BotBadge } from './BotIdentity';
+import { WebhookAvatar, WebhookBadge } from './WebhookIdentity';
+import { EphemeralAnswerRow, InteractionHeader, PendingInteractionRow } from './slash/InteractionRows';
 import {
   formatDaySeparator,
   formatFullTimestamp,
@@ -40,6 +45,10 @@ interface ChatMessage {
   pinned?: boolean;
   /** Set when a bot wrote the message — rendered with the BOT badge. */
   bot?: MessageBot | null;
+  /** A bot's answer to a slash command: "↳ <user> used /<command>". */
+  interaction?: MessageInteractionInfo | null;
+  /** Posted by an incoming channel webhook — rendered with the WEBHOOK badge. */
+  webhook?: MessageWebhookInfo | null;
 }
 
 interface MessageBot {
@@ -53,13 +62,47 @@ interface WsChatEnvelope {
   message: {
     id: string;
     channelId: string;
-    /** null when a bot wrote the message. */
+    /** null when a bot or a webhook wrote the message. */
     userId: string | null;
+    botId?: string | null;
     bot?: MessageBot | null;
     content: string;
+    metadata?: Record<string, unknown> | null;
     createdAt: string;
   };
   at: string;
+}
+
+/**
+ * Who wrote a message the API or the realtime feed delivered: a bot (with
+ * its interaction header, if it answered a command), a webhook, a member,
+ * or nobody any more.
+ */
+function describeAuthor(
+  message: { userId: string | null; botId?: string | null; bot?: unknown; metadata?: unknown },
+  names: Map<string, string>,
+  t: Translator,
+  unknownMember: string
+): Pick<ChatMessage, 'author' | 'bot' | 'interaction' | 'webhook'> {
+  const bot = message.userId ? null : asMessageBot(message.bot);
+  if (bot) {
+    return {
+      author: bot.name || t('lobbyMain.chat.unknownBot'),
+      bot,
+      interaction: readMessageInteraction({ userId: message.userId, botId: message.botId ?? bot.id, metadata: message.metadata }),
+      webhook: null,
+    };
+  }
+  const webhook = readMessageWebhook(message);
+  if (webhook) {
+    return { author: webhook.displayName || t('interactions.webhook.unnamed'), bot: null, interaction: null, webhook };
+  }
+  return {
+    author: message.userId ? (names.get(message.userId) ?? unknownMember) : t('lobbyMain.chat.deletedUser'),
+    bot: null,
+    interaction: null,
+    webhook: null,
+  };
 }
 
 /** A bot author from an API or realtime payload; anything malformed is not a bot. */
@@ -94,6 +137,32 @@ export interface LobbyLiveRosterData {
 
 const PRESENCE_POLL_MS = 8_000;
 
+interface TimelineItem {
+  key: string;
+  createdAt: string;
+  node: ReactNode;
+}
+
+/** Merge two newest-first lists into one, newest first (stable for equal times). */
+function mergeNewestFirst(a: TimelineItem[], b: TimelineItem[]): TimelineItem[] {
+  if (b.length === 0) return a;
+  const out: TimelineItem[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length || j < b.length) {
+    const left = a[i];
+    const right = b[j];
+    if (left && (!right || Date.parse(left.createdAt) > Date.parse(right.createdAt))) {
+      out.push(left);
+      i += 1;
+    } else if (right) {
+      out.push(right);
+      j += 1;
+    }
+  }
+  return out;
+}
+
 /** The rule between two days of conversation. */
 function DaySeparator({ at }: { at: string }) {
   const t = useT();
@@ -114,11 +183,21 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
   const nameCacheRef = useRef<Map<string, string>>(new Map(Object.entries(data.knownNames)));
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const notificationPrefsRef = useRef({ level: 'mentions', desktopEnabled: true, showPreview: true, sound: 'default' });
+  const localRows = useInteractionState();
+  /** Ids that came in through the realtime feed or the local echo. */
+  const liveIdsRef = useRef<Set<string>>(new Set());
 
   // Sync name cache when knownNames prop changes (parent re-render with new data).
   useEffect(() => {
     for (const [k, v] of Object.entries(data.knownNames)) nameCacheRef.current.set(k, v);
   }, [data.knownNames]);
+
+  // Answers already in the first paint settle their pending rows.
+  useEffect(() => {
+    for (const message of data.initialMessages) {
+      if (message.interaction) interactionStore.markAnswered(message.interaction.id);
+    }
+  }, [data.initialMessages]);
 
   useEffect(() => {
     let cancelled = false;
@@ -156,29 +235,32 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
           cache: 'no-store',
         });
         if (!res.ok) return;
-        const body = (await res.json()) as { messages?: Array<{ id: string; userId: string | null; content: string; createdAt: string; metadata?: Record<string, unknown>; blocked?: boolean; bot?: unknown }> };
+        const body = (await res.json()) as { messages?: Array<{ id: string; userId: string | null; botId?: string | null; content: string; createdAt: string; metadata?: Record<string, unknown>; blocked?: boolean; bot?: unknown }> };
         if (cancelled || !body.messages) return;
-        setMessages(body.messages.map((message) => {
-          const bot = message.userId ? null : asMessageBot(message.bot);
+        const history: ChatMessage[] = body.messages.map((message) => {
+          const who = describeAuthor(message, nameCacheRef.current, t, t('lobbyMain.chat.unknownUser'));
+          // A pending row whose public answer is already in the history is done.
+          if (who.interaction) interactionStore.markAnswered(who.interaction.id);
           return {
             id: message.id,
             authorId: message.userId,
-            author: message.blocked
-              ? t('lobbyMain.chat.blockedUser')
-              : bot
-                ? (bot.name || t('lobbyMain.chat.unknownBot'))
-                : message.userId
-                  ? (nameCacheRef.current.get(message.userId) ?? t('lobbyMain.chat.unknownUser'))
-                  : t('lobbyMain.chat.deletedUser'),
+            ...who,
+            author: message.blocked ? t('lobbyMain.chat.blockedUser') : who.author,
             authorColor: message.userId === data.currentUserId ? 'primary' : 'default',
             timestamp: formatMessageTimestamp(message.createdAt, t),
             createdAt: message.createdAt,
             body: message.content,
             blocked: message.blocked,
             pinned: typeof message.metadata?.$pinnedAt === 'string',
-            bot,
           };
-        }));
+        });
+        // A message that arrived live while the history was loading (a
+        // bot's answer can come back within milliseconds) must survive it.
+        setMessages((current) => {
+          const known = new Set(history.map((m) => m.id));
+          const live = current.filter((m) => liveIdsRef.current.has(m.id) && !known.has(m.id));
+          return [...live, ...history];
+        });
       } catch {
         // Realtime/local echo can continue from the current snapshot.
       }
@@ -194,23 +276,21 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
     const unsubscribe = rc.subscribe<WsChatEnvelope>(topic, (env) => {
       if (!env || env.type !== 'message' || !env.message) return;
       const m = env.message;
-      const bot = m.userId ? null : asMessageBot(m.bot);
-      const author = bot
-        ? (bot.name || t('lobbyMain.chat.unknownBot'))
-        : m.userId
-          ? (nameCacheRef.current.get(m.userId) ?? t('lobbyMain.chat.unknownUser'))
-          : t('lobbyMain.chat.deletedUser');
+      const who = describeAuthor(m, nameCacheRef.current, t, t('lobbyMain.chat.unknownUser'));
+      const author = who.author;
+      // The public answer to this member's command: its pending row is done.
+      if (who.interaction) interactionStore.markAnswered(who.interaction.id);
+      liveIdsRef.current.add(m.id);
       setMessages((prev) => {
         if (prev.some((x) => x.id === m.id)) return prev;
         const next: ChatMessage = {
           id: m.id,
           authorId: m.userId,
-          author,
+          ...who,
           authorColor: m.userId === data.currentUserId ? 'primary' : 'default',
           timestamp: formatMessageTimestamp(m.createdAt, t),
           createdAt: m.createdAt,
           body: m.content,
-          bot,
         };
         // Newest first; UI uses flex-col-reverse so newest appears at bottom.
         return [next, ...prev];
@@ -230,7 +310,14 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
         Notification.permission === 'granted' &&
         document.visibilityState !== 'visible'
       ) {
-        new Notification(t('lobbyMain.chat.notificationTitle', { author, channel: data.channelName }), {
+        // A bot or a webhook is never mistaken for a member — not even in
+        // a desktop notification, which cannot show the badge.
+        const titleKey = who.webhook
+          ? 'lobbyMain.chat.notificationTitleWebhook'
+          : who.bot
+            ? 'lobbyMain.chat.notificationTitleBot'
+            : 'lobbyMain.chat.notificationTitle';
+        new Notification(t(titleKey, { author, channel: data.channelName }), {
           body: prefs.showPreview ? m.content : t('lobbyMain.chat.notificationBody'),
           silent: prefs.sound === 'none',
           tag: `lf-message:${data.channelId}`,
@@ -253,6 +340,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
       };
       if (!detail || detail.channelId !== data.channelId) return;
       const m = detail.message;
+      liveIdsRef.current.add(m.id);
       setMessages((prev) => {
         if (prev.some((x) => x.id === m.id)) return prev;
         const author = m.userId
@@ -328,9 +416,53 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
     (!normalizedSearch || `${message.author} ${message.body}`.toLocaleLowerCase().includes(normalizedSearch))
   );
 
+  // The invoker's own rows — pending commands and answers only they can
+  // see — sit in the timeline by time. They are not messages: a search or
+  // the pinned view leaves them out.
+  const resolveName = (id: string | null) =>
+    (id ? nameCacheRef.current.get(id) : undefined) ?? t('lobbyMain.chat.unknownUser');
+  const invokerName = data.currentUserId
+    ? (nameCacheRef.current.get(data.currentUserId) ?? t('lobbyMain.chat.you'))
+    : t('lobbyMain.chat.you');
+  const filtering = showPinned || Boolean(normalizedSearch);
+  const inChannel = (row: { channelId: string; serverId: string | null }) =>
+    row.channelId === data.channelId && (!row.serverId || row.serverId === data.serverId);
+  const local: TimelineItem[] = filtering
+    ? []
+    : [
+        ...localRows.interactions.filter(inChannel).map((interaction) => ({
+          key: `pending:${interaction.id}`,
+          createdAt: interaction.createdAt,
+          node: <PendingInteractionRow interaction={interaction} invokerName={invokerName} />,
+        })),
+        ...localRows.ephemerals.filter(inChannel).map((answer) => ({
+          key: `ephemeral:${answer.key}`,
+          createdAt: answer.createdAt,
+          node: <EphemeralAnswerRow answer={answer} invokerName={invokerName} />,
+        })),
+      ].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const timeline = mergeNewestFirst(
+    visibleMessages.map((m) => ({
+      key: m.id,
+      createdAt: m.createdAt,
+      node: (
+        <LiveMessage
+          message={m}
+          invokedByName={m.interaction ? (m.interaction.invokedBy.name ?? resolveName(m.interaction.invokedBy.id)) : null}
+          currentUserId={data.currentUserId}
+          serverId={data.serverId}
+          channelId={data.channelId}
+          canManageMessages={data.canManageMessages}
+          onPinnedChange={(pinned) => setMessages((current) => current.map((item) => item.id === m.id ? { ...item, pinned } : item))}
+        />
+      ),
+    })),
+    local
+  );
+
   return (
-    <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-6 space-y-6 flex flex-col-reverse">
-      {visibleMessages.length === 0 ? (
+    <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-6 space-y-6 flex flex-col-reverse sm:px-6">
+      {timeline.length === 0 ? (
         <p className="font-body-md text-text-muted italic">
           {showPinned
             ? t('lobbyMain.chat.emptyPinned')
@@ -339,17 +471,17 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
               : t('lobbyMain.chat.empty')}
         </p>
       ) : null}
-      {visibleMessages.map((m, index) => {
-        // `visibleMessages` is newest-first and the column is reversed,
-        // so the message rendered ABOVE this one is the next entry. A
-        // separator belongs here when that one fell on an earlier day
-        // (or when this is the oldest message loaded).
-        const older = visibleMessages[index + 1];
-        const startsDay = !older || !isSameDay(older.createdAt, m.createdAt);
+      {timeline.map((item, index) => {
+        // `timeline` is newest-first and the column is reversed, so the
+        // item rendered ABOVE this one is the next entry. A separator
+        // belongs here when that one fell on an earlier day (or when this
+        // is the oldest item loaded).
+        const older = timeline[index + 1];
+        const startsDay = !older || !isSameDay(older.createdAt, item.createdAt);
         return (
-          <Fragment key={m.id}>
-            <LiveMessage message={m} currentUserId={data.currentUserId} serverId={data.serverId} channelId={data.channelId} canManageMessages={data.canManageMessages} onPinnedChange={(pinned) => setMessages((current) => current.map((item) => item.id === m.id ? { ...item, pinned } : item))} />
-            {startsDay ? <DaySeparator at={m.createdAt} /> : null}
+          <Fragment key={item.key}>
+            {item.node}
+            {startsDay ? <DaySeparator at={item.createdAt} /> : null}
           </Fragment>
         );
       })}
@@ -374,7 +506,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
   );
 }
 
-function LiveMessage({ message, currentUserId, serverId, channelId, canManageMessages, onPinnedChange }: { message: ChatMessage; currentUserId: string | null; serverId: string; channelId: string; canManageMessages: boolean; onPinnedChange: (pinned: boolean) => void }) {
+function LiveMessage({ message, invokedByName, currentUserId, serverId, channelId, canManageMessages, onPinnedChange }: { message: ChatMessage; invokedByName: string | null; currentUserId: string | null; serverId: string; channelId: string; canManageMessages: boolean; onPinnedChange: (pinned: boolean) => void }) {
   const t = useT();
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(message.body);
@@ -435,18 +567,26 @@ function LiveMessage({ message, currentUserId, serverId, channelId, canManageMes
   }
   const authorColorClass = message.authorColor === 'primary' ? 'text-primary' : 'text-text-primary';
   return (
-    <div data-chat-message data-bot-message={message.bot ? 'true' : undefined} className="flex gap-4 group hover:bg-surface-container/30 p-2 -mx-2 rounded-lg transition-colors animate-fade-in-up relative">
+    <div data-chat-message data-bot-message={message.bot ? 'true' : undefined} data-webhook-message={message.webhook ? 'true' : undefined} className="flex gap-4 group hover:bg-surface-container/30 p-2 -mx-2 rounded-lg transition-colors animate-fade-in-up relative">
       {message.bot ? (
         <BotAvatar size="md" className="mt-1" />
+      ) : message.webhook ? (
+        <WebhookAvatar className="mt-1" />
       ) : (
         <div data-chat-avatar className="chat-avatar w-10 h-10 rounded-full bg-secondary-container flex-shrink-0 mt-1 flex items-center justify-center font-bold text-text-primary">
           {message.author.charAt(0).toUpperCase()}
         </div>
       )}
-      <div className="flex flex-col w-full">
+      <div className="flex flex-col w-full min-w-0">
+        {message.bot && message.interaction ? (
+          <InteractionHeader
+            user={invokedByName ?? t('lobbyMain.chat.unknownUser')}
+            command={message.interaction.commandName}
+          />
+        ) : null}
         <div className="flex items-baseline gap-2">
           <span className={`font-label-sm font-medium ${authorColorClass}`}>{message.author}</span>
-          {message.bot ? <BotBadge className="self-center" /> : null}
+          {message.bot ? <BotBadge className="self-center" /> : message.webhook ? <WebhookBadge className="self-center" /> : null}
           <span
             className="font-label-xs text-[11px] text-text-secondary"
             title={formatFullTimestamp(message.createdAt, t)}
@@ -468,7 +608,7 @@ function LiveMessage({ message, currentUserId, serverId, channelId, canManageMes
             <button onClick={() => setEditing(false)} className="text-xs px-2 py-1 text-text-secondary hover:text-text-primary">{t('lobbyMain.chat.cancel')}</button>
           </div>
         ) : (
-          <p className="font-body-md text-text-secondary mt-1 whitespace-pre-wrap">{message.body}</p>
+          <p className="font-body-md text-text-secondary mt-1 whitespace-pre-wrap break-words">{message.body}</p>
         )}
       </div>
       {/* Hover action menu — only for own messages */}

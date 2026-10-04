@@ -8,6 +8,12 @@ describe('lobby voice client integration', () => {
     'utf8'
   );
 
+  it('creates a guest with the field the strict guest route accepts', () => {
+    // `{ displayName }` was rejected (400) by the route's .strict() schema.
+    expect(source).toContain('JSON.stringify({ displayNameSeed: localDisplayName');
+    expect(source).not.toContain('JSON.stringify({ displayName: localDisplayName');
+  });
+
   it('writes heartbeat data through the authenticated presence mutation route', () => {
     expect(source).toContain("fetch('/api/presence'");
     expect(source).toContain('serverId,');

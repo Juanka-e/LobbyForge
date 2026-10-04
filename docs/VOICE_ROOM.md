@@ -47,6 +47,42 @@ dev pages (`lib/public-endpoints.ts`).
 - Moderators with MUTE_MEMBERS get a mute control in the connected
   channel roster. The target's footer shows "Muted by a moderator".
 
+**Moderator disconnect (Discord's "Disconnect").**
+- `POST /api/servers/{id}/channels/{channelId}/members/{userId}/voice/disconnect`
+  removes the member from that channel's room
+  (`RemoveParticipant(liveKitRoomName(serverId, channelId), userId)`) and
+  writes a `voice.disconnect` audit row (moderator as actor, `channelId`
+  in the metadata). The body is empty or `{}`. A room name sent by the
+  client is refused, never trusted.
+- It needs MUTE_MEMBERS and goes through the moderation hierarchy gate
+  (`voice_disconnect` in `lib/member-authorization.ts`): the moderator
+  must outrank the target, the owner cannot be disconnected, and
+  disconnecting yourself is 400 `self_action` (leave with your own
+  Disconnect button). Not in the room: 404 `not_in_voice`. LiveKit
+  unreachable or not configured: 503 `voice_unavailable`. Every refusal
+  carries a `code` the lobby translates.
+- In the voice roster, a "⋮" button (or a right-click) on a member opens
+  a menu with **Disconnect from voice**. There is no confirmation step,
+  and Escape closes the menu. The menu shows only for viewers with
+  MUTE_MEMBERS and only on members they outrank. The lobby page works out
+  which members those are from the member list
+  (`lib/voice-moderation-targets.ts`); the route has the final say. It
+  works for any voice channel, including one the moderator is not in.
+- The disconnected member's client gets `PARTICIPANT_REMOVED` and shows
+  `lobby.voice.error.removed` ("You were removed from the voice channel."
+  / "Sesli kanaldan çıkarıldın.", `lib/voice-disconnect-notice.ts`). They
+  can click the channel and rejoin straight away.
+
+| | Moderator disconnect | Anti-cheat removal (below) |
+|---|---|---|
+| Who | A moderator with MUTE_MEMBERS who outranks the target | The LiveKit webhook (system) |
+| Why | Moderator's choice | A track whose kind does not match its source |
+| Rooms | That channel only | Every voice room of the server |
+| Voice block | None. The token route keeps issuing tokens | 10 → 30 → 120 min on that server. The token route answers 403 `voice_blocked` |
+| Rejoin with an old token | Allowed | Removed again on `participant_joined` (`voice.block_enforced`) |
+| What the member sees | "You were removed from the voice channel." | The same, then `voiceBlocked` with the minutes left when they try to rejoin |
+| Audit action | `voice.disconnect` | `voice.track_rejected`, then `voice.block_enforced` |
+
 **A track's kind must match its source (security review AUTHZ-006
 follow-up).** LiveKit checks the source a new track claims against
 `canPublishSources` and nothing else. It never checks that a Camera track
@@ -97,11 +133,24 @@ that contradicts the declared kind. The rule lives in one module,
     cannot be read, production refuses with a retryable 503 (the same
     rule as session revocation) and dev/test let the token through.
   - On `participant_joined`, a blocked identity is removed at once: it is
-    connecting with a token minted before the block. This writes only a
-    server log line, no audit row. If Redis cannot be read here the
-    webhook answers 200 and does nothing (fail open): LiveKit queues a
-    room's webhooks one after another, and retrying every join would
-    hold back that room's `track_published` events.
+    connecting with a token minted before the block. This logs a server
+    line and writes a `voice.block_enforced` audit row (`channelId`,
+    `room`, `retryAfterSeconds`), at most one per user, per server, per
+    minute. The limit is a Redis `SET NX EX` key,
+    `lf:{env}:voice-block-enforced-audit:{serverId}:{userId}`, so a
+    reconnect loop cannot flood the log. The row is skipped when Redis
+    cannot take that key. If Redis cannot be read for the block check
+    itself, the webhook answers 200 and does nothing (fail open): LiveKit
+    queues a room's webhooks one after another, and retrying every join
+    would hold back that room's `track_published` events.
+  - **In the audit log** (Community Settings → Audit Log), the **Voice
+    security** filter lists `voice.track_rejected`, `voice.block_enforced`
+    and `voice.disconnect` (below). Each row names the member, gives the
+    channel when the viewer can see it, and has a one-line summary, for
+    example "System removed Mallory (0a1b2c3d…) from #Main Lounge: audio
+    published as camera — voice blocked on this server for 10 minutes".
+    A rejection caught by its media type (a "video" camera track
+    carrying `audio/opus`) also records the `mimeType`.
   - Every other event gets a 200 and nothing else happens.
 - **Token lifetime.** LiveKit tokens live 10 minutes
   (`LIVEKIT_TOKEN_TTL_SECONDS`). The token only has to get a participant

@@ -1,23 +1,24 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useT } from '@/lib/i18n/client';
 import type { Translator } from '@/lib/i18n/core';
+import { rich } from '@/lib/i18n/rich';
 import { auditActionLabelKey } from '@/lib/audit-action-labels';
+import {
+  VOICE_SECURITY_ACTIONS,
+  auditEventSummary,
+  auditEventSummaryText,
+  auditTargetLabel,
+  type AuditEntryView,
+} from '@/lib/audit-event-summary';
 
-export interface AuditEntryView {
-  id: string;
-  action: string;
-  targetType: string | null;
-  targetId: string | null;
-  metadata: Record<string, unknown>;
-  actorName: string | null;
-  createdAt: string;
-}
+export type { AuditEntryView };
 
 type Category =
   | 'all'
   | 'moderation'
+  | 'voice'
   | 'roles'
   | 'invites'
   | 'channels'
@@ -29,6 +30,7 @@ type Category =
 const CATEGORY_LABEL_KEYS: Record<Category, string> = {
   all: 'admin.audit.category.all',
   moderation: 'admin.audit.category.moderation',
+  voice: 'admin.audit.category.voice',
   roles: 'admin.audit.category.roles',
   invites: 'admin.audit.category.invites',
   channels: 'admin.audit.category.channels',
@@ -46,6 +48,7 @@ function actionLabel(t: Translator, action: string): string {
 const FILTERS: Category[] = [
   'all',
   'moderation',
+  'voice',
   'roles',
   'invites',
   'channels',
@@ -74,9 +77,10 @@ export default function AuditClient({
         ...entry,
         category: categorizeAction(entry.action),
         metadataText: stableJson(entry.metadata),
+        summaryText: auditEventSummaryText(t, entry),
         timestamp: new Date(entry.createdAt).getTime(),
       })),
-    [entries]
+    [entries, t]
   );
 
   const counts = useMemo(() => {
@@ -101,6 +105,9 @@ export default function AuditClient({
           entry.actorName ?? systemActor,
           entry.targetType ?? '',
           entry.targetId ?? '',
+          entry.targetName ?? '',
+          entry.channelName ?? '',
+          entry.summaryText,
           entry.metadataText,
         ]
           .join(' ')
@@ -118,10 +125,12 @@ export default function AuditClient({
       t(CATEGORY_LABEL_KEYS[entry.category]),
       entry.targetType ?? '',
       entry.targetId ?? '',
+      entry.targetName ?? '',
+      entry.summaryText,
       entry.metadataText,
     ]);
     const csv = [
-      ['created_at', 'actor', 'action', 'category', 'target_type', 'target_id', 'metadata'],
+      ['created_at', 'actor', 'action', 'category', 'target_type', 'target_id', 'target_name', 'summary', 'metadata'],
       ...rows,
     ]
       .map((row) => row.map(formatCsvCell).join(','))
@@ -249,9 +258,15 @@ function AuditRow({
   const t = useT();
   const { icon, tone } = describeAction(entry.action);
   const targetKind = entry.targetType ? targetTypeLabel(t, entry.targetType) : null;
-  const target = targetKind
-    ? `${targetKind}${entry.targetId ? `: ${truncate(entry.targetId, 24)}` : ''}`
+  // "user: Ayşe (0a1b2c3d…)" — the full id stays in the tooltip, the
+  // search box and the CSV export.
+  const targetText = entry.targetId
+    ? entry.targetName
+      ? auditTargetLabel(t, entry)
+      : truncate(entry.targetId, 24)
     : null;
+  const target = targetKind ? `${targetKind}${targetText ? `: ${targetText}` : ''}` : null;
+  const summary = renderSummary(t, entry);
 
   return (
     <article className="rounded-xl border border-border-subtle bg-surface p-4 transition-colors hover:bg-surface-raised/40">
@@ -259,7 +274,9 @@ function AuditRow({
         <div
           className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border ${tone.classes.bg} ${tone.classes.border}`}
         >
-          <span className={`material-symbols-outlined text-lg ${tone.classes.icon}`}>{icon}</span>
+          <span className={`material-symbols-outlined text-lg ${tone.classes.icon}`} aria-hidden>
+            {icon}
+          </span>
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
@@ -268,11 +285,18 @@ function AuditRow({
             </span>
             <span className="text-text-secondary">{actionLabel(t, entry.action)}</span>
           </div>
+          {summary ? (
+            <p className="mt-1 text-sm text-text-secondary" data-testid="audit-summary">
+              {summary}
+            </p>
+          ) : null}
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-muted">
             <span className="rounded bg-surface-container px-2 py-0.5 text-text-secondary">
               {t(CATEGORY_LABEL_KEYS[entry.category])}
             </span>
-            {target ? <span>{t('admin.audit.target', { target })}</span> : null}
+            {target ? (
+              <span title={entry.targetId ?? undefined}>{t('admin.audit.target', { target })}</span>
+            ) : null}
             {/* The server formats in its own time zone; the browser's wins without a hydration error. */}
             <time dateTime={entry.createdAt} suppressHydrationWarning>
               {formatDateTime(entry.createdAt, t.locale)}
@@ -325,7 +349,24 @@ function SummaryCard({
   );
 }
 
+/**
+ * The row's one-line summary, names emphasised. Every piece of data — the
+ * names, the channel, a quoted mime type — goes in as an element, never
+ * through the text `rich()` scans for markers.
+ */
+function renderSummary(t: Translator, entry: AuditEntryView): ReactNode {
+  const summary = auditEventSummary(t, entry);
+  if (!summary) return null;
+  const emphasis = (text: string) => <strong className="font-medium text-text-primary">{text}</strong>;
+  return rich(t(summary.key, summary.params), {
+    ...summary.slots,
+    actor: emphasis(entry.actorName ?? t('admin.audit.systemActor')),
+    target: emphasis(auditTargetLabel(t, entry)),
+  });
+}
+
 function categorizeAction(action: string): Category {
+  if (VOICE_SECURITY_ACTIONS.has(action)) return 'voice';
   if (action.startsWith('bot.moderation.')) return 'moderation';
   if (action.startsWith('bot.')) return 'system';
   if (action.startsWith('ban.') || action.startsWith('moderation.') || action === 'kick') {
@@ -367,6 +408,9 @@ function describeAction(action: string): {
     },
   };
 
+  if (action === 'voice.track_rejected') return { icon: 'gpp_bad', tone: danger, actionLabel: action };
+  if (action === 'voice.block_enforced') return { icon: 'block', tone: danger, actionLabel: action };
+  if (action === 'voice.disconnect') return { icon: 'call_end', tone: neutral, actionLabel: action };
   if (action.startsWith('invite.')) return { icon: 'mail', tone: neutral, actionLabel: action.replace('invite.', '') };
   if (action.startsWith('ban.') || action.startsWith('moderation.') || action === 'kick') {
     return { icon: 'security', tone: danger, actionLabel: action.replace('moderation.', '') };
