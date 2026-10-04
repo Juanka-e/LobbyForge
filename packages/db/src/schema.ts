@@ -538,6 +538,18 @@ export const instanceSettings = pgTable('instance_settings', {
   maintenanceMessage: varchar('maintenance_message', { length: 280 }),
   maintenanceStartedAt: timestamp('maintenance_started_at', { withTimezone: true }),
   maintenanceUpdatedAt: timestamp('maintenance_updated_at', { withTimezone: true }).defaultNow().notNull(),
+  // 0045 bot protection (docs/CAPTCHA.md §3.1). The secret is stored only
+  // encrypted (`v1.<iv>.<ciphertext>.<tag>`, AES-256-GCM, key derived from
+  // the session secret) — the CHECK in the migration is the backstop.
+  // Environment overrides (LOBBYFORGE_CAPTCHA_*) win over these columns.
+  captchaProvider: text('captcha_provider').default('altcha').notNull(),
+  captchaSurfaces: jsonb('captcha_surfaces')
+    .default({ register: 'on', invite_register: 'off', guest: 'on', login: 'adaptive' })
+    .notNull(),
+  captchaSiteKey: text('captcha_site_key'),
+  captchaSecretEncrypted: text('captcha_secret_encrypted'),
+  captchaOptions: jsonb('captcha_options').default({}).notNull(),
+  captchaAttackMode: boolean('captcha_attack_mode').default(false).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
