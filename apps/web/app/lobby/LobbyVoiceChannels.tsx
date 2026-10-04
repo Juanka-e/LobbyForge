@@ -1,6 +1,7 @@
 ﻿'use client';
 
-import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useT } from '@/lib/i18n/client';
 import type { Params } from '@/lib/i18n/core';
 import { useLobbyVoice, type LobbyVoiceParticipant } from './LobbyVoiceProvider';
@@ -452,11 +453,34 @@ interface ParticipantAction {
   onSelect: () => void;
 }
 
+/** Gap between the row and its menu, in px (the old `mt-1`). */
+const MENU_GAP = 4;
+
+type MenuPosition = { top?: number; bottom?: number; right: number };
+
+/**
+ * Where the row's menu goes on screen: under the row's right edge, or
+ * above it when there is no room below.
+ */
+function menuPosition(row: DOMRect, menuHeight: number): MenuPosition {
+  const right = Math.max(0, window.innerWidth - row.right);
+  const roomBelow = window.innerHeight - row.bottom - MENU_GAP;
+  if (menuHeight > roomBelow && row.top - MENU_GAP > roomBelow) {
+    return { bottom: window.innerHeight - row.top + MENU_GAP, right };
+  }
+  return { top: row.bottom + MENU_GAP, right };
+}
+
 /**
  * One roster entry. With moderator actions it gets a "⋮" menu (also on
  * right-click, like Discord): opening it focuses the first item, Escape
  * closes it and returns focus to the button, a click elsewhere or Tab
  * closes it.
+ *
+ * The menu is portalled to <body> with fixed positioning: the sidebar
+ * sections fade in with an animation, which makes each a stacking context
+ * while it runs, and an `absolute z-50` menu inside one could end up under
+ * the next section ("Activities").
  */
 function ParticipantRow({
   name,
@@ -469,17 +493,47 @@ function ParticipantRow({
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<MenuPosition | null>(null);
   const rootRef = useRef<HTMLLIElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const firstItemRef = useRef<HTMLButtonElement | null>(null);
   const hasActions = actions.length > 0;
   const menuLabel = t('lobbyMain.voice.participantActions', { name });
 
+  // Place the menu next to its row before it paints, and keep it there
+  // while the page or the sidebar scrolls.
+  useLayoutEffect(() => {
+    if (!open) {
+      setPosition(null);
+      return;
+    }
+    const place = () => {
+      const row = rootRef.current?.getBoundingClientRect();
+      if (row) setPosition(menuPosition(row, menuRef.current?.offsetHeight ?? 0));
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  }, [open]);
+
+  // Focus the first item once the menu is placed: until then it is
+  // `visibility: hidden`, and a hidden element cannot take focus — Escape and
+  // Tab are handled on the menu, so they would never arrive.
+  const placed = position !== null;
+  useEffect(() => {
+    if (open && placed) firstItemRef.current?.focus();
+  }, [open, placed]);
+
   useEffect(() => {
     if (!open) return;
-    firstItemRef.current?.focus();
     const onPointerDown = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (!rootRef.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false);
     };
     document.addEventListener('mousedown', onPointerDown);
     return () => document.removeEventListener('mousedown', onPointerDown);
@@ -525,18 +579,30 @@ function ParticipantRow({
               more_vert
             </span>
           </button>
-          {open ? (
+          {open && typeof document !== 'undefined' ? createPortal(
             <div
+              ref={menuRef}
               role="menu"
               aria-label={menuLabel}
-              className="absolute right-0 top-full z-50 mt-1 w-56 rounded-lg border border-border-subtle bg-surface-floating p-1 shadow-xl"
+              style={{
+                position: 'fixed',
+                top: position?.top,
+                bottom: position?.bottom,
+                right: position?.right ?? 0,
+                // Measured first, shown once placed — never a flash in the corner.
+                visibility: position ? 'visible' : 'hidden',
+              }}
+              className="z-50 w-56 rounded-lg border border-border-subtle bg-surface-floating p-1 shadow-xl"
               onKeyDown={(event) => {
                 if (event.key === 'Escape') {
                   event.stopPropagation();
                   setOpen(false);
                   triggerRef.current?.focus();
                 } else if (event.key === 'Tab') {
+                  // The menu now lives at the end of <body>: move focus back to
+                  // the button first, so Tab carries on from the row as before.
                   setOpen(false);
+                  triggerRef.current?.focus();
                 }
               }}
             >
@@ -560,7 +626,8 @@ function ParticipantRow({
                   {action.label}
                 </button>
               ))}
-            </div>
+            </div>,
+            document.body
           ) : null}
         </>
       ) : null}
