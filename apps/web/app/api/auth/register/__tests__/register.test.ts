@@ -33,6 +33,10 @@ vi.mock('@/lib/guest-session', () => ({
   buildGuestSessionCookie: () => ({ setCookieHeader: 'lf_guest=signed; HttpOnly; SameSite=Lax' }),
 }));
 vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));
+// Bot protection has its own suites (lib/captcha/__tests__); here the guard
+// is a spy that lets everything through unless a test says otherwise.
+const guardCaptchaSurface = vi.fn();
+vi.mock('@/lib/captcha/guard', () => ({ guardCaptchaSurface }));
 
 const validBody = {
   email: 'member@example.com',
@@ -66,6 +70,7 @@ beforeEach(() => {
     serverId: 'server-id',
   });
   recordSession.mockResolvedValue(undefined);
+  guardCaptchaSurface.mockReset().mockResolvedValue(null);
 });
 
 async function post(body: unknown) {
@@ -213,5 +218,74 @@ describe('POST /api/auth/register', { timeout: 20_000 }, () => {
       expect(hashPassword).not.toHaveBeenCalled();
       expect(createOfficialAccount).not.toHaveBeenCalled();
     });
+  });
+});
+
+// Bot protection (docs/CAPTCHA.md §2, §4.4): the surface depends on the
+// invite, the registration mode goes along (an invite can only ADD
+// protection — the real rule is pinned in register-captcha.test.ts), the
+// official hub always uses `register`, and a refusal stops the request
+// before any account work or password hashing.
+describe('POST /api/auth/register — bot protection', { timeout: 20_000 }, () => {
+  it('without an invite: the register surface, with the body’s captcha fields and the registration mode', async () => {
+    const body = { ...validBody, captchaToken: 'tok', captchaProvider: 'turnstile', formToken: 'ft', website: '' };
+    expect((await post(body)).status).toBe(201);
+    expect(guardCaptchaSurface).toHaveBeenCalledWith(
+      expect.any(Request),
+      expect.objectContaining({ captchaToken: 'tok', formToken: 'ft' }),
+      'register',
+      { registrationMode: 'open' }
+    );
+  });
+
+  it('with an invite: the invite_register surface — and the mode, so an open instance cannot be downgraded', async () => {
+    await post({ ...validBody, inviteCode: 'abcd2345efgh' });
+    expect(guardCaptchaSurface).toHaveBeenCalledWith(expect.any(Request), expect.anything(), 'invite_register', { registrationMode: 'open' });
+    getEffectiveInstanceAccessSettings.mockResolvedValue({ registrationMode: 'invite_only' });
+    await post({ ...validBody, inviteCode: 'abcd2345efgh' });
+    expect(guardCaptchaSurface).toHaveBeenLastCalledWith(expect.any(Request), expect.anything(), 'invite_register', {
+      registrationMode: 'invite_only',
+    });
+  });
+
+  it('a closed instance answers 403 without asking for a challenge', async () => {
+    getEffectiveInstanceAccessSettings.mockResolvedValue({ registrationMode: 'closed' });
+    expect((await post({ ...validBody, inviteCode: 'abcd2345efgh' })).status).toBe(403);
+    expect(guardCaptchaSurface).not.toHaveBeenCalled();
+  });
+
+  it('the official hub always uses register', async () => {
+    isOfficialDeployment.mockReturnValue(true);
+    await post(validBody);
+    expect(guardCaptchaSurface).toHaveBeenCalledWith(expect.any(Request), expect.anything(), 'register');
+    expect(createOfficialAccount).toHaveBeenCalled();
+    guardCaptchaSurface.mockClear();
+    await post({ ...validBody, inviteCode: 'abcd2345efgh' });
+    expect(guardCaptchaSurface).toHaveBeenCalledWith(expect.any(Request), expect.anything(), 'register');
+    expect(getEffectiveInstanceAccessSettings).not.toHaveBeenCalled();
+  });
+
+  it('a refusal comes back as is — before invite lookups, hashing or account creation', async () => {
+    for (const error of ['captcha_required', 'captcha_invalid', 'captcha_unavailable', 'form_rejected']) {
+      guardCaptchaSurface.mockResolvedValueOnce(new Response(JSON.stringify({ error }), { status: 400 }));
+      const response = await post({ ...validBody, inviteCode: 'abcd2345efgh' });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error });
+    }
+    isOfficialDeployment.mockReturnValue(true);
+    guardCaptchaSurface.mockResolvedValueOnce(new Response(JSON.stringify({ error: 'captcha_required' }), { status: 400 }));
+    expect((await post(validBody)).status).toBe(400);
+    expect(getInviteMetadata).not.toHaveBeenCalled();
+    expect(getInstanceBootstrapStatus).not.toHaveBeenCalled();
+    expect(hashPassword).not.toHaveBeenCalled();
+    expect(createLocalAccount).not.toHaveBeenCalled();
+    expect(createOfficialAccount).not.toHaveBeenCalled();
+  });
+
+  it('keeps the schema strict: only the contract’s fields are added', async () => {
+    expect((await post({ ...validBody, captchaToken: 'x'.repeat(4097) })).status).toBe(400);
+    expect((await post({ ...validBody, captchaProvider: 'none' })).status).toBe(400);
+    expect((await post({ ...validBody, recaptcha: 'x' })).status).toBe(400);
+    expect(guardCaptchaSurface).not.toHaveBeenCalled();
   });
 });

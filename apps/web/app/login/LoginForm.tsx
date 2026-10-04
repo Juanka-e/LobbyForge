@@ -1,7 +1,11 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
+import type { Route } from 'next';
 import { useRouter } from 'next/navigation';
+import { CaptchaField } from '@/components/captcha/CaptchaField';
+import { reportFormValidity } from '@/components/captcha/form-validity';
+import { useCaptchaGate } from '@/components/captcha/useCaptchaGate';
 import { useT } from '@/lib/i18n/client';
 import { completeDesktopHandoff } from './desktop-handoff';
 import { retryAfterMinutes } from './login-errors';
@@ -14,6 +18,7 @@ export default function LoginForm({
   initialInviteCode,
   initialMode = 'login',
   desktopLoginState,
+  nextPath = '/lobby',
 }: {
   guestEnabled: boolean;
   registrationMode: RegistrationMode;
@@ -22,6 +27,8 @@ export default function LoginForm({
   initialMode?: 'login' | 'register';
   /** Native shell's pending handoff state (?desktopLoginState=...). */
   desktopLoginState?: string;
+  /** Where to go once signed in — `?next=`, already checked by the page. */
+  nextPath?: string;
 }) {
   const t = useT();
   const router = useRouter();
@@ -37,9 +44,21 @@ export default function LoginForm({
   const [inviteCode, setInviteCode] = useState(initialInviteCode);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Bot protection (docs/CAPTCHA.md §6). Sign-in is adaptive: nothing is
+  // fetched or shown until the server answers `captcha_required`. Sign-up
+  // is bound to its surface — an invite code makes it `invite_register`.
+  const accountGate = useCaptchaGate({
+    surface: mode === 'login' ? 'login' : inviteCode.trim() ? 'invite_register' : 'register',
+    prefetch: mode === 'register',
+  });
+  // The guest form's widget appears once someone uses that form, so a
+  // sign-up page never shows two challenges at once.
+  const guestGate = useCaptchaGate({ surface: 'guest', prefetch: guestEnabled, deferred: true });
 
   async function submitAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // noValidate: the captcha checkbox must not block the send (form-validity.ts).
+    if (!reportFormValidity(event.currentTarget)) return;
     setBusy(true);
     setError(null);
     const endpoint = mode === 'login' ? '/api/auth/login' : '/api/auth/register';
@@ -51,13 +70,21 @@ export default function LoginForm({
           displayName: accountDisplayName.trim(),
           ...(inviteCode.trim() ? { inviteCode: inviteCode.trim() } : {}),
         };
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const body = (await response.json().catch(() => ({}))) as { error?: string; retryAfter?: number };
+    const result = await accountGate.submit((fields) =>
+      fetch(endpoint, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...payload, ...fields }),
+      })
+    );
+    if (result.kind !== 'response') {
+      setError(t(result.kind === 'blocked' ? result.messageKey : 'captcha.error.network'));
+      setBusy(false);
+      return;
+    }
+    const { response } = result;
+    const body = result.body as { error?: string; retryAfter?: number };
     if (!response.ok) {
       setError(
         // A rate limit or the per-account sign-in lock: say how long, in the
@@ -77,30 +104,45 @@ export default function LoginForm({
     ) {
       return;
     }
-    router.replace('/lobby');
+    router.replace(nextPath as Route);
     router.refresh();
   }
 
   async function submitGuest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!reportFormValidity(event.currentTarget)) return;
     setBusy(true);
     setError(null);
-    const response = await fetch('/api/auth/guest', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        displayNameSeed: guestDisplayName.trim(),
-        ...(inviteCode.trim() ? { inviteCode: inviteCode.trim() } : {}),
-      }),
-    });
-    const body = (await response.json().catch(() => ({}))) as { error?: string };
-    if (!response.ok) {
-      setError(body.error ?? t('auth.login.guestFailed'));
+    const result = await guestGate.submit((fields) =>
+      fetch('/api/auth/guest', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          displayNameSeed: guestDisplayName.trim(),
+          ...(inviteCode.trim() ? { inviteCode: inviteCode.trim() } : {}),
+          ...fields,
+        }),
+      })
+    );
+    if (result.kind !== 'response') {
+      setError(t(result.kind === 'blocked' ? result.messageKey : 'captcha.error.network'));
       setBusy(false);
       return;
     }
-    router.replace('/lobby');
+    const { response } = result;
+    const body = result.body as { error?: string; retryAfter?: number };
+    if (!response.ok) {
+      setError(
+        // As on the account form: a rate limit says how long, in the viewer's language.
+        response.status === 429
+          ? t('auth.login.error.rateLimited', { minutes: retryAfterMinutes(body.retryAfter) })
+          : body.error ?? t('auth.login.guestFailed')
+      );
+      setBusy(false);
+      return;
+    }
+    router.replace(nextPath as Route);
     router.refresh();
   }
 
@@ -119,7 +161,7 @@ export default function LoginForm({
         </div>
       ) : null}
 
-      <form onSubmit={submitAccount} className="grid gap-4">
+      <form onSubmit={submitAccount} noValidate className="grid gap-4">
         {mode === 'register' ? (
           <Field label={t('auth.login.displayName')}>
             <input
@@ -162,6 +204,7 @@ export default function LoginForm({
         {mode === 'register' && (inviteOnly || initialInviteCode) ? (
           <InviteField value={inviteCode} onChange={setInviteCode} required={inviteOnly} />
         ) : null}
+        <CaptchaField gate={accountGate} />
         <button
           type="submit"
           disabled={
@@ -184,7 +227,7 @@ export default function LoginForm({
             <span>{t('auth.login.orGuest')}</span>
             <span className="h-px flex-1 bg-border-subtle" />
           </div>
-          <form onSubmit={submitGuest} className="grid gap-4">
+          <form onSubmit={submitGuest} onFocus={guestGate.engage} noValidate className="grid gap-4">
             <Field label={t('auth.login.guestDisplayName')}>
               <input
                 value={guestDisplayName}
@@ -198,6 +241,7 @@ export default function LoginForm({
               />
             </Field>
             {inviteOnly ? <InviteField value={inviteCode} onChange={setInviteCode} required /> : null}
+            <CaptchaField gate={guestGate} />
             <button
               type="submit"
               disabled={busy || guestDisplayName.trim().length < 2 || (inviteOnly && inviteCode.trim().length < 6)}

@@ -15,14 +15,21 @@ vi.mock('@/lib/security-headers', () => ({
 }));
 const recordSession = vi.fn();
 vi.mock('@/lib/session-tracker', () => ({ recordSession }));
+// Bot protection has its own suites (lib/captcha/__tests__); here the guard
+// is a spy that lets everything through unless a test says otherwise.
+const { guardSignInCaptcha, noteSignInFailure } = vi.hoisted(() => ({ guardSignInCaptcha: vi.fn(), noteSignInFailure: vi.fn() }));
+vi.mock('@/lib/captcha/guard', () => ({ guardSignInCaptcha, noteSignInFailure }));
 // The per-account limiter has its own tests (lib/__tests__/auth-throttle.test.ts
 // and the account-limit route tests). Here it always allows: under
 // NODE_ENV=production it would otherwise reach for Redis, which CI lacks.
+const { deviceSignInPathOpen } = vi.hoisted(() => ({ deviceSignInPathOpen: vi.fn() }));
 vi.mock('@/lib/auth-throttle', () => ({
   beginSignInAttempt: async () => ({ allowed: true, path: 'account' }),
   confirmSignInDevice: async (_subject: unknown, attempt: unknown) => attempt,
   finishSignInAttempt: async () => undefined,
   accountLockedResponse: () => new Response(null, { status: 429 }),
+  // Is the device's own failure bucket still below its limit?
+  deviceSignInPathOpen,
 }));
 
 beforeEach(() => {
@@ -30,6 +37,9 @@ beforeEach(() => {
   getUserCredentialsByEmail.mockReset();
   verifyPassword.mockReset();
   recordSession.mockReset().mockResolvedValue(undefined);
+  guardSignInCaptcha.mockReset().mockResolvedValue(null);
+  noteSignInFailure.mockReset().mockResolvedValue(undefined);
+  deviceSignInPathOpen.mockReset().mockResolvedValue(true);
 });
 
 async function post(body: unknown) {
@@ -146,5 +156,105 @@ describe('POST /api/auth/login — beta-review S7 session tracking', () => {
     const response = await post({ email: USER.email, password: 'wrong' });
     expect(response.status).toBe(401);
     expect(recordSession).not.toHaveBeenCalled();
+  });
+});
+
+// Bot protection (docs/CAPTCHA.md §2): adaptive sign-in. The guard runs
+// after the zod parse and BEFORE the attempt is counted or the account is
+// looked up; a wrong password feeds the address / attack-mode signals.
+describe('POST /api/auth/login — bot protection', () => {
+  const USER = {
+    id: '00000000-0000-0000-0000-000000000001',
+    email: 'owner@example.com',
+    displayName: 'Owner',
+    passwordHash: 'stored-hash',
+    deletedAt: null,
+  };
+
+  it('asks the sign-in guard with the email, the body’s captcha fields and no device claim', async () => {
+    getUserCredentialsByEmail.mockResolvedValue(USER);
+    verifyPassword.mockResolvedValue(true);
+    const res = await post({ email: 'OWNER@example.com', password: 'pw', captchaToken: 'tok', captchaProvider: 'recaptcha', website: '' });
+    expect(res.status).toBe(200);
+    expect(guardSignInCaptcha).toHaveBeenCalledWith(
+      expect.any(Request),
+      expect.objectContaining({ captchaToken: 'tok', captchaProvider: 'recaptcha' }),
+      { email: 'owner@example.com', hasDeviceClaim: false }
+    );
+  });
+
+  async function postWithCookie(cookie: string) {
+    const { POST } = await import('../route.js');
+    return POST(
+      new Request('https://example.test/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie },
+        body: JSON.stringify({ email: USER.email, password: 'pw' }),
+      }),
+      {}
+    );
+  }
+
+  async function deviceCookie(passwordHash = USER.passwordHash): Promise<string> {
+    const { buildDeviceCookie } = await import('@/lib/device-cookie');
+    return buildDeviceCookie(null, USER.email, passwordHash)!.split(';', 1)[0]!;
+  }
+
+  it('a trusted device for the account (claim holds, bucket open) skips the challenge — one lookup, reused', async () => {
+    getUserCredentialsByEmail.mockResolvedValue(USER);
+    verifyPassword.mockResolvedValue(true);
+    expect((await postWithCookie(await deviceCookie())).status).toBe(200);
+    expect(guardSignInCaptcha).toHaveBeenCalledWith(expect.any(Request), expect.anything(), { email: USER.email, hasDeviceClaim: true });
+    expect(getUserCredentialsByEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it('a stale device cookie (issued before a password change) does NOT skip the challenge', async () => {
+    getUserCredentialsByEmail.mockResolvedValue(USER); // current hash: stored-hash
+    verifyPassword.mockResolvedValue(true);
+    await postWithCookie(await deviceCookie('the-old-password-hash'));
+    expect(guardSignInCaptcha).toHaveBeenCalledWith(expect.any(Request), expect.anything(), { email: USER.email, hasDeviceClaim: false });
+  });
+
+  it('a device whose own failure bucket tripped does NOT skip the challenge — and is not even looked up first', async () => {
+    deviceSignInPathOpen.mockResolvedValue(false);
+    getUserCredentialsByEmail.mockResolvedValue(USER);
+    guardSignInCaptcha.mockResolvedValueOnce(new Response(JSON.stringify({ error: 'captcha_required' }), { status: 400 }));
+    expect((await postWithCookie(await deviceCookie())).status).toBe(400);
+    expect(guardSignInCaptcha).toHaveBeenCalledWith(expect.any(Request), expect.anything(), { email: USER.email, hasDeviceClaim: false });
+    expect(getUserCredentialsByEmail).not.toHaveBeenCalled();
+  });
+
+  it('a device cookie for a deleted account does not count', async () => {
+    getUserCredentialsByEmail.mockResolvedValue({ ...USER, deletedAt: new Date() });
+    verifyPassword.mockResolvedValue(true);
+    await postWithCookie(await deviceCookie());
+    expect(guardSignInCaptcha).toHaveBeenCalledWith(expect.any(Request), expect.anything(), { email: USER.email, hasDeviceClaim: false });
+  });
+
+  it('a refusal comes back before the lookup or the password check', async () => {
+    for (const error of ['captcha_required', 'captcha_invalid', 'captcha_unavailable', 'form_rejected']) {
+      guardSignInCaptcha.mockResolvedValueOnce(new Response(JSON.stringify({ error }), { status: 400 }));
+      const res = await post({ email: USER.email, password: 'pw' });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error });
+    }
+    expect(getUserCredentialsByEmail).not.toHaveBeenCalled();
+    expect(verifyPassword).not.toHaveBeenCalled();
+  });
+
+  it('a wrong password feeds the sign-in failure signals; a right one does not', async () => {
+    getUserCredentialsByEmail.mockResolvedValue(USER);
+    verifyPassword.mockResolvedValue(false);
+    expect((await post({ email: USER.email, password: 'bad' })).status).toBe(401);
+    expect(noteSignInFailure).toHaveBeenCalledTimes(1);
+    verifyPassword.mockResolvedValue(true);
+    expect((await post({ email: USER.email, password: 'pw' })).status).toBe(200);
+    expect(noteSignInFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it('validates the captcha fields like every protected route', async () => {
+    expect((await post({ email: USER.email, password: 'pw', captchaToken: 'x'.repeat(4097) })).status).toBe(400);
+    expect((await post({ email: USER.email, password: 'pw', captchaProvider: 'hcaptcha' })).status).toBe(400);
+    expect(guardSignInCaptcha).not.toHaveBeenCalled();
   });
 });

@@ -1,13 +1,16 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render as rtlRender, screen } from '@testing-library/react';
+import { render as rtlRender, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactElement, ReactNode } from 'react';
+import { altchaWidget, bodiesFor, captchaConfig, solveAltcha } from '@/components/captcha/__tests__/captcha-test-utils';
 import { I18nProvider } from '@/lib/i18n/client';
 import { providerPropsFor } from '@/lib/i18n/catalogue';
 import OfficialSignInForm from '../OfficialSignInForm';
 
 const nav = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn() }));
+const altchaLoader = vi.hoisted(() => ({ loadAltcha: vi.fn(async () => {}), registerAltchaStrings: vi.fn() }));
+vi.mock('@/components/captcha/altcha-loader', () => altchaLoader);
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: nav.replace, refresh: nav.refresh }),
@@ -109,5 +112,41 @@ describe('OfficialSignInForm', () => {
     await user.click(toggle);
     expect(password).toHaveAttribute('type', 'text');
     expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('returns to the page that sent the visitor here (?next=), Google sign-in included', async () => {
+    fetchMock.mockResolvedValue(json({ user: { id: 'u1' } }, 200));
+    render(<OfficialSignInForm googleEnabled initialError={null} nextPath="/settings/appearance" />);
+    expect(screen.getByRole('link', { name: 'Continue with Google' })).toHaveAttribute(
+      'href',
+      '/api/auth/oauth/google?redirect=%2Fsettings%2Fappearance'
+    );
+    await fillAndSubmit('ada@example.com', 'correct-horse-battery');
+    expect(nav.replace).toHaveBeenCalledWith('/settings/appearance');
+  });
+
+  it('adaptive sign-in: fetches nothing up front, then shows the challenge after captcha_required and signs in', async () => {
+    const answers = [json({ error: 'captcha_required' }, 400), json({ user: { id: 'u1' } }, 200)];
+    fetchMock.mockImplementation(async (url: string) =>
+      url === '/api/auth/captcha?surface=login'
+        ? json(captchaConfig({ surface: 'login', required: false, mode: 'adaptive' }), 200)
+        : answers.shift()!
+    );
+    render(<OfficialSignInForm googleEnabled={false} initialError={null} />);
+    expect(altchaWidget()).toBeNull();
+    await fillAndSubmit('ada@example.com', 'correct-horse-battery');
+    await waitFor(() => expect(altchaWidget()).not.toBeNull());
+    await solveAltcha('pow-login');
+    await waitFor(() => expect(nav.replace).toHaveBeenCalledWith('/home'));
+    const urls = fetchMock.mock.calls.map(([url]) => url);
+    expect(urls).toEqual(['/api/auth/login', '/api/auth/captcha?surface=login', '/api/auth/login']);
+    expect(bodiesFor(fetchMock, '/api/auth/login')[1]).toEqual({
+      email: 'ada@example.com',
+      password: 'correct-horse-battery',
+      captchaToken: 'pow-login',
+      captchaProvider: 'altcha',
+    });
+    // Not "wrong password": the refusal never reads as one.
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });

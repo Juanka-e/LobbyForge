@@ -23,6 +23,7 @@
  * Runs only against a compose stack (LF_E2E_BASE_URL).
  */
 import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { createGuest, resetRateLimits, signIn } from './helpers/auth';
 
 const baseUrl = process.env.LF_E2E_BASE_URL ?? '';
 const setupToken = process.env.LF_E2E_SETUP_TOKEN ?? '';
@@ -94,6 +95,8 @@ test.describe('Vampire Village through the real lobby UI', () => {
   let serverId = '';
 
   test.beforeAll(async ({ playwright }) => {
+    // One client address for every context here: start from a fresh rate-limit window.
+    resetRateLimits();
     // Own browser WITHOUT the config's --disable-web-security: that flag makes
     // Chromium drop the Origin header, which the app's CSRF guard rejects.
     browser = await playwright.chromium.launch({
@@ -116,7 +119,7 @@ test.describe('Vampire Village through the real lobby UI', () => {
       },
     });
     if (setup.status() !== 200) {
-      const login = await owner.request.post('/api/auth/login', {
+      const login = await signIn(owner.request, {
         headers: ORIGIN,
         data: { email: OWNER_EMAIL, password: OWNER_PASSWORD },
       });
@@ -150,7 +153,7 @@ test.describe('Vampire Village through the real lobby UI', () => {
     const { invite } = (await inviteRes.json()) as { invite: { code: string } };
     for (let i = 1; i < NAMES.length; i += 1) {
       const guest = await newPlayer(browser);
-      expect((await guest.request.post('/api/auth/guest', { headers: ORIGIN, data: {} })).status()).toBe(200);
+      expect((await createGuest(guest.request, { headers: ORIGIN, data: {} })).status()).toBe(200);
       expect((await guest.request.post(`/api/invites/${invite.code}/redeem`, { headers: ORIGIN })).status()).toBe(201);
       contexts.push(guest);
     }

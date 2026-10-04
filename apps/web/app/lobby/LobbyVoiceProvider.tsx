@@ -27,6 +27,8 @@ import {
   type ScreenShareCaptureOptions,
 } from 'livekit-client';
 import { resolveBrowserLiveKitUrl } from '@/lib/public-endpoints';
+import { GuestVerificationDialog } from '@/components/captcha/GuestVerificationDialog';
+import { readCaptchaRefusal } from '@/components/captcha/types';
 import { useT } from '@/lib/i18n/client';
 import type { Params } from '@/lib/i18n/core';
 import {
@@ -512,6 +514,10 @@ export function LobbyVoiceProvider({
     setMainViewMode('activity');
   }, []);
   const [guest, setGuest] = useState<Guest | null>(null);
+  // Bot protection: a NEW guest may have to pass a challenge first
+  // (docs/CAPTCHA.md §6). 'open' shows the dialog; 'dismissed' means the
+  // person closed it, and joining a voice channel opens it again.
+  const [guestCheck, setGuestCheck] = useState<'closed' | 'open' | 'dismissed'>('closed');
 
   const roomRef = useRef<Room | null>(null);
   const remoteAudioContainerRef = useRef<HTMLDivElement | null>(null);
@@ -651,6 +657,12 @@ export function LobbyVoiceProvider({
           // name fail with 400.
           body: JSON.stringify({ displayNameSeed: localDisplayName || undefined }),
         });
+        // A captcha refusal is not a failure to show: ask the person once,
+        // in a dialog, instead of retrying behind their back.
+        if (await readCaptchaRefusal(res)) {
+          if (!cancelled) setGuestCheck('open');
+          return;
+        }
         if (!res.ok) throw new VoiceNoticeError({ key: 'lobby.voice.error.sessionFailed', params: { status: res.status } });
         const data = (await res.json()) as { guest: Guest };
         if (!cancelled) setGuest(data.guest);
@@ -810,6 +822,11 @@ export function LobbyVoiceProvider({
     async (channelId: string) => {
       if (activeChannelId === channelId && roomRef.current) return;
       if (!guest?.uid) {
+        // The session waits on the bot check the person closed: offer it again.
+        if (guestCheck === 'dismissed') {
+          setGuestCheck('open');
+          return;
+        }
         setError({ key: 'lobby.voice.error.sessionNotReady' });
         return;
       }
@@ -1126,6 +1143,7 @@ export function LobbyVoiceProvider({
     [
       activeChannelId,
       guest?.uid,
+      guestCheck,
       serverId,
       livekitUrl,
       localDisplayName,
@@ -1814,6 +1832,19 @@ export function LobbyVoiceProvider({
     <LobbyVoiceContext.Provider value={value}>
       {children}
         <div ref={remoteAudioContainerRef} aria-hidden style={{ position: 'absolute', width: 0, height: 0, opacity: 0, pointerEvents: 'none', overflow: 'hidden' }} />
+      <GuestVerificationDialog
+        open={guestCheck === 'open'}
+        body={{ displayNameSeed: localDisplayName || undefined }}
+        onVerified={(verified) => {
+          setGuest(verified);
+          setGuestCheck('closed');
+          setError(null);
+        }}
+        onDismiss={() => {
+          setGuestCheck('dismissed');
+          setError({ key: 'captcha.guest.dismissed' });
+        }}
+      />
     </LobbyVoiceContext.Provider>
   );
 }

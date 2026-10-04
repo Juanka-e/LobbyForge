@@ -27,6 +27,7 @@ import {
   type Locator,
   type Page,
 } from '@playwright/test';
+import { createGuest, resetRateLimits, signIn } from './helpers/auth';
 
 const baseUrl = process.env.LF_E2E_BASE_URL ?? '';
 const setupToken = process.env.LF_E2E_SETUP_TOKEN ?? '';
@@ -94,6 +95,8 @@ test.describe('Poll and Dice Bot with two players, through the lobby', () => {
   let guestUid = '';
 
   test.beforeAll(async ({ playwright }) => {
+    // One client address for every context here: start from a fresh rate-limit window.
+    resetRateLimits();
     // Own browser WITHOUT the config's --disable-web-security: that flag
     // makes Chromium drop the Origin header, which the app's CSRF guard
     // (rightly) rejects — and every vote and roll is a POST from the page.
@@ -118,7 +121,7 @@ test.describe('Poll and Dice Bot with two players, through the lobby', () => {
       },
     });
     if (setup.status() !== 200) {
-      const login = await ownerCtx.request.post('/api/auth/login', {
+      const login = await signIn(ownerCtx.request, {
         headers: ORIGIN,
         data: { email: OWNER_EMAIL, password: OWNER_PASSWORD },
       });
@@ -148,7 +151,7 @@ test.describe('Poll and Dice Bot with two players, through the lobby', () => {
     await endOpenActivities(ownerCtx.request, serverId, voiceChannelId);
 
     // Guest: a guest identity that redeems the owner's invite.
-    const guestAuth = await guestCtx.request.post('/api/auth/guest', {
+    const guestAuth = await createGuest(guestCtx.request, {
       headers: ORIGIN,
       data: { displayNameSeed: 'PollDice' },
     });

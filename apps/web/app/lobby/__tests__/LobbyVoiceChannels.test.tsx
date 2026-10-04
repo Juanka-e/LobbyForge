@@ -204,6 +204,47 @@ describe('LobbyVoiceChannels — the action', () => {
     expect(document.activeElement).toBe(trigger);
   });
 
+  it('focuses the first item only once the menu is visible (a hidden element cannot take focus in a browser)', () => {
+    // jsdom lets a `visibility: hidden` element take focus; a browser does
+    // not, and then Escape/Tab (handled on the menu) never arrive. Record
+    // the menu's visibility at the moment its item is focused.
+    const visibilityAtFocus: string[] = [];
+    const originalFocus = HTMLElement.prototype.focus;
+    const spy = vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(function (this: HTMLElement, options?: FocusOptions) {
+      if (this.getAttribute('role') === 'menuitem') {
+        visibilityAtFocus.push((this.closest('[role="menu"]') as HTMLElement | null)?.style.visibility ?? 'missing');
+      }
+      return originalFocus.call(this, options);
+    });
+    try {
+      renderRoster();
+      fireEvent.click(menuButton('Mallory')!);
+      expect(visibilityAtFocus.length).toBeGreaterThan(0);
+      expect(visibilityAtFocus.every((value) => value === 'visible')).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('renders the menu on <body>, beside its row, so a section’s fade-in cannot trap it', () => {
+    const { container } = renderRoster();
+    const trigger = menuButton('Mallory')!;
+    fireEvent.click(trigger);
+    const menu = screen.getByRole('menu', { name: 'Voice actions for Mallory' });
+    // Outside the sidebar's stacking contexts.
+    expect(container.contains(menu)).toBe(false);
+    expect(menu.parentElement).toBe(document.body);
+    expect(menu.style.position).toBe('fixed');
+    expect(menu.style.visibility).toBe('visible');
+    // A click inside the portalled menu is not "outside".
+    fireEvent.mouseDown(menu);
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    // Tab leaves the menu from its row: focus goes back to the button first.
+    fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Disconnect from voice' }), { key: 'Tab' });
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
   it('opens on right-click, like Discord', () => {
     renderRoster();
     fireEvent.contextMenu(screen.getByText('Mallory'));

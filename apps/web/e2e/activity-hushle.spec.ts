@@ -26,6 +26,7 @@
  * players' panels fall back to polling every 5 s (the waits allow for it).
  */
 import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { createGuest, resetRateLimits, signIn } from './helpers/auth';
 
 const baseUrl = process.env.LF_E2E_BASE_URL ?? '';
 const setupToken = process.env.LF_E2E_SETUP_TOKEN ?? '';
@@ -121,6 +122,8 @@ test.describe('Hushle through the lobby UI', () => {
   };
 
   test.beforeAll(async ({ playwright }) => {
+    // One client address for every context here: start from a fresh rate-limit window.
+    resetRateLimits();
     // Own browser WITHOUT the config's --disable-web-security: that flag makes
     // Chromium drop the Origin header, which the app's CSRF guard rejects.
     ownBrowser = await playwright.chromium.launch({
@@ -143,7 +146,7 @@ test.describe('Hushle through the lobby UI', () => {
       },
     });
     if (setup.status() !== 200) {
-      const login = await hostCtx.request.post('/api/auth/login', {
+      const login = await signIn(hostCtx.request, {
         headers: ORIGIN,
         data: { email: OWNER_EMAIL, password: OWNER_PASSWORD },
       });
@@ -189,7 +192,7 @@ test.describe('Hushle through the lobby UI', () => {
     // ── Three guests, each invited into the server.
     const guest = async (): Promise<Seat> => {
       const ctx = await newUserContext(ownBrowser);
-      expect((await ctx.request.post('/api/auth/guest', { headers: ORIGIN, data: {} })).status()).toBe(200);
+      expect((await createGuest(ctx.request, { headers: ORIGIN, data: {} })).status()).toBe(200);
       const inviteRes = await hostCtx.request.post(`/api/servers/${serverId}/invites`, { headers: ORIGIN, data: {} });
       expect(inviteRes.status()).toBe(201);
       const { invite } = (await inviteRes.json()) as { invite: { code: string } };

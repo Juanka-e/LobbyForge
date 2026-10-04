@@ -15,7 +15,9 @@ import {
   confirmSignInDevice,
   finishSignInAttempt,
 } from '@/lib/auth-throttle';
-import { buildDeviceCookie, deviceClaimHolds, readDeviceClaim } from '@/lib/device-cookie';
+import { guardSignInCaptcha, noteSignInFailure } from '@/lib/captcha/guard';
+import { CaptchaBodyFields } from '@/lib/captcha/types';
+import { buildDeviceCookie, deviceClaimHolds, readDeviceClaim, trustedDeviceFor } from '@/lib/device-cookie';
 import { withApiSecurity } from '@/lib/security-headers';
 
 export const dynamic = 'force-dynamic';
@@ -44,6 +46,8 @@ const StartSchema = z.object({
   password: z.string().min(1).max(128),
   /** Where the shell wants the handoff to land (info only, echoed back). */
   state: z.string().min(32).max(128).optional(),
+  // Bot protection (docs/CAPTCHA.md §4.3): the `login` surface, adaptive.
+  ...CaptchaBodyFields,
 });
 
 const CODE_TTL_SECONDS = DESKTOP_HANDOFF_TTL_SECONDS;
@@ -61,11 +65,16 @@ async function handleStart(req: Request): Promise<NextResponse> {
   // before has its own bucket and is not refused by the account lock.
   const cookieHeader = req.headers.get('cookie');
   const device = readDeviceClaim(cookieHeader, parsed.data.email);
+  // As /api/auth/login: adaptive bot protection before the attempt counts;
+  // only a trusted device (claim holds, bucket not tripped) skips it.
+  const trusted = await trustedDeviceFor(parsed.data.email, device);
+  const refused = await guardSignInCaptcha(req, parsed.data, { email: parsed.data.email, hasDeviceClaim: trusted.trusted });
+  if (refused) return refused;
   const subject = { email: parsed.data.email, deviceNonce: device?.nonce ?? null };
   const begun = await beginSignInAttempt(subject);
   if (!begun.allowed) return accountLockedResponse(begun.retryAfterSeconds);
 
-  const user = await getUserCredentialsByEmail(getDb(), parsed.data.email);
+  const user = trusted.lookedUp ? trusted.user : await getUserCredentialsByEmail(getDb(), parsed.data.email);
   // As /api/auth/login: a device entry issued under an older password is
   // charged to the account counter (before the password check), and the
   // binding is computed for every attempt, unknown emails included.
@@ -79,6 +88,7 @@ async function handleStart(req: Request): Promise<NextResponse> {
   const valid = await verifyPassword(parsed.data.password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
   if (!user || user.deletedAt || !user.passwordHash || !valid) {
     // Same timing-safe shape as /api/auth/login; no account enumeration.
+    await noteSignInFailure(req);
     return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 });
   }
   await finishSignInAttempt(subject, attempt.path);
@@ -114,6 +124,7 @@ async function handleStart(req: Request): Promise<NextResponse> {
 
 export const POST = withApiSecurity(handleStart, {
   allowedMethods: ['POST'],
-  maxBodyBytes: 4096,
+  // Room for a CAPTCHA token (up to 4096 characters).
+  maxBodyBytes: 12 * 1024,
   rateLimit: { identifier: 'desktop-handoff-start', config: { windowMs: 15 * 60_000, maxRequests: 10 } },
 });

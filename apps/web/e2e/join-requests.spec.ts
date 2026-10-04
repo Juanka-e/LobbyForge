@@ -15,6 +15,7 @@
  * Screenshots of each state, dark and light, go to the test's output dir.
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { resetRateLimits, signIn } from './helpers/auth';
 
 const baseUrl = process.env.LF_E2E_BASE_URL ?? '';
 const setupToken = process.env.LF_E2E_SETUP_TOKEN ?? '';
@@ -51,6 +52,8 @@ test.describe('join requests: ask, wait, get approved', () => {
   let original: AccessPolicy | null = null;
 
   test.beforeAll(async ({ playwright }) => {
+    // One client address for every context here: start from a fresh rate-limit window.
+    resetRateLimits();
     // Own browser WITHOUT the config's --disable-web-security: that flag makes
     // Chromium drop the Origin header, which the app's CSRF guard rejects.
     browser = await playwright.chromium.launch({ args: [] });
@@ -74,7 +77,7 @@ test.describe('join requests: ask, wait, get approved', () => {
       },
     });
     if (setup.status() !== 200) {
-      const login = await ownerCtx.request.post('/api/auth/login', {
+      const login = await signIn(ownerCtx.request, {
         headers: ORIGIN,
         data: { email: OWNER_EMAIL, password: OWNER_PASSWORD },
       });

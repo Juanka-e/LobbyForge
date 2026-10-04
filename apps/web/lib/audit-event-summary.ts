@@ -74,9 +74,33 @@ export function auditEventSummary(t: Translator, entry: AuditEntryView): AuditSu
       };
     case 'voice.disconnect':
       return { key: 'admin.audit.event.disconnect', params, slots };
+    case 'instance.captcha_updated': {
+      // Bot protection settings: the NAMES of the fields that changed, never
+      // their values (a secret key among them).
+      const fields = captchaFieldNames(meta.fields).map((field) => t(`admin.audit.captchaField.${field}`));
+      if (fields.length === 0) return { key: 'admin.audit.event.captchaUpdatedNoFields', params, slots };
+      return { key: 'admin.audit.event.captchaUpdated', params, slots: { ...slots, fields: listFormat(t.locale, fields) } };
+    }
     default:
       return null;
   }
+}
+
+const CAPTCHA_FIELDS = ['provider', 'surfaces', 'siteKey', 'secretKey', 'options', 'attackMode'] as const;
+
+/** "a, b and c" in the reader's language. */
+function listFormat(locale: string, items: string[]): string {
+  try {
+    return new Intl.ListFormat(locale, { style: 'long', type: 'conjunction' }).format(items);
+  } catch {
+    return items.join(', ');
+  }
+}
+
+/** The known field names in an `instance.captcha_updated` entry, in a fixed order. */
+function captchaFieldNames(value: unknown): Array<(typeof CAPTCHA_FIELDS)[number]> {
+  if (!Array.isArray(value)) return [];
+  return CAPTCHA_FIELDS.filter((field) => value.includes(field));
 }
 
 /**

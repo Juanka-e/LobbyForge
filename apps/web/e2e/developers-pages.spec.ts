@@ -14,6 +14,7 @@
  *                        without it
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { createGuest, registerAccount } from './helpers/auth';
 
 const selfHostUrl = process.env.LF_E2E_BASE_URL ?? '';
 const officialUrl = process.env.LF_E2E_OFFICIAL_URL ?? '';
@@ -129,13 +130,13 @@ for (const stack of STACKS) {
       const api = ctx.request;
       const headers = { Origin: stack.url };
       if (stack.name === 'official') {
-        const reg = await api.post('/api/auth/register', {
+        const reg = await registerAccount(api, {
           headers,
           data: { email: `docs-${RUN}@e2e.local`, displayName: `Docs ${RUN.slice(-4)}`, password: 'correct-horse-battery-staple' },
         });
         expect(reg.status(), await reg.text()).toBe(201);
       } else {
-        expect((await api.post('/api/auth/guest', { headers, data: { displayNameSeed: 'Docs Reader' } })).status()).toBe(200);
+        expect((await createGuest(api, { headers, data: { displayNameSeed: 'Docs Reader' } })).status()).toBe(200);
       }
       expect((await api.patch('/api/settings/me', { headers, data: { theme: 'light' } })).status()).toBe(200);
       // The theme is applied client-side once the settings load, and surfaces

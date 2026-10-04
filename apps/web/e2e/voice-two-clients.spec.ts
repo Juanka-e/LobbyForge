@@ -14,6 +14,7 @@
  * the app uses, proving the media path end to end.
  */
 import { expect, test } from '@playwright/test';
+import { createGuest, signIn } from './helpers/auth';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -74,7 +75,7 @@ test.describe('two-client voice over the real LiveKit', () => {
       },
     });
     if (setupRes.status() !== 200) {
-      const login = await ownerCtx.post('/api/auth/login', {
+      const login = await signIn(ownerCtx, {
         headers: { Origin: baseUrl },
         data: { email: OWNER_EMAIL, password: OWNER_PASSWORD },
       });
@@ -101,7 +102,7 @@ test.describe('two-client voice over the real LiveKit', () => {
       baseURL: baseUrl,
       extraHTTPHeaders: { Origin: baseUrl },
     });
-    const guestAuth = await guestCtx.post('/api/auth/guest', { data: {} });
+    const guestAuth = await createGuest(guestCtx, { data: {} });
     expect(guestAuth.status()).toBe(200);
 
     const inviteRes = await ownerCtx.post(`/api/servers/${serverId}/invites`, {

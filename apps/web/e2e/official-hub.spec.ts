@@ -24,6 +24,7 @@
  * a few runs back to back; after that, clear `*rate-limit*` keys in Redis.
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { clearRateLimitBuckets } from './helpers/auth';
 
 const baseUrl = process.env.LF_E2E_OFFICIAL_URL ?? process.env.LF_E2E_BASE_URL ?? '';
 const REPO_URL = 'https://github.com/Juanka-e/LobbyForge';
@@ -177,16 +178,22 @@ test.describe('official hub', () => {
   test('signing up creates an account and lands on the hub home', async () => {
     const page = await openPage({ width: 1280, height: 900 });
     session = page;
+    // Sign-up stays a per-address bucket (5 per 15 minutes) and every test
+    // client is one address: earlier specs' sign-ups must not count here.
+    clearRateLimitBuckets(['auth-local-register']);
     await page.goto('/register');
     await expect(page.getByRole('heading', { level: 1, name: 'Create your account' })).toBeVisible();
 
     await page.getByLabel('Display name').fill(account.name);
     await page.getByLabel('Email').fill(account.email);
     await page.getByLabel('Password', { exact: true }).fill(account.password);
-    await page.getByRole('checkbox').check();
+    // The terms box by name: the bot-protection widget has a checkbox of its own.
+    await page.getByRole('checkbox', { name: /^I agree to follow/ }).check();
     await page.getByRole('button', { name: 'Create account' }).click();
 
-    await expect(page).toHaveURL(/\/home$/);
+    // Bot protection first (docs/CAPTCHA.md): the form waits for the check
+    // and the 2.5 s minimum fill time before it sends.
+    await expect(page).toHaveURL(/\/home$/, { timeout: 20_000 });
     await expect(page.getByRole('heading', { level: 1 })).toContainText(account.name);
     // A new account has joined nothing yet, and the page says so.
     await expect(page.getByText("You haven't joined a community yet.", { exact: false })).toBeVisible();

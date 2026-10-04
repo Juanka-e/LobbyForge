@@ -109,6 +109,125 @@ export async function setInstanceAccessSettings(
   return toAccessSettings(inserted);
 }
 
+// ---- Bot protection (0045, docs/CAPTCHA.md §3.1) ---------------------------
+
+export type CaptchaProviderSetting = 'none' | 'altcha' | 'turnstile' | 'recaptcha';
+
+export const CAPTCHA_PROVIDER_SETTINGS: readonly CaptchaProviderSetting[] = ['none', 'altcha', 'turnstile', 'recaptcha'];
+
+/** The column defaults of 0045 — also what an instance without a settings row gets. */
+export const DEFAULT_CAPTCHA_SURFACES = Object.freeze({
+  register: 'on',
+  invite_register: 'off',
+  guest: 'on',
+  login: 'adaptive',
+}) as Readonly<Record<'register' | 'invite_register' | 'guest' | 'login', string>>;
+
+/**
+ * The stored bot protection settings, as they are in the row. `surfaces` and
+ * `options` are raw JSON: the web app validates them and fills in defaults
+ * (it owns the vocabulary). The secret stays encrypted here; decrypting it
+ * needs the session secret, which this package never sees.
+ */
+export interface InstanceCaptchaSettings {
+  instanceId: string;
+  provider: CaptchaProviderSetting;
+  surfaces: unknown;
+  siteKey: string | null;
+  secretEncrypted: string | null;
+  options: unknown;
+  attackMode: boolean;
+  updatedAt: Date | null;
+}
+
+/**
+ * A partial update: a field left `undefined` keeps its stored value; `null`
+ * clears a nullable one (`siteKey`, `secretEncrypted`).
+ */
+export interface SetInstanceCaptchaSettingsInput {
+  instanceId?: string;
+  provider?: CaptchaProviderSetting;
+  surfaces?: Record<string, string>;
+  siteKey?: string | null;
+  secretEncrypted?: string | null;
+  options?: Record<string, unknown>;
+  attackMode?: boolean;
+  now?: Date;
+}
+
+function toCaptchaSettings(row: typeof instanceSettings.$inferSelect): InstanceCaptchaSettings {
+  return {
+    instanceId: row.instanceId,
+    provider: (CAPTCHA_PROVIDER_SETTINGS as readonly string[]).includes(row.captchaProvider)
+      ? (row.captchaProvider as CaptchaProviderSetting)
+      : 'altcha',
+    surfaces: row.captchaSurfaces,
+    siteKey: row.captchaSiteKey,
+    secretEncrypted: row.captchaSecretEncrypted,
+    options: row.captchaOptions,
+    attackMode: row.captchaAttackMode,
+    updatedAt: row.updatedAt,
+  };
+}
+
+/** The stored bot protection settings, or the 0045 defaults when there is no settings row yet. */
+export async function getInstanceCaptchaSettings(
+  db: DbClient,
+  instanceId = DEFAULT_INSTANCE_ID
+): Promise<InstanceCaptchaSettings> {
+  const [row] = await db
+    .select()
+    .from(instanceSettings)
+    .where(eq(instanceSettings.instanceId, instanceId))
+    .limit(1);
+  if (row) return toCaptchaSettings(row);
+  return {
+    instanceId,
+    provider: 'altcha',
+    surfaces: { ...DEFAULT_CAPTCHA_SURFACES },
+    siteKey: null,
+    secretEncrypted: null,
+    options: {},
+    attackMode: false,
+    updatedAt: null,
+  };
+}
+
+/**
+ * Save the bot protection settings (a partial update — see the input type).
+ * Creates the settings row when it does not exist yet, like the other
+ * instance setters. Returns the stored result.
+ */
+export async function setInstanceCaptchaSettings(
+  db: DbClient,
+  input: SetInstanceCaptchaSettingsInput
+): Promise<InstanceCaptchaSettings> {
+  const instanceId = input.instanceId ?? DEFAULT_INSTANCE_ID;
+  const now = input.now ?? new Date();
+  const values: Partial<typeof instanceSettings.$inferInsert> = { updatedAt: now };
+  if (input.provider !== undefined) values.captchaProvider = input.provider;
+  if (input.surfaces !== undefined) values.captchaSurfaces = input.surfaces;
+  if (input.siteKey !== undefined) values.captchaSiteKey = input.siteKey;
+  if (input.secretEncrypted !== undefined) values.captchaSecretEncrypted = input.secretEncrypted;
+  if (input.options !== undefined) values.captchaOptions = input.options;
+  if (input.attackMode !== undefined) values.captchaAttackMode = input.attackMode;
+
+  const [updated] = await db
+    .update(instanceSettings)
+    .set(values)
+    .where(eq(instanceSettings.instanceId, instanceId))
+    .returning();
+  if (updated) return toCaptchaSettings(updated);
+
+  const [inserted] = await db
+    .insert(instanceSettings)
+    .values({ instanceId, instanceName: DEFAULT_INSTANCE_NAME, ...values })
+    .onConflictDoUpdate({ target: instanceSettings.instanceId, set: values })
+    .returning();
+  if (!inserted) throw new Error('setInstanceCaptchaSettings: insert returned no rows');
+  return toCaptchaSettings(inserted);
+}
+
 function toMaintenanceStatus(row: typeof instanceSettings.$inferSelect): InstanceMaintenanceStatus {
   return {
     instanceId: row.instanceId,

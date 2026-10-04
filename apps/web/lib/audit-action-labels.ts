@@ -24,6 +24,7 @@ const ACTION_LABEL_KEYS: Record<string, string> = {
   'channel.create': 'admin.audit.action.channel.create',
   'channel.delete': 'admin.audit.action.channel.delete',
   'channel.update': 'admin.audit.action.channel.update',
+  'instance.captcha_updated': 'admin.audit.action.instance.captcha_updated',
   'invite.create': 'admin.audit.action.invite.create',
   'invite.redeem': 'admin.audit.action.invite.redeem',
   'invite.revoke': 'admin.audit.action.invite.revoke',

@@ -82,6 +82,8 @@ vi.mock('@/lib/guest-session', () => ({
   buildGuestSessionCookie: () => ({ setCookieHeader: 'lf_guest=signed; HttpOnly; SameSite=Lax' }),
 }));
 vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));
+// Bot protection is covered by lib/captcha/__tests__ — a pass-through here.
+vi.mock('@/lib/captcha/guard', () => ({ guardCaptchaSurface: async () => null }));
 
 const ctx = () => ({ params: Promise.resolve({ id: SERVER }) });
 

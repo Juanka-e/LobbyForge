@@ -88,7 +88,9 @@ export default function InstanceAccessForm({
   }
 
   return (
-    <div className="relative min-h-[calc(100vh-180px)] pb-28">
+    // The sticky save bar below belongs to this container only: it stops
+    // at the end of these cards, before the bot protection card (own save).
+    <div className="relative">
       <div className="grid max-w-4xl gap-6">
         <section className="rounded-xl border border-border-subtle bg-surface p-5">
           <div className="mb-4">

@@ -27,6 +27,7 @@
  * output directory.
  */
 import { expect, test, type APIRequestContext, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { createGuest, resetRateLimits, signIn } from './helpers/auth';
 // The SDK is not a dependency of apps/web: load its built ESM directly.
 import { LobbyForgeBot } from '../../../packages/bot-sdk/dist/index.js';
 
@@ -124,6 +125,8 @@ test.describe('Bot API v2: commands, interactions, events, access and webhooks',
   }
 
   test.beforeAll(async ({ playwright }) => {
+    // One client address for every context here: start from a fresh rate-limit window.
+    resetRateLimits();
     test.setTimeout(120_000);
     // Own browser WITHOUT the config's --disable-web-security (it drops the
     // Origin header and the CSRF guard rejects every POST from the page).
@@ -146,7 +149,7 @@ test.describe('Bot API v2: commands, interactions, events, access and webhooks',
       },
     });
     if (setup.status() !== 200) {
-      const login = await owner.post('/api/auth/login', { headers: ORIGIN, data: { email: OWNER_EMAIL, password: OWNER_PASSWORD } });
+      const login = await signIn(owner, { headers: ORIGIN, data: { email: OWNER_EMAIL, password: OWNER_PASSWORD } });
       expect(login.status(), 'owner login on a warm stack').toBe(200);
     }
     const { servers } = (await (await owner.get('/api/servers')).json()) as { servers: Array<{ id: string }> };
@@ -169,7 +172,7 @@ test.describe('Bot API v2: commands, interactions, events, access and webhooks',
     expect([...createdBody.bot.permissions].sort()).toEqual([...PERMISSIONS].sort());
 
     // A member joins through an invite.
-    expect((await memberCtx.request.post('/api/auth/guest', { headers: ORIGIN, data: { displayNameSeed: 'Roller' } })).status()).toBe(200);
+    expect((await createGuest(memberCtx.request, { headers: ORIGIN, data: { displayNameSeed: 'Roller' } })).status()).toBe(200);
     const invite = await owner.post(`/api/servers/${serverId}/invites`, { headers: ORIGIN, data: {} });
     expect(invite.status()).toBe(201);
     const { invite: inv } = (await invite.json()) as { invite: { code: string } };

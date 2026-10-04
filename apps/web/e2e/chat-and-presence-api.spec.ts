@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { createGuest } from './helpers/auth';
 
 /**
  * Tier 2/3 — Chat + presence API boundary cases.
@@ -21,7 +22,7 @@ const NON_MEMBER_CHANNEL = '00000000-0000-0000-0000-000000000091';
 
 test.describe('Chat + presence API boundaries', () => {
   test('rejects a message POST to a channel the caller is not a member of', async ({ request }) => {
-    const created = await request.post('/api/auth/guest', { data: { displayNameSeed: 'Chat Probe' } });
+    const created = await createGuest(request, { data: { displayNameSeed: 'Chat Probe' } });
     expect(created.ok()).toBeTruthy();
     const res = await request.post(
       `/api/servers/${NON_MEMBER_SERVER}/channels/${NON_MEMBER_CHANNEL}/messages`,
@@ -31,7 +32,7 @@ test.describe('Chat + presence API boundaries', () => {
   });
 
   test('rejects a typing POST to a channel the caller is not a member of', async ({ request }) => {
-    const created = await request.post('/api/auth/guest', { data: { displayNameSeed: 'Typing Probe' } });
+    const created = await createGuest(request, { data: { displayNameSeed: 'Typing Probe' } });
     expect(created.ok()).toBeTruthy();
     const res = await request.post(
       `/api/servers/${NON_MEMBER_SERVER}/channels/${NON_MEMBER_CHANNEL}/typing`
@@ -40,7 +41,7 @@ test.describe('Chat + presence API boundaries', () => {
   });
 
   test('rejects a channel-presence GET for a non-member channel', async ({ request }) => {
-    const created = await request.post('/api/auth/guest', { data: { displayNameSeed: 'Presence Read' } });
+    const created = await createGuest(request, { data: { displayNameSeed: 'Presence Read' } });
     expect(created.ok()).toBeTruthy();
     const res = await request.get(
       `/api/servers/${NON_MEMBER_SERVER}/channels/${NON_MEMBER_CHANNEL}/presence`
@@ -49,7 +50,7 @@ test.describe('Chat + presence API boundaries', () => {
   });
 
   test('rejects invite creation without CREATE_INVITE permission on a foreign server', async ({ request }) => {
-    const created = await request.post('/api/auth/guest', { data: { displayNameSeed: 'Invite Probe' } });
+    const created = await createGuest(request, { data: { displayNameSeed: 'Invite Probe' } });
     expect(created.ok()).toBeTruthy();
     const res = await request.post(`/api/servers/${NON_MEMBER_SERVER}/invites`, {
       data: { maxUses: 5 },

@@ -24,6 +24,7 @@ import {
   type BrowserContext,
   type Page,
 } from '@playwright/test';
+import { createGuest, resetRateLimits, signIn } from './helpers/auth';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -94,7 +95,7 @@ test.describe('voice moderation: disconnect, rejoin, and the voice security log'
       colorScheme: 'dark',
       permissions: ['microphone', 'camera'],
     });
-    expect((await ctx.request.post('/api/auth/guest', { headers: ORIGIN, data: { displayNameSeed: `${seed} ${RUN.slice(-4)}` } })).status()).toBe(200);
+    expect((await createGuest(ctx.request, { headers: ORIGIN, data: { displayNameSeed: `${seed} ${RUN.slice(-4)}` } })).status()).toBe(200);
     const invite = await owner.post(`/api/servers/${serverId}/invites`, { headers: ORIGIN, data: {} });
     expect(invite.status()).toBe(201);
     const { invite: inv } = (await invite.json()) as { invite: { code: string } };
@@ -104,6 +105,8 @@ test.describe('voice moderation: disconnect, rejoin, and the voice security log'
   }
 
   test.beforeAll(async ({ playwright }) => {
+    // One client address for every context here: start from a fresh rate-limit window.
+    resetRateLimits();
     test.setTimeout(120_000);
     // Fake media, and WITHOUT the config's --disable-web-security (it drops
     // the Origin header; the CSRF guard then refuses every POST).
@@ -134,7 +137,7 @@ test.describe('voice moderation: disconnect, rejoin, and the voice security log'
       },
     });
     if (setup.status() !== 200) {
-      const login = await owner.post('/api/auth/login', { headers: ORIGIN, data: { email: OWNER_EMAIL, password: OWNER_PASSWORD } });
+      const login = await signIn(owner, { headers: ORIGIN, data: { email: OWNER_EMAIL, password: OWNER_PASSWORD } });
       expect(login.status(), 'owner login on a warm stack').toBe(200);
     }
     const { servers } = (await (await owner.get('/api/servers')).json()) as { servers: Array<{ id: string }> };
@@ -202,16 +205,50 @@ test.describe('voice moderation: disconnect, rejoin, and the voice security log'
     await expect(item).toBeVisible();
     // Nothing paints over the open menu (the sidebar's next section used to:
     // its fade-in animation left a transform that stacked it above the menu).
-    const covered = await menu.evaluate((el) => {
-      const box = el.getBoundingClientRect();
-      const points: Array<[number, number]> = [];
-      for (const fx of [0.1, 0.5, 0.9]) for (const fy of [0.15, 0.5, 0.85]) points.push([box.left + box.width * fx, box.top + box.height * fy]);
-      return points
-        .map(([x, y]) => document.elementFromPoint(x, y))
-        .filter((hit) => !hit || !el.contains(hit))
-        .map((hit) => (hit ? `${hit.tagName.toLowerCase()}: ${(hit.textContent ?? '').trim().slice(0, 30)}` : 'nothing'));
-    });
-    expect(covered, 'parts of the open roster menu covered by other elements').toEqual([]);
+    const coveredPoints = () =>
+      menu.evaluate((el) => {
+        const box = el.getBoundingClientRect();
+        const points: Array<[number, number]> = [];
+        for (const fx of [0.1, 0.5, 0.9]) for (const fy of [0.15, 0.5, 0.85]) points.push([box.left + box.width * fx, box.top + box.height * fy]);
+        return points
+          .map(([x, y]) => document.elementFromPoint(x, y))
+          .filter((hit) => !hit || !el.contains(hit))
+          .map((hit) => (hit ? `${hit.tagName.toLowerCase()}: ${(hit.textContent ?? '').trim().slice(0, 30)}` : 'nothing'));
+      });
+    const firstLook = await coveredPoints();
+    if (firstLook.length > 0) {
+      // Covered: record why before failing — the stacking-context makers among
+      // the menu's ancestors and the covering element's (running animations,
+      // transforms, opacity, z-index), and a picture.
+      const why = await menu.evaluate((el) => {
+        const describe = (start: Element | null) => {
+          const chain: string[] = [];
+          for (let node = start as HTMLElement | null; node && node !== document.body; node = node.parentElement) {
+            const style = getComputedStyle(node);
+            const running = node.getAnimations().filter((a) => a.playState === 'running').map((a) => (a as CSSAnimation).animationName ?? 'anim');
+            const marks = [
+              style.transform !== 'none' ? `transform:${style.transform}` : '',
+              running.length ? `running:${running.join('+')}` : '',
+              style.zIndex !== 'auto' ? `z:${style.zIndex}` : '',
+              style.opacity !== '1' ? `opacity:${style.opacity}` : '',
+              style.isolation === 'isolate' ? 'isolate' : '',
+            ].filter(Boolean);
+            if (marks.length) chain.push(`${node.tagName.toLowerCase()}.${String(node.className).split(' ').slice(0, 3).join('.')} [${marks.join(' ')}]`);
+          }
+          return chain;
+        };
+        const box = el.getBoundingClientRect();
+        const hit = [0.15, 0.5, 0.85]
+          .map((fy) => document.elementFromPoint(box.left + box.width / 2, box.top + box.height * fy))
+          .find((h) => h && !el.contains(h));
+        return { menu: describe(el.parentElement), cover: describe(hit ?? null) };
+      });
+      await moderator.page.screenshot({ path: testInfo.outputPath('covered-roster-menu.png') });
+      console.info(`[voice-moderation] roster menu covered at first look by ${JSON.stringify(firstLook)} — ${JSON.stringify(why)}`);
+      testInfo.annotations.push({ type: 'roster menu covered at first look', description: JSON.stringify({ firstLook, why }) });
+    }
+    // The menu renders in a portal on <body>: nothing in the sidebar can cover it, even mid-animation.
+    expect(firstLook, 'parts of the open roster menu covered by other elements').toEqual([]);
     await shootBothThemes(moderator.page, shot('1-roster-menu'));
     await item.click();
 

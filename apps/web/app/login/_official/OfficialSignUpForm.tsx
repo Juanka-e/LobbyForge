@@ -4,6 +4,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useId, useState, type FormEvent } from 'react';
 import tones from '@/app/(marketing)/_components/hub-tones.module.css';
+import { CaptchaField } from '@/components/captcha/CaptchaField';
+import { reportFormValidity } from '@/components/captcha/form-validity';
+import { useCaptchaGate } from '@/components/captcha/useCaptchaGate';
 import { LOBBYFORGE_REPO } from '@/lib/github-repo';
 import { useT } from '@/lib/i18n/client';
 import { rich } from '@/lib/i18n/rich';
@@ -50,24 +53,31 @@ export default function OfficialSignUpForm() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const strength = passwordStrength(password);
+  // Hub sign-up is the `register` surface (docs/CAPTCHA.md §2).
+  const gate = useCaptchaGate({ surface: 'register' });
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // noValidate: the captcha checkbox must not block the send (form-validity.ts).
+    if (!reportFormValidity(event.currentTarget)) return;
     setBusy(true);
     setError(null);
-    const response = await fetch('/api/auth/register', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email: email.trim(), password, displayName: displayName.trim() }),
-    }).catch(() => null);
-    if (!response) {
-      setError(t('auth.official.error.network'));
+    const result = await gate.submit((fields) =>
+      fetch('/api/auth/register', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password, displayName: displayName.trim(), ...fields }),
+      })
+    );
+    if (result.kind !== 'response') {
+      setError(t(result.kind === 'blocked' ? result.messageKey : 'auth.official.error.network'));
       setBusy(false);
       return;
     }
+    const { response } = result;
     if (!response.ok) {
-      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      const body = result.body as { error?: string };
       setError(signUpErrorMessage(t, response.status, body.error));
       setBusy(false);
       return;
@@ -89,7 +99,7 @@ export default function OfficialSignUpForm() {
         </p>
       ) : null}
 
-      <form onSubmit={submit} aria-busy={busy} className="flex flex-col gap-5">
+      <form onSubmit={submit} aria-busy={busy} noValidate className="flex flex-col gap-5">
         <div className="flex flex-col gap-2">
           <label htmlFor={`${ids}-name`} className={authLabel}>
             {t('auth.login.displayName')}
@@ -171,6 +181,7 @@ export default function OfficialSignUpForm() {
           </label>
         </div>
 
+        <CaptchaField gate={gate} />
         <button type="submit" disabled={busy} className={authSubmit}>
           {busy ? t('auth.login.pleaseWait') : t('auth.login.createAccount')}
         </button>

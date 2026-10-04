@@ -4,8 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * Security follow-up: the per-account sign-in failure limit.
  */
 
-const { evalMock, delMock } = vi.hoisted(() => ({ evalMock: vi.fn(), delMock: vi.fn() }));
-vi.mock('@/lib/redis', () => ({ redis: { eval: evalMock, del: delMock } }));
+const { evalMock, delMock, getMock } = vi.hoisted(() => ({ evalMock: vi.fn(), delMock: vi.fn(), getMock: vi.fn() }));
+vi.mock('@/lib/redis', () => ({ redis: { eval: evalMock, del: delMock, get: getMock } }));
 
 import {
   PASSWORD_CHANGE_ACCOUNT_LIMIT,
@@ -18,7 +18,9 @@ import {
   clearAccountAttempts,
   confirmSignInDevice,
   deviceAttemptKey,
+  deviceSignInPathOpen,
   finishSignInAttempt,
+  peekSignInAttempts,
   resetAccountAttemptsForTests,
 } from '../auth-throttle.js';
 
@@ -401,5 +403,68 @@ describe('accountLockedResponse', () => {
     expect(Object.keys(body).sort()).toEqual(['error', 'resetAt', 'retryAfter']);
     expect(body.error).toBe('Rate limit exceeded');
     expect(body.retryAfter).toBe(120);
+  });
+});
+
+// Bot protection (docs/CAPTCHA.md §2): adaptive sign-in reads the account's
+// counter WITHOUT counting an attempt.
+describe('peekSignInAttempts', () => {
+  it('in-process: reads the count, never adds to it, and forgets it after a success', async () => {
+    expect(await peekSignInAttempts('owner@example.com')).toBe(0);
+    await beginSignInAttempt({ email: 'owner@example.com' });
+    await beginSignInAttempt({ email: 'Owner@Example.com' });
+    expect(await peekSignInAttempts('OWNER@example.com')).toBe(2);
+    expect(await peekSignInAttempts('owner@example.com')).toBe(2);
+    await finishSignInAttempt({ email: 'owner@example.com' }, 'account');
+    expect(await peekSignInAttempts('owner@example.com')).toBe(0);
+  });
+
+  it('in-process: an expired window reads 0', async () => {
+    vi.useFakeTimers();
+    await beginSignInAttempt({ email: 'owner@example.com' });
+    vi.advanceTimersByTime(SIGN_IN_ACCOUNT_LIMIT.windowMs + 1);
+    expect(await peekSignInAttempts('owner@example.com')).toBe(0);
+  });
+
+  it('Redis: a GET of the same key; null when Redis is down', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    getMock.mockResolvedValueOnce('4');
+    expect(await peekSignInAttempts('owner@example.com')).toBe(4);
+    expect(getMock).toHaveBeenCalledWith(accountAttemptKey(signIn('owner@example.com')));
+    expect(evalMock).not.toHaveBeenCalled();
+    getMock.mockResolvedValueOnce(null);
+    expect(await peekSignInAttempts('owner@example.com')).toBe(0);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    getMock.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    expect(await peekSignInAttempts('owner@example.com')).toBeNull();
+  });
+});
+
+// Bot protection: a device may skip the adaptive challenge only while its
+// own bucket is below the limit — read without counting.
+describe('deviceSignInPathOpen', () => {
+  const NONCE = 'A'.repeat(22);
+
+  it('in-process: open until the device bucket is full, never counts itself', async () => {
+    for (let i = 0; i < SIGN_IN_DEVICE_LIMIT.maxAttempts - 1; i += 1) {
+      await beginSignInAttempt({ email: 'owner@example.com', deviceNonce: NONCE });
+      expect(await deviceSignInPathOpen('owner@example.com', NONCE)).toBe(true);
+    }
+    await beginSignInAttempt({ email: 'owner@example.com', deviceNonce: NONCE });
+    expect(await deviceSignInPathOpen('Owner@Example.com', NONCE)).toBe(false);
+    expect(await deviceSignInPathOpen('owner@example.com', 'B'.repeat(22))).toBe(true);
+  });
+
+  it('Redis: a GET of the device key; closed when Redis is down', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    getMock.mockResolvedValueOnce(String(SIGN_IN_DEVICE_LIMIT.maxAttempts - 1));
+    expect(await deviceSignInPathOpen('owner@example.com', NONCE)).toBe(true);
+    expect(getMock).toHaveBeenCalledWith(deviceAttemptKey('owner@example.com', NONCE));
+    getMock.mockResolvedValueOnce(String(SIGN_IN_DEVICE_LIMIT.maxAttempts));
+    expect(await deviceSignInPathOpen('owner@example.com', NONCE)).toBe(false);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    getMock.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    expect(await deviceSignInPathOpen('owner@example.com', NONCE)).toBe(false);
+    expect(evalMock).not.toHaveBeenCalled();
   });
 });

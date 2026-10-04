@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { createGuest } from './helpers/auth';
 
 // A production-mode stack's CSRF guard refuses a POST without an Origin
 // ("Missing request origin", 403) — send the app's own, as a browser would.
@@ -12,8 +13,8 @@ test.describe('Voice and Presence Integration', () => {
     const pageA = await userAContext.newPage();
     const pageB = await userBContext.newPage();
 
-    const guestA = await pageA.request.post('/api/auth/guest', { data: { displayNameSeed: 'Voice Alice' } });
-    const guestB = await pageB.request.post('/api/auth/guest', { data: { displayNameSeed: 'Voice Bob' } });
+    const guestA = await createGuest(pageA.request, { data: { displayNameSeed: 'Voice Alice' } });
+    const guestB = await createGuest(pageB.request, { data: { displayNameSeed: 'Voice Bob' } });
     expect(guestA.ok()).toBeTruthy();
     expect(guestB.ok()).toBeTruthy();
     const bodyA = await guestA.json();
@@ -37,7 +38,7 @@ test.describe('Voice and Presence Integration', () => {
   });
 
   test('rejects presence writes without a valid server and channel membership', async ({ page }) => {
-    const guest = await page.request.post('/api/auth/guest', { data: { displayNameSeed: 'Presence Test' } });
+    const guest = await createGuest(page.request, { data: { displayNameSeed: 'Presence Test' } });
     expect(guest.ok()).toBeTruthy();
     const response = await page.request.post('/api/presence', { data: {
       serverId: '00000000-0000-0000-0000-000000000090',

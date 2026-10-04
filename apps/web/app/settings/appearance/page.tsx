@@ -1,7 +1,10 @@
 ﻿'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import type { Route } from 'next';
+import { useRouter } from 'next/navigation';
 import SettingsShell from '@/app/SettingsShell';
+import { currentPagePath, signInHref } from '@/lib/sign-in-return';
 import { deriveAccent } from '@/lib/accent';
 import { clearLocaleCookie, serializeLocaleCookie } from '@/lib/i18n/locale-cookie';
 import { useLocaleOptions, useT } from '@/lib/i18n/client';
@@ -158,6 +161,7 @@ function applyAppearanceTheme(theme: ThemeChoice): void {
 
 export default function AppearanceSettingsPage() {
   const t = useT();
+  const router = useRouter();
   const localeOptions = useLocaleOptions();
   const [theme, setTheme] = useState<ThemeChoice>('dark');
   const [extra, setExtra] = useState<AppearanceExtra>(DEFAULT_EXTRA);
@@ -189,12 +193,10 @@ export default function AppearanceSettingsPage() {
           data = await jsonFetch<SettingsResponse>('/api/settings/me');
         } catch (err) {
           if (!(err as Error).message.startsWith('HTTP 401')) throw err;
-          await jsonFetch('/api/auth/guest', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({}),
-          });
-          data = await jsonFetch<SettingsResponse>('/api/settings/me');
+          // Signed out: sign in and come back here. Settings never mint a
+          // guest (bot protection would refuse one; docs/CAPTCHA.md §6).
+          if (!cancelled) router.replace(signInHref(currentPagePath()) as Route);
+          return;
         }
         if (!cancelled) {
           const nextTheme = coerceTheme(data.settings.theme);
@@ -211,7 +213,7 @@ export default function AppearanceSettingsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [router]);
 
   function patchTheme(next: ThemeChoice) {
     setTheme(next);

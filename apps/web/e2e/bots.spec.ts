@@ -22,6 +22,7 @@
  * other specs' chat).
  */
 import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { createGuest, resetRateLimits, signIn } from './helpers/auth';
 
 const baseUrl = process.env.LF_E2E_BASE_URL ?? '';
 const setupToken = process.env.LF_E2E_SETUP_TOKEN ?? '';
@@ -75,6 +76,8 @@ test.describe('Bots: welcome, moderation and the Bot API', () => {
   let customBotToken = '';
 
   test.beforeAll(async ({ playwright }) => {
+    // One client address for every context here: start from a fresh rate-limit window.
+    resetRateLimits();
     // Own browser WITHOUT the config's --disable-web-security: that flag
     // makes Chromium drop the Origin header, which the app's CSRF guard
     // rejects — and saving bot settings and posting in chat are POSTs.
@@ -99,7 +102,7 @@ test.describe('Bots: welcome, moderation and the Bot API', () => {
       },
     });
     if (setup.status() !== 200) {
-      const login = await ownerCtx.request.post('/api/auth/login', {
+      const login = await signIn(ownerCtx.request, {
         headers: ORIGIN,
         data: { email: OWNER_EMAIL, password: OWNER_PASSWORD },
       });
@@ -148,7 +151,7 @@ test.describe('Bots: welcome, moderation and the Bot API', () => {
     await saveEnabled(card, 'Enable the welcome bot');
 
     // A second user joins through an invite.
-    const guestAuth = await memberCtx.request.post('/api/auth/guest', {
+    const guestAuth = await createGuest(memberCtx.request, {
       headers: ORIGIN,
       data: { displayNameSeed: 'Botwatch' },
     });

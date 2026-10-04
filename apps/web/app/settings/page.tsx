@@ -1,7 +1,10 @@
 ﻿'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import type { Route } from 'next';
+import { useRouter } from 'next/navigation';
 import SettingsShell from '@/app/SettingsShell';
+import { currentPagePath, signInHref } from '@/lib/sign-in-return';
 import SettingsStickyFooter, { type SettingsStatus } from '@/app/settings/SettingsStickyFooter';
 import { useT } from '@/lib/i18n/client';
 
@@ -103,6 +106,7 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
 
 export default function SettingsPage() {
   const t = useT();
+  const router = useRouter();
   const [privacy, setPrivacy] = useState<PrivacySettings | null>(null);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [status, setStatus] = useState<SettingsStatus>({ key: 'settings.footer.loading' });
@@ -120,13 +124,12 @@ export default function SettingsPage() {
         let data: SettingsResponse;
         try {
           data = await jsonFetch<SettingsResponse>('/api/settings/me');
-        } catch {
-          await jsonFetch('/api/auth/guest', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({}),
-          });
-          data = await jsonFetch<SettingsResponse>('/api/settings/me');
+        } catch (err) {
+          if (!(err as Error).message.startsWith('HTTP 401')) throw err;
+          // Signed out: sign in and come back here. Settings never mint a
+          // guest (bot protection would refuse one; docs/CAPTCHA.md §6).
+          if (!cancelled) router.replace(signInHref(currentPagePath()) as Route);
+          return;
         }
         if (!cancelled) {
           setPrivacy(data.settings.privacy);
@@ -148,7 +151,7 @@ export default function SettingsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [router]);
 
   function patchPrivacy(patch: Partial<PrivacySettings>) {
     setPrivacy((current) => (current ? { ...current, ...patch } : current));

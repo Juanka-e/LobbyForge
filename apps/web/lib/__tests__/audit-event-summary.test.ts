@@ -138,3 +138,31 @@ describe('labels', () => {
     expect([...VOICE_SECURITY_ACTIONS].sort()).toEqual(['voice.block_enforced', 'voice.disconnect', 'voice.track_rejected']);
   });
 });
+
+// Bot protection (docs/CAPTCHA.md §6.1): the instance-wide settings entry
+// names the fields that changed — never their values.
+describe('auditEventSummaryText — instance.captcha_updated', () => {
+  const updated = (metadata: Record<string, unknown>) =>
+    entry({ action: 'instance.captcha_updated', targetType: 'instance', targetId: 'self-host', targetName: null, actorName: 'Owner', channelName: null, metadata });
+
+  it('lists the changed fields in a fixed order, in English and Turkish', () => {
+    const e = updated({ fields: ['secretKey', 'provider', 'attackMode'] });
+    // Joined the reader's way (Intl.ListFormat), not with a hard-coded ", ".
+    expect(auditEventSummaryText(en, e)).toBe('Owner changed the bot protection settings: provider, secret key, and attack mode.');
+    expect(auditEventSummaryText(tr, e)).toBe('Owner, bot koruması ayarlarını değiştirdi: sağlayıcı, gizli anahtar ve saldırı modu.');
+    expect(auditEventSummaryText(en, updated({ fields: ['provider', 'siteKey'] }))).toBe('Owner changed the bot protection settings: provider and site key.');
+  });
+
+  it('ignores anything that is not a known field name', () => {
+    expect(auditEventSummaryText(en, updated({ fields: ['surfaces', 'secret: abc', 42] }))).toBe(
+      'Owner changed the bot protection settings: protected pages.'
+    );
+    expect(auditEventSummaryText(en, updated({}))).toBe('Owner changed the bot protection settings.');
+  });
+
+  it('has a label', async () => {
+    const { auditActionLabelKey } = await import('@/lib/audit-action-labels');
+    expect(en(auditActionLabelKey('instance.captcha_updated')!)).toBe('changed the bot protection settings');
+    expect(tr(auditActionLabelKey('instance.captcha_updated')!)).toBe('bot koruması ayarlarını değiştirdi');
+  });
+});

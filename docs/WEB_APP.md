@@ -176,6 +176,10 @@ to reduce timing-based account discovery. `/api/auth/password` verifies the
 current credential, performs an old-hash compare-and-swap update, and revokes
 other tracked sessions.
 
+Bot protection (sign-up, new guests and suspicious sign-ins solve a
+challenge — the built-in ALTCHA by default, Turnstile or reCAPTCHA
+optionally) is described in [CAPTCHA.md](./CAPTCHA.md).
+
 What is **not** there yet:
 
 - **Synchronizer CSRF tokens.** State-changing browser requests already enforce
@@ -444,6 +448,15 @@ Required env:
 - `LOBBYFORGE_SESSION_SECRET` — HMAC key for the `lf_guest` cookie (32+ chars).
 - `DATABASE_URL` — Postgres connection string for `@lobbyforge/db` (default points at the docker-compose dev stack).
 - `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` — credentials for the LiveKit token endpoint.
+
+Optional bot protection overrides (they win over Admin → Settings →
+Authentication → Bot protection and show as locked there; see
+[CAPTCHA.md](./CAPTCHA.md)):
+
+- `LOBBYFORGE_CAPTCHA_PROVIDER` — `none` | `altcha` | `turnstile` | `recaptcha`;
+  `none` is the emergency switch.
+- `LOBBYFORGE_CAPTCHA_SITE_KEY` / `LOBBYFORGE_CAPTCHA_SECRET_KEY` — the
+  external provider's key pair.
 
 The full env list is in `infra/docker/.env.example`.
 
