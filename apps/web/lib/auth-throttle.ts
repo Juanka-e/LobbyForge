@@ -24,8 +24,34 @@
  *     in-process otherwise; when Redis is unavailable the attempt is
  *     refused (fail closed), as that limiter does.
  *
- * Keys live under `lf:<env>:rate-limit:auth-account:*`, so clearing
- * `*rate-limit*` keys (the documented e2e reset) clears them too.
+ * Device cookies (OWASP "Slow Down Online Guessing Attacks with Device
+ * Cookies", `lib/device-cookie.ts`): the account-wide lock alone let
+ * anyone who knows an address lock its owner out. A sign-in attempt from a
+ * browser holding a valid device cookie for that account goes through
+ * `beginSignInAttempt` on the DEVICE path instead:
+ *
+ *   - It is counted in a bucket keyed by (account, device nonce) —
+ *     `SIGN_IN_DEVICE_LIMIT`, the same fixed-window counter — and is NOT
+ *     refused by the account-wide lock. Its success clears only its own
+ *     bucket, never the account counter (otherwise every sign-in of the
+ *     owner would hand whoever is guessing a fresh batch of guesses).
+ *   - A device whose bucket trips is untrusted until that window ends: its
+ *     attempts are charged to the account-wide counter like a browser
+ *     without a device cookie (refused while the account is locked), and
+ *     even a success then does not reset the account counter.
+ *   - Without a valid device cookie for the account (none, forged,
+ *     expired, or another account's) nothing changes from before.
+ *   - The device path is provisional until the account is looked up: a
+ *     device cookie entry is bound to the password hash it was issued
+ *     under, and `confirmSignInDevice` (after the lookup, BEFORE the
+ *     password check) charges the attempt to the account-wide counter —
+ *     refused while the account is locked — when that binding no longer
+ *     holds. So a password change (which also signs out every other
+ *     session) leaves no device with a bucket outside the account lock.
+ *
+ * Keys live under `lf:<env>:rate-limit:auth-account:*` and
+ * `lf:<env>:rate-limit:auth-device:*`, so clearing `*rate-limit*` keys
+ * (the documented e2e reset) clears them too.
  */
 import { createHash, createHmac } from 'node:crypto';
 import { NextResponse } from 'next/server';
@@ -37,6 +63,8 @@ export interface AccountLimit {
 
 /** Sign-in by email (login + desktop handoff start): 10 failures / 15 min. */
 export const SIGN_IN_ACCOUNT_LIMIT: AccountLimit = { maxAttempts: 10, windowMs: 15 * 60_000 };
+/** Sign-in from a trusted device (valid device cookie): 10 failures / 15 min per (account, device). */
+export const SIGN_IN_DEVICE_LIMIT: AccountLimit = { maxAttempts: 10, windowMs: 15 * 60_000 };
 /** Current-password check when changing it: 5 failures / 15 min per user. */
 export const PASSWORD_CHANGE_ACCOUNT_LIMIT: AccountLimit = { maxAttempts: 5, windowMs: 15 * 60_000 };
 
@@ -46,6 +74,25 @@ export type AccountSubject =
 
 export type AccountAttempt = { allowed: true } | { allowed: false; retryAfterSeconds: number };
 
+/** A sign-in attempt: the email, and the nonce of a VALID device cookie entry for it, if any. */
+export interface SignInSubject {
+  email: string;
+  /** From `readDeviceClaim` (MAC verified) — never an unverified value from the request. */
+  deviceNonce?: string | null;
+}
+
+/**
+ * Which counter an allowed sign-in attempt was charged to:
+ * `account` — no valid device cookie, or one whose credential binding no
+ * longer holds; `device` — the device's own bucket; `untrusted-device` — a
+ * device cookie whose bucket tripped, charged to the account counter.
+ */
+export type SignInPath = 'account' | 'device' | 'untrusted-device';
+
+export type SignInAttempt =
+  | { allowed: true; path: SignInPath }
+  | { allowed: false; retryAfterSeconds: number };
+
 /** When Redis is down the attempt is refused for this long (as distributedRateLimit). */
 const UNAVAILABLE_RETRY_SECONDS = 5;
 
@@ -53,10 +100,8 @@ function limitFor(subject: AccountSubject): AccountLimit {
   return subject.scope === 'sign-in' ? SIGN_IN_ACCOUNT_LIMIT : PASSWORD_CHANGE_ACCOUNT_LIMIT;
 }
 
-/** The normalised subject, hashed — the only form that reaches a key name. */
-function subjectDigest(subject: AccountSubject): string {
-  const value = subject.scope === 'sign-in' ? subject.email.trim().toLowerCase() : subject.userId;
-  const material = `${subject.scope}:${value}`;
+/** HMAC of the material — the only form of an email that reaches a key name. */
+function keyDigest(material: string): string {
   const secret = process.env.LOBBYFORGE_SESSION_SECRET;
   // Keyed so a Redis dump does not reveal which addresses were tried
   // (a plain hash of an email is a dictionary lookup away). The key is
@@ -69,8 +114,23 @@ function subjectDigest(subject: AccountSubject): string {
   return createHash('sha256').update(`lobbyforge:${material}`).digest('hex');
 }
 
+function normalisedEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function keyPrefix(): string {
+  return `lf:${process.env.NODE_ENV || 'dev'}:rate-limit`;
+}
+
 export function accountAttemptKey(subject: AccountSubject): string {
-  return `lf:${process.env.NODE_ENV || 'dev'}:rate-limit:auth-account:${subject.scope}:${subjectDigest(subject)}`;
+  const value = subject.scope === 'sign-in' ? normalisedEmail(subject.email) : subject.userId;
+  return `${keyPrefix()}:auth-account:${subject.scope}:${keyDigest(`${subject.scope}:${value}`)}`;
+}
+
+/** The failure bucket of one trusted device for one account. */
+export function deviceAttemptKey(email: string, deviceNonce: string): string {
+  const material = JSON.stringify(['sign-in-device', normalisedEmail(email), deviceNonce]);
+  return `${keyPrefix()}:auth-device:sign-in:${keyDigest(material)}`;
 }
 
 function useRedis(): boolean {
@@ -108,36 +168,26 @@ function memoryAttempt(key: string, limit: AccountLimit): { count: number; ttlMs
   return { count: existing.count, ttlMs: existing.resetAt - now };
 }
 
-/**
- * Count one attempt for this account. Call it BEFORE checking the
- * password; when it is refused, answer with `accountLockedResponse`
- * without checking anything.
- */
-export async function beginAccountAttempt(subject: AccountSubject): Promise<AccountAttempt> {
-  const limit = limitFor(subject);
-  const key = accountAttemptKey(subject);
-  let count: number;
-  let ttlMs: number;
-  if (useRedis()) {
-    try {
-      const { redis } = await import('@/lib/redis');
-      const result = (await redis.eval(REDIS_ATTEMPT_SCRIPT, 1, key, String(limit.windowMs))) as [number, number];
-      count = Number(result[0]);
-      ttlMs = Math.max(1, Number(result[1]));
-    } catch (error) {
-      console.error('[auth] account attempt limiter unavailable', (error as Error).message);
-      return { allowed: false, retryAfterSeconds: UNAVAILABLE_RETRY_SECONDS };
-    }
-  } else {
-    ({ count, ttlMs } = memoryAttempt(key, limit));
+/** One atomic increment of a counter; null when the store is unavailable. */
+async function countAttempt(key: string, limit: AccountLimit): Promise<{ count: number; ttlMs: number } | null> {
+  if (!useRedis()) return memoryAttempt(key, limit);
+  try {
+    const { redis } = await import('@/lib/redis');
+    const result = (await redis.eval(REDIS_ATTEMPT_SCRIPT, 1, key, String(limit.windowMs))) as [number, number];
+    return { count: Number(result[0]), ttlMs: Math.max(1, Number(result[1])) };
+  } catch (error) {
+    console.error('[auth] account attempt limiter unavailable', (error as Error).message);
+    return null;
   }
-  if (count <= limit.maxAttempts) return { allowed: true };
-  return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil(ttlMs / 1000)) };
 }
 
-/** A successful password check clears the account's counter. */
-export async function clearAccountAttempts(subject: AccountSubject): Promise<void> {
-  const key = accountAttemptKey(subject);
+function verdict(counted: { count: number; ttlMs: number } | null, limit: AccountLimit): AccountAttempt {
+  if (!counted) return { allowed: false, retryAfterSeconds: UNAVAILABLE_RETRY_SECONDS };
+  if (counted.count <= limit.maxAttempts) return { allowed: true };
+  return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil(counted.ttlMs / 1000)) };
+}
+
+async function clearKey(key: string): Promise<void> {
   if (!useRedis()) {
     memory.delete(key);
     return;
@@ -148,6 +198,79 @@ export async function clearAccountAttempts(subject: AccountSubject): Promise<voi
   } catch (error) {
     // The sign-in already succeeded; a stale counter only expires later.
     console.error('[auth] failed to clear the account attempt counter', (error as Error).message);
+  }
+}
+
+/**
+ * Count one attempt for this account. Call it BEFORE checking the
+ * password; when it is refused, answer with `accountLockedResponse`
+ * without checking anything.
+ */
+export async function beginAccountAttempt(subject: AccountSubject): Promise<AccountAttempt> {
+  const limit = limitFor(subject);
+  return verdict(await countAttempt(accountAttemptKey(subject), limit), limit);
+}
+
+/** A successful password check clears the account's counter. */
+export async function clearAccountAttempts(subject: AccountSubject): Promise<void> {
+  await clearKey(accountAttemptKey(subject));
+}
+
+/**
+ * Count one sign-in attempt (login form or desktop handoff start), on the
+ * device path when `deviceNonce` is set. Call it BEFORE looking anything
+ * up; when it is refused, answer with `accountLockedResponse`. An allowed
+ * attempt then goes through `confirmSignInDevice` after the lookup.
+ */
+export async function beginSignInAttempt(subject: SignInSubject): Promise<SignInAttempt> {
+  const account = { scope: 'sign-in', email: subject.email } as const;
+  let path: SignInPath = 'account';
+  if (subject.deviceNonce) {
+    const device = await countAttempt(deviceAttemptKey(subject.email, subject.deviceNonce), SIGN_IN_DEVICE_LIMIT);
+    // Store down: fail closed, as the account counter does.
+    if (!device) return { allowed: false, retryAfterSeconds: UNAVAILABLE_RETRY_SECONDS };
+    if (device.count <= SIGN_IN_DEVICE_LIMIT.maxAttempts) return { allowed: true, path: 'device' };
+    // The device's own bucket tripped: untrusted until that window ends,
+    // so this attempt is charged to the account-wide counter.
+    path = 'untrusted-device';
+  }
+  const attempt = await beginAccountAttempt(account);
+  return attempt.allowed ? { allowed: true, path } : attempt;
+}
+
+/**
+ * The second half of the device check: call it after the credentials
+ * lookup and BEFORE the password check, with `deviceHolds` from
+ * `deviceClaimHolds` (is the device cookie entry bound to the account's
+ * CURRENT password hash?). `beginSignInAttempt` could only check the
+ * cookie's MAC. When an attempt on the device path turns out to carry an
+ * entry issued under an older password (or for an account that is gone),
+ * the device path is withdrawn: the attempt is charged to the account-wide
+ * counter, exactly as for a browser without a device cookie, and refused
+ * while the account is locked. Any other attempt is returned unchanged —
+ * it was charged to the account counter already, and is never charged
+ * twice.
+ */
+export async function confirmSignInDevice(
+  subject: SignInSubject,
+  attempt: { allowed: true; path: SignInPath },
+  deviceHolds: boolean
+): Promise<SignInAttempt> {
+  if (attempt.path !== 'device' || deviceHolds) return attempt;
+  const account = await beginAccountAttempt({ scope: 'sign-in', email: subject.email });
+  return account.allowed ? { allowed: true, path: 'account' } : account;
+}
+
+/**
+ * After a successful password check: clear the counter the attempt was
+ * charged to. A device success clears only its own bucket; a success from
+ * a device whose bucket tripped clears nothing.
+ */
+export async function finishSignInAttempt(subject: SignInSubject, path: SignInPath): Promise<void> {
+  if (path === 'account') {
+    await clearAccountAttempts({ scope: 'sign-in', email: subject.email });
+  } else if (path === 'device' && subject.deviceNonce) {
+    await clearKey(deviceAttemptKey(subject.email, subject.deviceNonce));
   }
 }
 

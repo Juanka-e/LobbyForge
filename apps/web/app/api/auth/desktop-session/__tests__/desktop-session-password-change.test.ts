@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetAccountAttemptsForTests } from '@/lib/auth-throttle';
 import { buildGuestSessionCookie } from '@/lib/guest-session';
 
 /**
@@ -6,6 +7,11 @@ import { buildGuestSessionCookie } from '@/lib/guest-session';
  * routes against one in-memory Redis: an attacker who knows the old
  * password keeps a desktop handoff code in hand, the victim changes the
  * password, the attacker completes the handoff. It must fail.
+ *
+ * The same shape for device cookies (security follow-up): an attacker who
+ * signed in once with the old password keeps the `lf_device` cookie, the
+ * victim changes the password, the attacker must not keep a bucket of
+ * guesses outside the account lock.
  */
 
 const { store, sets } = vi.hoisted(() => ({
@@ -74,7 +80,10 @@ vi.mock('@/lib/password', () => ({
   verifyPassword: vi.fn(async (password: string, hash: string) => hash === `hash:${password}`),
   hashPassword: vi.fn(async (password: string) => `hash:${password}`),
 }));
-vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));
+vi.mock('@/lib/security-headers', () => ({
+  withApiSecurity: (handler: unknown) => handler,
+  resolveClientAddress: () => '203.0.113.7',
+}));
 vi.mock('@/lib/session-tracker', () => ({
   recordSession: vi.fn(async () => undefined),
   revokeOtherSessions: vi.fn(async () => 0),
@@ -87,7 +96,30 @@ beforeEach(() => {
   store.clear();
   sets.clear();
   account.passwordHash = 'hash:old password';
+  resetAccountAttemptsForTests();
 });
+
+/** One sign-in attempt on either door, with an optional cookie header. */
+async function signIn(door: 'login' | 'desktop', password: string, cookie?: string): Promise<Response> {
+  const { POST } = door === 'login' ? await import('../../login/route.js') : await import('../route.js');
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  if (cookie) headers.cookie = cookie;
+  return POST(
+    new Request(`http://localhost/api/auth/${door === 'login' ? 'login' : 'desktop-session'}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ email: 'owner@example.test', password }),
+    }),
+    {}
+  );
+}
+
+/** The `lf_device=…` pair a response set — what the browser sends back. */
+function devicePair(res: Response): string {
+  const header = res.headers.getSetCookie().find((c) => c.startsWith('lf_device='));
+  if (!header) throw new Error('expected an lf_device cookie');
+  return header.split(';', 1)[0];
+}
 
 async function mint(password: string): Promise<{ code: string; state: string }> {
   const { POST } = await import('../route.js');
@@ -177,5 +209,45 @@ describe('security-review AUTH-001: desktop handoff vs password change', () => {
     const handoff = await mint('brand new password');
     const res = await completeHandoff(handoff);
     expect(res.status).toBe(200);
+  });
+});
+
+describe('device cookies vs password change (through POST /api/auth/password)', () => {
+  /** Ten wrong guesses from a browser without a device cookie lock the account. */
+  async function lockAccount(): Promise<void> {
+    for (let i = 0; i < 10; i += 1) expect((await signIn('login', 'wrong')).status).toBe(401);
+    expect((await signIn('login', 'brand new password')).status).toBe(429);
+  }
+
+  it.each(['login', 'desktop'] as const)(
+    'a device cookie earned on %s before the change no longer gets past the lock, on either door',
+    async (door) => {
+      const stale = devicePair(await signIn(door, 'old password'));
+      // Before the change it does get past the lock...
+      for (let i = 0; i < 10; i += 1) await signIn('login', 'wrong');
+      expect((await signIn(door, 'old password', stale)).status).toBe(200);
+      resetAccountAttemptsForTests();
+
+      expect((await changePassword('old password', 'brand new password')).status).toBe(200);
+      await lockAccount();
+      for (const target of ['login', 'desktop'] as const) {
+        const res = await signIn(target, 'brand new password', stale);
+        expect(res.status).toBe(429);
+        expect(res.headers.get('set-cookie')).toBeNull();
+      }
+      // The password route deleted the codes minted above; the refused attempts minted none.
+      expect([...store.keys()]).toEqual([]);
+    }
+  );
+
+  it('a fresh sign-in after the change issues a valid device cookie again', async () => {
+    const stale = devicePair(await signIn('login', 'old password'));
+    expect((await changePassword('old password', 'brand new password')).status).toBe(200);
+    const res = await signIn('desktop', 'brand new password', stale);
+    expect(res.status).toBe(200);
+    const fresh = devicePair(res);
+    await lockAccount();
+    expect((await signIn('login', 'brand new password', fresh)).status).toBe(200);
+    expect((await signIn('desktop', 'brand new password', fresh)).status).toBe(200);
   });
 });

@@ -9,15 +9,19 @@ vi.mock('@/lib/password', () => ({
   DUMMY_PASSWORD_HASH: 'dummy-hash',
   verifyPassword,
 }));
-vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));
+vi.mock('@/lib/security-headers', () => ({
+  withApiSecurity: (handler: unknown) => handler,
+  resolveClientAddress: () => '203.0.113.7',
+}));
 const recordSession = vi.fn();
 vi.mock('@/lib/session-tracker', () => ({ recordSession }));
 // The per-account limiter has its own tests (lib/__tests__/auth-throttle.test.ts
 // and the account-limit route tests). Here it always allows: under
 // NODE_ENV=production it would otherwise reach for Redis, which CI lacks.
 vi.mock('@/lib/auth-throttle', () => ({
-  beginAccountAttempt: async () => ({ allowed: true }),
-  clearAccountAttempts: async () => undefined,
+  beginSignInAttempt: async () => ({ allowed: true, path: 'account' }),
+  confirmSignInDevice: async (_subject: unknown, attempt: unknown) => attempt,
+  finishSignInAttempt: async () => undefined,
   accountLockedResponse: () => new Response(null, { status: 429 }),
 }));
 
@@ -113,6 +117,26 @@ describe('POST /api/auth/login — beta-review S7 session tracking', () => {
       expect(response.headers.get('set-cookie')).toBeNull();
     } finally {
       env.NODE_ENV = previous;
+    }
+  });
+
+  it('in production the device cookie is Secure (and HttpOnly, SameSite=Lax, 180 days)', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    try {
+      getUserCredentialsByEmail.mockResolvedValue(USER);
+      verifyPassword.mockResolvedValue(true);
+      const response = await post({ email: USER.email, password: 'correct password' });
+      expect(response.status).toBe(200);
+      const cookies = response.headers.getSetCookie();
+      const device = cookies.find((c) => c.startsWith('lf_device='));
+      expect(device).toBeDefined();
+      const flags = device!.split('; ').slice(1);
+      expect(flags).toEqual(
+        expect.arrayContaining(['Path=/', 'Max-Age=15552000', 'HttpOnly', 'SameSite=Lax', 'Secure'])
+      );
+      expect(cookies.find((c) => c.startsWith('lf_guest='))).toContain('Secure');
+    } finally {
+      vi.unstubAllEnvs();
     }
   });
 

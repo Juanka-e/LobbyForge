@@ -184,6 +184,21 @@ describe('POST /api/auth/password — security-review AUTH-001', () => {
     expect(body).toEqual({ status: 'changed' });
     expect(body).not.toHaveProperty('warning');
   });
+
+  it('re-issues this browser a device cookie bound to the NEW password (old entries are void)', async () => {
+    validChange();
+    revokeOtherSessions.mockResolvedValue(0);
+    const response = await post({ currentPassword: 'old password', newPassword: 'new password long' });
+    expect(response.status).toBe(200);
+    const cookie = response.headers.get('set-cookie') ?? '';
+    expect(cookie).toMatch(/^lf_device=/);
+    expect(cookie).toContain('HttpOnly');
+    const { readDeviceClaim, deviceClaimHolds } = await import('@/lib/device-cookie');
+    const claim = readDeviceClaim(cookie.split(';', 1)[0]!, 'owner@example.com');
+    expect(claim).not.toBeNull();
+    expect(deviceClaimHolds(claim, 'owner@example.com', 'new-hash')).toBe(true);
+    expect(deviceClaimHolds(claim, 'owner@example.com', 'old-hash')).toBe(false);
+  });
 });
 
 function credentials() {

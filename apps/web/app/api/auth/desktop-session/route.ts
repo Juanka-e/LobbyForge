@@ -9,7 +9,13 @@ import {
   credentialFingerprint,
   storeDesktopHandoffCode,
 } from '@/lib/desktop-handoff-codes';
-import { accountLockedResponse, beginAccountAttempt, clearAccountAttempts } from '@/lib/auth-throttle';
+import {
+  accountLockedResponse,
+  beginSignInAttempt,
+  confirmSignInDevice,
+  finishSignInAttempt,
+} from '@/lib/auth-throttle';
+import { buildDeviceCookie, deviceClaimHolds, readDeviceClaim } from '@/lib/device-cookie';
 import { withApiSecurity } from '@/lib/security-headers';
 
 export const dynamic = 'force-dynamic';
@@ -50,18 +56,32 @@ async function handleStart(req: Request): Promise<NextResponse> {
 
   // Security follow-up: the SAME per-account failure counter as
   // /api/auth/login, so the two sign-in doors do not add up to double the
-  // guesses. Counted for unknown emails too; locked → generic 429.
-  const subject = { scope: 'sign-in', email: parsed.data.email } as const;
-  const attempt = await beginAccountAttempt(subject);
-  if (!attempt.allowed) return accountLockedResponse(attempt.retryAfterSeconds);
+  // guesses. Counted for unknown emails too; locked → generic 429. The
+  // same device cookies apply: a browser that signed in to this account
+  // before has its own bucket and is not refused by the account lock.
+  const cookieHeader = req.headers.get('cookie');
+  const device = readDeviceClaim(cookieHeader, parsed.data.email);
+  const subject = { email: parsed.data.email, deviceNonce: device?.nonce ?? null };
+  const begun = await beginSignInAttempt(subject);
+  if (!begun.allowed) return accountLockedResponse(begun.retryAfterSeconds);
 
   const user = await getUserCredentialsByEmail(getDb(), parsed.data.email);
+  // As /api/auth/login: a device entry issued under an older password is
+  // charged to the account counter (before the password check), and the
+  // binding is computed for every attempt, unknown emails included.
+  const attempt = await confirmSignInDevice(
+    subject,
+    begun,
+    deviceClaimHolds(device, parsed.data.email, user && !user.deletedAt ? user.passwordHash : null)
+  );
+  if (!attempt.allowed) return accountLockedResponse(attempt.retryAfterSeconds);
+
   const valid = await verifyPassword(parsed.data.password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
   if (!user || user.deletedAt || !user.passwordHash || !valid) {
     // Same timing-safe shape as /api/auth/login; no account enumeration.
     return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 });
   }
-  await clearAccountAttempts(subject);
+  await finishSignInAttempt(subject, attempt.path);
 
   // One-time code + state (the TS parser requires 43-128 urlsafe chars).
   const code = randomBytes(32).toString('base64url');
@@ -76,6 +96,11 @@ async function handleStart(req: Request): Promise<NextResponse> {
     credential: credentialFingerprint(user.passwordHash),
   });
 
+  const headers = new Headers({ 'Cache-Control': 'no-store' });
+  // As /api/auth/login: a successful start earns this browser a device
+  // cookie for the account, bound to the current password hash.
+  const deviceCookie = buildDeviceCookie(cookieHeader, parsed.data.email, user.passwordHash);
+  if (deviceCookie) headers.append('Set-Cookie', deviceCookie);
   return NextResponse.json(
     {
       code,
@@ -83,7 +108,7 @@ async function handleStart(req: Request): Promise<NextResponse> {
       expiresIn: CODE_TTL_SECONDS,
       redirectUrl: `lobbyforge://session/complete?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}&instance=${encodeURIComponent(process.env.NEXT_PUBLIC_BASE_URL ?? '')}`,
     },
-    { headers: { 'Cache-Control': 'no-store' } }
+    { headers }
   );
 }
 
