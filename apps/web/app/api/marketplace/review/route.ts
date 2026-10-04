@@ -6,6 +6,7 @@ import { getDb } from '@/lib/db';
 import { withApiSecurity } from '@/lib/security-headers';
 import { getCatalogEntry } from '@lobbyforge/db';
 import { downloadBundleForReview } from '@/lib/plugin-bundle-download';
+import { missingSandboxRootFiles, scanTarEntries } from '@/lib/plugin-installer';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -64,6 +65,17 @@ async function handlePost(req: Request): Promise<NextResponse> {
       try {
         const { createHash } = await import('node:crypto');
         const bundle = await downloadBundleForReview(entry.manifestUrl);
+        // ADR-007: only sandbox-v1 bundles can ever be installed, so refuse
+        // to approve (and pin) anything else here instead of letting the
+        // owner discover it at install time.
+        const scan = scanTarEntries(Buffer.from(bundle));
+        if (!scan.ok) {
+          return NextResponse.json({ error: `Bundle rejected: ${scan.error}` }, { status: 400 });
+        }
+        const missing = missingSandboxRootFiles(scan.entries);
+        if (missing) {
+          return NextResponse.json({ error: `Bundle rejected: ${missing}`, code: 'not_sandbox_bundle' }, { status: 400 });
+        }
         bundlePin = {
           sha256: createHash('sha256').update(Buffer.from(bundle)).digest('hex'),
           sizeBytes: bundle.byteLength,

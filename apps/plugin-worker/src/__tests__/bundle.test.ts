@@ -8,6 +8,7 @@ import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_PLUGIN_INSTALL_DIR,
+  MAX_SOURCE_BYTES,
   computeBundleDigest,
   pluginInstallDir,
   resolveBundle,
@@ -68,32 +69,70 @@ describe('computeBundleDigest', () => {
   });
 });
 
-describe('resolveBundle', () => {
-  const install = (version: string, body: string): string => {
+const MANIFEST = (version: string, id = 'game') =>
+  JSON.stringify({ id, name: 'Game', version, sdk: 'sandbox-v1', ui: false, actionPolicies: { go: { role: 'member' } } });
+
+describe('resolveBundle (sandbox-v1)', () => {
+  const install = (version: string, files: Record<string, string>): string => {
     const dir = join(root, 'game', version);
-    writeTree(dir, { 'index.js': body });
+    writeTree(dir, files);
     return computeBundleDigest(dir);
   };
+  const bundleFiles = (version: string, source = 'globalThis.plugin = {};') => ({
+    'manifest.json': MANIFEST(version),
+    'server.js': source,
+  });
 
-  it('resolves the exact folder and caches the verification', () => {
-    const digest = install('1.0.0', 'export const plugin = 1;');
+  it('resolves the exact folder, returns the manifest and source, and caches the verification', () => {
+    const digest = install('1.0.0', bundleFiles('1.0.0', 'globalThis.plugin = 1;'));
     const verified: VerifiedBundles = new Map();
     const first = resolveBundle(root, { pluginId: 'game', version: '1.0.0', digest }, verified);
-    expect(first).toEqual({ ok: true, indexPath: join(root, 'game', '1.0.0', 'index.js') });
+    expect(first).toMatchObject({ ok: true, dir: join(root, 'game', '1.0.0'), source: 'globalThis.plugin = 1;' });
+    if (first.ok) expect(first.manifest.actionPolicies).toEqual({ go: { role: 'member' } });
     expect(verified.size).toBe(1);
+    // A cache hit runs the bytes that were digested, even if a file changed in place.
+    writeFileSync(join(root, 'game', '1.0.0', 'server.js'), 'globalThis.plugin = 2;');
+    const second = resolveBundle(root, { pluginId: 'game', version: '1.0.0', digest }, verified);
+    expect(second).toMatchObject({ ok: true, source: 'globalThis.plugin = 1;' });
   });
 
   it('re-verifies a folder that was replaced after verification', () => {
-    const digest = install('1.0.0', 'export const plugin = 1;');
+    const digest = install('1.0.0', bundleFiles('1.0.0'));
     const verified: VerifiedBundles = new Map();
     expect(resolveBundle(root, { pluginId: 'game', version: '1.0.0', digest }, verified).ok).toBe(true);
     // The installer moves a NEW folder into place (staging → version).
     const staging = join(root, 'game', '.staging');
-    writeTree(staging, { 'index.js': 'export const plugin = 2;' });
+    writeTree(staging, bundleFiles('1.0.0', 'globalThis.plugin = { other: true };'));
     rmSync(join(root, 'game', '1.0.0'), { recursive: true, force: true });
     renameSync(staging, join(root, 'game', '1.0.0'));
     const again = resolveBundle(root, { pluginId: 'game', version: '1.0.0', digest }, verified);
     expect(again).toMatchObject({ ok: false, status: 409 });
+  });
+
+  it('refuses a legacy Node bundle (index.js) with the fix in the message', () => {
+    const digest = install('1.0.0', { 'index.js': 'export const plugin = {};' });
+    const result = resolveBundle(root, { pluginId: 'game', version: '1.0.0', digest }, new Map());
+    expect(result).toMatchObject({ ok: false, status: 422 });
+    if (!result.ok) expect(result.error).toMatch(/legacy Node bundle.*sandbox-v1/);
+  });
+
+  it('refuses an invalid manifest, a manifest for another plugin or another version (422)', () => {
+    const cases: Array<[string, Record<string, string>, RegExp]> = [
+      ['1.0.0', { 'manifest.json': '{"sdk":"node"}', 'server.js': '' }, /sdk/],
+      ['1.0.1', { 'manifest.json': MANIFEST('1.0.1', 'other-game'), 'server.js': '' }, /does not match plugin id/],
+      ['1.0.2', { 'manifest.json': MANIFEST('9.9.9'), 'server.js': '' }, /does not match the installed version/],
+    ];
+    for (const [version, files, message] of cases) {
+      const digest = install(version, files);
+      const result = resolveBundle(root, { pluginId: 'game', version, digest }, new Map());
+      expect(result).toMatchObject({ ok: false, status: 422 });
+      if (!result.ok) expect(result.error).toMatch(message);
+    }
+  });
+
+  it('refuses a server.js over the size cap (422)', () => {
+    const digest = install('1.0.0', bundleFiles('1.0.0', 'x'.repeat(MAX_SOURCE_BYTES + 1)));
+    expect(resolveBundle(root, { pluginId: 'game', version: '1.0.0', digest }, new Map())).toMatchObject({ ok: false, status: 422 });
   });
 
   it('refuses malformed refs before touching the disk', () => {

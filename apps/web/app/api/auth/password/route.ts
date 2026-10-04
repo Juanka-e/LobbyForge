@@ -7,6 +7,7 @@ import { getDb } from '@/lib/db';
 import { revokeDesktopHandoffCodes } from '@/lib/desktop-handoff-codes';
 import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from '@/lib/password';
 import { withApiSecurity } from '@/lib/security-headers';
+import { buildDeviceCookie } from '@/lib/device-cookie';
 import { revokeOtherSessions } from '@/lib/session-tracker';
 
 export const dynamic = 'force-dynamic';
@@ -90,14 +91,27 @@ async function handlePost(req: Request): Promise<NextResponse> {
     // client words in the viewer's language (every environment alike).
     return NextResponse.json(
       { status: 'changed', warning: 'sessions_not_revoked' },
-      { headers: { 'Cache-Control': 'no-store' } }
+      { headers: changedHeaders(req, credentials.email, newPasswordHash) }
     );
   }
 
-  return NextResponse.json(
-    { status: 'changed' },
-    { headers: { 'Cache-Control': 'no-store' } }
-  );
+  return NextResponse.json({ status: 'changed' }, { headers: changedHeaders(req, credentials.email, newPasswordHash) });
+}
+
+/**
+ * The browser that just changed the password stays a known device: device
+ * cookies are bound to the password hash (lib/device-cookie.ts), so every
+ * old entry for this account is void now — re-issue this browser's entry
+ * against the NEW hash, or its owner would wait out an account lock like a
+ * stranger's computer.
+ */
+function changedHeaders(req: Request, email: string | null, newPasswordHash: string): Headers {
+  const headers = new Headers({ 'Cache-Control': 'no-store' });
+  if (email) {
+    const deviceCookie = buildDeviceCookie(req.headers.get('cookie'), email, newPasswordHash);
+    if (deviceCookie) headers.append('Set-Cookie', deviceCookie);
+  }
+  return headers;
 }
 
 export const POST = withApiSecurity(handlePost, {

@@ -17,6 +17,8 @@ import { authorizeChannelMessageAccess } from '@/lib/message-authorization';
 import { authorizeServerPermission } from '@/lib/permissions';
 import { moderateMessage, moderationBlockedBody } from '@/lib/bots/moderation';
 import { readMessageBot } from '@/lib/bots/message-meta';
+import { emitMessageEvent } from '@/lib/bots/events';
+import { publishChatMessageDelete, publishChatMessageUpdate } from '@/lib/chat-bus';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -264,6 +266,25 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
       ...(body.content !== undefined ? { content: body.content } : {}),
       ...(body.pinned !== undefined ? { metadata } : {}),
     });
+    if (body.content !== undefined) {
+      // Bot API v2: bots hear about edits — the event stream through the
+      // chat topic (the gateway reloads the message and checks access),
+      // outgoing endpoints through the cached fan-out. Fire-and-forget.
+      publishChatMessageUpdate({ serverId, channelId, messageId: updated.id, botId: updated.botId });
+      emitMessageEvent({
+        serverId,
+        channel: { id: channelId },
+        event: 'message_update',
+        message: {
+          id: updated.id,
+          content: updated.content,
+          createdAt: updated.createdAt.toISOString(),
+          editedAt: updated.editedAt?.toISOString() ?? null,
+          replyToId: updated.replyToId,
+          userId: updated.userId,
+        },
+      });
+    }
     void logAction(getDb(), {
       serverId,
       actorUserId: session.uid,
@@ -299,6 +320,13 @@ async function handleDelete(req: Request, ctx: RouteContext): Promise<NextRespon
     }
 
     await softDeleteMessage(getDb(), messageId);
+    publishChatMessageDelete({ serverId, channelId, messageId, botId: access.message.botId });
+    emitMessageEvent({
+      serverId,
+      channel: { id: channelId },
+      event: 'message_delete',
+      message: { id: messageId, ...(access.message.botId ? { bot: { id: access.message.botId, name: '' } } : {}) },
+    });
     void logAction(getDb(), {
       serverId,
       actorUserId: session.uid,

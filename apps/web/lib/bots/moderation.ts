@@ -183,6 +183,72 @@ export async function moderateMessage(input: ModerateInput): Promise<ModerationV
   return { action: 'block', rule: violation.rule, botId: bot.id, botName: bot.name };
 }
 
+/**
+ * Bot API v2 §5.1: a post from an incoming channel webhook goes through the
+ * same Moderation Bot. Webhooks are not members, so:
+ *   - the CONTENT rules run (blocked words, links, mentions); the counting
+ *     rules do not — a webhook has its own 30/min limit at the route;
+ *   - there is no staff exemption (a webhook has no roles);
+ *   - the audit entry names the webhook (`targetType: 'webhook'`), and the
+ *     optional notice uses the webhook's name.
+ * Fails open on a bot that cannot be loaded, like member messages.
+ */
+export async function moderateWebhookMessage(input: {
+  serverId: string;
+  channelId: string;
+  webhook: { id: string; name: string };
+  content: string;
+}): Promise<ModerationVerdict> {
+  let bot: BotRow | null;
+  try {
+    bot = await getBuiltInBot(input.serverId, 'moderation');
+  } catch (err) {
+    console.error('[bots] moderation bot unavailable, webhook post allowed:', (err as Error).message);
+    return ALLOW;
+  }
+  if (!bot || !bot.enabled || !botHasPermission(bot, 'moderate_messages')) return ALLOW;
+  const settings = parseModerationSettings(bot.settings);
+  const violation = evaluateContentRules(input.content, settings, wordRulesFor(bot, settings));
+  if (!violation) return ALLOW;
+
+  const openChannel = await isChannelOpenToBots(getDb(), input.channelId).catch(() => false);
+  await logAction(getDb(), {
+    serverId: input.serverId,
+    actorUserId: null,
+    action: 'bot.moderation.block',
+    targetType: 'webhook',
+    targetId: input.webhook.id,
+    metadata: {
+      botId: bot.id,
+      botName: bot.name,
+      rule: violation.rule,
+      detail: violation.detail,
+      channelId: input.channelId,
+      kind: 'webhook',
+      webhookName: input.webhook.name,
+      excerpt: openChannel ? excerptOf(input.content) : null,
+      contentSha256: sha256(input.content),
+    },
+  }).catch((err) => console.error('[audit] bot.moderation.block failed:', (err as Error).message));
+
+  if (settings.postNotice && botHasPermission(bot, 'send_messages')) {
+    const moderationBot = bot;
+    void (async () => {
+      const gate = await distributedRateLimit(
+        `bot-mod-notice:${input.serverId}:${input.channelId}:webhook:${input.webhook.id}`,
+        { windowMs: NOTICE_WINDOW_MS, maxRequests: 1 }
+      );
+      if (!gate.allowed) return;
+      const template = settings.noticeTemplate ?? defaultBotText('bots.moderation.defaultNotice');
+      const content = renderBotTemplate(template, { user: input.webhook.name });
+      if (!content) return;
+      const posted = await postBotMessage({ bot: moderationBot, channelId: input.channelId, content });
+      if (!posted.ok) console.warn(`[bots] moderation notice not posted: ${posted.code}`);
+    })().catch((err) => console.error('[bots] moderation notice failed:', (err as Error).message));
+  }
+  return { action: 'block', rule: violation.rule, botId: bot.id, botName: bot.name };
+}
+
 /** The error a blocked sender gets; the lobby translates it by `code` + `rule`. */
 export function moderationBlockedBody(verdict: Extract<ModerationVerdict, { action: 'block' }>) {
   return {

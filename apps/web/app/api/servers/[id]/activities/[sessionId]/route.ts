@@ -12,7 +12,7 @@ import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
 import { authorizeSessionChannelVisibility } from '@/lib/permissions';
 import { getPluginServer } from '@/lib/plugin-server-registry';
-import { projectActivityState } from '@/lib/activity-projection';
+import { projectStateForViewer } from '@/lib/plugin-projection';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -115,8 +115,20 @@ async function handleGet(
     // canonical projector (lib/activity-projection.ts, shared across all
     // routes) strips secret fields (Hushle's deck/currentCard rules,
     // Quiz's correctIndex) so a player inspecting the Network tab
-    // cannot cheat.
-    const projectedState = projectActivityState(state, row.pluginId, session.uid);
+    // cannot cheat. ADR-007: a marketplace plugin projects with its own
+    // projectState in the plugin worker; a failure is a 500, never the
+    // unprojected state.
+    const projectedState = await projectStateForViewer({
+      plugin,
+      pluginId: row.pluginId,
+      state,
+      viewerUserId: session.uid,
+      ctx: {
+        sessionId: row.id,
+        serverId: row.serverId,
+        hostUserId: row.createdBy ?? null,
+      },
+    });
 
     return NextResponse.json(
       {

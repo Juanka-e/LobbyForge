@@ -29,6 +29,13 @@ export const BOT_PERMISSION_REQUIRES: Record<BotPermissionId, CorePermissionT | 
   manage_game_session: CorePermission.START_ACTIVITY,
   manage_music_queue: CorePermission.START_ACTIVITY,
   read_audit_log: CorePermission.VIEW_AUDIT_LOG,
+  // A command answer is a message in the channel, so handing out commands
+  // takes the right to post yourself (BOT_API_V2 §1.2).
+  slash_commands: CorePermission.SEND_MESSAGES,
+  // Member join/leave and member lookups show names every member already
+  // sees in the member list; the event stream itself grants nothing.
+  read_members: null,
+  receive_events: null,
 };
 
 export function botHasPermission(

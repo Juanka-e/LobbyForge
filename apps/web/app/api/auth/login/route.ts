@@ -4,9 +4,15 @@ import { getUserCredentialsByEmail } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { buildGuestSessionCookie, createGuestIdentity } from '@/lib/guest-session';
 import { getSessionSecret } from '@/lib/api-auth';
-import { accountLockedResponse, beginAccountAttempt, clearAccountAttempts } from '@/lib/auth-throttle';
+import {
+  accountLockedResponse,
+  beginSignInAttempt,
+  confirmSignInDevice,
+  finishSignInAttempt,
+} from '@/lib/auth-throttle';
+import { buildDeviceCookie, deviceClaimHolds, readDeviceClaim } from '@/lib/device-cookie';
 import { DUMMY_PASSWORD_HASH, verifyPassword } from '@/lib/password';
-import { withApiSecurity } from '@/lib/security-headers';
+import { resolveClientAddress, withApiSecurity } from '@/lib/security-headers';
 import { recordSession } from '@/lib/session-tracker';
 
 export const dynamic = 'force-dynamic';
@@ -27,18 +33,38 @@ async function handlePost(req: Request): Promise<NextResponse> {
   // desktop handoff start (the per-IP bucket alone let a distributed
   // attacker guess forever). Counted before anything is looked up, for
   // known and unknown emails alike; a locked account gets the generic 429
-  // whether or not the password is right.
-  const subject = { scope: 'sign-in', email: parsed.data.email } as const;
-  const attempt = await beginAccountAttempt(subject);
-  if (!attempt.allowed) return accountLockedResponse(attempt.retryAfterSeconds);
+  // whether or not the password is right. A browser holding a valid
+  // device cookie for this email (it signed in here before) is counted in
+  // its own bucket instead, so a lockout aimed at the address does not
+  // lock the owner out of their own devices.
+  const cookieHeader = req.headers.get('cookie');
+  const device = readDeviceClaim(cookieHeader, parsed.data.email);
+  const subject = { email: parsed.data.email, deviceNonce: device?.nonce ?? null };
+  const begun = await beginSignInAttempt(subject);
+  if (!begun.allowed) return accountLockedResponse(begun.retryAfterSeconds);
 
   const user = await getUserCredentialsByEmail(getDb(), parsed.data.email);
+  // A device cookie entry is bound to the password it was issued under: once
+  // the password has changed, it no longer earns a bucket of its own and the
+  // attempt is charged to the account counter, still before the password is
+  // checked. Computed for every attempt (a stand-in when there is no
+  // account), so unknown emails do the same work.
+  const attempt = await confirmSignInDevice(
+    subject,
+    begun,
+    deviceClaimHolds(device, parsed.data.email, user && !user.deletedAt ? user.passwordHash : null)
+  );
+  if (!attempt.allowed) return accountLockedResponse(attempt.retryAfterSeconds);
+
   const valid = await verifyPassword(parsed.data.password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
   if (!user || user.deletedAt || !user.passwordHash || !valid) {
-    console.warn(`[security] failed login: email=${parsed.data.email.slice(0, 3)}*** ip=${req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'}`);
+    // The address the rate limiter trusts (the LAST hop the trusted proxy
+    // saw — SEC-004), not the first X-Forwarded-For entry, which the client
+    // writes itself and could use to forge log lines.
+    console.warn(`[security] failed login: email=${parsed.data.email.slice(0, 3)}*** ip=${JSON.stringify(resolveClientAddress(req))}`);
     return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 });
   }
-  await clearAccountAttempts(subject);
+  await finishSignInAttempt(subject, attempt.path);
 
   const sessionSeed = createGuestIdentity();
   const session = buildGuestSessionCookie(
@@ -64,10 +90,14 @@ async function handlePost(req: Request): Promise<NextResponse> {
       );
     }
   }
-  return NextResponse.json(
-    { user: { id: user.id, email: user.email, displayName: user.displayName } },
-    { headers: { 'Set-Cookie': session.setCookieHeader, 'Cache-Control': 'no-store' } }
-  );
+  const headers = new Headers({ 'Cache-Control': 'no-store' });
+  headers.append('Set-Cookie', session.setCookieHeader);
+  // Only a successful sign-in earns this browser a device cookie for the
+  // account — an unknown email never gets one. The entry is bound to the
+  // current password hash and replaces any stale entry for this email.
+  const deviceCookie = buildDeviceCookie(cookieHeader, parsed.data.email, user.passwordHash);
+  if (deviceCookie) headers.append('Set-Cookie', deviceCookie);
+  return NextResponse.json({ user: { id: user.id, email: user.email, displayName: user.displayName } }, { headers });
 }
 
 export const POST = withApiSecurity(handlePost, {

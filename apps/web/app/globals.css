@@ -267,9 +267,12 @@
       opacity: 0;
       transform: translateY(10px);
     }
+    /* `none`, not translateY(0): with `forwards` the last frame stays
+       applied, and any transform makes the element a stacking context —
+       a later sidebar section then painted over the voice roster's menu. */
     100% {
       opacity: 1;
-      transform: translateY(0);
+      transform: none;
     }
   }
   @keyframes pulseSoft {

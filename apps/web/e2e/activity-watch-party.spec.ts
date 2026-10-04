@@ -221,11 +221,12 @@ test.describe('Watch Party with two people, through the lobby', () => {
     await ownBrowser?.close();
   });
 
-  test('the app’s pages allow framing exactly one origin: YouTube’s privacy-enhanced player', async () => {
+  test('the app’s pages allow framing exactly one third-party origin: YouTube’s privacy-enhanced player', async () => {
     const lobby = await ownerCtx.request.get('/lobby');
     const csp = lobby.headers()['content-security-policy'] ?? '';
     const directives = csp.split(';').map((d) => d.trim());
-    expect(directives).toContain('frame-src https://www.youtube-nocookie.com');
+    // 'self' is the sandboxed marketplace plugin UI (ADR-007).
+    expect(directives).toContain("frame-src 'self' https://www.youtube-nocookie.com");
     expect(directives).toContain("frame-ancestors 'none'");
   });
 

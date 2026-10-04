@@ -17,7 +17,10 @@ const { getUserCredentialsByEmail, verifyPassword, recordSession, storeDesktopHa
 vi.mock('@lobbyforge/db', () => ({ getUserCredentialsByEmail }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __test: true }) }));
 vi.mock('@/lib/password', () => ({ DUMMY_PASSWORD_HASH: 'dummy-hash', verifyPassword }));
-vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));
+vi.mock('@/lib/security-headers', () => ({
+  withApiSecurity: (handler: unknown) => handler,
+  resolveClientAddress: () => '203.0.113.7',
+}));
 vi.mock('@/lib/session-tracker', () => ({ recordSession }));
 vi.mock('@/lib/desktop-handoff-codes', () => ({
   DESKTOP_HANDOFF_TTL_SECONDS: 300,

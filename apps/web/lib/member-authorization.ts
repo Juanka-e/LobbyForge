@@ -28,7 +28,7 @@ import {
 } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 
-export type ModerationOperation = 'kick' | 'ban' | 'timeout' | 'set_roles' | 'voice_mute';
+export type ModerationOperation = 'kick' | 'ban' | 'timeout' | 'set_roles' | 'voice_mute' | 'voice_disconnect';
 
 const OPERATION_PERMISSION: Record<ModerationOperation, CorePermission> = {
   kick: CorePermission.KICK_MEMBERS,
@@ -36,6 +36,9 @@ const OPERATION_PERMISSION: Record<ModerationOperation, CorePermission> = {
   timeout: CorePermission.MODERATE_MEMBERS,
   set_roles: CorePermission.MANAGE_ROLES,
   voice_mute: CorePermission.MUTE_MEMBERS,
+  // There is no move-members permission: Mute Members also allows
+  // disconnecting someone from a voice room (docs/ROLES.md).
+  voice_disconnect: CorePermission.MUTE_MEMBERS,
 };
 
 const OPERATION_LABEL: Record<ModerationOperation, string> = {
@@ -44,7 +47,27 @@ const OPERATION_LABEL: Record<ModerationOperation, string> = {
   timeout: 'time out',
   set_roles: 'manage the roles of',
   voice_mute: 'voice-mute',
+  voice_disconnect: 'disconnect from voice',
 };
+
+/**
+ * Machine-readable reason on every refusal below (`{ error, code }`), so
+ * a client can say it in the viewer's language instead of showing the
+ * English `error`.
+ */
+export type ModerationRefusalCode =
+  | 'invalid_request'
+  | 'server_not_found'
+  | 'forbidden'
+  | 'self_action'
+  | 'target_is_owner'
+  | 'user_not_found'
+  | 'target_not_member'
+  | 'insufficient_rank';
+
+function refuse(error: string, code: ModerationRefusalCode, status: number): { ok: false; response: NextResponse } {
+  return { ok: false, response: NextResponse.json({ error, code }, { status }) };
+}
 
 export interface ModerationAuthContext {
   server: { id: string; ownerUserId: string };
@@ -82,45 +105,37 @@ export async function authorizeModerationTarget(input: {
 > {
   const { operation, serverId, actorUserId, targetUserId } = input;
   if (!serverId || !actorUserId || !targetUserId) {
-    return {
-      ok: false,
-      response: NextResponse.json({ error: 'Server and user ids are required' }, { status: 400 }),
-    };
+    return refuse('Server and user ids are required', 'invalid_request', 400);
   }
 
   const server = await getServerById(getDb(), serverId);
   if (!server) {
-    return { ok: false, response: NextResponse.json({ error: 'Server not found' }, { status: 404 }) };
+    return refuse('Server not found', 'server_not_found', 404);
   }
 
   const actorIsOwner = server.ownerUserId === actorUserId;
   if (!actorIsOwner && !(await isServerMember(getDb(), actorUserId, serverId))) {
-    return { ok: false, response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
+    return refuse('Forbidden', 'forbidden', 403);
   }
 
   const permissions = await getUserPermissions(getDb(), actorUserId, serverId);
   if (!actorIsOwner && !hasPermission(permissions, OPERATION_PERMISSION[operation])) {
-    return { ok: false, response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
+    return refuse('Forbidden', 'forbidden', 403);
   }
 
   // Self-action: never moderate yourself through these routes (kick's
   // self-leave path never reaches here; leaving is handled there).
   if (actorUserId === targetUserId) {
-    return {
-      ok: false,
-      response: NextResponse.json({ error: 'You cannot perform this action on yourself' }, { status: 400 }),
-    };
+    return refuse('You cannot perform this action on yourself', 'self_action', 400);
   }
 
   // The owner is protected from every moderation action by anyone else.
   if (targetUserId === server.ownerUserId) {
-    return {
-      ok: false,
-      response: NextResponse.json(
-        { error: `The server owner cannot be ${OPERATION_LABEL[operation] === 'kick' ? 'kicked' : OPERATION_LABEL[operation] === 'ban' ? 'banned' : 'targeted'} by this action` },
-        { status: 403 }
-      ),
-    };
+    return refuse(
+      `The server owner cannot be ${OPERATION_LABEL[operation] === 'kick' ? 'kicked' : OPERATION_LABEL[operation] === 'ban' ? 'banned' : 'targeted'} by this action`,
+      'target_is_owner',
+      403
+    );
   }
 
   if (!(await isServerMember(getDb(), targetUserId, serverId))) {
@@ -134,17 +149,14 @@ export async function authorizeModerationTarget(input: {
       // security-review FILE-001: an existence check selects the id only,
       // not the target's row with its avatar / banner data URLs.
       if (!(await userExists(getDb(), targetUserId))) {
-        return { ok: false, response: NextResponse.json({ error: 'User not found' }, { status: 404 }) };
+        return refuse('User not found', 'user_not_found', 404);
       }
       const actorHighest = actorIsOwner
         ? Number.POSITIVE_INFINITY
         : await getHighestRolePosition(getDb(), serverId, actorUserId, server.ownerUserId);
       return { ok: true, context: { server, actorHighest } };
     }
-    return {
-      ok: false,
-      response: NextResponse.json({ error: 'Target user is not a member of this server' }, { status: 404 }),
-    };
+    return refuse('Target user is not a member of this server', 'target_not_member', 404);
   }
 
   // Owner bypasses ranking entirely; everyone else must strictly
@@ -158,13 +170,7 @@ export async function authorizeModerationTarget(input: {
     getHighestRolePosition(getDb(), serverId, targetUserId, server.ownerUserId),
   ]);
   if (!isActorAboveTarget(actorHighest, targetHighest)) {
-    return {
-      ok: false,
-      response: NextResponse.json(
-        { error: `You can only ${OPERATION_LABEL[operation]} members below your highest role` },
-        { status: 403 }
-      ),
-    };
+    return refuse(`You can only ${OPERATION_LABEL[operation]} members below your highest role`, 'insufficient_rank', 403);
   }
 
   return { ok: true, context: { server, actorHighest } };

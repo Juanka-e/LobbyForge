@@ -1,0 +1,55 @@
+<!doctype html>
+<!--
+  Sandbox Buzzer — the UI of the example marketplace plugin (ADR-007).
+
+  The lobby loads this page in <iframe sandbox="allow-scripts">: an opaque
+  origin with no network (connect-src 'none') and no inline scripts. All it
+  knows comes from the frame protocol (lobbyforge-frame.js); all it can do is
+  dispatch actions, which the lobby sends as the viewer.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sandbox Buzzer</title>
+    <link rel="stylesheet" href="style.css" />
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <main class="shell" id="app" aria-busy="true">
+      <header class="head">
+        <span class="glyph" aria-hidden="true">B</span>
+        <h1 class="title" id="title">Buzzer</h1>
+        <span class="pill" id="round"></span>
+        <span class="phase" id="phase"></span>
+      </header>
+
+      <p class="status" id="status" role="status" aria-live="polite"></p>
+
+      <div class="stage">
+        <button class="buzz" id="buzz" type="button" disabled>Buzz!</button>
+        <p class="count" id="count"></p>
+      </div>
+
+      <section class="result" id="result" hidden>
+        <p class="winner" id="winner"></p>
+        <h2 class="label" id="order-label"></h2>
+        <ol class="order" id="order"></ol>
+      </section>
+
+      <section class="scores" id="scores" hidden>
+        <h2 class="label" id="scores-label"></h2>
+        <ul class="score-list" id="score-list"></ul>
+      </section>
+
+      <section class="host" id="host" hidden>
+        <h2 class="label" id="host-label"></h2>
+        <div class="host-row">
+          <button class="btn btn-primary" id="open" type="button"></button>
+          <button class="btn btn-primary" id="reveal" type="button"></button>
+          <button class="btn btn-quiet" id="reset" type="button"></button>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

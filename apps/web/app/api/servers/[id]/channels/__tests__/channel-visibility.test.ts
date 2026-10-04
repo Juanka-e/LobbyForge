@@ -21,6 +21,8 @@ const dbFns = {
   setChannelRoleOverrides: vi.fn(),
   updateChannel: vi.fn(),
   logAction: vi.fn(),
+  // Bot API v2 §1.1: restricting a channel re-checks bot grants on it.
+  listBotChannelGrantsForChannel: vi.fn(),
 };
 
 vi.mock('@lobbyforge/db', () => dbFns);
@@ -29,6 +31,7 @@ vi.mock('@/lib/security-headers', () => ({
   withApiSecurity: (handler: unknown) => handler,
   applySecurityHeaders: (r: unknown) => r,
 }));
+vi.mock('@/lib/access-invalidation', () => ({ publishAccessInvalidation: vi.fn() }));
 
 const SECRET = 'x'.repeat(32);
 const SERVER_ID = 'srv-1';
@@ -44,6 +47,7 @@ beforeEach(() => {
   dbFns.isServerMember.mockResolvedValue(true);
   dbFns.getUserPermissions.mockResolvedValue([]);
   dbFns.logAction.mockResolvedValue(undefined);
+  dbFns.listBotChannelGrantsForChannel.mockResolvedValue([]);
   dbFns.listChannelsForServer.mockResolvedValue([
     { id: 'open', serverId: SERVER_ID, name: 'open', type: 'text', position: 0, pluginId: null, topic: null, createdAt: new Date() },
     { id: 'vip-only', serverId: SERVER_ID, name: 'vip', type: 'text', position: 1, pluginId: null, topic: null, createdAt: new Date() },
@@ -119,6 +123,7 @@ describe('PATCH /api/servers/{id}/channels/[channelId] — visibleToRoleIds', ()
     );
     expect(res.status).toBe(200);
     expect(dbFns.setChannelRoleOverrides).toHaveBeenCalledWith(expect.anything(), CHANNEL_ID, [ROLE_ID]);
+    expect(dbFns.listBotChannelGrantsForChannel).toHaveBeenCalledWith(expect.anything(), CHANNEL_ID);
   });
 
   it('400 when a role belongs to a different server', async () => {
@@ -155,5 +160,7 @@ describe('PATCH /api/servers/{id}/channels/[channelId] — visibleToRoleIds', ()
     );
     expect(res.status).toBe(200);
     expect(dbFns.setChannelRoleOverrides).toHaveBeenCalledWith(expect.anything(), CHANNEL_ID, []);
+    // Opening a channel up cannot make any grant improper.
+    expect(dbFns.listBotChannelGrantsForChannel).not.toHaveBeenCalled();
   });
 });

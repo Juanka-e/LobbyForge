@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useRef, useState, type InputHTMLAttributes, type KeyboardEvent, type MutableRefObject } from 'react';
 import { useT } from '@/lib/i18n/client';
 
 /**
@@ -28,6 +28,15 @@ export interface MentionInputProps {
   disabled?: boolean;
   className?: string;
   onMention?: (userId: string) => void;
+  /**
+   * Runs before the mention keys; return true when the key was handled
+   * (the composer's slash command picker owns the arrows while it is open).
+   */
+  onBeforeKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => boolean;
+  /** Extra attributes for the input — e.g. the combobox role and its ARIA state. */
+  inputProps?: InputHTMLAttributes<HTMLInputElement> & { [data: `data-${string}`]: string | boolean | undefined };
+  /** Receives the input element, for callers that move focus back to it. */
+  inputRef?: MutableRefObject<HTMLInputElement | null>;
 }
 
 export function MentionInput({
@@ -38,6 +47,9 @@ export function MentionInput({
   disabled,
   className,
   onMention,
+  onBeforeKeyDown,
+  inputProps,
+  inputRef: externalRef,
 }: MentionInputProps) {
   const t = useT();
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -103,6 +115,7 @@ export function MentionInput({
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (onBeforeKeyDown?.(e)) return;
     if (mentionQuery !== null && filtered.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
@@ -130,7 +143,11 @@ export function MentionInput({
   return (
     <div className="relative flex-1">
       <input
-        ref={inputRef}
+        {...inputProps}
+        ref={(el) => {
+          inputRef.current = el;
+          if (externalRef) externalRef.current = el;
+        }}
         value={value}
         onChange={handleChange}
         onKeyDown={handleKeyDown}

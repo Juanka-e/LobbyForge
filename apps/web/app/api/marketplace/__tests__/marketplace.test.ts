@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextResponse } from 'next/server';
+import { gzipSync } from 'node:zlib';
 
 const requireMaterializedSession = vi.fn();
 const requireAdminHealthToken = vi.fn();
@@ -19,7 +20,35 @@ vi.mock('@lobbyforge/db', () => ({
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
 vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));
 // 13th-audit: review-time bundle pinning.
-const downloadBundleForReview = vi.fn().mockResolvedValue(new ArrayBuffer(16));
+// ADR-007: approval now refuses anything but a sandbox-v1 bundle
+// (manifest.json + server.js at the archive root), so the mocked download
+// is a real (tiny) gzip'd ustar archive.
+function sandboxBundle(): ArrayBuffer {
+  const header = (name: string, size: number) => {
+    const h = Buffer.alloc(512);
+    h.write(name, 0, 100, 'utf8');
+    h.write(size.toString(8).padStart(11, '0'), 124, 11, 'utf8');
+    h[156] = 48; // '0' = regular file
+    h.write('ustar', 257, 5, 'utf8');
+    h.fill(0x20, 148, 156);
+    h.write(h.reduce((acc, b) => acc + b, 0).toString(8).padStart(6, '0'), 148, 6, 'utf8');
+    return h;
+  };
+  const files: Array<[string, string]> = [
+    ['package/manifest.json', '{"id":"my-awesome-game"}'],
+    ['package/server.js', 'globalThis.plugin = {};'],
+  ];
+  const blocks: Buffer[] = [];
+  for (const [name, content] of files) {
+    const data = Buffer.from(content, 'utf8');
+    blocks.push(header(name, data.length), data, Buffer.alloc(Math.ceil(data.length / 512) * 512 - data.length));
+  }
+  blocks.push(Buffer.alloc(1024));
+  const gz = gzipSync(Buffer.concat(blocks));
+  return gz.buffer.slice(gz.byteOffset, gz.byteOffset + gz.byteLength) as ArrayBuffer;
+}
+const SANDBOX_BUNDLE = sandboxBundle();
+const downloadBundleForReview = vi.fn().mockResolvedValue(SANDBOX_BUNDLE);
 vi.mock('@/lib/plugin-bundle-download', () => ({ downloadBundleForReview }));
 
 const UID = '00000000-0000-0000-0000-000000000099';
@@ -158,7 +187,7 @@ describe('POST /api/marketplace/review', () => {
       'approved',
       null,
       null,
-      expect.objectContaining({ sha256: expect.any(String), sizeBytes: 16 })
+      expect.objectContaining({ sha256: expect.any(String), sizeBytes: SANDBOX_BUNDLE.byteLength })
     );
   });
 

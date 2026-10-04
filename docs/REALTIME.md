@@ -48,9 +48,22 @@ WS by default; hosts behind proxies that strip WS upgrades stay on SSE.
 |---|---|---|---|
 | `activity-state:{serverId}:{sessionId}` | `lf:{env}:activity-state:{serverId}:{sessionId}` | activity `actions` + `end` routes | SSE stream route, ws-gateway |
 | `chat:{serverId}:{channelId}` | `lf:{env}:chat:{serverId}:{channelId}` | messages `POST` route | ws-gateway (chat UI is M20+) |
+| `user:{userId}` | `lf:{env}:user-events:{userId}` | Bot API v2 (ephemeral interaction answers) | ws-gateway — only the session whose uid matches |
+
+Bots do not use these topics: they connect on `/ws/bot` and get a feed
+the gateway builds for them — see [`docs/BOT_API_V2.md`](./BOT_API_V2.md) §4.
 
 Both topics are scoped to `(serverId, resourceId)`. A user can subscribe
 only to topics whose `serverId` they have access to.
+
+An `activity-state` event on the bus carries no state. Each consumer loads
+the session and projects it for its own viewer: official plugins with
+`projectActivityState` (`@lobbyforge/core`); marketplace plugins with their
+own `projectState`, which runs in the plugin worker that only the web app
+can reach — so the gateway asks web per viewer through the signed internal
+`POST /api/internal/activity-projection` (`apps/ws-gateway/src/host-projection.ts`,
+`LOBBYFORGE_INTERNAL_WEB_URL`, default `http://web:3000`). If web cannot
+answer, the subscriber gets the event without state (ADR-007).
 
 ## Wire protocol (WebSocket)
 

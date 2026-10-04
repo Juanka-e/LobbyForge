@@ -31,7 +31,7 @@ export interface SubscriberConnection {
   quit(): Promise<unknown>;
 }
 
-function envPrefix(): string {
+export function envPrefix(): string {
   return process.env.NODE_ENV || 'dev';
 }
 
@@ -99,7 +99,20 @@ export function acquireTopicSubscription(
       },
     };
   }
+  return acquireRedisChannel(wireTopic, handler);
+}
 
+/**
+ * Subscribe to a raw Redis channel name on the SAME shared connection
+ * (Bot API v2: `lf:{env}:bot-events:{botId}`, which is never a client
+ * topic). Same refcounting and release semantics as
+ * `acquireTopicSubscription`. Callers must build the name themselves —
+ * this is for server-side feeds only, never for client-chosen strings.
+ */
+export function acquireRedisChannel(
+  wireTopic: string,
+  handler: (raw: string) => void
+): { release: () => void } {
   const sub = getSubscriber();
   let entries = states.get(wireTopic);
   if (!entries) {

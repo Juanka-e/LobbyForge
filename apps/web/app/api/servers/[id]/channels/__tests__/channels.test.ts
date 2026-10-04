@@ -12,8 +12,10 @@ const updateChannel = vi.fn();
 const deleteChannel = vi.fn();
 const getUserPermissions = vi.fn();
 const logAction = vi.fn().mockResolvedValue(undefined);
+const listBotChannelGrantsForChannel = vi.fn().mockResolvedValue([]);
 
 vi.mock('@lobbyforge/db', () => ({
+  listBotChannelGrantsForChannel,
   getServerById,
   isServerMember,
   canMemberAccessChannel,
@@ -34,6 +36,8 @@ vi.mock('@/lib/security-headers', () => ({
 vi.mock('@/lib/db', () => ({
   getDb: () => ({ __mockDbClient: true }),
 }));
+
+vi.mock('@/lib/access-invalidation', () => ({ publishAccessInvalidation: vi.fn() }));
 
 const SECRET = 'x'.repeat(32);
 

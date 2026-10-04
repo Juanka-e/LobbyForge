@@ -4,7 +4,8 @@
  * (a server-muted member's microphone published as `camera`, video as
  * `microphone`, …), blocks them from voice on that server, and removes a
  * blocked identity again on `participant_joined` (a token minted before
- * the block, still valid). Requests are signed by LiveKit — the real
+ * the block, still valid) — auditing that, at most once a minute per user
+ * and server. Requests are signed by LiveKit — the real
  * livekit-server-sdk signs and verifies here, nothing about the signature
  * check is mocked.
  */
@@ -19,7 +20,8 @@ const removeParticipant = vi.fn();
 const listRooms = vi.fn();
 const logAction = vi.fn();
 const blockVoice = vi.fn();
-const isVoiceBlocked = vi.fn();
+const getVoiceBlock = vi.fn();
+const claimVoiceBlockEnforcedAudit = vi.fn();
 
 vi.mock('@/lib/livekit', () => ({
   requireLiveKitCredentials: () => ({ apiKey: API_KEY, apiSecret: API_SECRET }),
@@ -28,7 +30,7 @@ vi.mock('@/lib/livekit', () => ({
 vi.mock('@lobbyforge/db', () => ({ logAction }));
 // The block list's own behaviour (keys, ladder) is covered in
 // lib/__tests__/voice-block.test.ts; here only how the webhook uses it.
-vi.mock('@/lib/voice-block', () => ({ blockVoice, isVoiceBlocked }));
+vi.mock('@/lib/voice-block', () => ({ blockVoice, getVoiceBlock, claimVoiceBlockEnforcedAudit }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
 vi.mock('@/lib/security-headers', () => ({
   withMachineApiSecurity: (handler: unknown) => handler,
@@ -90,7 +92,8 @@ beforeEach(() => {
   listRooms.mockReset().mockResolvedValue([]);
   logAction.mockReset().mockResolvedValue(undefined);
   blockVoice.mockReset().mockResolvedValue({ serverId: SERVER_ID, strike: 1, seconds: 600 });
-  isVoiceBlocked.mockReset().mockResolvedValue(false);
+  getVoiceBlock.mockReset().mockResolvedValue(null);
+  claimVoiceBlockEnforcedAudit.mockReset().mockResolvedValue(true);
   vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
 });
@@ -202,10 +205,19 @@ describe('POST /api/livekit/webhook — track_published', () => {
     );
   });
 
-  it('removes the participant when the negotiated mime type contradicts the declared type', async () => {
+  it('removes the participant when the negotiated mime type contradicts the declared type, and audits the mime type', async () => {
     const res = await signedPost(trackPublished({ sid: 'TR_x', type: 'VIDEO', source: 'CAMERA', mimeType: 'audio/opus' }));
     expect(res.status).toBe(200);
     expect(removeParticipant).toHaveBeenCalledWith(ROOM, IDENTITY);
+    // "video published as camera" alone would read as allowed: the row
+    // carries the media that gave it away.
+    expect(logAction).toHaveBeenCalledWith(
+      { __mockDb: true },
+      expect.objectContaining({
+        action: 'voice.track_rejected',
+        metadata: { channelId: CHANNEL_ID, room: ROOM, source: 'camera', type: 'video', mimeType: 'audio/opus', blockedSeconds: 600 },
+      })
+    );
   });
 
   it.each([
@@ -267,40 +279,88 @@ describe('POST /api/livekit/webhook — participant_joined', () => {
     });
   }
 
-  it('removes a participant who joins while blocked (a token minted before the block), with a log line and no audit row', async () => {
-    isVoiceBlocked.mockResolvedValueOnce(true);
+  it('removes a participant who joins while blocked (a token minted before the block), logs it and audits it', async () => {
+    getVoiceBlock.mockResolvedValueOnce({ retryAfterSeconds: 420 });
     const res = await signedPost(participantJoined());
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, removed: true });
-    expect(isVoiceBlocked).toHaveBeenCalledWith({ serverId: SERVER_ID, channelId: CHANNEL_ID }, IDENTITY);
+    expect(getVoiceBlock).toHaveBeenCalledWith({ serverId: SERVER_ID, channelId: CHANNEL_ID }, IDENTITY);
     expect(removeParticipant).toHaveBeenCalledWith(ROOM, IDENTITY);
     expect(console.warn).toHaveBeenCalledWith(
       expect.stringContaining('joined while blocked'),
       expect.objectContaining({ room: ROOM, identity: IDENTITY })
     );
-    expect(logAction).not.toHaveBeenCalled();
+    expect(claimVoiceBlockEnforcedAudit).toHaveBeenCalledWith(SERVER_ID, IDENTITY);
+    expect(logAction).toHaveBeenCalledTimes(1);
+    expect(logAction).toHaveBeenCalledWith(
+      { __mockDb: true },
+      {
+        serverId: SERVER_ID,
+        actorUserId: null,
+        action: 'voice.block_enforced',
+        targetType: 'user',
+        targetId: IDENTITY,
+        metadata: { channelId: CHANNEL_ID, room: ROOM, retryAfterSeconds: 420 },
+      }
+    );
+    // The row is written only after the removal went through.
+    expect(removeParticipant.mock.invocationCallOrder[0]).toBeLessThan(logAction.mock.invocationCallOrder[0]!);
     // Re-removal is not a new offence: the block is not lengthened.
     expect(blockVoice).not.toHaveBeenCalled();
+  });
+
+  it('dedupes the audit row: a reconnect loop inside the window removes every time but logs once', async () => {
+    getVoiceBlock.mockResolvedValue({ retryAfterSeconds: 300 });
+    claimVoiceBlockEnforcedAudit.mockResolvedValueOnce(true).mockResolvedValue(false);
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const res = await signedPost(participantJoined());
+      expect(res.status).toBe(200);
+    }
+    expect(removeParticipant).toHaveBeenCalledTimes(5);
+    expect(claimVoiceBlockEnforcedAudit).toHaveBeenCalledTimes(5);
+    expect(logAction).toHaveBeenCalledTimes(1);
+    expect(logAction).toHaveBeenCalledWith({ __mockDb: true }, expect.objectContaining({ action: 'voice.block_enforced' }));
+  });
+
+  it('skips the audit row silently when Redis cannot take the dedupe claim, and still removes', async () => {
+    getVoiceBlock.mockResolvedValueOnce({ retryAfterSeconds: 300 });
+    claimVoiceBlockEnforcedAudit.mockRejectedValueOnce(new Error('redis down'));
+    vi.mocked(console.error).mockClear();
+    const res = await signedPost(participantJoined());
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, removed: true });
+    expect(removeParticipant).toHaveBeenCalledWith(ROOM, IDENTITY);
+    expect(logAction).not.toHaveBeenCalled();
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it('a failing audit write does not fail the delivery', async () => {
+    getVoiceBlock.mockResolvedValueOnce({ retryAfterSeconds: 300 });
+    logAction.mockRejectedValueOnce(new Error('db down'));
+    const res = await signedPost(participantJoined());
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, removed: true });
   });
 
   it('does nothing for a participant who is not blocked', async () => {
     const res = await signedPost(participantJoined());
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
-    expect(isVoiceBlocked).toHaveBeenCalledTimes(1);
+    expect(getVoiceBlock).toHaveBeenCalledTimes(1);
     expect(removeParticipant).not.toHaveBeenCalled();
     expect(logAction).not.toHaveBeenCalled();
+    expect(claimVoiceBlockEnforcedAudit).not.toHaveBeenCalled();
   });
 
   it('skips the check for a room name the app did not mint', async () => {
     const res = await signedPost(participantJoined('some-other-room'));
     expect(res.status).toBe(200);
-    expect(isVoiceBlocked).not.toHaveBeenCalled();
+    expect(getVoiceBlock).not.toHaveBeenCalled();
     expect(removeParticipant).not.toHaveBeenCalled();
   });
 
   it('fails open with a 200 (no retry storm) when the block list cannot be read', async () => {
-    isVoiceBlocked.mockRejectedValueOnce(new Error('redis down'));
+    getVoiceBlock.mockRejectedValueOnce(new Error('redis down'));
     const res = await signedPost(participantJoined());
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
@@ -309,12 +369,15 @@ describe('POST /api/livekit/webhook — participant_joined', () => {
   });
 
   it('treats a participant already gone as done, and asks for a retry when LiveKit cannot be reached', async () => {
-    isVoiceBlocked.mockResolvedValue(true);
+    getVoiceBlock.mockResolvedValue({ retryAfterSeconds: 300 });
     removeParticipant.mockRejectedValueOnce(Object.assign(new Error('participant not found'), { status: 404 }));
     expect((await signedPost(participantJoined())).status).toBe(200);
 
+    logAction.mockClear();
     removeParticipant.mockRejectedValueOnce(Object.assign(new Error('connect ECONNREFUSED'), { status: 0 }));
     expect((await signedPost(participantJoined())).status).toBe(503);
+    // No row for a removal that did not happen (LiveKit retries the delivery).
+    expect(logAction).not.toHaveBeenCalled();
   });
 });
 
@@ -323,7 +386,7 @@ describe('POST /api/livekit/webhook — other events', () => {
     'acknowledges %s and does nothing',
     async (name) => {
       // Even for a blocked identity: only participant_joined acts on the block.
-      isVoiceBlocked.mockResolvedValue(true);
+      getVoiceBlock.mockResolvedValue({ retryAfterSeconds: 300 });
       const body = JSON.stringify({
         event: name,
         id: 'EV_2',
@@ -337,7 +400,7 @@ describe('POST /api/livekit/webhook — other events', () => {
       expect(removeParticipant).not.toHaveBeenCalled();
       expect(logAction).not.toHaveBeenCalled();
       expect(blockVoice).not.toHaveBeenCalled();
-      expect(isVoiceBlocked).not.toHaveBeenCalled();
+      expect(getVoiceBlock).not.toHaveBeenCalled();
     }
   );
 });

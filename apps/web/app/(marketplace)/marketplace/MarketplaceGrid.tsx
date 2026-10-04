@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import type { PluginCatalogRow } from '@lobbyforge/db';
-import { LOBBYFORGE_REPO } from '@/lib/github-repo';
 import { useT } from '@/lib/i18n/client';
 
 const TRUST_COLORS: Record<string, string> = {
@@ -54,9 +53,9 @@ export default function MarketplaceGrid({
           <>
             <h2 className="text-base font-semibold text-text-primary">{t('hub.marketplace.empty.title')}</h2>
             <p className="mx-auto mt-1 max-w-md text-pretty text-sm text-text-secondary">{t('hub.marketplace.empty.body')}</p>
-            <a href={LOBBYFORGE_REPO.pluginPublishingUrl} className={emptyAction}>
+            <Link href="/developers/publishing" className={emptyAction}>
               {t('hub.marketplace.empty.publish')}
-            </a>
+            </Link>
           </>
         )}
       </div>

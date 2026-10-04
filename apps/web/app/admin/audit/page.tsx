@@ -1,20 +1,15 @@
 import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
-import { inArray } from 'drizzle-orm';
-import {
-  getInstanceSetupStatus,
-  listAuditLogsForServer,
-  listServersForUser,
-  users,
-  type AuditLogRow,
-} from '@lobbyforge/db';
+import { getInstanceSetupStatus, listServersForUser } from '@lobbyforge/db';
 import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
 import { getSessionSecret } from '@/lib/api-auth';
+import type { AuditEntryView } from '@/lib/audit-event-summary';
+import { loadAuditEntries } from '@/lib/audit-log-view';
 import { getDb } from '@/lib/db';
 import { getActiveSession } from '@/lib/active-session';
 import { getTranslator } from '@/lib/i18n/server';
 import SettingsShell from '@/app/SettingsShell';
-import AuditClient, { type AuditEntryView } from './AuditClient';
+import AuditClient from './AuditClient';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -30,6 +25,9 @@ export async function generateMetadata(): Promise<Metadata> {
  * The audit log is append-only. Filtering and CSV export happen client-side
  * from the rows this authorized server component already loaded, avoiding an
  * extra export endpoint while the route permission model is still maturing.
+ * Actor and target names, and the names of channels the viewer may see,
+ * are resolved here (lib/audit-log-view.ts) so moderators read "who" and
+ * "where" instead of raw ids.
  */
 export default async function AuditLogPage() {
   const cookieStore = await cookies();
@@ -58,29 +56,12 @@ export default async function AuditLogPage() {
       const servers = await listServersForUser(db, userId, { limit: 1 });
       const firstServer = servers[0];
       if (firstServer) {
-        const rows: AuditLogRow[] = await listAuditLogsForServer(db, firstServer.id, {
+        entries = await loadAuditEntries(db, {
+          serverId: firstServer.id,
+          ownerUserId: firstServer.ownerUserId,
+          viewerUserId: userId,
           limit: 100,
         });
-        const actorIds = Array.from(
-          new Set(rows.map((r) => r.actorUserId).filter((v): v is string => Boolean(v)))
-        );
-        const actorMap = new Map<string, string>();
-        if (actorIds.length > 0) {
-          const userRows = await db
-            .select({ id: users.id, name: users.displayName })
-            .from(users)
-            .where(inArray(users.id, actorIds));
-          for (const r of userRows) actorMap.set(r.id, r.name);
-        }
-        entries = rows.map((r) => ({
-          id: r.id,
-          action: r.action,
-          targetType: r.targetType,
-          targetId: r.targetId,
-          metadata: r.metadata,
-          actorName: r.actorUserId ? actorMap.get(r.actorUserId) ?? null : null,
-          createdAt: r.createdAt.toISOString(),
-        }));
       }
     } catch (err) {
       loadError = (err as Error).message;

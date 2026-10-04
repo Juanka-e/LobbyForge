@@ -9,6 +9,13 @@ export const BotPermission = {
   MANAGE_GAME_SESSION: 'manage_game_session',
   MANAGE_MUSIC_QUEUE: 'manage_music_queue',
   READ_AUDIT_LOG: 'read_audit_log',
+  // Bot API v2 (docs/BOT_API_V2.md §1.2).
+  /** Register slash commands, receive and answer interactions. */
+  SLASH_COMMANDS: 'slash_commands',
+  /** `member_join` / `member_leave` events and member lookups. */
+  READ_MEMBERS: 'read_members',
+  /** Open the event stream (WebSocket) or set an outgoing event endpoint. */
+  RECEIVE_EVENTS: 'receive_events',
 } as const;
 
 export type BotPermission = typeof BotPermission[keyof typeof BotPermission];
@@ -85,6 +92,82 @@ export {
   type BotMessageAuthor,
   type ReadMessagesOptions,
 } from './client.js';
+
+// Bot API v2 (docs/BOT_API_V2.md §6) — `new LobbyForgeBot({ baseUrl, token })`,
+// event-endpoint signatures, incoming webhooks and the event stream protocol.
+export {
+  LobbyForgeBot,
+  MAX_COMMANDS_PER_BOT,
+  MAX_COMMAND_OPTIONS,
+  type LobbyForgeBotOptions,
+  type LobbyForgeBotEvents,
+  type LobbyForgeBotEventName,
+  type LobbyForgeBotListener,
+  type ReconnectOptions,
+  type WebSocketLike,
+  type WebSocketConstructor,
+  type BotCommandDefinition,
+  type BotCommand,
+  type BotCommandOption,
+  type BotCommandOptionType,
+  type BotCommandOptionChoice,
+  type BotInteraction,
+  type BotMember,
+  type BotEventEndpoint,
+  type AnswerOptions,
+  type EventEndpointResult,
+  type BotReadyInfo,
+  type BotDisconnectInfo,
+} from './bot.js';
+export {
+  verifySignature,
+  signPayload,
+  DEFAULT_SIGNATURE_TOLERANCE_SECONDS,
+  type VerifySignatureInput,
+  type SignPayloadInput,
+  type SignedBody,
+} from './signature.js';
+export {
+  postToWebhook,
+  MAX_WEBHOOK_USERNAME_LENGTH,
+  type WebhookPayload,
+  type PostToWebhookOptions,
+} from './webhook.js';
+export {
+  BOT_GATEWAY_PATH,
+  BOT_IDENTIFY_TIMEOUT_MS,
+  BOT_HEARTBEAT_INTERVAL_MS,
+  BotCloseCode,
+  BOT_FATAL_CLOSE_CODES,
+  BOT_EVENT_NAMES,
+  BOT_EVENT_PERMISSIONS,
+  type BotIdentifyMessage,
+  type BotPingMessage,
+  type BotClientMessage,
+  type BotHelloMessage,
+  type BotHeartbeatMessage,
+  type BotPongMessage,
+  type BotErrorCode,
+  type BotErrorMessage,
+  type BotFeedChannel,
+  type BotFeedAuthor,
+  type BotFeedMessage,
+  type BotFeedMember,
+  type BotFeedInteraction,
+  type BotInteractionOptionValue,
+  type BotReadyEvent,
+  type BotMessageCreateEvent,
+  type BotMessageUpdateEvent,
+  type BotMessageDeleteEvent,
+  type BotMemberJoinEvent,
+  type BotMemberLeaveEvent,
+  type BotInteractionCreateEvent,
+  type BotChannelAccessChangedEvent,
+  type BotEventData,
+  type BotEventName,
+  type BotEventMessage,
+  type BotServerMessage,
+} from './gateway-protocol.js';
 
 // Re-export the shared locale helper so consumers can `import { tFor,
 // loadBotLocale, detectLocale, pickBestLocale, listBotLocales,

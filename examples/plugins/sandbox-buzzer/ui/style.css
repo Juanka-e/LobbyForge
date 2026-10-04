@@ -1,0 +1,268 @@
+/*
+ * Colours come from the lobby's theme: the frame client copies every --lf-*
+ * variable onto :root (dark, dim or light, plus the viewer's accent), so a
+ * var(--lf-…, fallback) here matches the app. The fallbacks are the dark
+ * theme, used only before the first init.
+ */
+:root {
+  color-scheme: dark;
+  --bz-surface: var(--lf-surface, #111722);
+  --bz-raised: var(--lf-surface-raised, #171e2b);
+  --bz-border: var(--lf-border-subtle, #263142);
+  --bz-text: var(--lf-text-primary, #f4f7fb);
+  --bz-text-2: var(--lf-text-secondary, #b7c0cc);
+  --bz-muted: var(--lf-text-muted, #7f8a99);
+  --bz-accent: var(--lf-user-accent, #8fb8ff);
+  --bz-on-accent: var(--lf-on-accent, #003063);
+  --bz-game: var(--lf-ember, #e7b86a);
+  --bz-success: var(--lf-success, #7ccfa6);
+  /* The round's tone (a fill behind dark text in every theme). */
+  --bz-tone: #e7b86a;
+  --bz-on-tone: #1a1406;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: transparent;
+  color: var(--bz-text);
+  font: 14px/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  background: var(--bz-surface);
+  border: 1px solid var(--bz-border);
+  border-radius: 14px;
+}
+
+.shell[aria-busy='true'] > * {
+  visibility: hidden;
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.glyph {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: var(--bz-game);
+  color: var(--lf-on-ember, #2a1b00);
+  font-weight: 800;
+}
+
+.title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.pill,
+.phase {
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pill {
+  border: 1px solid var(--bz-border);
+  color: var(--bz-text-2);
+}
+
+.phase {
+  margin-left: auto;
+  background: var(--bz-raised);
+  color: var(--bz-text-2);
+}
+
+.phase[data-phase='open'] {
+  color: var(--bz-game);
+}
+
+.phase[data-phase='open']::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: bz-pulse 1.6s ease-in-out infinite;
+}
+
+.status {
+  margin: 0;
+  color: var(--bz-text-2);
+}
+
+.stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+}
+
+.buzz {
+  width: min(220px, 70vw);
+  aspect-ratio: 1;
+  border: 0;
+  border-radius: 50%;
+  background: var(--bz-tone);
+  color: var(--bz-on-tone);
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  box-shadow: 0 10px 0 rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  transition: transform 0.08s ease, box-shadow 0.08s ease, filter 0.15s ease;
+}
+
+.buzz:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.buzz:active:not(:disabled) {
+  transform: translateY(6px);
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.25);
+}
+
+.buzz:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.buzz[data-buzzed='true'] {
+  opacity: 0.7;
+}
+
+.count {
+  margin: 0;
+  color: var(--bz-muted);
+  font-size: 13px;
+}
+
+.label {
+  margin: 0 0 8px;
+  color: var(--bz-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.winner {
+  margin: 0 0 12px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--bz-success);
+}
+
+.order,
+.score-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.order li,
+.score-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--bz-border);
+  border-radius: 10px;
+  background: var(--bz-raised);
+}
+
+.order li:first-child {
+  border-color: var(--bz-success);
+}
+
+.order .ms,
+.score-list .pts {
+  color: var(--bz-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.host {
+  border-top: 1px solid var(--bz-border);
+  padding-top: 14px;
+}
+
+.host-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.btn {
+  border-radius: 10px;
+  padding: 8px 14px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.btn[hidden] {
+  display: none;
+}
+
+.btn-primary {
+  background: var(--bz-accent);
+  color: var(--bz-on-accent);
+}
+
+.btn-quiet {
+  background: transparent;
+  border-color: var(--bz-border);
+  color: var(--bz-text-2);
+}
+
+.btn:hover {
+  filter: brightness(1.08);
+}
+
+.buzz:focus-visible,
+.btn:focus-visible {
+  outline: 2px solid var(--bz-accent);
+  outline-offset: 3px;
+}
+
+.tone-amber { --bz-tone: #e7b86a; }
+.tone-teal { --bz-tone: #5fc9c0; }
+.tone-violet { --bz-tone: #b9a3ff; }
+.tone-rose { --bz-tone: #f09ab5; }
+.tone-lime { --bz-tone: #a9d46f; }
+
+@keyframes bz-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

@@ -162,7 +162,22 @@ beforeEach(() => {
   workerCalls.length = 0;
   dbFns.setGameSessionStateCAS.mockClear();
   registry.clear();
-  registry.set('counter', buildWorkerPlugin({ id: 'counter', name: 'Counter', version: '1.10.0', digest: DIGEST }));
+  registry.set(
+    'counter',
+    buildWorkerPlugin({
+      id: 'counter',
+      name: 'Counter',
+      version: '1.10.0',
+      digest: DIGEST,
+      sdk: 'sandbox-v1',
+      actionPolicies: {},
+      locales: ['en'],
+      ui: false,
+      hasValidateAction: false,
+      hasProjection: false,
+      hasMigrateState: true,
+    })
+  );
   registry.set('poll', registerGamePlugin(pollPlugin));
 });
 

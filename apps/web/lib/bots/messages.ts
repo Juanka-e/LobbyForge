@@ -3,10 +3,10 @@
  * the Bot API and the built-in bots, so both obey the same rules:
  *
  *   - the bot must be enabled and hold the permission for the action;
- *   - the channel must belong to the BOT'S server (a bot never reaches
- *     another server — a foreign channel id is simply "not found");
- *   - only text / announcement channels without a role gate — a bot has
- *     no roles, so a private channel stays private;
+ *   - the channel must be one the bot reaches (`botCanAccessChannel`,
+ *     docs/BOT_API_V2.md §1.1): its own server only (a foreign channel id
+ *     is simply "not found"), text / announcement channels only, and —
+ *     unless an admin granted channels explicitly — no role-gated channel;
  *   - no `@everyone` / `@here` — a bot cannot ping the whole server.
  *
  * A bot message is stored like a member's (same table, same realtime
@@ -14,11 +14,7 @@
  * `metadata.bot` snapshot, which is how every client shows the BOT badge.
  */
 import {
-  BOT_MESSAGE_CHANNEL_TYPES,
   createMessage,
-  getChannelById,
-  isChannelOpenToBots,
-  listBotAccessibleChannels,
   listMessagesForChannel,
   listUserDisplayNames,
   logAction,
@@ -32,6 +28,8 @@ import { botHasPermission } from './permissions';
 import { containsMassMention } from './settings';
 import { readMessageBot } from './message-meta';
 import { noteBotActivity } from './activity';
+import { botCanAccessChannel, listBotChannels } from './access';
+import { emitMessageEvent } from './events';
 
 /** The part of a bot row the actions need. */
 export interface BotActor {
@@ -67,17 +65,10 @@ function requirePermission(bot: BotActor, permission: BotPermissionId): BotFailu
 
 const CHANNEL_UNAVAILABLE = 'Channel not found, or not available to bots';
 
-/** The channel, if it is one this bot may use. */
+/** The channel, if it is one this bot may use (the §1.1 rule, one helper). */
 export async function resolveBotChannel(bot: BotActor, channelId: string): Promise<BotResult<ChannelRow>> {
-  const channel = await getChannelById(getDb(), channelId);
-  if (
-    !channel ||
-    channel.serverId !== bot.serverId ||
-    !(BOT_MESSAGE_CHANNEL_TYPES as readonly string[]).includes(channel.type)
-  ) {
-    return fail(404, 'not_found', CHANNEL_UNAVAILABLE);
-  }
-  if (!(await isChannelOpenToBots(getDb(), channel.id))) return fail(404, 'not_found', CHANNEL_UNAVAILABLE);
+  const channel = await botCanAccessChannel(bot, channelId);
+  if (!channel) return fail(404, 'not_found', CHANNEL_UNAVAILABLE);
   return { ok: true, value: channel };
 }
 
@@ -96,7 +87,7 @@ export async function listChannelsForBot(bot: BotActor): Promise<BotResult<BotAp
       permission: 'read_messages',
     });
   }
-  const channels = await listBotAccessibleChannels(getDb(), bot.serverId);
+  const channels = await listBotChannels(bot);
   return {
     ok: true,
     value: channels.map((c) => ({ id: c.id, name: c.name, type: c.type, position: c.position, topic: c.topic })),
@@ -116,6 +107,19 @@ export interface BotApiMessage {
   editedAt: string | null;
   replyToId: string | null;
   author: BotApiMessageAuthor;
+  /**
+   * Bot API v2: set on a post from an incoming channel webhook (its author
+   * stays `unknown` so v1 clients see no new author type).
+   */
+  webhook?: { id: string | null; name: string };
+  /** Bot API v2: set on a bot's answer to a slash command. */
+  interaction?: { id: string; commandName: string };
+}
+
+function metadataRecord(row: MessageRow, key: string): Record<string, unknown> | null {
+  const metadata = row.metadata && typeof row.metadata === 'object' ? (row.metadata as Record<string, unknown>) : {};
+  const value = metadata[key];
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
 export function toBotApiMessage(row: MessageRow, names: ReadonlyMap<string, string>): BotApiMessage {
@@ -125,6 +129,10 @@ export function toBotApiMessage(row: MessageRow, names: ReadonlyMap<string, stri
     : row.userId
       ? { type: 'user', id: row.userId, name: names.get(row.userId) ?? null }
       : { type: 'unknown', id: null, name: null };
+  // Both readers mirror the client's: a member-authored row never counts as
+  // a webhook post or an interaction answer, whatever its metadata says.
+  const webhook = !row.userId && !row.botId ? metadataRecord(row, 'webhook') : null;
+  const interaction = bot ? metadataRecord(row, 'interaction') : null;
   return {
     id: row.id,
     channelId: row.channelId,
@@ -133,6 +141,17 @@ export function toBotApiMessage(row: MessageRow, names: ReadonlyMap<string, stri
     editedAt: row.editedAt ? row.editedAt.toISOString() : null,
     replyToId: row.replyToId,
     author,
+    ...(webhook
+      ? {
+          webhook: {
+            id: typeof webhook.id === 'string' ? webhook.id : null,
+            name: typeof webhook.username === 'string' && webhook.username ? webhook.username : String(webhook.name ?? ''),
+          },
+        }
+      : {}),
+    ...(interaction && typeof interaction.id === 'string' && typeof interaction.commandName === 'string'
+      ? { interaction: { id: interaction.id, commandName: interaction.commandName } }
+      : {}),
   };
 }
 
@@ -165,6 +184,11 @@ export async function postBotMessage(input: {
   bot: BotActor;
   channelId: string;
   content: string;
+  /**
+   * Extra server-written metadata (Bot API v2: `interaction` on a command
+   * answer). Never from a client; `bot` cannot be overridden.
+   */
+  metadata?: Record<string, unknown>;
 }): Promise<BotResult<MessageRow>> {
   const { bot } = input;
   const denied = requirePermission(bot, 'send_messages');
@@ -185,7 +209,7 @@ export async function postBotMessage(input: {
     userId: null,
     botId: bot.id,
     content,
-    metadata: { bot: snapshot },
+    metadata: { ...(input.metadata ?? {}), bot: snapshot },
   });
   publishChatMessage({
     serverId: bot.serverId,
@@ -210,6 +234,19 @@ export async function postBotMessage(input: {
     targetId: created.id,
     metadata: { channelId: created.channelId, botId: bot.id, botName: bot.name, botType: bot.type },
   }).catch((err) => console.error('[audit] bot message.create failed:', (err as Error).message));
+  // Other bots' outgoing endpoints (the stream reads the chat bus itself).
+  emitMessageEvent({
+    serverId: bot.serverId,
+    channel: { id: channel.value.id, type: channel.value.type },
+    event: 'message_create',
+    message: {
+      id: created.id,
+      content: created.content,
+      createdAt: created.createdAt.toISOString(),
+      replyToId: created.replyToId,
+      bot: { id: bot.id, name: bot.name },
+    },
+  });
   noteBotActivity(bot.id);
   return { ok: true, value: created };
 }

@@ -24,13 +24,30 @@ describe('API source security invariants', () => {
     const exceptions = new Set([
       join(apiRoot, 'test', 'db-reset', 'route.ts'),
       join(apiRoot, 'test', 'redis-reset', 'route.ts'),
+      // ADR-007: the sandboxed plugin UI assets. withApiSecurity stamps
+      // `X-Frame-Options: DENY` and the app CSP, which would stop the
+      // iframe from loading at all; the route sets its own strict CSP,
+      // nosniff and Fetch Metadata checks (lib/plugin-ui-assets.ts) and
+      // exports GET only.
+      join(apiRoot, 'plugin-ui', '[pluginId]', '[version]', '[...path]', 'route.ts'),
     ]);
+    // A route file that only re-exports another route's handlers
+    // (`export { GET } from '../../v1/channels/route'`) is covered by the
+    // file it re-exports from.
+    const effectiveSource = (file: string): string => {
+      const source = readFileSync(file, 'utf8');
+      const reexport = /export\s*\{[^}]*\}\s*from\s*'(\.[^']+)'/.exec(source);
+      if (reexport && !/export\s+(?:const|async function|function)\s+(?:GET|POST|PUT|PATCH|DELETE)\b/.test(source)) {
+        return effectiveSource(join(file, '..', `${reexport[1]}.ts`));
+      }
+      return source;
+    };
     for (const file of routeFiles) {
       if (file.includes(`${join('activities', '[sessionId]', 'stream')}`) || exceptions.has(file)) continue;
       // Browser routes use withApiSecurity; signed machine routes
       // (9th-audit) use withMachineApiSecurity — both are the shared
       // boundary, both enforce method/body/rate limits.
-      const source = readFileSync(file, 'utf8');
+      const source = effectiveSource(file);
       expect(
         source.includes('withApiSecurity') || source.includes('withMachineApiSecurity'),
         file

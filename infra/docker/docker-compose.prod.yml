@@ -148,6 +148,8 @@ services:
     networks:
       - edge
       - internal
+      # ADR-007: the plugin worker's only network — web calls its /rpc.
+      - plugin-sandbox
 
   # ── Realtime: WebSocket gateway ──────────────────────────────────
   ws-gateway:
@@ -179,13 +181,16 @@ services:
       - edge
       - internal
 
-  # ── Isolated runtime for marketplace plugins (LF-SEC-010) ────────
-  # Third-party plugin code runs HERE — a separate container with NO
-  # host secrets, a read-only plugin mount, memory/pid caps, dropped
-  # capabilities and an internal-only network. The web app talks to it
-  # over the token-authenticated /rpc endpoint with hard timeouts; a
-  # hung plugin can at worst get this container restarted by its
-  # healthcheck. Not behind nginx at all.
+  # ── Sandboxed runtime for marketplace plugins (ADR-007) ──────────
+  # Marketplace plugin code (`server.js` of a sdk "sandbox-v1" bundle)
+  # runs HERE, inside a QuickJS WebAssembly VM with no host functions —
+  # one fresh VM per call, 32 MB, a call budget enforced by an interrupt
+  # and a thread kill. This container is the outer layer: no host
+  # secrets except the RPC token, a read-only plugin mount, memory/pid
+  # caps, no capabilities, and a network that ONLY web joins
+  # (plugin-sandbox): no route to Postgres, Redis, LiveKit or the
+  # gateway, and nothing to call — the worker makes no outbound
+  # requests (no plugin storage in sandbox v1). Not behind nginx.
   plugin-worker:
     image: ${LOBBYFORGE_IMAGE:-lobbyforge-web:latest}
     container_name: lobbyforge-plugin-worker
@@ -198,11 +203,9 @@ services:
       # Same root as the web service (the installer); read-only here.
       LOBBYFORGE_PLUGIN_INSTALL_DIR: /app/plugins/installed
       PLUGIN_WORKER_TOKEN: ${LOBBYFORGE_PLUGIN_WORKER_TOKEN:?Set LOBBYFORGE_PLUGIN_WORKER_TOKEN}
-      # 9th-audit: NO storage secret here — the worker only relays
-      # host-minted scoped capabilities.
-      # The storage-capability proxy target — the web container on the
-      # internal network. nginx never routes /api/internal/*.
-      PLUGIN_HOST_ORIGIN: http://web:3000
+      # Per-call budget (ms) and executor threads; these are the defaults.
+      PLUGIN_CALL_BUDGET_MS: "2000"
+      PLUGIN_SANDBOX_THREADS: "2"
     volumes:
       - plugins-data:/app/plugins:ro
     read_only: true
@@ -221,7 +224,7 @@ services:
       retries: 3
       start_period: 10s
     networks:
-      - internal
+      - plugin-sandbox
 
   # ── DB migrations: one-shot at boot ──────────────────────────────
   migrate:
@@ -387,3 +390,8 @@ networks:
   internal:
     name: lobbyforge-internal
     internal: true  # No external access — DB/Redis are isolated.
+  # ADR-007: the plugin worker's network. Only web joins it (to call the
+  # worker); internal, so it has no route out either.
+  plugin-sandbox:
+    name: lobbyforge-plugin-sandbox
+    internal: true

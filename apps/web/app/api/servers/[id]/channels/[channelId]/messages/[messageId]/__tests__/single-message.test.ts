@@ -54,6 +54,14 @@ vi.mock('@/lib/permissions', () => ({
 
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDbClient: true }) }));
 
+// Bot API v2: edits and deletes are published for bots (chat topic for the
+// event stream, the cached fan-out for outgoing endpoints).
+const publishChatMessageUpdate = vi.fn();
+const publishChatMessageDelete = vi.fn();
+vi.mock('@/lib/chat-bus', () => ({ publishChatMessageUpdate, publishChatMessageDelete }));
+const emitMessageEvent = vi.fn();
+vi.mock('@/lib/bots/events', () => ({ emitMessageEvent }));
+
 const SECRET = 'x'.repeat(32);
 const SERVER_ID = 'srv-1';
 const CHANNEL_ID = 'ch-1';
@@ -88,6 +96,9 @@ beforeEach(() => {
     getUserPermissions,
     getActiveMemberTimeout,
     authorizeChannelVisibility,
+    publishChatMessageUpdate,
+    publishChatMessageDelete,
+    emitMessageEvent,
   ]) {
     fn.mockReset();
   }
@@ -238,5 +249,68 @@ describe('PATCH single message — beta-review: timeouts apply to edits', () => 
     const res = await call('PATCH', AUTHOR_ID, { content: 'edited' });
     expect(res.status).toBe(200);
     expect(updateMessage).toHaveBeenCalled();
+  });
+});
+
+describe('PATCH/DELETE single message — Bot API v2 events', () => {
+  it('an edit is published on the chat topic and to the endpoint fan-out', async () => {
+    const res = await call('PATCH', AUTHOR_ID, { content: 'edited' });
+    expect(res.status).toBe(200);
+    expect(publishChatMessageUpdate).toHaveBeenCalledWith({
+      serverId: SERVER_ID,
+      channelId: CHANNEL_ID,
+      messageId: MESSAGE_ID,
+      botId: undefined,
+    });
+    expect(emitMessageEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serverId: SERVER_ID,
+        channel: { id: CHANNEL_ID },
+        event: 'message_update',
+        message: expect.objectContaining({ id: MESSAGE_ID, content: 'edited', userId: AUTHOR_ID }),
+      })
+    );
+  });
+
+  it('a pin is not an edit: nothing is published', async () => {
+    getUserPermissions.mockResolvedValue(['read_message_history', 'manage_messages']);
+    const res = await call('PATCH', USER_ID, { pinned: true });
+    expect(res.status).toBe(200);
+    expect(publishChatMessageUpdate).not.toHaveBeenCalled();
+    expect(emitMessageEvent).not.toHaveBeenCalled();
+  });
+
+  it('a delete is published with the author bot, so that bot never hears its own', async () => {
+    getMessageById.mockResolvedValue({ ...messageRow(AUTHOR_ID), botId: null });
+    const res = await call('DELETE', AUTHOR_ID);
+    expect(res.status).toBe(200);
+    expect(publishChatMessageDelete).toHaveBeenCalledWith({
+      serverId: SERVER_ID,
+      channelId: CHANNEL_ID,
+      messageId: MESSAGE_ID,
+      botId: null,
+    });
+    expect(emitMessageEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'message_delete', message: { id: MESSAGE_ID } })
+    );
+  });
+
+  it('a moderator deleting a bot message names that bot', async () => {
+    getUserPermissions.mockResolvedValue(['read_message_history', 'manage_messages']);
+    getMessageById.mockResolvedValue({ ...messageRow(AUTHOR_ID), userId: null, botId: 'bot-9' });
+    const res = await call('DELETE', USER_ID);
+    expect(res.status).toBe(200);
+    expect(publishChatMessageDelete).toHaveBeenCalledWith(expect.objectContaining({ botId: 'bot-9' }));
+    expect(emitMessageEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'message_delete', message: { id: MESSAGE_ID, bot: { id: 'bot-9', name: '' } } })
+    );
+  });
+
+  it('a refused edit or delete publishes nothing', async () => {
+    expect((await call('PATCH', USER_ID, { content: 'not mine' })).status).toBe(403);
+    expect((await call('DELETE', USER_ID)).status).toBe(403);
+    expect(publishChatMessageUpdate).not.toHaveBeenCalled();
+    expect(publishChatMessageDelete).not.toHaveBeenCalled();
+    expect(emitMessageEvent).not.toHaveBeenCalled();
   });
 });

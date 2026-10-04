@@ -28,7 +28,34 @@
  *   replaced by `ballotCount` + the viewer's own `hasVoted`. Diffing
  *   successive revisions of the box against the option counts revealed
  *   who voted for what.
+ * - Marketplace (sandbox-v1) plugins, ADR-007: NOT here. Their state is
+ *   projected by the plugin's own `projectState` in the plugin worker,
+ *   which only the web app can reach. This function has no rule for them
+ *   and returns their state unfiltered, so it must never serve one: a
+ *   caller that cannot reach the worker (the ws-gateway) checks
+ *   `isCoreProjectedPlugin` first and asks the web app for any other id.
  */
+
+/**
+ * The official, compiled-in plugins: for these ids `projectActivityState`
+ * alone is the complete per-viewer projection (the rules above, or none
+ * because their state is public). Every other id — a marketplace plugin,
+ * or a plugin a self-hoster compiled in — must be projected by the web app.
+ * Keep in step with apps/web/lib/plugin-registry.ts (a web test checks that
+ * every id here is compiled in).
+ */
+export const CORE_PROJECTED_PLUGIN_IDS: readonly string[] = Object.freeze([
+  'hushle',
+  'quiz',
+  'poll',
+  'dice-bot',
+  'watch-party',
+  'vampire-village',
+]);
+
+export function isCoreProjectedPlugin(pluginId: string): boolean {
+  return CORE_PROJECTED_PLUGIN_IDS.includes(pluginId);
+}
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

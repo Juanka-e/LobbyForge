@@ -17,6 +17,7 @@ import { withApiSecurity } from '@/lib/security-headers';
 import { authorizeModerationTarget } from '@/lib/member-authorization';
 import { publishAccessInvalidation } from '@/lib/access-invalidation';
 import { queueMemberVoiceSync } from '@/lib/voice-moderation';
+import { emitMemberEvent } from '@/lib/bots/events';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -155,6 +156,15 @@ async function handlePost(req: Request, ctx: { params: Promise<{ id: string }> }
       return NextResponse.json({ error: 'Invalid expiresAt' }, { status: 400 });
     }
 
+    // Bot API v2: a ban that removes a MEMBER is a member_leave for bots
+    // with read_members; a pre-emptive ban of a non-member is not.
+    let wasMember = false;
+    try {
+      wasMember = Boolean(await isServerMember(getDb(), body.userId, serverId));
+    } catch {
+      /* an unknown answer only costs the bots one event */
+    }
+
     // beta-review (S2): banUser now removes the membership in the SAME
     // transaction as the ban insert (it used to leave it in place — the
     // banned user kept posting messages and minting LiveKit tokens).
@@ -189,6 +199,7 @@ async function handlePost(req: Request, ctx: { params: Promise<{ id: string }> }
     // beta-review (S2): drop the user from every live voice room of the
     // server (a LiveKit session outlives the REST membership).
     queueMemberVoiceSync(serverId, body.userId);
+    if (wasMember) emitMemberEvent({ serverId, userId: body.userId, event: 'member_leave', reason: 'ban' });
     void logAction(getDb(), {
       serverId,
       actorUserId: session.uid,

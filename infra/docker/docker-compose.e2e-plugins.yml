@@ -1,0 +1,60 @@
+# E2E-only: sandboxed marketplace plugins on the parallel e2e stack.
+#
+# Adds the QuickJS plugin worker (same image, same command and env as the
+# `plugin-worker` service in docker-compose.prod.yml) and switches dynamic
+# plugins on in the web app, with the shared install volume at
+# /app/plugins like production. Combine with the dev + e2e-ports files:
+#
+#   export LOBBYFORGE_SETUP_TOKEN=e2e_setup_token_default_0123456789ab
+#   docker compose -p lobbyforge-e2e \
+#     -f infra/docker/docker-compose.dev.yml \
+#     -f infra/docker/docker-compose.e2e-ports.yml \
+#     -f infra/docker/docker-compose.e2e-plugins.yml \
+#     up -d --no-build --wait
+#   bash infra/docker/e2e-install-sandbox-plugin.sh   # installs examples/plugins/sandbox-buzzer, restarts web
+#   LF_E2E_BASE_URL=http://localhost:19620 \
+#     pnpm --filter @lobbyforge/web exec playwright test e2e/marketplace-sandbox.spec.ts --workers=1
+#
+# Test values only — never reuse these tokens anywhere real.
+services:
+  plugin-worker:
+    image: lobbyforge-app:dev
+    container_name: lobbyforge-e2e-plugin-worker
+    working_dir: /app
+    command: ["node", "apps/plugin-worker/dist/index.js"]
+    environment:
+      PLUGIN_WORKER_STANDALONE: "1"
+      PLUGIN_WORKER_PORT: "7101"
+      LOBBYFORGE_PLUGIN_INSTALL_DIR: /app/plugins/installed
+      PLUGIN_WORKER_TOKEN: e2e_plugin_worker_token_0123456789abcdef0123
+      PLUGIN_CALL_BUDGET_MS: "2000"
+      PLUGIN_SANDBOX_THREADS: "2"
+    volumes:
+      - plugins-data:/app/plugins:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7101/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+  web:
+    environment:
+      LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED: "true"
+      LOBBYFORGE_PLUGIN_WORKER_URL: http://plugin-worker:7101
+      LOBBYFORGE_PLUGIN_WORKER_TOKEN: e2e_plugin_worker_token_0123456789abcdef0123
+      LOBBYFORGE_PLUGIN_STORAGE_TOKEN: e2e_plugin_storage_token_0123456789abcdef01
+      LOBBYFORGE_PLUGIN_INSTALL_DIR: /app/plugins/installed
+    volumes:
+      - plugins-data:/app/plugins
+    depends_on:
+      plugin-worker:
+        condition: service_healthy
+
+volumes:
+  plugins-data:

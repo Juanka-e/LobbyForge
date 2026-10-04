@@ -12,10 +12,14 @@ import { buttonPrimary, focusRing } from './styles';
 /**
  * The hub header, in its two designed states:
  *
- * - signed out (landing): logo · Communities, Marketplace, Download, Docs ·
- *   Star on GitHub, Sign in, Get started;
- * - signed in (hub home): logo, Home, Communities, Marketplace, Download ·
- *   the account menu.
+ * - signed out (landing): logo · Communities, Marketplace, Download,
+ *   Developers · Star on GitHub, Sign in, Get started;
+ * - signed in (hub home): logo, Home, Communities, Marketplace, Download,
+ *   Developers · the account menu.
+ *
+ * "Developers" is the hub's own docs section (`/developers`), which took
+ * the place of the design's "Docs" link to the repository's docs folder —
+ * that folder is linked from the section's overview.
  *
  * Below `lg` the page links move into the menu button's panel; Star on
  * GitHub joins them below `xl`, where it no longer fits the row.
@@ -30,12 +34,13 @@ export default async function HubNav({ viewer }: { viewer: HubViewer | null }) {
         { kind: 'internal', href: '/discover', label: t('hub.nav.communities') },
         { kind: 'internal', href: '/marketplace', label: t('hub.nav.marketplace') },
         { kind: 'internal', href: '/download', label: t('hub.nav.download') },
+        { kind: 'internal', href: '/developers', label: t('hub.nav.developers') },
       ]
     : [
         { kind: 'internal', href: '/discover', label: t('hub.nav.communities') },
         { kind: 'internal', href: '/marketplace', label: t('hub.nav.marketplace') },
         { kind: 'internal', href: '/download', label: t('hub.nav.download') },
-        { kind: 'external', href: LOBBYFORGE_REPO.docsUrl, label: t('hub.nav.docs') },
+        { kind: 'internal', href: '/developers', label: t('hub.nav.developers') },
       ];
   const stats = signedIn ? null : await getRepoStats();
 

@@ -1,7 +1,8 @@
 ﻿'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react';
 import { useT } from '@/lib/i18n/client';
+import type { Params } from '@/lib/i18n/core';
 import { useLobbyVoice, type LobbyVoiceParticipant } from './LobbyVoiceProvider';
 import Link from 'next/link';
 
@@ -34,6 +35,12 @@ export interface LobbyVoiceChannelsProps {
   currentUserId: string | null;
   /** MUTE_MEMBERS: show the moderator server-mute control on participants. */
   canMuteMembers?: boolean;
+  /**
+   * Members this viewer outranks (never themselves or the owner): with
+   * MUTE_MEMBERS they get "Disconnect from voice" in the roster. A hint
+   * from the page — the route enforces the same rules.
+   */
+  voiceModerationTargetIds?: readonly string[];
 }
 
 interface PresenceEntry {
@@ -45,6 +52,39 @@ interface PresenceEntry {
 
 const POLL_INTERVAL_MS = 10_000;
 
+const NO_TARGETS: readonly string[] = [];
+
+/**
+ * The roster message for a refused disconnect, from the route's `code`
+ * (the server's English `error` is never shown).
+ */
+export function disconnectErrorMessage(
+  status: number,
+  code: string | undefined,
+  name: string
+): { key: string; params?: Params } {
+  switch (code) {
+    case 'forbidden':
+      return { key: 'lobbyMain.voice.disconnectError.forbidden' };
+    case 'insufficient_rank':
+      return { key: 'lobbyMain.voice.disconnectError.insufficientRank' };
+    case 'target_is_owner':
+      return { key: 'lobbyMain.voice.disconnectError.owner' };
+    case 'self_action':
+      return { key: 'lobbyMain.voice.disconnectError.self' };
+    case 'not_in_voice':
+      return { key: 'lobbyMain.voice.disconnectError.notInVoice', params: { name } };
+    case 'target_not_member':
+      return { key: 'lobbyMain.voice.disconnectError.notMember', params: { name } };
+    case 'voice_unavailable':
+      return { key: 'lobbyMain.voice.disconnectError.unavailable' };
+    default:
+      if (status === 429) return { key: 'lobbyMain.voice.disconnectError.rateLimited' };
+      if (status === 403) return { key: 'lobbyMain.voice.disconnectError.forbidden' };
+      return { key: 'lobbyMain.voice.disconnectError.generic', params: { name, status } };
+  }
+}
+
 export function LobbyVoiceChannels({
   channels,
   initialVoiceUsers = [],
@@ -52,11 +92,19 @@ export function LobbyVoiceChannels({
   initialActiveChannelId = null,
   currentUserId,
   canMuteMembers = false,
+  voiceModerationTargetIds = NO_TARGETS,
 }: LobbyVoiceChannelsProps) {
   const t = useT();
   const voice = useLobbyVoice();
   const [moderationError, setModerationError] = useState<string | null>(null);
   const [pendingMute, setPendingMute] = useState<string | null>(null);
+  const [pendingDisconnect, setPendingDisconnect] = useState<string | null>(null);
+  const moderationTargets = useMemo(() => new Set(voiceModerationTargetIds), [voiceModerationTargetIds]);
+  const canDisconnect = (participant: LobbyVoiceParticipant) =>
+    canMuteMembers &&
+    !participant.isLocal &&
+    participant.identity !== currentUserId &&
+    moderationTargets.has(participant.identity);
 
   // beta-review: moderator server mute from the voice roster (the API
   // existed but had no UI). The server persists it and enforces it in
@@ -85,6 +133,37 @@ export function LobbyVoiceChannels({
         setModerationError(t('lobbyMain.voice.muteFailed'));
       } finally {
         setPendingMute(null);
+      }
+    },
+    [t, voice.serverId]
+  );
+
+  // Discord-style "Disconnect from voice": no confirmation, no block —
+  // the member can rejoin straight away (their own client says
+  // "You were removed from the voice channel").
+  const disconnectFromVoice = useCallback(
+    async (channelId: string, userId: string, name: string) => {
+      setPendingDisconnect(userId);
+      setModerationError(null);
+      try {
+        const res = await fetch(
+          `/api/servers/${voice.serverId}/channels/${channelId}/members/${userId}/voice/disconnect`,
+          {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}',
+          }
+        );
+        if (!res.ok) {
+          const detail = (await res.json().catch(() => ({}))) as { code?: string };
+          const message = disconnectErrorMessage(res.status, detail.code, name);
+          setModerationError(t(message.key, message.params));
+        }
+      } catch {
+        setModerationError(t('lobbyMain.voice.disconnectError.network', { name }));
+      } finally {
+        setPendingDisconnect(null);
       }
     },
     [t, voice.serverId]
@@ -267,9 +346,22 @@ export function LobbyVoiceChannels({
               {participants.length > 0 ? (
                 <ul className="ml-6 mt-1 space-y-1 pb-2">
                   {participants.map((u) => (
-                    <li
+                    <ParticipantRow
                       key={u.id}
-                      className="flex items-center gap-2 px-2 py-1 rounded-md hover:bg-surface-container/50 cursor-pointer group"
+                      name={u.name}
+                      actions={
+                        canDisconnect(u)
+                          ? [
+                              {
+                                id: 'disconnect',
+                                icon: 'call_end',
+                                label: t('lobbyMain.voice.disconnectFromVoice'),
+                                disabled: pendingDisconnect === u.identity,
+                                onSelect: () => void disconnectFromVoice(c.id, u.identity, u.name),
+                              },
+                            ]
+                          : []
+                      }
                     >
                       <div
                         className={
@@ -335,7 +427,7 @@ export function LobbyVoiceChannels({
                       {u.hasScreenShare ? (
                         <span className="material-symbols-outlined text-[14px] text-success" title={t('lobbyMain.voice.sharingScreen')} aria-label={t('lobbyMain.voice.sharingScreen')}>present_to_all</span>
                       ) : null}
-                    </li>
+                    </ParticipantRow>
                   ))}
                 </ul>
               ) : null}
@@ -352,3 +444,126 @@ export function LobbyVoiceChannels({
   );
 }
 
+interface ParticipantAction {
+  id: string;
+  icon: string;
+  label: string;
+  disabled?: boolean;
+  onSelect: () => void;
+}
+
+/**
+ * One roster entry. With moderator actions it gets a "⋮" menu (also on
+ * right-click, like Discord): opening it focuses the first item, Escape
+ * closes it and returns focus to the button, a click elsewhere or Tab
+ * closes it.
+ */
+function ParticipantRow({
+  name,
+  actions,
+  children,
+}: {
+  name: string;
+  actions: ParticipantAction[];
+  children: ReactNode;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLLIElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const firstItemRef = useRef<HTMLButtonElement | null>(null);
+  const hasActions = actions.length > 0;
+  const menuLabel = t('lobbyMain.voice.participantActions', { name });
+
+  useEffect(() => {
+    if (!open) return;
+    firstItemRef.current?.focus();
+    const onPointerDown = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    return () => document.removeEventListener('mousedown', onPointerDown);
+  }, [open]);
+
+  // The actions can disappear while the menu is open (the member left).
+  useEffect(() => {
+    if (!hasActions) setOpen(false);
+  }, [hasActions]);
+
+  return (
+    <li
+      ref={rootRef}
+      className="relative flex items-center gap-2 px-2 py-1 rounded-md hover:bg-surface-container/50 cursor-pointer group"
+      onContextMenu={
+        hasActions
+          ? (event) => {
+              event.preventDefault();
+              setOpen(true);
+            }
+          : undefined
+      }
+    >
+      {children}
+      {hasActions ? (
+        <>
+          <button
+            ref={triggerRef}
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={open}
+            aria-label={menuLabel}
+            title={menuLabel}
+            onClick={(event) => {
+              event.stopPropagation();
+              setOpen((value) => !value);
+            }}
+            className={`grid size-5 place-items-center rounded text-text-muted transition-opacity hover:text-text-primary focus-visible:opacity-100 group-hover:opacity-100 ${
+              open ? 'opacity-100' : 'opacity-0'
+            }`}
+          >
+            <span className="material-symbols-outlined text-[16px]" aria-hidden>
+              more_vert
+            </span>
+          </button>
+          {open ? (
+            <div
+              role="menu"
+              aria-label={menuLabel}
+              className="absolute right-0 top-full z-50 mt-1 w-56 rounded-lg border border-border-subtle bg-surface-floating p-1 shadow-xl"
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  event.stopPropagation();
+                  setOpen(false);
+                  triggerRef.current?.focus();
+                } else if (event.key === 'Tab') {
+                  setOpen(false);
+                }
+              }}
+            >
+              {actions.map((action, index) => (
+                <button
+                  key={action.id}
+                  ref={index === 0 ? firstItemRef : undefined}
+                  type="button"
+                  role="menuitem"
+                  disabled={action.disabled}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setOpen(false);
+                    action.onSelect();
+                  }}
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-danger transition-colors hover:bg-danger/10 focus-visible:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <span className="material-symbols-outlined text-[18px]" aria-hidden>
+                    {action.icon}
+                  </span>
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </>
+      ) : null}
+    </li>
+  );
+}

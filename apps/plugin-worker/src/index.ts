@@ -1,38 +1,43 @@
 /**
- * Plugin worker — the ISOLATED runtime for marketplace (dynamic) plugins
- * (LF-SEC-010 long-term fix).
+ * Plugin worker — the runtime for marketplace (dynamic) plugins (ADR-007).
  *
- * Third-party plugin code never runs in the web process anymore. This
- * service is a separate container with:
- *   - NO host secrets in its environment (the compose service gets only
- *     the RPC token, the host origin and the storage-capability token);
- *   - a READ-ONLY mount of the installed-plugins directory;
- *   - memory/pid caps, dropped capabilities, no-new-privileges and an
- *     internal-only network (never behind the public edge).
+ * Marketplace plugin code never runs in the web process, and since
+ * ADR-007 it never runs as Node either: a bundle is `sdk: "sandbox-v1"`
+ * (`manifest.json` + `server.js`), and `server.js` runs inside a QuickJS
+ * WebAssembly VM with no host functions, one fresh VM per call, inside a
+ * pool of executor threads that are killed when a call overruns
+ * (sandbox-core.mjs, sandbox-pool.ts). Per call: 32 MB of VM memory, a
+ * 256 KiB VM stack, the call budget (PLUGIN_CALL_BUDGET_MS, default 2 s)
+ * as an interrupt deadline plus a hard thread kill shortly after, and a
+ * 4 MiB cap on the result.
  *
- * A frozen/hung worker cannot touch the web app: the host client times
- * out, this service's healthcheck fails and compose restarts it.
+ * Defence in depth around that, in compose: a separate container with no
+ * host secrets except the RPC token, a read-only mount of the install
+ * directory, memory/pid caps, no capabilities, no-new-privileges, and a
+ * network that only the web app joins. The worker makes no outbound calls
+ * (there is no plugin storage in sandbox v1).
  *
  * RPC surface (POST /rpc, header `x-lf-worker-token`). Every op names the
  * exact bundle — `pluginId`, the active `version` and the `digest` of its
  * files, as recorded by the web app's installer — and the worker refuses
- * anything else (bundle.ts). There is no `list` op any more: it chose the
- * alphabetically last version folder.
- *   { op: 'describe', pluginId, version, digest }
- *   { op: 'createInitialState', pluginId, version, digest, ctx, ... }
- *   { op: 'handleAction', pluginId, version, digest, ctx, state, action }
- *   { op: 'migrateState', pluginId, version, digest, raw }
- *
- * The ctx envelope carries ONLY snapshot data (actorUserId, players,
- * voiceParticipants). Write-side capabilities (`ctx.storage.*`) are
- * proxied back to the host over the internal plugin-storage endpoint —
- * the worker holds no database credentials, so a compromised plugin can
- * at worst touch its OWN (serverId, pluginId) storage keyspace.
+ * anything else (bundle.ts).
+ *   { op: 'describe', ...ref }                          → { plugin: {...manifest, has*} }
+ *   { op: 'createInitialState', ...ref, ctx }           → { result }
+ *   { op: 'handleAction', ...ref, ctx, state, action }  → { result } | { unchanged: true }
+ *   { op: 'validateAction', ...ref, action }            → { result: string | null }
+ *   { op: 'projectState', ...ref, state, viewerId, ctx }→ { result }
+ *   { op: 'migrateState', ...ref, raw }                 → { result }
  */
 import * as http from 'node:http';
-import { fileURLToPath } from 'node:url';
-import { fork } from 'node:child_process';
-import { pluginInstallDir, readBundleRef, resolveBundle, type VerifiedBundles } from './bundle.js';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import {
+  pluginInstallDir,
+  readBundleRef,
+  resolveBundle,
+  type LoadedBundle,
+  type VerifiedBundles,
+} from './bundle.js';
+import { SandboxPool, type SandboxOp } from './sandbox-pool.js';
 
 const PORT = parseInt(process.env.PLUGIN_WORKER_PORT || '7101', 10);
 const HOST = process.env.PLUGIN_WORKER_HOST || '0.0.0.0';
@@ -42,168 +47,260 @@ const HOST = process.env.PLUGIN_WORKER_HOST || '0.0.0.0';
 // app's installer; PLUGINS_DIR is the old name), default /app/plugins/installed.
 const pluginsDir = () => pluginInstallDir();
 const rpcToken = () => process.env.PLUGIN_WORKER_TOKEN || '';
-const hostOrigin = () => (process.env.PLUGIN_HOST_ORIGIN || '').replace(/\/$/, '');
-// 9th-audit: the worker holds NO storage secret at all. The HOST mints
-// per-RPC scoped capabilities (HMAC(serverId|pluginId|expiry) over a
-// secret only the web app has) and the worker merely RELAYS them; the
-// endpoint verifies capability-vs-scope. A malicious plugin reading
-// this process's entire env gains nothing storage-related.
 
-/** Per-call wall clock; the host client also enforces its own timeout. */
-const CALL_BUDGET_MS = parseInt(process.env.PLUGIN_CALL_BUDGET_MS || String(10_000), 10);
-const MAX_RESULT_BYTES = 4 * 1024 * 1024;
-
-interface PlayerSnapshot {
-  id: string;
-  name: string;
+/** Constant-time check of the RPC token (hash first: equal lengths for timingSafeEqual). */
+function tokenMatches(provided: string | string[] | undefined): boolean {
+  const expected = rpcToken();
+  if (!expected || typeof provided !== 'string') return false;
+  const a = createHash('sha256').update(provided).digest();
+  const b = createHash('sha256').update(expected).digest();
+  return timingSafeEqual(a, b);
 }
 
-interface CtxEnvelope {
-  actorUserId: string;
-  players: PlayerSnapshot[];
-  voiceParticipants: string[];
-  /** Scoping for storage capabilities. */
-  serverId: string;
-  pluginId: string;
+/** Result cap (UTF-8 bytes of the plugin's JSON output). */
+export const MAX_RESULT_BYTES = 4 * 1024 * 1024;
+/** Request cap: state + action + ctx. */
+const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
+/** QuickJS heap per call (ADR-007). */
+export const SANDBOX_MEMORY_BYTES = 32 * 1024 * 1024;
+/** QuickJS stack per call: deep enough for ordinary recursion, caught before the thread's native stack. */
+export const SANDBOX_STACK_BYTES = 256 * 1024;
+/** Extra time after the budget before the executor thread is killed. */
+const KILL_GRACE_MS = 250;
+const MAX_PLAYERS = 500;
+const ID_MAX = 128;
+const LOCALE_RE = /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/;
+
+function envInt(name: string, fallback: number, min: number, max: number): number {
+  const parsed = Number.parseInt(process.env[name] ?? '', 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
 }
 
-/**
- * 10th-audit finding 2: the parent process holds ONLY filesystem
- * metadata — it never import()s a plugin bundle (ESM import runs
- * top-level code: a malicious plugin could block this process,
- * read process.env, monkeypatch globals or spy on later RPCs before
- * any executor thread existed). Importing and shape-validation happen
- * exclusively inside disposable executor processes. The parent only
- * resolves the exact folder and verifies its digest (bundle.ts).
- */
+/** Per-call budget, ms. The web app's RPC timeout (10 s) stays above it. */
+const callBudgetMs = () => envInt('PLUGIN_CALL_BUDGET_MS', 2_000, 50, 10_000);
+/** CSPRNG floats handed to createInitialState / handleAction (ctx.random). */
+const randomValuesPerCall = () => envInt('PLUGIN_RANDOM_VALUES', 1024, 0, 65_536);
+
+let pool: SandboxPool | null = null;
+
+function getPool(): SandboxPool {
+  if (!pool) {
+    pool = new SandboxPool({
+      size: envInt('PLUGIN_SANDBOX_THREADS', 2, 1, 8),
+      limits: {
+        budgetMs: callBudgetMs(),
+        memoryBytes: SANDBOX_MEMORY_BYTES,
+        stackBytes: SANDBOX_STACK_BYTES,
+        maxOutputBytes: MAX_RESULT_BYTES,
+      },
+      killGraceMs: KILL_GRACE_MS,
+      maxQueue: 64,
+      queueTimeoutMs: 5_000,
+    });
+  }
+  return pool;
+}
+
+/** Stop the executor threads (tests, shutdown). The next call starts a new pool. */
+export async function closeSandboxPool(): Promise<void> {
+  const current = pool;
+  pool = null;
+  await current?.close();
+}
+
+/** Bundles whose digest has been verified, with their manifest and server.js. */
 const verifiedBundles: VerifiedBundles = new Map();
 
-/**
- * 10th-audit (findings 4+5): run ONE plugin op in a dedicated
- * worker_thread with an EMPTY environment and hard resource limits,
- * terminated on timeout. The plugin can neither read worker secrets
- * (env is {}) nor block the service forever (terminate kills the
- * loop). Returns the op result; rejects on error/timeout.
- */
-/**
- * 15th-audit finding 5: child-process isolation. worker_threads share
- * the OS process — /proc/self/environ still exposes the process's
- * STARTUP environment (which includes PLUGIN_WORKER_TOKEN). A child
- * process is a real OS boundary: its own /proc/<pid>/environ (empty
- * via env: NONE), hard kill(signal) termination, and --max-old-space-
- * size for memory limits. The ONLY thing the child receives is the
- * JSON payload (pluginPath + op + snapshot ctx + scoped capability).
- */
-function runInExecutorProcess(payload: {
-  pluginPath: string;
-  op: 'describe' | 'createInitialState' | 'handleAction' | 'migrateState';
-  ctx: CtxEnvelope;
-  state?: unknown;
-  action?: unknown;
-  raw?: unknown;
-  storageCapability: string;
-  storageEndpoint: string;
-}): Promise<unknown> {
-  return new Promise<unknown>((resolve, reject) => {
-    // 17th-audit: detached → the child becomes its OWN PROCESS GROUP
-    // LEADER (setsid). On cleanup we kill(-pid, SIGKILL) to take out
-    // the entire process tree — a plugin that spawned descendants via
-    // node:child_process cannot leave them running after the executor
-    // dies.
-    const child = fork(resolveChildExecutorPath(), [], {
-      env: {}, // NO environment — nothing leaks in or out
-      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-      execArgv: ['--max-old-space-size=128'], // V8 old-space cap; the container
-      //-level mem_limit: 256m is the real hard ceiling (shared by parent + children)
-      detached: true, // own process group for tree-wide kill
-    });
-    const killProcessGroup = () => {
-      try {
-        // Negative PID targets the GROUP (the child + all descendants).
-        process.kill(-child.pid!, 'SIGKILL');
-      } catch {
-        // Group already gone; the direct child may linger.
-        try { child.kill('SIGKILL'); } catch { /* already dead */ }
-      }
-    };
-    // 16th-audit: settled flag — a plugin calling process.exit(0)
-    // never sends a message; without the flag the exit handler cleared
-    // the timeout without settling, leaving the Promise pending forever.
-    let settled = false;
-    const finishError = (err: Error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      killProcessGroup();
-      reject(err);
-    };
-    const finishResult = (value: unknown) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      killProcessGroup();
-      resolve(value);
-    };
-    const timer = setTimeout(() => {
-      finishError(new Error('plugin call exceeded its execution budget (process tree killed)'));
-    }, CALL_BUDGET_MS);
-    // 17th-audit: STRICT IPC message validation — a hostile plugin
-    // shares the process.send() primitive and can send null, arrays,
-    // or fabricated "result" objects. The old handler accessed
-    // msg.log without checking, so process.send(null) crashed the
-    // PARENT (uncaught TypeError → entire plugin-worker down).
-    child.on('message', (raw: unknown) => {
-      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-        finishError(new Error('Invalid executor IPC message (expected object)'));
-        return;
-      }
-      const msg = raw as { result?: unknown; error?: unknown; log?: unknown };
-      // Discriminated protocol: exactly one of {log, error, result}.
-      if (typeof msg.log === 'string') {
-        console.info(`[plugin-executor] ${msg.log.slice(0, 200)}`);
-        return; // log messages don't settle the Promise
-      }
-      if (typeof msg.error === 'string') {
-        finishError(new Error(msg.error.slice(0, 500)));
-        return;
-      }
-      if ('result' in msg) {
-        finishResult(msg.result ?? null);
-        return;
-      }
-      // Unknown shape — hostile or corrupted protocol.
-      finishError(new Error('Invalid executor IPC message (no known field)'));
-    });
-    child.on('error', (err) => {
-      finishError(err);
-    });
-    child.on('exit', (code, signal) => {
-      if (signal === 'SIGKILL') return; // timeout already settled
-      // Any exit without a settled result is a failure — including
-      // clean process.exit(0) from a hostile plugin.
-      finishError(
-        new Error(`executor exited before producing a result (code=${code}, signal=${signal ?? 'none'})`)
-      );
-    });
-    // Collect stderr for diagnostics (plugin crash traces).
-    let stderr = '';
-    child.stderr?.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString('utf8');
-      if (stderr.length > 4096) stderr = stderr.slice(-4096); // cap
-    });
-    child.on('close', () => {
-      if (stderr.trim()) {
-        const lastLine = stderr.trim().split('\n').pop() ?? '';
-        console.warn(`[plugin-executor] stderr: ${lastLine}`);
-      }
-    });
-    // Send the payload AFTER the IPC listeners are wired.
-    child.send(payload);
-  });
+/** Uniform floats in [0, 1) with 53 random bits each, from the CSPRNG. */
+export function cryptoRandomFloats(count: number): number[] {
+  const bytes = randomBytes(count * 8);
+  const values: number[] = new Array<number>(count);
+  for (let i = 0; i < count; i++) {
+    const high = bytes.readUInt32BE(i * 8) >>> 5; // 27 bits
+    const low = bytes.readUInt32BE(i * 8 + 4) >>> 6; // 26 bits
+    values[i] = (high * 67_108_864 + low) / 9_007_199_254_740_992;
+  }
+  return values;
 }
 
-function resolveChildExecutorPath(): string {
-  return fileURLToPath(new URL('./executor-child.mjs', import.meta.url));
+function boundedId(value: unknown): string {
+  return typeof value === 'string' && value.length <= ID_MAX ? value : '';
+}
+
+function nullableId(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 && value.length <= ID_MAX ? value : null;
+}
+
+/**
+ * The ctx a plugin sees in createInitialState / handleAction: plain data
+ * only. `random()` is added inside the VM, drawing from the CSPRNG values
+ * passed with the call.
+ */
+interface SandboxCtx {
+  players: Array<{ id: string; name: string }>;
+  now: number;
+  locale: string;
+  sessionId: string;
+  serverId: string;
+  hostId: string | null;
+  actorId: string | null;
+}
+
+/**
+ * The ctx projectState gets: the state, the viewer and these — nothing
+ * that differs between the REST, SSE and WebSocket paths (no players, no
+ * locale: the gateway knows neither), and no random draws.
+ */
+interface SandboxReadCtx {
+  now: number;
+  sessionId: string;
+  serverId: string;
+  hostId: string | null;
+}
+
+function readProjectionCtx(raw: unknown): SandboxReadCtx {
+  const env = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+  return {
+    now: typeof env.now === 'number' && Number.isFinite(env.now) ? env.now : Date.now(),
+    sessionId: boundedId(env.sessionId),
+    serverId: boundedId(env.serverId),
+    hostId: nullableId(env.hostId),
+  };
+}
+
+function readCtx(raw: unknown): SandboxCtx {
+  const env = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+  const players: SandboxCtx['players'] = [];
+  if (Array.isArray(env.players)) {
+    for (const entry of env.players.slice(0, MAX_PLAYERS)) {
+      if (!entry || typeof entry !== 'object') continue;
+      const p = entry as { id?: unknown; name?: unknown };
+      const id = boundedId(p.id);
+      if (!id) continue;
+      players.push({ id, name: typeof p.name === 'string' ? p.name.slice(0, 100) : id });
+    }
+  }
+  const now = typeof env.now === 'number' && Number.isFinite(env.now) ? env.now : Date.now();
+  const locale = typeof env.locale === 'string' && LOCALE_RE.test(env.locale) ? env.locale : 'en';
+  return {
+    players,
+    now,
+    locale,
+    sessionId: boundedId(env.sessionId),
+    serverId: boundedId(env.serverId),
+    hostId: nullableId(env.hostId),
+    actorId: nullableId(env.actorId ?? env.actorUserId),
+  };
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+type RpcReply = { status: number; body: unknown };
+
+type OpOutcome = { ok: true; value: unknown; unchanged: boolean } | { ok: false; reply: RpcReply };
+
+async function runOp(bundle: LoadedBundle, input: Record<string, unknown> & { op: SandboxOp }): Promise<OpOutcome> {
+  const pluginId = bundle.manifest.id;
+  const result = await getPool().run({ source: bundle.source, input: JSON.stringify(input) });
+  if (!result.ok) {
+    if (result.kind === 'output') return { ok: false, reply: { status: 413, body: { error: 'Plugin result exceeds the size cap' } } };
+    const status = result.kind === 'busy' ? 503 : 500;
+    return { ok: false, reply: { status, body: { error: `Plugin "${pluginId}" failed: ${result.error}` } } };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result.output);
+  } catch {
+    return { ok: false, reply: { status: 500, body: { error: `Plugin "${pluginId}" failed: its result is not JSON` } } };
+  }
+  if (isPlainObject(parsed) && parsed.u === 1 && input.op === 'handleAction') return { ok: true, value: null, unchanged: true };
+  if (!isPlainObject(parsed) || !('r' in parsed)) {
+    return { ok: false, reply: { status: 500, body: { error: `Plugin "${pluginId}" failed: malformed result` } } };
+  }
+  return { ok: true, value: parsed.r, unchanged: false };
+}
+
+const OPS = new Set<SandboxOp>(['describe', 'createInitialState', 'handleAction', 'validateAction', 'projectState', 'migrateState']);
+
+async function handleRpc(rawBody: Buffer): Promise<RpcReply> {
+  let msg: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(rawBody.toString('utf8'));
+    if (!isPlainObject(parsed)) return { status: 400, body: { error: 'Invalid JSON' } };
+    msg = parsed;
+  } catch {
+    return { status: 400, body: { error: 'Invalid JSON' } };
+  }
+  const op = msg.op;
+  if (typeof op !== 'string' || !OPS.has(op as SandboxOp)) return { status: 400, body: { error: 'Unknown op' } };
+
+  const ref = readBundleRef(msg);
+  const bundle = resolveBundle(pluginsDir(), ref, verifiedBundles);
+  if (!bundle.ok) return { status: bundle.status, body: { error: bundle.error } };
+  const { manifest } = bundle;
+
+  if (op === 'describe') {
+    // The policies and metadata come from the manifest (data the host
+    // validates), never from code; the VM only reports which functions
+    // server.js defines.
+    const outcome = await runOp(bundle, { op: 'describe' });
+    if (!outcome.ok) return outcome.reply;
+    const flags = (isPlainObject(outcome.value) ? outcome.value : {}) as Record<string, unknown>;
+    if (flags.createInitialState !== true || flags.handleAction !== true) {
+      return {
+        status: 422,
+        body: { error: `Plugin "${manifest.id}": server.js must set globalThis.plugin with createInitialState and handleAction functions` },
+      };
+    }
+    return {
+      status: 200,
+      body: {
+        plugin: {
+          ...manifest,
+          hasValidateAction: flags.validateAction === true,
+          hasProjection: flags.projectState === true,
+          hasMigrateState: flags.migrateState === true,
+        },
+      },
+    };
+  }
+
+  let input: Record<string, unknown> & { op: SandboxOp };
+  if (op === 'createInitialState') {
+    input = { op, ctx: readCtx(msg.ctx), random: cryptoRandomFloats(randomValuesPerCall()) };
+  } else if (op === 'handleAction') {
+    if (!isPlainObject(msg.action)) return { status: 400, body: { error: 'action must be an object' } };
+    input = { op, ctx: readCtx(msg.ctx), state: msg.state ?? null, action: msg.action, random: cryptoRandomFloats(randomValuesPerCall()) };
+  } else if (op === 'validateAction') {
+    if (!isPlainObject(msg.action)) return { status: 400, body: { error: 'action must be an object' } };
+    input = { op, action: msg.action };
+  } else if (op === 'projectState') {
+    input = { op, ctx: readProjectionCtx(msg.ctx), state: msg.state ?? null, viewerId: nullableId(msg.viewerId) };
+  } else {
+    input = { op: 'migrateState', raw: msg.raw ?? null };
+  }
+
+  const outcome = await runOp(bundle, input);
+  if (!outcome.ok) return outcome.reply;
+  if (outcome.unchanged) return { status: 200, body: { unchanged: true } };
+
+  if (op === 'validateAction') {
+    const value = outcome.value;
+    if (value === null || value === '') return { status: 200, body: { result: null } };
+    if (typeof value === 'string') return { status: 200, body: { result: value.slice(0, 500) } };
+    return {
+      status: 500,
+      body: { error: `Plugin "${manifest.id}" failed: validateAction must return an error string or null` },
+    };
+  }
+  // Every other op returns a state: a JSON object.
+  if (!isPlainObject(outcome.value)) {
+    return { status: 500, body: { error: `Plugin "${manifest.id}" failed: ${op} must return an object` } };
+  }
+  return { status: 200, body: { result: outcome.value } };
 }
 
 function json(res: http.ServerResponse, status: number, body: unknown): void {
@@ -212,7 +309,7 @@ function json(res: http.ServerResponse, status: number, body: unknown): void {
   res.end(payload);
 }
 
-function readBody(req: http.IncomingMessage, cap = 8 * 1024 * 1024): Promise<Buffer> {
+function readBody(req: http.IncomingMessage, cap = MAX_REQUEST_BYTES): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let total = 0;
@@ -231,101 +328,20 @@ function readBody(req: http.IncomingMessage, cap = 8 * 1024 * 1024): Promise<Buf
   });
 }
 
-async function handleRpc(rawBody: Buffer): Promise<{ status: number; body: unknown }> {
-  let msg: Record<string, unknown>;
-  try {
-    msg = JSON.parse(rawBody.toString('utf8')) as Record<string, unknown>;
-  } catch {
-    return { status: 400, body: { error: 'Invalid JSON' } };
-  }
-  const op = msg.op;
-
-  if (op === 'describe') {
-    const ref = readBundleRef(msg);
-    const bundle = resolveBundle(pluginsDir(), ref, verifiedBundles);
-    if (!bundle.ok) return { status: bundle.status, body: { error: bundle.error } };
-    try {
-      // Manifest probe in the DISPOSABLE executor — the parent never
-      // imports untrusted code (10th-audit finding 2).
-      const described = await runInExecutorProcess({
-        pluginPath: bundle.indexPath,
-        op: 'describe',
-        ctx: { actorUserId: '', players: [], voiceParticipants: [], serverId: '', pluginId: ref.pluginId },
-        storageCapability: '',
-        storageEndpoint: '',
-      });
-      const d = (described && typeof described === 'object' ? described : {}) as {
-        id?: unknown;
-        name?: unknown;
-        version?: unknown;
-      };
-      if (d.id !== ref.pluginId) {
-        return {
-          status: 422,
-          body: { error: `Bundle manifest id "${String(d.id)}" does not match plugin id "${ref.pluginId}"` },
-        };
-      }
-      return {
-        status: 200,
-        body: {
-          plugin: {
-            id: ref.pluginId,
-            name: typeof d.name === 'string' ? d.name : ref.pluginId,
-            version: typeof d.version === 'string' ? d.version : null,
-          },
-        },
-      };
-    } catch (err) {
-      return { status: 500, body: { error: `Plugin "${ref.pluginId}" failed: ${(err as Error).message}` } };
-    }
-  }
-
-  if (op === 'createInitialState' || op === 'handleAction' || op === 'migrateState') {
-    const ref = readBundleRef(msg);
-    const pluginId = ref.pluginId;
-    const bundle = resolveBundle(pluginsDir(), ref, verifiedBundles);
-    if (!bundle.ok) return { status: bundle.status, body: { error: bundle.error } };
-
-    const envelope = msg.ctx as CtxEnvelope;
-    // Host-minted scoped capability rides the RPC envelope.
-    const capability = String(msg.storageCapability ?? '');
-    const storageEndpoint = `${hostOrigin()}/api/internal/plugin-storage`;
-
-    try {
-      const result = await runInExecutorProcess({
-        pluginPath: bundle.indexPath,
-        op,
-        ctx: envelope,
-        state: msg.state,
-        action: msg.action,
-        raw: msg.raw,
-        storageCapability: capability,
-        storageEndpoint,
-      });
-      const serialized = JSON.stringify(result ?? null);
-      if (serialized.length > MAX_RESULT_BYTES) {
-        return { status: 413, body: { error: 'Plugin result exceeds the size cap' } };
-      }
-      return { status: 200, body: { result: JSON.parse(serialized) } };
-    } catch (err) {
-      return {
-        status: 500,
-        body: { error: `Plugin "${pluginId}" failed: ${(err as Error).message}` },
-      };
-    }
-  }
-
-  return { status: 400, body: { error: 'Unknown op' } };
-}
-
 export function createPluginWorkerServer(): http.Server {
   return http.createServer((req, res) => {
     if (req.url === '/health' && req.method === 'GET') {
-      json(res, 200, { ok: true, service: 'plugin-worker', loaded: verifiedBundles.size });
+      json(res, 200, {
+        ok: true,
+        service: 'plugin-worker',
+        runtime: 'quickjs-sandbox-v1',
+        loaded: verifiedBundles.size,
+        sandbox: pool?.stats() ?? { threads: 0, ready: 0, busy: 0, queued: 0 },
+      });
       return;
     }
     if (req.url === '/rpc' && req.method === 'POST') {
-      if (!rpcToken() || req.headers['x-lf-worker-token'] !== rpcToken()) {
+      if (!tokenMatches(req.headers['x-lf-worker-token'])) {
         json(res, 401, { error: 'Unauthorized' });
         return;
       }
@@ -341,7 +357,14 @@ export function createPluginWorkerServer(): http.Server {
 
 // CLI entry (compose): start listening.
 if (process.env.PLUGIN_WORKER_STANDALONE === '1') {
-  createPluginWorkerServer().listen(PORT, HOST, () => {
-    console.log(`[plugin-worker] listening on ${HOST}:${PORT}, plugins dir ${pluginsDir()}`);
+  const server = createPluginWorkerServer();
+  server.listen(PORT, HOST, () => {
+    console.info(`[plugin-worker] listening on ${HOST}:${PORT}, plugins dir ${pluginsDir()}, QuickJS sandbox (sandbox-v1)`);
   });
+  const shutdown = () => {
+    server.close();
+    void closeSandboxPool().finally(() => process.exit(0));
+  };
+  process.once('SIGTERM', shutdown);
+  process.once('SIGINT', shutdown);
 }

@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
+import DeveloperDocsLink from '@/app/(developers)/developers/_components/DeveloperDocsLink';
 import type { BotJson } from '@/lib/bots/admin';
 import { CUSTOM_BOT_TYPE } from '@/lib/bots/catalog';
 import { ModerationBotCard, WelcomeBotCard } from './BuiltInBots';
@@ -45,6 +46,7 @@ export default function BotsClient({
       <header className="mb-6">
         <h1 className="text-2xl font-semibold text-text-primary">{t('bots.title')}</h1>
         <p className="mt-1 text-sm text-text-secondary">{t('bots.subtitle')}</p>
+        <DeveloperDocsLink topic="bots" className="mt-2" />
       </header>
 
       {loadError ? <Alert tone="danger">{t('bots.loadError', { error: loadError })}</Alert> : null}
@@ -77,6 +79,7 @@ export default function BotsClient({
           onChange={upsert}
           onRemoved={remove}
           onToken={setReveal}
+          channels={channels}
         />
       </Section>
 

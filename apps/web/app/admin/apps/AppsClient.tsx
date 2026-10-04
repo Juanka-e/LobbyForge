@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
+import DeveloperDocsLink from '@/app/(developers)/developers/_components/DeveloperDocsLink';
 
 export interface AppView {
   id: string;
@@ -86,6 +87,7 @@ export default function AppsClient({
       <header className="mb-6">
         <h1 className="text-2xl font-semibold text-text-primary">{t('admin.apps.title')}</h1>
         <p className="mt-1 text-sm text-text-secondary">{t('admin.apps.intro')}</p>
+        <DeveloperDocsLink topic="plugins" className="mt-2" />
       </header>
 
       {loadError ? (

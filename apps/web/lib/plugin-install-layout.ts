@@ -1,7 +1,8 @@
 /**
  * On-disk layout of marketplace (dynamic) plugin installs.
  *
- *   <root>/<pluginId>/<version>/index.js   one folder per installed version
+ *   <root>/<pluginId>/<version>/           one folder per installed version:
+ *        manifest.json, server.js, ui/…     a sdk "sandbox-v1" bundle (ADR-007)
  *   <root>/<pluginId>/active.json          { version, digest } of the ACTIVE one
  *
  * `<root>` is LOBBYFORGE_PLUGIN_INSTALL_DIR, default `/app/plugins/installed`:
@@ -35,6 +36,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
+import { parseSandboxManifest, type SandboxManifest } from './sandbox-manifest';
 
 export const DEFAULT_PLUGIN_INSTALL_DIR = '/app/plugins/installed';
 export const ACTIVE_POINTER_FILE = 'active.json';
@@ -48,6 +50,78 @@ export const DIGEST_RE = /^[0-9a-f]{64}$/;
 
 const MAX_DIGEST_FILES = 1000;
 const MAX_DIGEST_BYTES = 64 * 1024 * 1024;
+/** Same cap as the plugin worker (apps/plugin-worker/src/bundle.ts MAX_SOURCE_BYTES). */
+export const MAX_SERVER_JS_BYTES = 2 * 1024 * 1024;
+
+function isRegularFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * ADR-007: is `dir` an installable sdk "sandbox-v1" bundle for exactly
+ * this plugin id and catalog version? `manifest.json` and `server.js` at
+ * the root, a valid manifest (the action policies the host will enforce),
+ * a server.js under the worker's cap, and `ui/index.html` when the
+ * manifest says `ui: true`. A legacy Node bundle (`index.js`) is refused
+ * with the migration hint.
+ */
+export function checkSandboxBundle(
+  dir: string,
+  pluginId: string,
+  version: string
+): { ok: true; manifest: SandboxManifest } | { ok: false; error: string } {
+  const hasManifest = isRegularFile(join(dir, 'manifest.json'));
+  const hasServer = isRegularFile(join(dir, 'server.js'));
+  if (!hasManifest || !hasServer) {
+    if (existsSync(join(dir, 'index.js'))) {
+      return {
+        ok: false,
+        error:
+          'This is a legacy Node bundle (index.js). Marketplace plugins now run sandboxed: rebuild it as sdk "sandbox-v1" (manifest.json + server.js, see docs/PLUGIN_PUBLISHING.md).',
+      };
+    }
+    return {
+      ok: false,
+      error: `Bundle missing ${hasManifest ? 'server.js' : 'manifest.json'} at its root — not a sandbox-v1 LobbyForge plugin.`,
+    };
+  }
+  const parsed = parseSandboxManifest(readFileSync(join(dir, 'manifest.json')));
+  if (!parsed.ok) return { ok: false, error: parsed.error };
+  if (parsed.manifest.id !== pluginId) {
+    return { ok: false, error: `Bundle manifest id "${parsed.manifest.id}" does not match the catalog id "${pluginId}".` };
+  }
+  if (parsed.manifest.version !== version) {
+    return {
+      ok: false,
+      error: `Bundle manifest version ${parsed.manifest.version} does not match the catalog version ${version}.`,
+    };
+  }
+  if (statSync(join(dir, 'server.js')).size > MAX_SERVER_JS_BYTES) {
+    return { ok: false, error: `server.js is larger than ${MAX_SERVER_JS_BYTES} bytes.` };
+  }
+  if (parsed.manifest.ui && !isRegularFile(join(dir, 'ui', 'index.html'))) {
+    return { ok: false, error: 'manifest.json says "ui": true but the bundle has no ui/index.html.' };
+  }
+  return { ok: true, manifest: parsed.manifest };
+}
+
+/**
+ * The manifest of an installed version, read from the web app's own copy
+ * of the files (the worker only confirms what server.js defines). Throws
+ * when the folder is not a valid sandbox-v1 bundle for that id + version.
+ */
+export function readInstalledSandboxManifest(root: string, pluginId: string, version: string): SandboxManifest {
+  if (!PLUGIN_ID_RE.test(pluginId) || !VERSION_RE.test(version)) throw new Error('Invalid plugin id or version');
+  const dir = resolve(root, pluginId, version);
+  if (!dir.startsWith(resolve(root) + sep)) throw new Error('Invalid plugin path');
+  const checked = checkSandboxBundle(dir, pluginId, version);
+  if (!checked.ok) throw new Error(checked.error);
+  return checked.manifest;
+}
 
 /** The ONE install root shared by installer, loader and plugin-worker. */
 export function pluginInstallDir(
@@ -181,10 +255,12 @@ export async function activateStagedBundle<T extends DescribedPlugin>(input: {
   if (!resolve(targetDir).startsWith(resolve(root) + sep)) {
     return { ok: false, error: 'Install path escapes the plugin directory. Rejected.' };
   }
-  // The worker imports `<version>/index.js`; a nested index.js never loaded.
-  if (!existsSync(join(stagingDir, 'index.js'))) {
+  // ADR-007: only sdk "sandbox-v1" bundles (manifest.json + server.js at
+  // the root, checked before the worker ever sees them).
+  const bundleCheck = checkSandboxBundle(stagingDir, pluginId, version);
+  if (!bundleCheck.ok) {
     rmSync(stagingDir, { recursive: true, force: true });
-    return { ok: false, error: 'Bundle missing index.js at its root — not a valid LobbyForge plugin.' };
+    return { ok: false, error: bundleCheck.error };
   }
   const digest = computeBundleDigest(stagingDir);
   const previous = readActivePointer(root, pluginId);

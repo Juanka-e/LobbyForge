@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
+import { ChannelWebhooks } from './ChannelWebhooks';
 
 type ChannelType = 'text' | 'voice' | 'activity' | 'announcement' | 'stage';
 
@@ -63,6 +64,8 @@ export default function ChannelsClient({
   });
   const [busyId, setBusyId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  /** The text channel whose incoming webhooks are open. */
+  const [webhooksId, setWebhooksId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
 
   const sortedChannels = useMemo(
@@ -311,6 +314,9 @@ export default function ChannelsClient({
           onSaveEdit={saveEdit}
           onMove={moveChannel}
           onDelete={deleteChannel}
+          serverId={serverId}
+          webhooksId={webhooksId}
+          onToggleWebhooks={(id) => setWebhooksId((current) => (current === id ? null : id))}
         />
         <ChannelGroup
           title={t('adminSettings.channels.group.voice')}
@@ -328,6 +334,9 @@ export default function ChannelsClient({
           onSaveEdit={saveEdit}
           onMove={moveChannel}
           onDelete={deleteChannel}
+          serverId={serverId}
+          webhooksId={webhooksId}
+          onToggleWebhooks={(id) => setWebhooksId((current) => (current === id ? null : id))}
         />
         {activity.length > 0 ? (
           <ChannelGroup
@@ -346,6 +355,9 @@ export default function ChannelsClient({
             onSaveEdit={saveEdit}
             onMove={moveChannel}
             onDelete={deleteChannel}
+            serverId={serverId}
+            webhooksId={webhooksId}
+            onToggleWebhooks={(id) => setWebhooksId((current) => (current === id ? null : id))}
           />
         ) : null}
       </div>
@@ -369,6 +381,9 @@ function ChannelGroup({
   onSaveEdit,
   onMove,
   onDelete,
+  serverId,
+  webhooksId,
+  onToggleWebhooks,
 }: {
   title: string;
   channels: ChannelView[];
@@ -385,6 +400,9 @@ function ChannelGroup({
   onSaveEdit: (channel: ChannelView) => void;
   onMove: (channel: ChannelView, direction: -1 | 1) => void;
   onDelete: (channel: ChannelView) => void;
+  serverId: string | null;
+  webhooksId: string | null;
+  onToggleWebhooks: (channelId: string) => void;
 }) {
   const t = useT();
   return (
@@ -409,7 +427,7 @@ function ChannelGroup({
                 key={channel.id}
                 className="rounded-xl bg-surface border border-border-subtle p-3 transition-colors hover:border-border-strong"
               >
-                <div className="flex items-start gap-4">
+                <div className="flex items-start gap-3 sm:gap-4">
                   <div className="flex flex-col gap-1">
                     <IconButton
                       icon="keyboard_arrow_up"
@@ -424,7 +442,7 @@ function ChannelGroup({
                       onClick={() => onMove(channel, 1)}
                     />
                   </div>
-                  <div className="w-9 h-9 rounded bg-surface-container flex shrink-0 items-center justify-center text-text-muted">
+                  <div className="w-9 h-9 rounded bg-surface-container hidden shrink-0 items-center justify-center text-text-muted sm:flex">
                     <span className="material-symbols-outlined text-[20px]">{iconForType(channel.type)}</span>
                   </div>
                   <div className="min-w-0 flex-1">
@@ -507,6 +525,15 @@ function ChannelGroup({
                       </>
                     ) : (
                       <>
+                        {serverId && (channel.type === 'text' || channel.type === 'announcement') ? (
+                          <IconButton
+                            icon="webhook"
+                            label={t('webhooks.open', { channel: channel.name })}
+                            pressed={webhooksId === channel.id}
+                            disabled={isBusy}
+                            onClick={() => onToggleWebhooks(channel.id)}
+                          />
+                        ) : null}
                         <IconButton
                           icon="edit"
                           label={t('adminSettings.channels.edit')}
@@ -524,6 +551,9 @@ function ChannelGroup({
                     )}
                   </div>
                 </div>
+                {serverId && webhooksId === channel.id && !isEditing ? (
+                  <ChannelWebhooks serverId={serverId} channel={{ id: channel.id, name: channel.name }} />
+                ) : null}
               </li>
             );
           })}
@@ -565,19 +595,22 @@ function IconButton({
   label,
   disabled,
   danger,
+  pressed,
   onClick,
 }: {
   icon: string;
   label: string;
   disabled?: boolean;
   danger?: boolean;
+  /** Set for a toggle button (e.g. the webhooks panel). */
+  pressed?: boolean;
   onClick: () => void;
 }) {
   const className = danger
     ? 'inline-flex h-8 w-8 items-center justify-center rounded-lg border border-danger/30 text-danger transition-colors hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40'
     : 'inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border-subtle text-text-secondary transition-colors hover:bg-surface-container hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40';
   return (
-    <button type="button" title={label} aria-label={label} disabled={disabled} onClick={onClick} className={className}>
+    <button type="button" title={label} aria-label={label} aria-pressed={pressed} disabled={disabled} onClick={onClick} className={pressed ? `${className} border-primary text-primary` : className}>
       <span className="material-symbols-outlined text-[18px]">{icon}</span>
     </button>
   );

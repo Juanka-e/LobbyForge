@@ -4,7 +4,15 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { focusRing } from './styles';
 
-export type HubRoute = '/home' | '/discover' | '/marketplace' | '/download' | '/landing';
+export type HubRoute =
+  | '/home'
+  | '/discover'
+  | '/marketplace'
+  | '/download'
+  | '/landing'
+  | '/developers'
+  | '/developers/bots'
+  | '/developers/plugins';
 
 export type HubNavLink =
   | { kind: 'internal'; href: HubRoute; label: string }

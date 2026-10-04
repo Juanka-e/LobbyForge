@@ -18,7 +18,12 @@ import { authorizeServerPermission } from '@/lib/permissions';
 import { BOT_NAME_MAX_LENGTH, botTrustLevel, isBuiltInType, type BotTrustLevel } from './catalog';
 import { parseModerationSettings, parseWelcomeSettings } from './settings';
 
-/** A bot's display name: 1–32 characters, whitespace collapsed, no control characters. */
+/**
+ * A bot's display name: 1–32 characters, whitespace collapsed, no control
+ * or format characters — the latter include bidi overrides and isolates
+ * (U+202A–202E, U+2066–2069), U+061C and zero-width characters, which can
+ * make a name render as something else (same rule as webhook usernames).
+ */
 export const BotNameSchema = z
   .string()
   .transform((value) => value.replace(/\s+/g, ' ').trim())
@@ -27,7 +32,7 @@ export const BotNameSchema = z
       .string()
       .min(1, 'Name is required')
       .max(BOT_NAME_MAX_LENGTH, `Name must be at most ${BOT_NAME_MAX_LENGTH} characters`)
-      .refine((value) => !/[\u0000-\u001F\u007F-\u009F]/.test(value), 'Name must not contain control characters')
+      .refine((value) => !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value), 'Name must not contain control characters')
   );
 
 /**

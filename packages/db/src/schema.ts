@@ -337,9 +337,144 @@ export const bots = pgTable('bots', {
   lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  /**
+   * Bot API v2 §1.1 (0044): which channels the bot reaches. `all` = every
+   * text / announcement channel of its server without a role gate (the v1
+   * rule); `selected` = exactly its `bot_channel_access` rows — and NONE
+   * when there are no rows (a deleted last channel never widens a bot).
+   * CHECK `IN ('all', 'selected')` is SQL-only.
+   */
+  channelAccessMode: text('channel_access_mode').default('all').notNull(),
 }, (table) => ({
   serverIdx: index('idx_bots_server').on(table.serverId),
 }));
+
+// ── Bot API v2 (0044, docs/BOT_API_V2.md §2) ────────────────────────────
+// Every table cascades with its bot / server / channel. The CHECK
+// constraints (name patterns, lengths, status values, JSON shapes) live
+// in the migration SQL only, like roles_icon_allowlist_check — the table
+// builder here does not carry them.
+
+// The channels a bot in `selected` mode (`bots.channel_access_mode`) may
+// use — exactly these, and none when there are no rows. Ignored in `all`
+// mode (switching to `all` deletes them). Granting a role-gated channel is
+// policed by the route.
+export const botChannelAccess = pgTable('bot_channel_access', {
+  botId: uuid('bot_id').notNull().references(() => bots.id, { onDelete: 'cascade' }),
+  channelId: uuid('channel_id').notNull().references(() => channels.id, { onDelete: 'cascade' }),
+  grantedBy: uuid('granted_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  pk: primaryKey({ name: 'bot_channel_access_bot_id_channel_id_pk', columns: [table.botId, table.channelId] }),
+  channelIdx: index('idx_bot_channel_access_channel').on(table.channelId),
+}));
+
+// Slash commands a bot registered. Names are unique per SERVER (a member
+// types `/name`, so two bots cannot both own it). `options` / `channel_ids`
+// come from the bot; `enabled` and `admin_channel_ids` belong to the
+// server's managers: the row carries the effective values, and
+// `bot_command_overrides` keeps them per (bot, name) so they survive the bot
+// deleting and re-registering the command.
+export const botCommands = pgTable('bot_commands', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  botId: uuid('bot_id').notNull().references(() => bots.id, { onDelete: 'cascade' }),
+  serverId: uuid('server_id').notNull().references(() => servers.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  description: text('description').notNull(),
+  options: jsonb('options').default([]).notNull(),
+  /** null = every channel the bot can access; else a subset (set by the bot). */
+  channelIds: jsonb('channel_ids'),
+  /** A manager's channel restriction (null = none), intersected with `channel_ids`. */
+  adminChannelIds: jsonb('admin_channel_ids'),
+  /** A CorePermission id the INVOKER must hold. */
+  requiredPermission: text('required_permission'),
+  enabled: boolean('enabled').default(true).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  serverNameUnique: unique('bot_commands_server_id_name_unique').on(table.serverId, table.name),
+  botIdx: index('idx_bot_commands_bot').on(table.botId),
+}));
+
+// The managers' switches on a bot's command, keyed by (bot, command name)
+// — NOT by the command row, which the bot can delete and re-create at will.
+// Written by the admin PATCH (together with the row); read when the bot
+// (re-)registers a name, so `DELETE /commands/{name}` + `PUT /commands`
+// cannot reset a manager's "off" or channel restriction. Gone with the bot.
+export const botCommandOverrides = pgTable('bot_command_overrides', {
+  botId: uuid('bot_id').notNull().references(() => bots.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  enabled: boolean('enabled').default(true).notNull(),
+  /** The managers' channel restriction (null = none). */
+  adminChannelIds: jsonb('admin_channel_ids'),
+  updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  pk: primaryKey({ name: 'bot_command_overrides_bot_id_name_pk', columns: [table.botId, table.name] }),
+}));
+
+// One run of a slash command. The id is the capability the bot answers
+// with (uuid, and bound to the bot). Answerable for 15 minutes.
+//   status: 'pending' | 'answered' | 'expired' | 'failed'
+export const botInteractions = pgTable('bot_interactions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  botId: uuid('bot_id').notNull().references(() => bots.id, { onDelete: 'cascade' }),
+  commandId: uuid('command_id').references(() => botCommands.id, { onDelete: 'set null' }),
+  serverId: uuid('server_id').notNull().references(() => servers.id, { onDelete: 'cascade' }),
+  channelId: uuid('channel_id').notNull().references(() => channels.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  commandName: text('command_name').notNull(),
+  options: jsonb('options').default({}).notNull(),
+  status: text('status').default('pending').notNull(),
+  /** `{ content, ephemeral, messageId? }` of the first answer. */
+  response: jsonb('response'),
+  /** Follow-up messages sent so far (at most 5). */
+  followupCount: integer('followup_count').default(0).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  answeredAt: timestamp('answered_at', { withTimezone: true }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+}, (table) => ({
+  botStatusIdx: index('idx_bot_interactions_bot_status').on(table.botId, table.status, table.expiresAt),
+  userIdx: index('idx_bot_interactions_user').on(table.userId, table.createdAt),
+  // The channel / command FKs (cascade / set null) look rows up by these.
+  channelIdx: index('idx_bot_interactions_channel').on(table.channelId),
+  commandIdx: index('idx_bot_interactions_command').on(table.commandId).where(sql`command_id IS NOT NULL`),
+}));
+
+// Incoming webhooks: an external service posts into ONE channel with a
+// secret URL. Only the token's hash is kept (`sha256$<hex>`).
+export const channelWebhooks = pgTable('channel_webhooks', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  serverId: uuid('server_id').notNull().references(() => servers.id, { onDelete: 'cascade' }),
+  channelId: uuid('channel_id').notNull().references(() => channels.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  tokenHash: text('token_hash').notNull(),
+  enabled: boolean('enabled').default(true).notNull(),
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+}, (table) => ({
+  channelIdx: index('idx_channel_webhooks_channel').on(table.channelId),
+  serverIdx: index('idx_channel_webhooks_server').on(table.serverId),
+}));
+
+// A bot's outgoing event endpoint (HTTPS). `secret` is the HMAC key the
+// instance signs deliveries with — stored because the server must sign,
+// returned only once. Disabled after 20 consecutive failed deliveries.
+export const botEventEndpoints = pgTable('bot_event_endpoints', {
+  botId: uuid('bot_id').primaryKey().references(() => bots.id, { onDelete: 'cascade' }),
+  url: text('url').notNull(),
+  secret: text('secret').notNull(),
+  events: jsonb('events').default([]).notNull(),
+  enabled: boolean('enabled').default(true).notNull(),
+  failureCount: integer('failure_count').default(0).notNull(),
+  disabledReason: text('disabled_reason'),
+  lastDeliveryAt: timestamp('last_delivery_at', { withTimezone: true }),
+  lastStatus: integer('last_status'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
 
 // Version ledger for trusted, host-executed component data migrations.
 // Community packages never receive raw SQL access through this table.

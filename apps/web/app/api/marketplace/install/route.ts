@@ -34,7 +34,7 @@ async function handlePost(req: Request): Promise<NextResponse> {
   // process — the old message here still said "in-process".
   if (process.env.LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED !== 'true') {
     return NextResponse.json(
-      { error: 'Dynamic plugin installation is disabled. Set LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED=true to enable it; plugins then run only in the isolated plugin-worker, which isolates reviewed code, not hostile code (ADR-001).' },
+      { error: 'Dynamic plugin installation is disabled. Set LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED=true to enable it; plugins then run only in the plugin-worker, sandboxed in a QuickJS VM (ADR-007).' },
       { status: 503 }
     );
   }

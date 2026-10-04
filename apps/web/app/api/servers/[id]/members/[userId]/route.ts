@@ -11,6 +11,7 @@ import { withApiSecurity } from '@/lib/security-headers';
 import { authorizeModerationTarget } from '@/lib/member-authorization';
 import { publishAccessInvalidation } from '@/lib/access-invalidation';
 import { queueMemberVoiceSync } from '@/lib/voice-moderation';
+import { emitMemberEvent } from '@/lib/bots/events';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -93,6 +94,13 @@ async function handleDelete(
     }
 
     await removeMember(getDb(), serverId, targetUserId);
+    // Bot API v2: bots with read_members hear who left (fire-and-forget).
+    emitMemberEvent({
+      serverId,
+      userId: targetUserId,
+      event: 'member_leave',
+      reason: targetUserId === session.uid ? 'leave' : 'kick',
+    });
     if (targetUserId !== session.uid) {
       // LF-SEC-003: a kick must close the target's live server topics.
       publishAccessInvalidation({

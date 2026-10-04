@@ -33,10 +33,12 @@ ways:
   the full feature set: your own React panel, action policies, and hidden
   state per viewer.
 - **B: the marketplace.** This path is off by default and experimental.
-  The plugin runs in a separate worker container, which is not a sandbox
-  for hostile code. It gets no UI, all of its actions are host-only, there
-  is no hidden-state projection, and the code has open issues
-  ([§3.5](#35-path-b-marketplace-dynamic-plugin)).
+  Since ADR-007 the plugin runs sandboxed: its `server.js` in a QuickJS
+  WebAssembly VM in the plugin worker, its UI in a sandboxed iframe. It
+  gets action policies, `validateAction` and per-viewer hidden state
+  (`projectState`), but no Node APIs, imports, storage or timers, and it
+  is not listed in the Apps page or the picker
+  ([§3.5](#35-path-b-marketplace-dynamic-plugin), [PLUGIN_PUBLISHING.md](PLUGIN_PUBLISHING.md)).
 
 **What is the most I can build?** Server-authoritative activities that run
 inside a voice channel. They can be turn-based, or "real-time" at the pace
@@ -297,8 +299,10 @@ What your bot posts is your responsibility.
 5. A change notice goes out on Redis. It carries no state. The SSE route
    and the WebSocket gateway then load the row and **project it per
    viewer** with `projectActivityState`
-   (`packages/core/src/activity-projection.ts`). Every viewer, host
-   included, gets only what they may see.
+   (`packages/core/src/activity-projection.ts`) — or, for a marketplace
+   plugin, with its own `projectState` in the plugin worker
+   (`apps/web/lib/plugin-projection.ts`; the gateway asks the web app).
+   Every viewer, host included, gets only what they may see.
 
 ### 3.2 The contract (`packages/plugin-sdk/src/index.ts`)
 
@@ -717,86 +721,90 @@ anything you compile in the way you review your own code.
 
 ### 3.4 Choosing a path
 
-| | A: compiled in | B: marketplace |
+| | A: compiled in | B: marketplace (sandbox-v1) |
 |---|---|---|
-| Your own React panel | yes | no (`renderClient: () => null`, lobby shows a placeholder) |
-| `actionPolicies`, `validateAction` | yes | no: not forwarded, so every action is host-only |
-| Hidden state per viewer | yes, with a core projection branch | no: viewers receive the full state |
-| Listed in the Apps page and the activity picker | yes | no: compiled-in lists only |
-| Isolation | none (in-process) | separate container, but plugin code runs as the worker's user and shares a network with Postgres, Redis and LiveKit; [ADR-001](ARCHITECTURE_DECISIONS.md#adr-001-plugin-runtime-trust-model) says reviewed code only, not hostile code ([§3.5](#35-path-b-marketplace-dynamic-plugin)) |
+| Language and APIs | TypeScript, React, the whole SDK | plain JavaScript in `server.js`, no imports, no Node APIs |
+| Your own UI | a React panel in the app | `ui/` in a sandboxed iframe (no network), postMessage protocol v1 |
+| `actionPolicies`, `validateAction` | yes | yes: policies from `manifest.json`, `validateAction` in the sandbox |
+| Hidden state per viewer | yes, with a core projection branch | yes, with the plugin's own `projectState` |
+| Listed in the Apps page and the activity picker | yes | no: compiled-in lists only (enable and start through the API) |
+| Isolation | none (in-process, trusted code) | QuickJS WebAssembly VM per call, inside a hardened container on a network only web joins ([ADR-007](ARCHITECTURE_DECISIONS.md#adr-007-marketplace-plugins-run-sandboxed-supersedes-the-trust-limits-of-adr-001-and-the-target-of-adr-002)) |
+| Storage, timers, chat messages | `ctx.storage` (async, unused so far); the rest are stubs | none: the state is the plugin's only memory |
 | Install | rebuild the image | owner approves and installs at runtime |
-| Status | used by all six official plugins | experimental: unit and route tests, no end-to-end test on a running stack |
+| Status | used by all six official plugins | experimental: unit, route and sandbox tests, no end-to-end test on a running stack |
 
 ### 3.5 Path B: marketplace (dynamic) plugin
 
-What exists: there is a **per-instance** catalog. Users submit an entry,
-the instance owner reviews it, and approval downloads the bundle and pins
-its SHA-256 and size. Install verifies those bytes and extracts them; the
-web app then reaches the bundle only through the `plugin-worker`
-container. That container holds no host secrets except its own RPC token
-(`PLUGIN_WORKER_TOKEN`), and it has a read-only plugin mount, 256 MB of
-memory, 64 pids and no capabilities. Every call runs in a fresh child
-process with an empty environment, a 128 MB heap and a 10 s budget, and
-the process tree is killed afterwards.
+Since ADR-007 a marketplace plugin runs **sandboxed**, so an instance owner
+no longer has to trust its author with the server
+([ADR-007](ARCHITECTURE_DECISIONS.md#adr-007-marketplace-plugins-run-sandboxed-supersedes-the-trust-limits-of-adr-001-and-the-target-of-adr-002)).
+The full author's guide — bundle format, contract, limits, packing,
+migration from the old Node bundles — is
+[PLUGIN_PUBLISHING.md](PLUGIN_PUBLISHING.md). This section is the
+operator's view.
 
-**This is not a sandbox for hostile code.** Read this before you approve
-anything:
+What exists: a **per-instance** catalog. Users submit an entry, the
+instance owner reviews it, and approval downloads the bundle and pins its
+SHA-256 and size. Install verifies those bytes, refuses anything but a
+`sdk: "sandbox-v1"` bundle (`manifest.json` + `server.js`, optional `ui/`)
+whose id and version match the entry, extracts it, and has the
+`plugin-worker` load that exact version before recording it as active.
 
-- The worker's only network is the internal compose network. It has no
-  route to the internet, but the same network carries Postgres, Redis,
-  LiveKit and the web app (`web:3000`). Those are protected by passwords
-  and signed tokens, not by network separation.
-- The child process runs as the worker's user. Its own environment is
-  empty, but plugin code can normally read the worker's environment,
-  `PLUGIN_WORKER_TOKEN` included, through `/proc/<parent pid>/environ`.
-- That is why [ADR-001](ARCHITECTURE_DECISIONS.md#adr-001-plugin-runtime-trust-model)
-  accepts reviewed plugins only. Approve a bundle only if you have read
-  its source and would run it on your server yourself.
+How it runs:
 
-There is no shared catalog across instances. An entry approved on
-another instance (including the official one) does not appear on yours.
+- **Server code** (`server.js`) runs in a QuickJS WebAssembly VM in the
+  `plugin-worker` container: plain JavaScript, no `require`/`import`, no
+  `process`, file system, network, timers or shared memory, and no host
+  functions. Each call gets a fresh WebAssembly instance, 32 MB of VM
+  memory, a 256 KiB stack and the call budget (`PLUGIN_CALL_BUDGET_MS`,
+  default 2 s). The VM's interrupt can be outrun by one long native
+  operation, so calls run in a small pool of executor threads
+  (`PLUGIN_SANDBOX_THREADS`, default 2) and a thread that overruns is
+  terminated. A runaway plugin fails its call, never the worker.
+- **The host's features apply**, as for official plugins: the manifest's
+  `actionPolicies` (roles, `actorFields`, `joinsRoster`, `audit`) on the
+  actions route — read by the web app from its own copy of the files, so
+  plugin code cannot widen them; `validateAction`; a reducer that returns
+  its input is a refused action; and `projectState` gives per-viewer
+  hidden state on every read path (GET, SSE, the action response, and the
+  WebSocket gateway, which asks web through the signed internal
+  `POST /api/internal/activity-projection`). Without `projectState` the
+  state is public and the lobby says so.
+- **UI** (`ui/`) is served from `/api/plugin-ui/{pluginId}/{version}/…`
+  into `<iframe sandbox="allow-scripts">` with no network; see
+  "Marketplace plugin UI (sandboxed iframe)" in [PLUGIN_SDK.md](PLUGIN_SDK.md).
+- **The container** is the outer layer: read-only file system and plugin
+  mount, no capabilities, no-new-privileges, 256 MB and 64 pids, no
+  secrets except its RPC token (`PLUGIN_WORKER_TOKEN`), and its own
+  internal network, `plugin-sandbox`, that only `web` joins — no route to
+  Postgres, Redis, LiveKit or the gateway. The worker makes no outbound
+  calls.
 
-Steps, if you want to try it:
+There is no shared catalog across instances. An entry approved on another
+instance (including the official one) does not appear on yours.
+
+Steps:
 
 1. **Turn it on.** Add `LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED=true` to
    `.env.prod`. `install.sh` already generated
-   `LOBBYFORGE_PLUGIN_WORKER_TOKEN` and `LOBBYFORGE_PLUGIN_STORAGE_TOKEN`,
-   and compose sets the worker URL and the install directory
-   (`LOBBYFORGE_PLUGIN_INSTALL_DIR=/app/plugins/installed`, the same value
-   on web and plugin-worker, inside the `plugins-data` volume: web writes,
-   the worker mounts it read-only). Then run `docker compose … up -d`.
-   Without the worker nothing loads; this fails closed
-   (`warmInstalledPlugins` in `apps/web/lib/plugin-loader.ts`).
-2. **Build one self-contained ESM file.** The worker imports it from
-   `<LOBBYFORGE_PLUGIN_INSTALL_DIR>/<id>/<version>/index.js` with an empty
-   environment. There is no `node_modules` on that path, so `react`,
-   `@lobbyforge/plugin-sdk` and every other import must be bundled in. A
-   bundle that leaves one external fails at install with
-   `ERR_MODULE_NOT_FOUND … bundle every dependency (react and
-   @lobbyforge/plugin-sdk included) into index.js`. Run from your plugin
-   folder after `pnpm build:packages`:
-
-   ```sh
-   echo "export { buzzerPlugin as plugin } from './index';" > src/bundle-entry.ts
-   pnpm dlx esbuild src/bundle-entry.ts --bundle --format=esm --platform=node \
-     --target=node22 --jsx=automatic --outfile=bundle/index.js
-   tar -czf buzzer-0.1.0.tgz -C bundle .        # entries ./index.js ...
-   ```
-
-   The rules the installer and worker enforce:
-   - The bundle must export `plugin` or `default` (`apps/plugin-worker/src/executor-child.mjs`)
-     with `manifest.id`, `manifest.name`, `createInitialState` and
-     `handleAction`.
-   - `manifest.id` must equal the catalog `pluginId`. Follow the id
-     advice in [§3.2](#32-the-contract-packagesplugin-sdksrcindexts):
-     an id longer than 64 characters installs but cannot be enabled.
-   - The version must be strict semver.
-   - `index.js` must sit at the archive root; the installer refuses a
-     bundle without it. Extraction strips one leading path component
-     (`--strip-components=1` in `apps/web/lib/plugin-installer.ts`),
-     which turns `./index.js` into `index.js`.
-   - Regular files only, at most 500 entries, 10 MB compressed and 50 MB
-     unpacked.
+   `LOBBYFORGE_PLUGIN_WORKER_TOKEN`, and compose sets the worker URL and
+   the install directory (`LOBBYFORGE_PLUGIN_INSTALL_DIR=/app/plugins/installed`,
+   the same value on web and plugin-worker, inside the `plugins-data`
+   volume: web writes, the worker mounts it read-only). Then run
+   `docker compose … up -d`. Without the worker nothing loads; this fails
+   closed (`warmInstalledPlugins` in `apps/web/lib/plugin-loader.ts`).
+2. **Build the bundle** (PLUGIN_PUBLISHING.md): `manifest.json`,
+   `server.js`, optional `ui/`, packed with
+   `examples/plugins/sandbox-buzzer/pack.mjs`, which prints the SHA-256.
+   The installer enforces:
+   - `./manifest.json` and `./server.js` at the archive root (it extracts
+     with `--strip-components=1`); a legacy `index.js` bundle is refused
+     with a migration hint;
+   - a valid manifest: `sdk: "sandbox-v1"`, id and version equal to the
+     catalog entry's, well-formed `actionPolicies` (unknown keys refused),
+     `ui/index.html` when `ui: true`;
+   - `server.js` at most 2 MiB; regular files only, at most 500 entries,
+     10 MB compressed and 50 MB unpacked.
 3. **Host the `.tgz`** at a public HTTPS URL. Private, loopback and
    `.local` / `.internal` hosts are refused.
 4. **Submit** to your own instance as any signed-in user. There is no
@@ -805,86 +813,62 @@ Steps, if you want to try it:
    ```sh
    curl -X POST https://chat.example.com/api/marketplace/submit \
      -H "Origin: https://chat.example.com" -H "Cookie: lf_guest=…" -H "Content-Type: application/json" \
-     -d '{"pluginId":"buzzer","name":"Buzzer","version":"0.1.0","type":"game","publisher":"Me",
-          "manifestUrl":"https://example.org/buzzer-0.1.0.tgz"}'
+     -d '{"pluginId":"sandbox-buzzer","name":"Sandbox Buzzer","version":"0.1.0","type":"game","publisher":"Me",
+          "manifestUrl":"https://example.org/sandbox-buzzer-0.1.0.tgz"}'
    ```
 
 5. **Approve** as the instance owner: use **Admin → Moderation**
    (`/admin/moderation`), or send `POST /api/marketplace/review`
-   `{"pluginId":"buzzer","decision":"approved"}` with
+   `{"pluginId":"sandbox-buzzer","decision":"approved"}` with
    `x-lobbyforge-admin-token: $LOBBYFORGE_ADMIN_TOKEN` plus the `Origin`
    header. Approval downloads the bundle and pins its digest.
 6. **Install:** use the **Install** button on `/marketplace`, or
-   `POST /api/marketplace/install` `{"pluginId":"buzzer"}`. The installer
-   checks the bytes against the reviewed pin, extracts them into
-   `<id>/<version>/`, asks the worker to load exactly that version, and
-   only then records it as active (see *Versions and upgrades* below).
+   `POST /api/marketplace/install` `{"pluginId":"sandbox-buzzer"}`.
 7. **Enable and start through the API.** The Apps page and picker list
    only compiled-in plugins. Enable with `POST /api/servers/{id}/apps`
-   `{"pluginId":"buzzer","enabled":true}`, then start with
+   `{"pluginId":"sandbox-buzzer","enabled":true}`, then start with
    `POST /api/servers/{id}/channels/{channelId}/activities`
-   `{"pluginId":"buzzer"}`.
+   `{"pluginId":"sandbox-buzzer"}`.
 
 **Versions and upgrades.** The install directory holds one folder per
 version plus a record of the active one
 (`apps/web/lib/plugin-install-layout.ts`):
 
 ```
-<LOBBYFORGE_PLUGIN_INSTALL_DIR>/buzzer/0.2.0/index.js
-<LOBBYFORGE_PLUGIN_INSTALL_DIR>/buzzer/active.json   {"version":"0.2.0","digest":"<sha256>",...}
+<LOBBYFORGE_PLUGIN_INSTALL_DIR>/sandbox-buzzer/0.2.0/manifest.json, server.js, ui/…
+<LOBBYFORGE_PLUGIN_INSTALL_DIR>/sandbox-buzzer/active.json   {"version":"0.2.0","digest":"<sha256>",...}
 ```
 
 - The web app is the only writer. `active.json` names the active version
   and a SHA-256 digest of its files. The loader reads it at boot and
   sends that exact version and digest with every worker call. The worker
-  recomputes the digest and refuses a missing version (404) or a
-  mismatch (409). Nothing picks "the newest folder".
+  recomputes the digest, keeps the verified `server.js` and manifest in
+  memory, and refuses a missing version (404), a mismatch (409) or a
+  legacy bundle (422). Nothing picks "the newest folder".
 - An upgrade extracts the new version next to the old one. The worker
   loads the new one first; only then is `active.json` rewritten. The old
-  folder is deleted right after. If the worker refuses the new bundle,
-  the old version stays active and the new folder is removed.
+  folder is deleted right after. If the new bundle is refused, the old
+  version stays active and the new folder is removed.
 - The record is a file on the volume, not a database row. That way it
-  always travels with the files it describes: restoring the database
-  without the volume (or the other way round) cannot leave it pointing
-  at files that are not there.
-- A plugin folder without `active.json` is ignored; run Install again.
-  No install made before this change could reach the worker anyway (see
-  below), so there is nothing to migrate.
-
-**Fixed (security follow-ups, 2026-10-03).** Found while writing this
-guide. Unit and route tests cover them, but not a running stack:
-
-- *State did not carry over between actions.* A worker-backed plugin's
-  `migrateState` is async (an RPC). The GET, SSE and action routes,
-  including the CAS retry loop, used it without `await`. The reducer got
-  a Promise, which serializes to `{}`, and readers saw `{}`. Every call
-  site now awaits it; for official plugins, which return plain values,
-  this changes nothing.
-- *The installer wrote where the worker never looked.* It resolved
-  `plugins/installed` from the working directory (`/app/apps/web`), off
-  the shared volume. Installer, loader and worker now share
-  `LOBBYFORGE_PLUGIN_INSTALL_DIR`. The worker still reads the old name,
-  `PLUGINS_DIR`.
-- *The worker ran the alphabetically last version folder* (`1.9.0`
-  over `1.10.0`), and old versions were never removed. See *Versions and
-  upgrades*.
-- *An unresolvable import failed with a bare `ERR_MODULE_NOT_FOUND`.*
-  The error now says to bundle every dependency.
+  always travels with the files it describes.
+- A legacy install (an `index.js` bundle recorded before ADR-007) stays on
+  disk but no longer loads; the loader logs why. Install a sandbox-v1
+  version of it.
 
 **Still open:**
 
-- No end-to-end test runs this path on a real stack.
+- No end-to-end test runs this path on a real stack (unit, route,
+  gateway and sandbox tests cover it).
 - The web app loads the active list once, at boot. If the worker is not
-  reachable then, dynamic plugins stay unloaded until web restarts or the
-  plugin is reinstalled.
-- A refused action still counts as a change. Results cross the worker
-  as JSON, so the reducer never returns the *same object*, and every
-  action is host-only (see below), so a refused action is still audited.
-- `actionPolicies` and `validateAction` are not forwarded, and the Apps
-  page and picker do not list dynamic plugins (see the table in §3.4).
-
-Until an end-to-end test covers this path, use path A for anything your
-community relies on.
+  reachable then, marketplace plugins stay unloaded until web restarts or
+  the plugin is reinstalled; while unloaded, their activities' state is
+  withheld from viewers rather than sent unfiltered.
+- The Apps page and the activity picker do not list marketplace plugins.
+- No plugin storage, timers or chat messages in the sandbox;
+  `/api/internal/plugin-storage` remains for a future host-mediated
+  storage effect.
+- A busy plugin can occupy the executor threads for one budget per call
+  and slow other marketplace plugins (never official ones).
 
 ## 4. What you can build: capabilities and ceilings
 
@@ -892,7 +876,7 @@ community relies on.
 
 | You want | Today | How |
 |---|---|---|
-| Turn-based party, board or card games with secret information (werewolf, hidden hands, Taboo) | yes | Path A plus a projection branch. Vampire Village keeps all secrets under `state.secret`. |
+| Turn-based party, board or card games with secret information (werewolf, hidden hands, Taboo) | yes | Path A plus a projection branch (Vampire Village keeps all secrets under `state.secret`), or path B with the plugin's own `projectState` (the sandbox-buzzer example). |
 | Trivia with answers that never reach browsers | yes | Path A plus `prepare-plugin-action.ts` (the Quiz pattern) |
 | Polls, buzzers, dice, scoreboards, initiative trackers, brackets | yes | Path A |
 | Synced playback for the room | YouTube only | The Watch Party pattern (server-stamped timeline). Other players need a CSP change. |
@@ -952,8 +936,8 @@ camera or screen share.
 | State size | no explicit cap. Every action rewrites the whole JSONB and every subscriber reloads and projects it, so keep state in kilobytes. | inferred |
 | Players per app | `defaultMaxPlayers` 1–500 | `apps/route.ts:27` |
 | In-process reducer | "5 s" guard; ineffective for synchronous loops | `plugin-context.ts:218` |
-| Worker call | 10 s budget (`PLUGIN_CALL_BUDGET_MS`), host RPC timeout 10 s, result ≤ 4 MiB, request ≤ 8 MiB, 128 MB heap; one fresh Node process per call | `CALL_BUDGET_MS`, `MAX_RESULT_BYTES`, `readBody` and `--max-old-space-size` in `plugin-worker/src/index.ts`; `RPC_TIMEOUT_MS` in `plugin-worker-client.ts` |
-| Bundle | 10 MB download, 50 MB unpacked, 500 entries | `MAX_BUNDLE_BYTES`, `MAX_TOTAL_BYTES`, `MAX_ENTRIES` in `plugin-installer.ts` |
+| Sandbox call (marketplace) | a fresh QuickJS VM per call: 32 MB memory, 256 KiB stack, 2 s budget (`PLUGIN_CALL_BUDGET_MS`) then the executor thread is killed, result ≤ 4 MiB, request ≤ 8 MiB, 1024 random values; 2 executor threads (`PLUGIN_SANDBOX_THREADS`); host RPC timeout 10 s | `SANDBOX_MEMORY_BYTES`, `SANDBOX_STACK_BYTES`, `MAX_RESULT_BYTES`, `callBudgetMs` in `plugin-worker/src/index.ts`; `sandbox-pool.ts`; `RPC_TIMEOUT_MS` in `plugin-worker-client.ts` |
+| Bundle | 10 MB download, 50 MB unpacked, 500 entries; `server.js` ≤ 2 MiB, `manifest.json` ≤ 64 KiB | `MAX_BUNDLE_BYTES`, `MAX_TOTAL_BYTES`, `MAX_ENTRIES` in `plugin-installer.ts`; `MAX_SERVER_JS_BYTES` in `plugin-install-layout.ts` |
 | Plugin id | 1–64 characters to enable or start; 2–128, `[a-z0-9][a-z0-9_-]*`, for the marketplace | `apps/route.ts:32,38`, marketplace `submit` / `install` routes; see [§3.2](#32-the-contract-packagesplugin-sdksrcindexts) |
 | Plugin storage | keys `[a-zA-Z0-9._:-]{1,128}`; worker proxy body 256 KiB, 600 ops/min | `app/api/internal/plugin-storage/route.ts:28,98-99` |
 | WebSocket gateway | 10 connections/IP, 64 topics/connection, 256/user, 30 subscribes/min, 64 KB frames | `MAX_CONNECTIONS_PER_IP`, `SUBSCRIBE_RATE_LIMIT_MAX` and `maxPayload` in `ws-gateway/src/server.ts`; `subscriptions.ts:27-28` |
@@ -1010,19 +994,22 @@ Each points to where it is tracked.
    `manage_game_session` and `read_audit_log`. Bot ideas such as
    translation, summaries, game host and reminders are in
    `projectdetails/22_BACKLOG_IDEAS.md` §3.
-3. **Fixing the marketplace path** ([§3.5](#35-path-b-marketplace-dynamic-plugin)):
-   forward `actionPolicies` / `validateAction` from the worker, list
-   dynamic plugins in the Apps page and the picker, and add an
-   end-to-end test.
-4. **Marketplace UI in a sandboxed iframe** with a versioned
-   `postMessage` capability protocol ([ADR-002](ARCHITECTURE_DECISIONS.md)).
-5. **Projection and server-hydration hooks owned by the plugin.** Today
-   they are per-id branches in `packages/core/src/activity-projection.ts`
-   and `apps/web/lib/prepare-plugin-action.ts`. Until they move, a
-   marketplace plugin cannot keep secrets. This is a proposal, not yet a
-   tracked item.
-6. **Per-plugin containers** with separate UIDs and namespaces before
-   accepting untrusted code ([ADR-001](ARCHITECTURE_DECISIONS.md)).
+3. **Finishing the marketplace path** ([§3.5](#35-path-b-marketplace-dynamic-plugin)):
+   list marketplace plugins in the Apps page and the picker, and add an
+   end-to-end test. (Done with ADR-007, 2026-10-03: sandboxed execution,
+   `actionPolicies` and `validateAction` from the bundle, per-viewer
+   `projectState`.)
+4. **A host-mediated storage effect for sandboxed plugins**: data that
+   outlives a session (season leaderboards) without giving plugin code
+   any I/O. (The sandboxed iframe UI shipped with ADR-007.)
+5. **Moving the official plugins' projection and server-hydration hooks
+   into the plugins.** Today they are per-id branches in
+   `packages/core/src/activity-projection.ts` and
+   `apps/web/lib/prepare-plugin-action.ts`; marketplace plugins already
+   own theirs (`projectState`). This is a proposal, not yet a tracked item.
+6. **Per-plugin workers** (separate containers or UIDs) so one busy
+   marketplace plugin cannot slow the others; ADR-007 already removed the
+   need for them as a security boundary.
 7. **Games that control voice**: a private night room for vampires,
    team voice, listen-only for the eliminated
    ([SECURITY_REVIEW_2026-10.md](SECURITY_REVIEW_2026-10.md) §9
@@ -1048,5 +1035,5 @@ Each points to where it is tracked.
 | PLUGIN_SDK.md | "What M16 doesn't do": no plugin UI, the panel polls every 2 s | Panels render, and updates arrive over SSE/WebSocket |
 | [ACTIVITIES.md](ACTIVITIES.md) | The panel polls every 2 s | SSE/WebSocket push, 5 s poll fallback |
 | README | Vampire Village and Watch Party are "planned"; bot-sdk "runtime planned" | Both games ship; the bot SDK has a working HTTP client |
-| `POST /api/marketplace/install` error text | "plugins run in-process without isolation" | The worker is mandatory. **Fixed 2026-10-03:** the message now says plugins run only in the worker, which isolates reviewed code, not hostile code (ADR-001) |
+| `POST /api/marketplace/install` error text | "plugins run in-process without isolation" | The worker is mandatory. **Fixed 2026-10-03:** the message now says plugins run only in the plugin-worker, sandboxed in a QuickJS VM (ADR-007) |
 | [BOTS.md](BOTS.md) | (accurate) | Add: switching the Moderation Bot on needs *Manage Messages* unless you are the owner |

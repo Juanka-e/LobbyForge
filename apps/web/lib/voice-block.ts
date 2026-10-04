@@ -156,3 +156,20 @@ export async function getVoiceBlock(
 export async function isVoiceBlocked(scope: VoiceBlockScope, userId: string): Promise<boolean> {
   return (await getVoiceBlock(scope, userId)) !== null;
 }
+
+/** At most one `voice.block_enforced` audit row per user, per server, per this many seconds. */
+export const VOICE_BLOCK_ENFORCED_AUDIT_WINDOW_SECONDS = 60;
+
+/**
+ * Claim the right to write a `voice.block_enforced` audit row (a blocked
+ * identity rejoined with an old token and was removed again). A modified
+ * client can reconnect in a loop, so only the first removal in each
+ * window is logged: `SET NX EX` on
+ * `lf:{env}:voice-block-enforced-audit:{serverId}:{userId}`. true = write
+ * the row. Throws when Redis does — the webhook then skips the row.
+ */
+export async function claimVoiceBlockEnforcedAudit(serverId: string, userId: string): Promise<boolean> {
+  if (!serverId || !userId) return false;
+  const key = `${envPrefix()}:voice-block-enforced-audit:${serverId}:${userId}`;
+  return (await redis.set(key, '1', 'EX', VOICE_BLOCK_ENFORCED_AUDIT_WINDOW_SECONDS, 'NX')) === 'OK';
+}

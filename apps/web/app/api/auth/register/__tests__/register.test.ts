@@ -77,7 +77,9 @@ async function post(body: unknown) {
   }), {});
 }
 
-describe('POST /api/auth/register', () => {
+// The first test pays the route's cold import, which can pass 5 s when the
+// whole suite runs in parallel.
+describe('POST /api/auth/register', { timeout: 20_000 }, () => {
   it('creates an open-registration account and issues a session', async () => {
     const response = await post(validBody);
     expect(response.status).toBe(201);

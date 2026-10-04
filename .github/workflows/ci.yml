@@ -403,7 +403,7 @@ jobs:
           # security-review: sanctions that survive leave/rejoin, the
           # last-gating-role refusal and approval-required joins (AUTHZ-001/
           # 002/004), plus the bots runtime — SQL that mocks cannot prove.
-          TEST_DATABASE_URL="postgres://postgres:t@127.0.0.1:$PORT/d" pnpm vitest run src/__tests__/member-sanctions.integration.test.ts src/__tests__/bots.integration.test.ts src/__tests__/user-images.integration.test.ts
+          TEST_DATABASE_URL="postgres://postgres:t@127.0.0.1:$PORT/d" pnpm vitest run src/__tests__/member-sanctions.integration.test.ts src/__tests__/bots.integration.test.ts src/__tests__/user-images.integration.test.ts src/__tests__/bot-api-v2.integration.test.ts
           # 0043 join approval queue: one pending per user, invite uses
           # taken once per user and code, cross-server request ids, and
           # ban-made rejections that leave no cooldown after an unban.

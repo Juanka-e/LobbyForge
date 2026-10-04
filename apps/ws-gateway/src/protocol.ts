@@ -11,6 +11,12 @@
  *   activity-state:{serverId}:{sessionId}
  *   chat:{serverId}:{channelId}
  *   presence:{serverId}
+ *   dm:{channelId}
+ *   user:{userId}        (Bot API v2 §4.3 — only that user's own session)
+ *
+ * Bot connections (`/ws/bot`) do not choose topics; their wire format is
+ * in `bot-protocol.ts` (re-exported below) and the client messages they
+ * may send are validated by `BotClientMessageSchema`.
  *
  * Topic authorization is enforced per-subscribe against the user's
  * server membership — see `authorize.ts`. Subscribing to a topic you
@@ -22,7 +28,8 @@ export type Topic =
   | `activity-state:${string}:${string}`
   | `chat:${string}:${string}`
   | `presence:${string}`
-  | `dm:${string}`;
+  | `dm:${string}`
+  | `user:${string}`;
 
 export const SubscribeMessageSchema = z.object({
   type: z.literal('subscribe'),
@@ -37,6 +44,22 @@ export const UnsubscribeMessageSchema = z.object({
 export const ClientMessageSchema = z.discriminatedUnion('type', [
   SubscribeMessageSchema,
   UnsubscribeMessageSchema,
+]);
+
+/** Bot API v2 §4.1: the first message on `/ws/bot` when no header was sent. */
+export const BotIdentifyMessageSchema = z.object({
+  type: z.literal('identify'),
+  token: z.string().min(1).max(256),
+});
+
+/** Optional application-level keep-alive from a bot; answered with `pong`. */
+export const BotPingMessageSchema = z.object({
+  type: z.literal('ping'),
+});
+
+export const BotClientMessageSchema = z.discriminatedUnion('type', [
+  BotIdentifyMessageSchema,
+  BotPingMessageSchema,
 ]);
 
 export type SubscribeMessage = z.infer<typeof SubscribeMessageSchema>;
@@ -104,7 +127,7 @@ export type ServerMessage =
  * are 3-part (`kind:{serverId}:{resourceId}`). The parser handles both.
  */
 export function parseTopic(topic: string): {
-  kind: 'activity-state' | 'chat' | 'presence' | 'dm';
+  kind: 'activity-state' | 'chat' | 'presence' | 'dm' | 'user';
   serverId: string;
   resourceId: string;
 } | null {
@@ -115,6 +138,12 @@ export function parseTopic(topic: string): {
   if (kind === 'presence') {
     if (parts.length !== 2 || !parts[1]) return null;
     return { kind: 'presence', serverId: parts[1], resourceId: parts[1] };
+  }
+
+  // user:{userId} — 2 parts (per-user events, not server-scoped)
+  if (kind === 'user') {
+    if (parts.length !== 2 || !parts[1]) return null;
+    return { kind: 'user', serverId: parts[1], resourceId: parts[1] };
   }
 
   // dm:{channelId} — 2 parts (DM channels are instance-local, no serverId)
@@ -143,5 +172,21 @@ export function redisTopicName(envPrefix: string, parsed: NonNullable<ReturnType
   if (parsed.kind === 'dm') {
     return `lf:${envPrefix}:dm:${parsed.resourceId}`;
   }
+  if (parsed.kind === 'user') {
+    // Bot API v2 §4.3: ephemeral interaction answers for one user.
+    return userEventsChannel(envPrefix, parsed.resourceId);
+  }
   return `lf:${envPrefix}:${parsed.kind}:${parsed.serverId}:${parsed.resourceId}`;
 }
+
+/** Redis channel the web app publishes one user's private events on (§4.3). */
+export function userEventsChannel(envPrefix: string, userId: string): string {
+  return `lf:${envPrefix}:user-events:${userId}`;
+}
+
+/** Redis channel the web app publishes one bot's interactions and member events on (§4.3). */
+export function botEventsChannel(envPrefix: string, botId: string): string {
+  return `lf:${envPrefix}:bot-events:${botId}`;
+}
+
+export * from './bot-protocol.js';

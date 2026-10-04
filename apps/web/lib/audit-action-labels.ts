@@ -44,6 +44,8 @@ const ACTION_LABEL_KEYS: Record<string, string> = {
   'server.access_policy.update': 'admin.audit.action.server.access_policy.update',
   'server.banner.clear': 'admin.audit.action.server.banner.clear',
   'server.banner.update': 'admin.audit.action.server.banner.update',
+  'voice.block_enforced': 'admin.audit.action.voice.block_enforced',
+  'voice.disconnect': 'admin.audit.action.voice.disconnect',
   'voice.mute': 'admin.audit.action.voice.mute',
   'voice.track_rejected': 'admin.audit.action.voice.track_rejected',
   'voice.unmute': 'admin.audit.action.voice.unmute',

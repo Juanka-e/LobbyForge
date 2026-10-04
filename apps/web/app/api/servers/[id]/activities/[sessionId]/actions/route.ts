@@ -15,7 +15,8 @@ import { shouldAuditAction, type GamePluginActionPolicy } from '@lobbyforge/plug
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { getPluginServer } from '@/lib/plugin-server-registry';
-import { projectActivityState } from '@/lib/activity-projection';
+import { projectStateForViewer, sandboxLocaleFor } from '@/lib/plugin-projection';
+import { attachSandboxScope, isWorkerBackedPlugin } from '@/lib/plugin-worker-client';
 import { buildHttpPluginContext, callHandleAction } from '@/lib/plugin-context';
 import { withApiSecurity } from '@/lib/security-headers';
 import { authorizeSessionChannelVisibility } from '@/lib/permissions';
@@ -283,8 +284,11 @@ async function handlePost(
     // (playerId/hostId/...) are injected from the session above, so a
     // validator requiring them must see the server-set values, not the
     // raw client body (which legitimately omits them).
+    // Awaited: a marketplace plugin validates in the plugin worker (an RPC
+    // that returns a Promise); an official plugin's plain return value is
+    // unchanged by `await`. A worker failure throws → 500 (fail closed).
     if (plugin.validateAction) {
-      const validationError = plugin.validateAction(actionAuth.action);
+      const validationError = await plugin.validateAction(actionAuth.action);
       if (validationError) {
         return NextResponse.json({ error: validationError }, { status: 400 });
       }
@@ -360,6 +364,17 @@ async function handlePost(
       pluginId: row.pluginId,
       pendingPlayerId: joiningPlayer ? session.uid : undefined,
     });
+    // ADR-007: the sandbox ctx also carries the session, its host, the
+    // caller's language and ONE clock for the call and its CAS retries.
+    const sandboxed = isWorkerBackedPlugin(plugin);
+    if (sandboxed) {
+      attachSandboxScope(ctx2, {
+        sessionId,
+        hostUserId: row.createdBy ?? null,
+        locale: sandboxLocaleFor(req),
+        now: Date.now(),
+      });
+    }
     // State versioning: upgrade the persisted row to the plugin's
     // current shape before running the reducer. The reducer only
     // accepts the current shape, so without this step a session
@@ -426,7 +441,9 @@ async function handlePost(
     // SEC-001: NO state on the bus — subscribers load + project per
     // viewer. The summary carries only public counts (never secret
     // fields), so even a compromised fanout cannot leak cards/answers.
-    const deckSize = Array.isArray((committedState as { deck?: unknown }).deck)
+    // Official plugins only: a marketplace plugin's `deck` could be secret,
+    // and only its own projectState decides what viewers learn.
+    const deckSize = !sandboxed && Array.isArray((committedState as { deck?: unknown }).deck)
       ? ((committedState as { deck?: unknown[] }).deck as unknown[]).length
       : undefined;
     let rosterChanged = false;
@@ -470,7 +487,29 @@ async function handlePost(
     }
 
     // LF-001: EVERYONE gets the projection — including the host. Anti-cheat.
-    const viewerState = projectActivityState(committedState, row.pluginId, session.uid);
+    // ADR-007: a marketplace plugin projects in the plugin worker. If that
+    // fails, the action has still been applied: say so, never send the
+    // unprojected state.
+    let viewerState: unknown;
+    try {
+      viewerState = await projectStateForViewer({
+        plugin,
+        pluginId: row.pluginId,
+        state: committedState,
+        viewerUserId: session.uid,
+        ctx: {
+          sessionId,
+          serverId,
+          hostUserId: row.createdBy ?? null,
+        },
+      });
+    } catch (err) {
+      console.error('[activity-action] projection failed after commit:', JSON.stringify((err as Error).message));
+      return NextResponse.json(
+        { error: 'The action was applied, but your view of the activity could not be loaded. Reload to see it.', applied: true },
+        { status: 502, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
     return NextResponse.json(
       { activity: { id: row.id, state: viewerState, status: row.status } },
       { headers: { 'Cache-Control': 'no-store' } }

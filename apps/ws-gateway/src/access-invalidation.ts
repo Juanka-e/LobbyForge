@@ -17,11 +17,18 @@ import { parseTopic } from './protocol.js';
 export const ACCESS_INVALIDATION_CHANNEL = 'lf:access-invalidation';
 
 export interface AccessInvalidationEvent {
-  kind: 'user-server-access' | 'channel-policy' | 'server-policy' | 'dm-access';
+  /**
+   * `bot-access` (Bot API v2 §4.3): a bot's channel access, permissions or
+   * enabled state changed — the gateway recomputes that bot's feed. It
+   * never touches browser subscriptions.
+   */
+  kind: 'user-server-access' | 'channel-policy' | 'server-policy' | 'dm-access' | 'bot-access';
   serverId?: string;
   channelId?: string;
   userId?: string;
-  reason: string;
+  botId?: string;
+  /** Optional on `bot-access` events. */
+  reason?: string;
 }
 
 export type InvalidationHandler = (event: AccessInvalidationEvent) => void;
@@ -88,6 +95,9 @@ export function topicMatchesInvalidation(
 ): boolean {
   const parsed = parseTopic(topic);
   if (!parsed) return false;
+  // `user:{uid}` is authorised by the session uid alone — no server,
+  // channel or DM change can revoke it.
+  if (parsed.kind === 'user') return false;
 
   switch (event.kind) {
     case 'user-server-access':
@@ -111,6 +121,9 @@ export function topicMatchesInvalidation(
       return parsed.kind !== 'dm' && parsed.serverId === event.serverId;
     case 'dm-access':
       return parsed.kind === 'dm' && parsed.resourceId === event.channelId;
+    case 'bot-access':
+      // Bot feeds are recomputed by the bot gateway, not here.
+      return false;
     default:
       return false;
   }
