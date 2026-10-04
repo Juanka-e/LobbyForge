@@ -51,6 +51,7 @@ import {
   type Page,
   type PlaywrightWorkerArgs,
 } from '@playwright/test';
+import { createGuest, registerAccount, resetRateLimits, signIn } from './helpers/auth';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -114,7 +115,7 @@ async function newApi(playwright: Playwright): Promise<APIRequestContext> {
 /** A fresh guest: a materialized user with its own session cookie. */
 async function newGuest(playwright: Playwright, seed: string): Promise<Member> {
   const api = await newApi(playwright);
-  const res = await send(() => api.post('/api/auth/guest', { data: { displayNameSeed: `${seed} ${RUN.slice(-4)}` } }));
+  const res = await send(() => createGuest(api, { data: { displayNameSeed: `${seed} ${RUN.slice(-4)}` } }));
   expect(res.status(), `guest ${seed}`).toBe(200);
   const { guest } = (await res.json()) as { guest: { uid: string; name: string } };
   expect(guest.uid).toMatch(UUID_RE);
@@ -405,6 +406,8 @@ test.describe('security review 2026-10 — regressions on the real stack', () =>
   let inviteCode = '';
 
   test.beforeAll(async ({ playwright }) => {
+    // One client address for every context here: start from a fresh rate-limit window.
+    resetRateLimits();
     owner = await newApi(playwright);
     // Fresh stack → first-run setup; warm stack → owner login.
     const setup = await owner.post('/api/setup/complete', {
@@ -421,7 +424,7 @@ test.describe('security review 2026-10 — regressions on the real stack', () =>
     });
     if (setup.status() !== 200) {
       const login = await send(() =>
-        owner.post('/api/auth/login', { data: { email: OWNER_EMAIL, password: OWNER_PASSWORD } })
+        signIn(owner, { data: { email: OWNER_EMAIL, password: OWNER_PASSWORD } })
       );
       expect(login.status(), 'owner login on a warm stack').toBe(200);
     }
@@ -547,7 +550,7 @@ test.describe('security review 2026-10 — regressions on the real stack', () =>
     const user = await newApi(playwright);
     // With the owner's invite: registration works whatever the access policy.
     const register = await send(() =>
-      user.post('/api/auth/register', {
+      registerAccount(user, {
         data: { email, displayName: `Desk ${RUN.slice(-4)}`, password: firstPassword, inviteCode },
       })
     );

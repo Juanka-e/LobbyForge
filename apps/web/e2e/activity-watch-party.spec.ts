@@ -37,6 +37,7 @@ import {
   type Locator,
   type Page,
 } from '@playwright/test';
+import { createGuest, resetRateLimits, signIn } from './helpers/auth';
 
 const baseUrl = process.env.LF_E2E_BASE_URL ?? '';
 const setupToken = process.env.LF_E2E_SETUP_TOKEN ?? '';
@@ -133,6 +134,8 @@ test.describe('Watch Party with two people, through the lobby', () => {
   const frameRefusals: string[] = [];
 
   test.beforeAll(async ({ playwright }) => {
+    // One client address for every context here: start from a fresh rate-limit window.
+    resetRateLimits();
     // Own browser WITHOUT the config's --disable-web-security: that flag makes
     // Chromium drop the Origin header (the CSRF guard rejects every action) —
     // and it would hide exactly the CSP behaviour this spec checks.
@@ -161,7 +164,7 @@ test.describe('Watch Party with two people, through the lobby', () => {
       },
     });
     if (setup.status() !== 200) {
-      const login = await ownerCtx.request.post('/api/auth/login', {
+      const login = await signIn(ownerCtx.request, {
         headers: ORIGIN,
         data: { email: OWNER_EMAIL, password: OWNER_PASSWORD },
       });
@@ -187,7 +190,7 @@ test.describe('Watch Party with two people, through the lobby', () => {
     await endOpenActivities(ownerCtx.request, serverId, voiceChannelId);
 
     // Guest: a guest identity that redeems the owner's invite.
-    const guestAuth = await guestCtx.request.post('/api/auth/guest', {
+    const guestAuth = await createGuest(guestCtx.request, {
       headers: ORIGIN,
       data: { displayNameSeed: 'Watcher' },
     });

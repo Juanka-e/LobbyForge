@@ -35,6 +35,7 @@ import {
   type FrameLocator,
   type Page,
 } from '@playwright/test';
+import { createGuest, resetRateLimits, signIn } from './helpers/auth';
 
 const baseUrl = process.env.LF_E2E_BASE_URL ?? '';
 const setupToken = process.env.LF_E2E_SETUP_TOKEN ?? '';
@@ -112,11 +113,11 @@ test.describe('sandboxed marketplace plugin: Sandbox Buzzer', () => {
         },
       });
       if (setup.status() !== 200) {
-        const login = await ctx.request.post('/api/auth/login', { headers: ORIGIN, data: { email: OWNER_EMAIL, password: OWNER_PASSWORD } });
+        const login = await signIn(ctx.request, { headers: ORIGIN, data: { email: OWNER_EMAIL, password: OWNER_PASSWORD } });
         expect(login.status(), 'owner login on a warm stack').toBe(200);
       }
     } else {
-      expect((await ctx.request.post('/api/auth/guest', { headers: ORIGIN, data: { displayNameSeed: `${seed} ${RUN.slice(-4)}` } })).status()).toBe(200);
+      expect((await createGuest(ctx.request, { headers: ORIGIN, data: { displayNameSeed: `${seed} ${RUN.slice(-4)}` } })).status()).toBe(200);
       const invite = await owner.post(`/api/servers/${serverId}/invites`, { headers: ORIGIN, data: {} });
       expect(invite.status()).toBe(201);
       const { invite: inv } = (await invite.json()) as { invite: { code: string } };
@@ -146,6 +147,8 @@ test.describe('sandboxed marketplace plugin: Sandbox Buzzer', () => {
   }
 
   test.beforeAll(async ({ playwright }) => {
+    // One client address for every context here: start from a fresh rate-limit window.
+    resetRateLimits();
     test.setTimeout(120_000);
     // Fake media, and WITHOUT --disable-web-security (it drops the Origin
     // header, and the CSRF guard refuses every POST from the page).

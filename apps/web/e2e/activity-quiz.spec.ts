@@ -35,6 +35,7 @@ import {
   type Locator,
   type Page,
 } from '@playwright/test';
+import { createGuest, resetRateLimits, signIn } from './helpers/auth';
 // Server-only pack data — fine in a test, never in client code.
 import { findQuizPack } from '@lobbyforge/quiz/packs';
 
@@ -132,6 +133,8 @@ test.describe('Quiz with a host and two players, through the lobby', () => {
   let voiceChannelId = '';
 
   test.beforeAll(async ({ playwright }) => {
+    // One client address for every context here: start from a fresh rate-limit window.
+    resetRateLimits();
     // Own browser WITHOUT the config's --disable-web-security: that flag
     // makes Chromium drop the Origin header, which the app's CSRF guard
     // (rightly) rejects — and every answer is a POST from the page.
@@ -157,7 +160,7 @@ test.describe('Quiz with a host and two players, through the lobby', () => {
       },
     });
     if (setup.status() !== 200) {
-      const login = await ownerCtx.request.post('/api/auth/login', {
+      const login = await signIn(ownerCtx.request, {
         headers: ORIGIN,
         data: { email: OWNER_EMAIL, password: OWNER_PASSWORD },
       });
@@ -187,7 +190,7 @@ test.describe('Quiz with a host and two players, through the lobby', () => {
       [kayaCtx, 'QuizKaya'],
       [junoCtx, 'QuizJuno'],
     ] as const) {
-      expect((await ctx.request.post('/api/auth/guest', { headers: ORIGIN, data: { displayNameSeed: seed } })).status()).toBe(200);
+      expect((await createGuest(ctx.request, { headers: ORIGIN, data: { displayNameSeed: seed } })).status()).toBe(200);
       const inviteRes = await ownerCtx.request.post(`/api/servers/${serverId}/invites`, { headers: ORIGIN, data: {} });
       expect(inviteRes.status()).toBe(201);
       const { invite } = (await inviteRes.json()) as { invite: { code: string } };

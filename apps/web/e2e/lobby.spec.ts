@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { createGuest, refusalOf } from './helpers/auth';
 
 /**
  * Lobby smoke tests. Uses the guest auth flow (POST /api/auth/guest)
@@ -13,12 +14,15 @@ test.describe('Lobby experience', () => {
   test.beforeEach(async ({ page, context }) => {
     await context.grantPermissions(['microphone', 'camera']);
     // Mint a guest session via POST so the Set-Cookie header is stored.
-    const res = await page.request.post('/api/auth/guest', {
+    const res = await createGuest(page.request, {
       // The route's schema is strict: `displayNameSeed`, not `displayName`.
       data: { displayNameSeed: 'TestUser' },
     });
-    // If guest creation fails (e.g. registration closed), the lobby
-    // page will redirect to /login — tests will skip in that case.
+    // If guest creation is refused by the instance (e.g. guests closed),
+    // the lobby page will redirect to /login — tests will skip in that case.
+    // Bot protection or a rate limit is NOT such a case: fail, don't skip.
+    expect(await refusalOf(res), 'guest creation passes bot protection').toBeNull();
+    expect(res.status(), 'guest creation is not rate limited').not.toBe(429);
   });
 
   test('lobby renders with server rail and channels', async ({ page }) => {

@@ -12,6 +12,7 @@
  * stack's own LiveKit and gateway ports.
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { createGuest, resetRateLimits, signIn } from './helpers/auth';
 
 const baseUrl = process.env.LF_E2E_BASE_URL ?? '';
 const setupToken = process.env.LF_E2E_SETUP_TOKEN ?? '';
@@ -150,6 +151,8 @@ test.describe('voice through the real lobby UI', () => {
   let ownBrowser: Browser;
 
   test.beforeAll(async ({ playwright }) => {
+    // One client address for every context here: start from a fresh rate-limit window.
+    resetRateLimits();
     // Own browser WITHOUT the config's --disable-web-security: that flag makes
     // Chromium drop the Origin header, which the app's CSRF guard (rightly) rejects.
     ownBrowser = await playwright.chromium.launch({
@@ -173,7 +176,7 @@ test.describe('voice through the real lobby UI', () => {
       },
     });
     if (setup.status() !== 200) {
-      const login = await ownerCtx.request.post('/api/auth/login', {
+      const login = await signIn(ownerCtx.request, {
         headers: ORIGIN,
         data: { email: OWNER_EMAIL, password: OWNER_PASSWORD },
       });
@@ -189,7 +192,7 @@ test.describe('voice through the real lobby UI', () => {
     };
     voiceChannelId = channels.find((c) => c.type === 'voice')!.id;
 
-    expect((await guestCtx.request.post('/api/auth/guest', { headers: ORIGIN, data: {} })).status()).toBe(200);
+    expect((await createGuest(guestCtx.request, { headers: ORIGIN, data: {} })).status()).toBe(200);
     const inviteRes = await ownerCtx.request.post(`/api/servers/${serverId}/invites`, { headers: ORIGIN, data: {} });
     expect(inviteRes.status()).toBe(201);
     const { invite } = (await inviteRes.json()) as { invite: { code: string } };
@@ -345,7 +348,7 @@ test.describe('voice through the real lobby UI', () => {
           c?.audio ? Promise.reject(new DOMException('Permission denied', 'NotAllowedError')) : native(c);
       });
     }
-    expect((await ctx.request.post('/api/auth/guest', { headers: ORIGIN, data: {} })).status()).toBe(200);
+    expect((await createGuest(ctx.request, { headers: ORIGIN, data: {} })).status()).toBe(200);
     const { invite } = (await (
       await ownerCtx.request.post(`/api/servers/${serverId}/invites`, { headers: ORIGIN, data: {} })
     ).json()) as { invite: { code: string } };

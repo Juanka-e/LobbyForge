@@ -9,7 +9,9 @@ test('settings is a single full-screen modal that closes to the lobby', async ({
   await page.goto('/login');
   await page.getByLabel('Guest display name').fill('Settings Tester');
   await page.getByRole('button', { name: 'Continue as guest' }).click();
-  await expect(page).toHaveURL(/\/lobby$/);
+  // A new guest passes bot protection first (docs/CAPTCHA.md): the form waits
+  // for the check and the 2.5 s minimum fill time before it sends.
+  await expect(page).toHaveURL(/\/lobby$/, { timeout: 20_000 });
 
   await page.goto('/settings');
   await expect(page.getByRole('dialog', { name: 'User Settings' })).toHaveCount(1);

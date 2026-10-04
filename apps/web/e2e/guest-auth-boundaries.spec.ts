@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { createGuest } from './helpers/auth';
 
 /**
  * Tier 2 — Guest auth boundary / validation cases.
@@ -33,7 +34,7 @@ test.describe('Guest auth boundaries', () => {
   });
 
   test('GET /api/auth/guest returns the session after a guest is created', async ({ request }) => {
-    const created = await request.post('/api/auth/guest', { data: { displayNameSeed: 'E2E Alice' } });
+    const created = await createGuest(request, { data: { displayNameSeed: 'E2E Alice' } });
     expect(created.ok()).toBeTruthy();
     // The Playwright `request` context carries the Set-Cookie automatically.
     const me = await request.get('/api/auth/guest');
@@ -44,7 +45,7 @@ test.describe('Guest auth boundaries', () => {
   });
 
   test('a materialized guest cannot write presence to a non-member server', async ({ request }) => {
-    const created = await request.post('/api/auth/guest', { data: { displayNameSeed: 'Presence Probe' } });
+    const created = await createGuest(request, { data: { displayNameSeed: 'Presence Probe' } });
     expect(created.ok()).toBeTruthy();
     const res = await request.post('/api/presence', {
       data: {

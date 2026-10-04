@@ -16,6 +16,7 @@
  * runs the full chain on a fresh volume.
  */
 import { expect, test } from '@playwright/test';
+import { createGuest, signIn } from './helpers/auth';
 
 const baseUrl = process.env.LF_E2E_BASE_URL ?? '';
 const setupToken = process.env.LF_E2E_SETUP_TOKEN ?? '';
@@ -71,7 +72,7 @@ test.describe('compose stack — real Postgres/Redis', () => {
       ownerUid = body.setup.ownerUserId;
     } else {
       expect([409, 403, 503]).toContain(setup.status());
-      const login = await request.post('/api/auth/login', {
+      const login = await signIn(request, {
         headers: ORIGIN,
         data: { email: OWNER_EMAIL, password: OWNER_PASSWORD },
       });
@@ -248,7 +249,7 @@ test.describe('compose stack — real Postgres/Redis', () => {
 
   // Runs LAST (serial): guest issuance requires a bootstrapped instance.
   test('guest identities can be issued', async ({ request }) => {
-    const res = await request.post('/api/auth/guest', { headers: ORIGIN, data: {} });
+    const res = await createGuest(request, { headers: ORIGIN, data: {} });
     expect(res.status()).toBe(200);
     const body = (await res.json()) as { guest: { uid: string; gid: string } };
     expect(body.guest.uid).toBeTruthy();
