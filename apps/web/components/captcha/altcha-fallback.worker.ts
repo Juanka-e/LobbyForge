@@ -6,6 +6,9 @@ import { solveRange, type AltchaV2Challenge } from './altcha-fallback-solver';
 
 type Work = { challenge: AltchaV2Challenge; start: number; step: number; timeoutMs: number };
 
+// A dedicated worker: only the page that created it can post to it, so there
+// is no origin to check (MessageEvent.origin is empty here). It only does CPU
+// work on the challenge it is given and posts the result back to that page.
 self.onmessage = (event: MessageEvent<Work>) => {
   const { challenge, start, step, timeoutMs } = event.data;
   try {

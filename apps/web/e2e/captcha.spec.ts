@@ -665,10 +665,11 @@ test.describe('bot protection (CAPTCHA)', () => {
       // for 5 s: prime it with the old provider just before the save, then
       // time how soon its pages carry Turnstile (lib/captcha/csp.ts: past the
       // TTL, the first page refreshes, capped at 300 ms, before it goes out).
+      // Compare whole CSP source tokens, not a substring of the header.
       const otherCsp = async () =>
-        ((await owner.get(`${officialUrl}/landing`, { maxRedirects: 0 })).headers()['content-security-policy'] ?? '').includes(
-          'https://challenges.cloudflare.com'
-        );
+        ((await owner.get(`${officialUrl}/landing`, { maxRedirects: 0 })).headers()['content-security-policy'] ?? '')
+          .split(/[\s;]+/)
+          .includes('https://challenges.cloudflare.com');
       if (officialUrl) expect(await otherCsp(), 'the official process still on ALTCHA before the save').toBe(false);
       await card.getByRole('button', { name: 'Save bot protection' }).click();
       await expect(card.getByText('Bot protection saved.')).toBeVisible();
