@@ -19,6 +19,12 @@ const listPlayersForSession = vi.fn();
 const logAction = vi.fn().mockResolvedValue(undefined);
 const addPlayerToSession = vi.fn(async () => ({ id: 'player-row', sessionId: 'sess', userId: 'u' }));
 const publishActivityStateChange = vi.fn();
+// The session's write lock: the callback gets the row as it stands now.
+const withGameSessionWriteLock = vi.fn(
+  async (db: unknown, id: string, fn: (tx: unknown, row: unknown) => Promise<unknown>) =>
+    fn(db, await getGameSessionById(db, id))
+);
+class GameSessionBusyError extends Error {}
 
 // Mock the plugin-registry — the route uses `getPlugin` to look up the
 // plugin by id; the tests pin a single fake plugin that echoes the
@@ -55,6 +61,8 @@ vi.mock('@lobbyforge/db', () => ({
   getGameSessionById,
   setGameSessionState,
   setGameSessionStateCAS,
+  withGameSessionWriteLock,
+  GameSessionBusyError,
   endGameSession,
   listPlayersForSession,
   logAction,

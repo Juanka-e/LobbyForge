@@ -1,4 +1,5 @@
 {
+  "room.activity.conflict": "Too many players acted at the same moment. Try again.",
   "room.activity.end": "End",
   "room.activity.meta": "status: {status} · players: {count}",
   "room.activity.title": "Activity: {name}",

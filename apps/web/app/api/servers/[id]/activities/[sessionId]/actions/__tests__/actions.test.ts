@@ -18,9 +18,15 @@ const dbFns = {
   logAction: vi.fn(),
   setGameSessionStateCAS: vi.fn(),
   canMemberAccessChannel: vi.fn(),
+  withGameSessionWriteLock: vi.fn(),
 };
 
-vi.mock('@lobbyforge/db', () => dbFns);
+class GameSessionBusyError extends Error {}
+
+vi.mock('@lobbyforge/db', () => ({ ...dbFns, GameSessionBusyError }));
+
+/** The transaction handle the write-lock helper passes to its callback. */
+const TX = { __mockTx: true };
 
 vi.mock('@/lib/db', () => ({
   getDb: () => ({ __mockDbClient: true }),
@@ -137,6 +143,12 @@ beforeEach(() => {
     async (_db: unknown, _id: string, rev: number, state: Record<string, unknown>) =>
       ({ ok: true, row: { id: 'sess-1', state, status: 'active', revision: rev + 1 } })
   );
+  // The session's write lock: the callback gets the transaction and the row
+  // as it stands under the lock (here: what getGameSessionById serves).
+  dbFns.withGameSessionWriteLock.mockImplementation(
+    async (_db: unknown, id: string, fn: (tx: unknown, row: unknown) => Promise<unknown>) =>
+      fn(TX, await dbFns.getGameSessionById(TX, id))
+  );
   dbFns.logAction.mockResolvedValue(undefined);
 });
 
@@ -172,23 +184,43 @@ describe('POST activity actions — LF-002 idempotency', () => {
   });
 
   it('releases the claim when the dispatch fails so an honest retry works', async () => {
-    dbFns.setGameSessionStateCAS.mockResolvedValue({ ok: false, row: null });
     const body = { type: 'bust-forbidden', actionId: UUID, bustedBy: 'u-p3' };
 
-    // Session vanishes during CAS → 404, and the claim must be released.
-    dbFns.setGameSessionStateCAS.mockResolvedValueOnce({
-      ok: false,
-      row: { ...SESSION_ROW, revision: 4, state: {} },
-    });
-    dbFns.setGameSessionStateCAS.mockResolvedValue({ ok: false, row: null });
+    // Session vanishes before the write → 404, and the claim must be released.
+    dbFns.withGameSessionWriteLock.mockImplementationOnce(
+      async (_db: unknown, _id: string, fn: (tx: unknown, row: unknown) => Promise<unknown>) => fn(TX, null)
+    );
 
     const failed = await post(body);
     expect(failed.status).toBe(404);
+    expect(dbFns.setGameSessionStateCAS).not.toHaveBeenCalled();
     expect(releaseActionId).toHaveBeenCalledWith({
       sessionId: 'sess-1',
       actionId: UUID,
       token: 'claim-token',
     });
+  });
+
+  it('a session lock that is not granted in time is a retryable 409; the claim is released', async () => {
+    const { callHandleAction: cha } = (await import('@/lib/plugin-context')) as unknown as {
+      callHandleAction: { mock: { calls: unknown[][] } };
+    };
+    const reducerCallsBefore = cha.mock.calls.length;
+    dbFns.withGameSessionWriteLock.mockRejectedValueOnce(new GameSessionBusyError('busy'));
+    const res = await post({ type: 'bust-forbidden', actionId: UUID, bustedBy: 'u-p3' });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ retryable: true });
+    expect(cha.mock.calls).toHaveLength(reducerCallsBefore);
+    expect(releaseActionId).toHaveBeenCalled();
+  });
+
+  it('a write refused for a stale revision (a writer that skipped the lock) is a retryable 409', async () => {
+    dbFns.setGameSessionStateCAS.mockResolvedValueOnce({ ok: false, row: { ...SESSION_ROW, revision: 9 } });
+    const res = await post({ type: 'bust-forbidden', actionId: UUID, bustedBy: 'u-p3' });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ revision: 9, retryable: true });
+    expect(dbFns.setGameSessionStateCAS).toHaveBeenCalledTimes(1);
+    expect(releaseActionId).toHaveBeenCalled();
   });
 
   it('never forwards actionId to the plugin reducer', async () => {
@@ -285,6 +317,71 @@ describe('POST activity actions — beta-review ended-session guard', () => {
     expect(dbFns.setGameSessionStateCAS).toHaveBeenCalledTimes(1);
     expect(publishActivityStateChange.mock.calls).toHaveLength(0);
     expect(releaseActionId).toHaveBeenCalled();
+  });
+
+  it('an END that landed while the action waited for the lock wins: 409, no reducer run, no write', async () => {
+    const { callHandleAction: cha } = (await import('@/lib/plugin-context')) as unknown as {
+      callHandleAction: { mock: { calls: unknown[][] } };
+    };
+    const reducerCallsBefore = cha.mock.calls.length;
+    dbFns.withGameSessionWriteLock.mockImplementationOnce(
+      async (_db: unknown, _id: string, fn: (tx: unknown, row: unknown) => Promise<unknown>) =>
+        fn(TX, { ...SESSION_ROW, status: 'ended' })
+    );
+    const res = await post({ type: 'bust-forbidden', actionId: UUID, bustedBy: 'u-p3' });
+    expect(res.status).toBe(409);
+    expect(cha.mock.calls).toHaveLength(reducerCallsBefore);
+    expect(dbFns.setGameSessionStateCAS).not.toHaveBeenCalled();
+    expect(releaseActionId).toHaveBeenCalled();
+  });
+});
+
+// The final test pass: 8 players rolling dice at once — 3 or 4 got through
+// the old 3-attempt optimistic CAS, the rest saw "409 too many concurrent
+// actions". Under the session's write lock each action runs its reducer on
+// the row as it stands, so all of them apply, without a single retry.
+describe('POST activity actions — concurrent actions on one session', () => {
+  it('applies every one of 8 concurrent actions, each on the state the previous one wrote', async () => {
+    let stored = { ...SESSION_ROW, state: { phase: 'playing', count: 0 } as Record<string, unknown>, revision: 3 };
+    // A faithful lock: one callback at a time, each handed the CURRENT row.
+    let queue: Promise<unknown> = Promise.resolve();
+    dbFns.withGameSessionWriteLock.mockImplementation(
+      (_db: unknown, _id: string, fn: (tx: unknown, row: unknown) => Promise<unknown>) => {
+        const run = queue.then(() => fn(TX, structuredClone(stored)));
+        queue = run.catch(() => undefined);
+        return run;
+      }
+    );
+    dbFns.setGameSessionStateCAS.mockImplementation(
+      async (db: unknown, _id: string, rev: number, state: Record<string, unknown>) => {
+        expect(db).toBe(TX); // the write goes through the lock's transaction
+        await new Promise((resolve) => setTimeout(resolve, 1)); // let the other requests pile up
+        if (rev !== stored.revision) return { ok: false, row: structuredClone(stored) };
+        stored = { ...stored, state: structuredClone(state), revision: rev + 1 };
+        return { ok: true, row: structuredClone(stored) };
+      }
+    );
+    const { callHandleAction } = (await import('@/lib/plugin-context')) as unknown as {
+      callHandleAction: { mockImplementationOnce: (fn: (...a: unknown[]) => unknown) => void };
+    };
+    const seen: number[] = [];
+    for (let i = 0; i < 8; i++) {
+      callHandleAction.mockImplementationOnce(async (_p: unknown, _c: unknown, state: unknown) => {
+        const current = state as { count: number };
+        seen.push(current.count);
+        return { ...current, count: current.count + 1 };
+      });
+    }
+
+    const responses = await Promise.all(
+      Array.from({ length: 8 }, () => post({ type: 'bust-forbidden', bustedBy: 'u-p3' }))
+    );
+
+    expect(responses.map((r) => r.status)).toEqual(Array(8).fill(200));
+    expect(stored.state.count).toBe(8);
+    expect(stored.revision).toBe(11);
+    expect(seen).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(dbFns.setGameSessionStateCAS).toHaveBeenCalledTimes(8); // no retries, no conflicts
   });
 });
 

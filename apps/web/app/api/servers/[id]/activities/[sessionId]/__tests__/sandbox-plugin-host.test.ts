@@ -56,6 +56,12 @@ const dbFns = vi.hoisted(() => ({
     store.row = { ...store.row, state: structuredClone(state), revision: rev + 1 };
     return { ok: true, row: structuredClone(store.row) };
   }),
+  // The session's write lock hands its callback the row as it stands now.
+  withGameSessionWriteLock: vi.fn(
+    async (_db: unknown, _id: string, fn: (tx: unknown, row: unknown) => Promise<unknown>) =>
+      fn({ __mockTx: true }, structuredClone(store.row))
+  ),
+  GameSessionBusyError: class GameSessionBusyError extends Error {},
   users: { id: 'users.id', displayName: 'users.display_name' },
 }));
 vi.mock('@lobbyforge/db', () => dbFns);
