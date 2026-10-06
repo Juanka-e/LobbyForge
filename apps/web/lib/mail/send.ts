@@ -70,6 +70,7 @@ export function smtpConfigFrom(settings: ResolvedMailSettings): SmtpConfig | nul
     security: settings.security,
     username: settings.username,
     password: settings.password,
+    authStamp: settings.authStamp,
   };
 }
 

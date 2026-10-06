@@ -55,6 +55,8 @@ export interface SmtpConfig {
   security: SmtpSecurity;
   username: string | null;
   password: string | null;
+  /** `ResolvedMailSettings.authStamp` — what the cache key uses instead of the password. */
+  authStamp?: string | null;
 }
 
 export const SMTP_TIMEOUTS = Object.freeze({ connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 20_000 });
@@ -179,10 +181,15 @@ function poolHolder(): PoolHolder {
   return value;
 }
 
-/** A hash of everything that shapes the connection (the password hashed, never kept). */
+/**
+ * A hash of everything that shapes the connection. The password is
+ * represented by its non-secret `authStamp` (which changes whenever the
+ * password does), so no password is ever hashed here.
+ */
 export function transportKey(config: SmtpConfig, context: SmtpTargetContext): string {
+  const auth = config.authStamp ?? (config.username === null ? null : 'unstamped');
   return createHash('sha256')
-    .update(JSON.stringify([config.provider, config.host, config.port, config.security, config.username, config.password, context.production, context.official]))
+    .update(JSON.stringify([config.provider, config.host, config.port, config.security, config.username, auth, context.production, context.official]))
     .digest('hex');
 }
 

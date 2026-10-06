@@ -20,13 +20,13 @@ vi.mock('nodemailer', () => ({
 }));
 
 import { classifyMailError } from '../classify';
-import { closePooledTransport, createSmtpTransport, getPooledTransport, smtpTransportOptions, type SmtpConfig } from '../transport';
+import { closePooledTransport, createSmtpTransport, getPooledTransport, smtpTransportOptions, transportKey, type SmtpConfig } from '../transport';
 
 const DEV = { production: false, official: false };
 const PROD = { production: true, official: false };
 
 function config(overrides: Partial<SmtpConfig> = {}): SmtpConfig {
-  return { provider: 'custom', host: '127.0.0.1', port: 587, security: 'starttls', username: 'user', password: 'pass-word', ...overrides };
+  return { provider: 'custom', host: '127.0.0.1', port: 587, security: 'starttls', username: 'user', password: 'pass-word', authStamp: 'v1.sealed-1', ...overrides };
 }
 
 beforeEach(() => {
@@ -110,9 +110,17 @@ describe('createSmtpTransport', () => {
     expect(a.ok && b.ok && a.transport === b.transport).toBe(true);
     expect(h.createTransport).toHaveBeenCalledTimes(1);
     expect(h.createTransport.mock.calls[0]![0]).toMatchObject({ pool: true });
-    const c = await getPooledTransport(config({ password: 'changed' }), DEV);
+    // A new password arrives with a new authStamp (the sealed value changes);
+    // the key never hashes the password itself.
+    const c = await getPooledTransport(config({ password: 'changed', authStamp: 'v1.sealed-2' }), DEV);
     expect(c.ok && a.ok && c.transport !== a.transport).toBe(true);
     expect(h.createTransport).toHaveBeenCalledTimes(2);
+  });
+
+  it('the cache key never depends on the password, only on its stamp', () => {
+    const base = config({ authStamp: 'v1.sealed-1' });
+    expect(transportKey({ ...base, password: 'one' }, DEV)).toBe(transportKey({ ...base, password: 'two' }, DEV));
+    expect(transportKey(base, DEV)).not.toBe(transportKey({ ...base, authStamp: 'v1.sealed-2' }, DEV));
   });
 });
 

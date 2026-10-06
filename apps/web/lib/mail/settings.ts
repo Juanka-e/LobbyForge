@@ -85,6 +85,12 @@ export interface ResolvedMailSettings {
   username: string | null;
   /** Decrypted (or from the env). Server-only — never serialise this object to a client. */
   password: string | null;
+  /**
+   * A non-secret marker that changes whenever the password does: the sealed
+   * value as stored, 'env' for an environment password, or null. Test
+   * fingerprints and transport cache keys use it — never the password itself.
+   */
+  authStamp: string | null;
   passwordState: SmtpPasswordState;
   passwordHint: string | null;
   from: string | null;
@@ -247,6 +253,7 @@ function buildWithoutTestState(stored: InstanceMailSettings, env: MailEnvOverrid
     username: env.username ?? stored.smtpUsername,
     password,
     passwordState,
+    authStamp: env.password ? 'env' : stored.smtpPasswordEncrypted ?? null,
     passwordHint: secretHint(password),
     from,
     dailyLimit: stored.dailyLimit,
@@ -283,7 +290,8 @@ export interface MailTestConnection {
   port: number | null;
   security: SmtpSecurity | null;
   username: string | null;
-  password: string | null;
+  /** `ResolvedMailSettings.authStamp`: changes with the password, reveals nothing. */
+  authStamp: string | null;
   from: string | null;
 }
 
@@ -303,7 +311,7 @@ export function mailTestFingerprint(connection: MailTestConnection): string | nu
       connection.port,
       connection.security,
       connection.username,
-      connection.password,
+      connection.authStamp,
       connection.from,
     ]);
     return createHmac('sha256', key).update(material).digest('hex');
@@ -312,14 +320,14 @@ export function mailTestFingerprint(connection: MailTestConnection): string | nu
   }
 }
 
-export function connectionOf(settings: Pick<ResolvedMailSettings, 'provider' | 'host' | 'port' | 'security' | 'username' | 'password' | 'from'>): MailTestConnection {
+export function connectionOf(settings: Pick<ResolvedMailSettings, 'provider' | 'host' | 'port' | 'security' | 'username' | 'authStamp' | 'from'>): MailTestConnection {
   return {
     provider: settings.provider,
     host: settings.host,
     port: settings.port,
     security: settings.security,
     username: settings.username,
-    password: settings.password,
+    authStamp: settings.authStamp,
     from: settings.from,
   };
 }
