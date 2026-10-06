@@ -38,7 +38,7 @@ import { solveChallenge, type Challenge } from 'altcha-lib';
 import { deriveKey } from 'altcha-lib/algorithms/pbkdf2';
 
 export type FormCaptchaSurface = 'register' | 'invite_register' | 'guest';
-export type CaptchaSurface = FormCaptchaSurface | 'login';
+export type CaptchaSurface = FormCaptchaSurface | 'login' | 'password_reset';
 export type CaptchaProvider = 'none' | 'altcha' | 'turnstile' | 'recaptcha';
 
 export interface CaptchaFields {
@@ -299,6 +299,23 @@ export async function signIn(api: APIRequestContext, { data = {}, headers }: Aut
       fields = await captchaFields(api, 'login', { headers, force: true });
       continue;
     }
+    return res;
+  }
+  return res!;
+}
+
+/**
+ * `POST /api/auth/password/forgot` through the `password_reset` challenge
+ * (docs/EMAIL.md §4.3). Always 202 `{ sent: true }` when accepted, for a
+ * known address or not; 503 `mail_unavailable` when the instance has no mail.
+ */
+export async function requestPasswordReset(api: APIRequestContext, email: string, { headers }: { headers?: Headers } = {}): Promise<APIResponse> {
+  let res: APIResponse | null = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const fields = await captchaFields(api, 'password_reset', { headers });
+    res = await api.post('/api/auth/password/forgot', { headers, data: { email, ...fields } });
+    const refusal = await refusalOf(res);
+    if (refusal === 'captcha_required' || refusal === 'captcha_unavailable') continue;
     return res;
   }
   return res!;

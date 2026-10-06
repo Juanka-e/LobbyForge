@@ -1,0 +1,28 @@
+# E2E-only: a mail catcher on the parallel e2e stack (docs/EMAIL.md §8).
+#
+# The dev compose's `mailpit` service pins `container_name: lobbyforge-mailpit`,
+# publishes 19525/19526 and sits in the `full` profile. This overlay gives the
+# e2e project its own container and host ports and takes it out of the
+# profile, so it starts with the rest of the e2e stack. Inside the compose
+# network the web app reaches it as `mailpit:1025` — the one host a
+# production-mode instance accepts on port 1025 without TLS (lib/mail/host-rules.ts).
+# Configure it in Admin → Settings → Email (Custom SMTP: host `mailpit`,
+# port 1025, encryption "None"); the e2e specs read the inbox through
+# Mailpit's HTTP API on http://localhost:19626 (LF_E2E_MAILPIT_URL).
+#
+#   docker compose -p lobbyforge-e2e \
+#     -f infra/docker/docker-compose.dev.yml \
+#     -f infra/docker/docker-compose.e2e-ports.yml \
+#     -f infra/docker/docker-compose.e2e-plugins.yml \
+#     -f infra/docker/docker-compose.e2e-mail.yml \
+#     up -d --no-build --wait
+#
+# Pinned: the dev file follows `latest`, the e2e run should not change under it.
+services:
+  mailpit:
+    image: axllent/mailpit:v1.27
+    container_name: lobbyforge-e2e-mailpit
+    profiles: !reset []
+    ports: !override
+      - "19625:1025"  # SMTP
+      - "19626:8025"  # Web UI and HTTP API
