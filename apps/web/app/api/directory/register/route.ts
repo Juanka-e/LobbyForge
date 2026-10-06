@@ -16,6 +16,7 @@ import {
   fetchVerificationDocument,
 } from '@/lib/directory-verification';
 import { withApiSecurity } from '@/lib/security-headers';
+import { requireVerifiedEmail } from '@/lib/mail/verification';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -144,6 +145,9 @@ async function handlePost(req: Request): Promise<NextResponse> {
 
   const sessionResult = requireMaterializedSession(req);
   if (!sessionResult.ok) return sessionResult.response;
+  // docs/EMAIL.md §4.2: an unverified account in `required` mode may read, not do this.
+  const unverified = await requireVerifiedEmail(sessionResult.session.uid, 'directory_listing');
+  if (unverified) return unverified;
 
   let body: z.infer<typeof RegisterSchema>;
   try {

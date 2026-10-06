@@ -7,6 +7,7 @@ import { auditBotAction, jsonErrors, requireBotManager, toBotJson } from '@/lib/
 import { CUSTOM_BOT_TYPE, findUngrantableBotPermissions, isBotPermission } from '@/lib/bots/permissions';
 import { generateBotToken } from '@/lib/bots/token';
 import { notifyBotChanged } from '@/lib/bots/events';
+import { requireVerifiedEmail } from '@/lib/mail/verification';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -36,6 +37,9 @@ async function handlePost(req: Request, ctx: RouteContext): Promise<NextResponse
   const { id: serverId, botId } = await ctx.params;
   const auth = await requireBotManager(req, serverId);
   if (!auth.ok) return auth.response;
+  // docs/EMAIL.md §4.2: an unverified account in `required` mode may read, not do this.
+  const unverified = await requireVerifiedEmail(auth.manager.uid, 'bot_token');
+  if (unverified) return unverified;
 
   const { bot, builtIn } = await loadCustomBot(serverId, botId);
   if (!bot) return NOT_FOUND();

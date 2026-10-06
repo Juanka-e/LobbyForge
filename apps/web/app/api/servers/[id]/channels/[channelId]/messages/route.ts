@@ -22,6 +22,7 @@ import { publishChatMessage } from '@/lib/chat-bus';
 import { moderateMessage, moderationBlockedBody } from '@/lib/bots/moderation';
 import { readMessageBot } from '@/lib/bots/message-meta';
 import { emitMessageEvent } from '@/lib/bots/events';
+import { requireVerifiedEmail } from '@/lib/mail/verification';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -186,6 +187,9 @@ async function handlePost(
 
   const session = await resolveSession(req);
   if (!session.ok) return session.response;
+  // docs/EMAIL.md §4.2: an unverified account in `required` mode may read, not do this.
+  const unverified = await requireVerifiedEmail(session.uid, 'message');
+  if (unverified) return unverified;
 
   try {
     // LF-SEC-002: canonical policy for sends — membership + channel

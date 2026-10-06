@@ -6,6 +6,7 @@ import { requireMaterializedSession } from '@/lib/api-auth';
 import { withApiSecurity } from '@/lib/security-headers';
 import { AVATAR_LIMITS, checkImageDataUrl } from '@/lib/image-validation';
 import { checkUserImageQuota, quotaExceededResponse } from '@/lib/upload-quota';
+import { requireVerifiedEmail } from '@/lib/mail/verification';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -24,6 +25,9 @@ const DataUrlSchema = z.object({
 async function handlePost(req: Request): Promise<NextResponse> {
   const session = requireMaterializedSession(req);
   if (!session.ok) return session.response;
+  // docs/EMAIL.md §4.2: an unverified account in `required` mode may read, not do this.
+  const unverified = await requireVerifiedEmail(session.session.uid, 'upload');
+  if (unverified) return unverified;
 
   let body: z.infer<typeof DataUrlSchema>;
   try {

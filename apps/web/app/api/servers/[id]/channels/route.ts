@@ -16,6 +16,7 @@ import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
 import { CorePermission, authorizeServerPermission, hasPermission } from '@/lib/permissions';
+import { requireVerifiedEmail } from '@/lib/mail/verification';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -134,6 +135,9 @@ async function handlePost(req: Request, ctx: { params: Promise<{ id: string }> }
 
   const session = await resolveSession(req);
   if (!session.ok) return session.response;
+  // docs/EMAIL.md §4.2: an unverified account in `required` mode may read, not do this.
+  const unverified = await requireVerifiedEmail(session.uid, 'channel_create');
+  if (unverified) return unverified;
 
   try {
     const access = await assertServerAndMembership(serverId, session.uid);

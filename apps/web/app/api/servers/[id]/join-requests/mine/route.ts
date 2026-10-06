@@ -13,6 +13,7 @@ import { requireMaterializedSession } from '@/lib/api-auth';
 import { isUuid } from '@/lib/join-requests';
 import { resolveAutoJoinServerId } from '@/lib/lobby-auto-join';
 import { withApiSecurity } from '@/lib/security-headers';
+import { requireVerifiedEmail } from '@/lib/mail/verification';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -95,6 +96,12 @@ async function handlePost(req: Request, ctx: { params: Promise<{ id: string }> }
   const body = await readNote(req);
   if (!body.ok) {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  }
+  // docs/EMAIL.md §4.2: the note is free text sent to the moderators — an
+  // unverified account in `required` mode may ask to join, not write one.
+  if (body.note?.trim()) {
+    const unverified = await requireVerifiedEmail(uid, 'join_request');
+    if (unverified) return unverified;
   }
   try {
     const db = getDb();

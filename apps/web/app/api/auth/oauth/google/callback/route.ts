@@ -6,6 +6,7 @@ import { exchangeGoogleCode, isGoogleOAuthConfigured } from '@/lib/oauth-google'
 import {
   getIdentityLinkByProviderSubject,
   createUserIdentityLink,
+  markUserEmailVerifiedForAddress,
   touchUserIdentityLink,
 } from '@lobbyforge/db';
 import { findOrCreateGuestUser } from '@lobbyforge/db';
@@ -122,6 +123,7 @@ async function handleGet(req: Request): Promise<NextResponse> {
       const user = await findOrCreateGuestUser(db, {
         guestKey: `google:${googleUser.sub}`,
         displayName,
+        signupChannel: 'oauth',
       });
       if (!user) throw new Error('Failed to create user from Google OAuth');
       userId = user.id;
@@ -134,6 +136,16 @@ async function handleGet(req: Request): Promise<NextResponse> {
         providerEmail: googleUser.email,
         emailVerified: googleUser.emailVerified,
         claims: { name: googleUser.name, picture: googleUser.picture },
+      });
+    }
+
+    // docs/EMAIL.md §4.1: Google says the address is verified → so is the
+    // account, but only when that IS the account's address (keeps an
+    // earlier timestamp; a Google sign-up has no address, so it is never
+    // marked). Best effort: it must not fail the sign-in.
+    if (googleUser.emailVerified && googleUser.email) {
+      await markUserEmailVerifiedForAddress(db, userId, googleUser.email).catch((verifyErr: unknown) => {
+        console.error('[oauth/google/callback] could not mark the email verified:', (verifyErr as Error).message);
       });
     }
 

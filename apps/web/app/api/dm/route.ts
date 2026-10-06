@@ -5,6 +5,7 @@ import { requireMaterializedSession } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
 import { withApiSecurity } from '@/lib/security-headers';
 import { projectDmChannel } from '@/lib/profile-privacy';
+import { requireVerifiedEmail } from '@/lib/mail/verification';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -50,6 +51,9 @@ async function handlePost(req: Request): Promise<NextResponse> {
   const sessionResult = requireMaterializedSession(req);
   if (!sessionResult.ok) return sessionResult.response;
   const { uid } = sessionResult.session;
+  // docs/EMAIL.md §4.2: an unverified account in `required` mode may read, not do this.
+  const unverified = await requireVerifiedEmail(uid, 'dm');
+  if (unverified) return unverified;
 
   let body: z.infer<typeof CreateDmSchema>;
   try {

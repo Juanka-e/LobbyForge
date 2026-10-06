@@ -171,6 +171,9 @@ export async function collectDoctorReport(): Promise<{ report: DoctorReport; sta
     // Bot protection (docs/CAPTCHA.md §8): keys, secret, siteverify, test
     // keys in production, and ALTCHA's replay store (Redis).
     ...(await collectCaptchaDoctorChecks(stats.redisReachable)),
+    // Email (docs/EMAIL.md §6): transport, password, last test, send
+    // failures, the daily limit, and the port 25 / SPF+DMARC / Gmail hints.
+    ...(await collectMailDoctorChecks()),
   ];
   const report = buildDoctorReport(checks, stats);
   return { report, stats };
@@ -191,6 +194,16 @@ async function collectCaptchaDoctorChecks(redisReachable: boolean | null): Promi
     return await collectCaptchaChecks({ redisReachable });
   } catch (err) {
     console.error('[doctor] bot protection checks unavailable:', (err as Error).message);
+    return [];
+  }
+}
+
+async function collectMailDoctorChecks(): Promise<DoctorCheck[]> {
+  try {
+    const { collectMailChecks } = await import('@/lib/mail/doctor');
+    return await collectMailChecks();
+  } catch (err) {
+    console.error('[doctor] email checks unavailable:', (err as Error).message);
     return [];
   }
 }

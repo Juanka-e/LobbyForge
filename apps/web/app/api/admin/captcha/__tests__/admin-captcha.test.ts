@@ -127,7 +127,8 @@ describe('GET /api/admin/captcha', { timeout: 20_000 }, () => {
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect(await response.json()).toEqual({
       provider: 'altcha',
-      surfaces: { register: 'on', invite_register: 'off', guest: 'on', login: 'adaptive' },
+      // password_reset (docs/EMAIL.md §4.3) defaults to on, also for rows saved before it existed.
+      surfaces: { register: 'on', invite_register: 'off', guest: 'on', login: 'adaptive', password_reset: 'on' },
       siteKey: null,
       secretSet: false,
       secretHint: null,
@@ -164,6 +165,18 @@ describe('GET /api/admin/captcha', { timeout: 20_000 }, () => {
 });
 
 describe('PUT /api/admin/captcha', { timeout: 20_000 }, () => {
+  it('saves the password_reset surface; a client that predates it keeps the stored value', async () => {
+    const off = await put({ ...validBody, surfaces: { ...validBody.surfaces, password_reset: 'off' } });
+    expect(off.status).toBe(200);
+    expect((await off.json()).surfaces.password_reset).toBe('off');
+    expect((h.stored.current.surfaces as Record<string, string>).password_reset).toBe('off');
+    // The old four-key body: password_reset stays off.
+    const legacy = await put(validBody);
+    expect(legacy.status).toBe(200);
+    expect((await legacy.json()).surfaces.password_reset).toBe('off');
+    expect((await put({ ...validBody, surfaces: { ...validBody.surfaces, password_reset: 'maybe' } })).status).toBe(400);
+  });
+
   it('saves, answers the GET shape, and audits the changed field NAMES only', async () => {
     const response = await put({
       ...validBody,

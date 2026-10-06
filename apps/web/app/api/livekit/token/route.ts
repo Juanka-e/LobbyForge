@@ -32,6 +32,7 @@ import { VOICE_BLOCKED_CODE } from '@/lib/voice-block-notice';
 import { buildAllowedPublishSources, canPublishAnySource } from '@/lib/voice-moderation';
 import { publishBlockedReason } from '@/lib/voice-publish-state';
 import { getRuntimeLiveKitUrl } from '@/lib/public-endpoints';
+import { requireVerifiedEmail } from '@/lib/mail/verification';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -60,6 +61,9 @@ async function handler(req: Request): Promise<NextResponse> {
   const sessionResult = requireMaterializedSession(req);
   if (!sessionResult.ok) return sessionResult.response;
   const { session } = sessionResult;
+  // docs/EMAIL.md §4.2: an unverified account in `required` mode may read, not do this.
+  const unverified = await requireVerifiedEmail(session.uid, 'voice');
+  if (unverified) return unverified;
 
   let body: z.infer<typeof TokenRequestSchema>;
   try {

@@ -6,6 +6,7 @@ import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
 import { isOfficialDeployment } from '@/lib/deployment-mode';
+import { requireVerifiedEmail } from '@/lib/mail/verification';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -71,6 +72,10 @@ async function handlePost(req: Request): Promise<NextResponse> {
       { status: 503 }
     );
   }
+
+  // docs/EMAIL.md §4.2: an unverified account in `required` mode may read, not do this.
+  const unverified = await requireVerifiedEmail(session.uid, 'server_create');
+  if (unverified) return unverified;
 
   let body: z.infer<typeof CreateServerSchema>;
   try {

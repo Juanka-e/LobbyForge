@@ -171,6 +171,9 @@ importers:
       next:
         specifier: ^16.3.6
         version: 16.3.8(@babel/core@7.29.7)(@playwright/test@1.60.0)(@types/node@22.19.20)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      nodemailer:
+        specifier: 10.0.11
+        version: 10.0.11
       postgres:
         specifier: ^3.4.9
         version: 3.4.9
@@ -2799,6 +2802,10 @@ packages:
   node-releases@2.0.54:
     resolution: {integrity: sha512-YHs7BmmcsdAI5Ozuf8JZo6PT0mv2GIWC9vMfvUC3dp65M8hn7Ux8CPL+2oBI7juNuj9d0ndhTcznq2ODBps9cQ==}
     engines: {node: '>=18'}
+
+  nodemailer@10.0.11:
+    resolution: {integrity: sha512-/c4P7U7aGpiNu2Rl08q525q2zECkUpSaf2zQPgIStCcAjHAkkQQKwD4sTyi3l91mGcLQrKzL1syXPHymo+Ogtw==}
+    engines: {node: '>=20.0.0'}
 
   normalize-path@3.0.0:
     resolution: {integrity: sha512-6eZs5Ls3WtCisHWp9S2GUy8dqkpGi4BVSz3GaqiE6ezub0512ESztXUwUB6C6IKbQkY2Pnb/mD4WYojCRwcwLA==}
@@ -5672,6 +5679,8 @@ snapshots:
       semver: 6.3.1
 
   node-releases@2.0.54: {}
+
+  nodemailer@10.0.11: {}
 
   normalize-path@3.0.0: {}
 

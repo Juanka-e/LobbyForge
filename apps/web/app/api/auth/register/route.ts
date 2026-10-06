@@ -17,6 +17,10 @@ import { buildGuestSessionCookie, createGuestIdentity } from '@/lib/guest-sessio
 import { getSessionSecret } from '@/lib/api-auth';
 import { normalizeInviteCode } from '@/lib/invite-code';
 import { createOfficialAccount } from '@/lib/official-account';
+import { isDisposableEmail } from '@/lib/mail/disposable';
+import { resolveMailSettings } from '@/lib/mail/settings';
+import { preferredMailLocale } from '@/lib/mail/templates';
+import { maybeStartSignupVerification } from '@/lib/mail/verification';
 import { hashPassword } from '@/lib/password';
 import { withApiSecurity } from '@/lib/security-headers';
 import { recordSession } from '@/lib/session-tracker';
@@ -43,6 +47,12 @@ async function handlePost(req: Request): Promise<NextResponse> {
       { error: parsed.error.issues[0]?.message ?? 'Invalid registration payload.' },
       { status: 400 }
     );
+  }
+
+  // Disposable addresses (docs/EMAIL.md §4.5), when the admin blocks them —
+  // before the challenge, so a refused address does not spend a solved one.
+  if (await disposableRefused(parsed.data.email)) {
+    return NextResponse.json({ error: 'disposable_email' }, { status: 400 });
   }
 
   // Bot protection, before any account work or password hashing (§4.4).
@@ -115,6 +125,9 @@ async function handlePost(req: Request): Promise<NextResponse> {
     displayName: parsed.data.displayName,
     passwordHash,
     ...(inviteCode ? { inviteCode } : { serverId: setup.firstServerId! }),
+    // docs/EMAIL.md §4.2: verification restricts an account only when its
+    // sign-up channel is in scope (an invite is already a gate).
+    signupChannel: inviteCode ? 'invite' : 'open',
   });
   if (!result.ok) {
     if (result.error === 'email_exists') {
@@ -132,7 +145,15 @@ async function handlePost(req: Request): Promise<NextResponse> {
   // Bots milestone: registering joins a server — the Welcome Bot greets
   // the new member (never throws, so it cannot fail the registration).
   await notifyMemberJoined({ serverId: result.serverId, userId: result.user.id });
-  return signedInResponse(req, result.user, { user: result.user, serverId: result.serverId });
+  const verificationEmailSent = await maybeStartSignupVerification(
+    { id: result.user.id, email: result.user.email, locale: preferredMailLocale(req, null) },
+    { invite: inviteCode !== null }
+  );
+  return signedInResponse(req, result.user, {
+    user: result.user,
+    serverId: result.serverId,
+    ...(verificationEmailSent ? { verificationEmailSent } : {}),
+  });
 }
 
 /**
@@ -151,11 +172,33 @@ async function registerOfficialAccount(req: Request, data: RegisterInput): Promi
     email: data.email,
     displayName: data.displayName,
     passwordHash,
+    // The hub has no invite sign-up: every hub account is an open one.
+    signupChannel: 'open',
   });
   if (!result.ok) {
     return NextResponse.json({ error: 'An account with this email already exists.' }, { status: 409 });
   }
-  return signedInResponse(req, result.user, { user: result.user });
+  // Every hub sign-up is an open sign-up (scope `open_register`).
+  const verificationEmailSent = await maybeStartSignupVerification(
+    { id: result.user.id, email: result.user.email, locale: preferredMailLocale(req, null) },
+    { invite: false }
+  );
+  return signedInResponse(req, result.user, { user: result.user, ...(verificationEmailSent ? { verificationEmailSent } : {}) });
+}
+
+/**
+ * Is this address on a disposable domain the instance refuses
+ * (`disposable_email_block`)? Never throws: unreadable settings refuse
+ * nothing (the default is off).
+ */
+async function disposableRefused(email: string): Promise<boolean> {
+  try {
+    const settings = await resolveMailSettings();
+    if (!settings.disposable.block) return false;
+    return isDisposableEmail(email, { allow: settings.disposable.allow, block: settings.disposable.blockExtra });
+  } catch {
+    return false;
+  }
 }
 
 async function signedInResponse(

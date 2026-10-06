@@ -16,6 +16,7 @@ const dbFns = {
   getIdentityLinkByProviderSubject: vi.fn(),
   createUserIdentityLink: vi.fn(),
   touchUserIdentityLink: vi.fn(),
+  markUserEmailVerifiedForAddress: vi.fn(),
   listUserIdentityLinks: vi.fn(),
   findOrCreateGuestUser: vi.fn(),
   getEffectiveInstanceAccessSettings: vi.fn(),
@@ -69,6 +70,7 @@ beforeEach(() => {
   dbFns.findOrCreateGuestUser.mockResolvedValue({ id: NEW_USER_ID, displayName: 'Someone' });
   dbFns.createUserIdentityLink.mockResolvedValue({ id: 'link-1', userId: NEW_USER_ID });
   dbFns.touchUserIdentityLink.mockResolvedValue(undefined);
+  dbFns.markUserEmailVerifiedForAddress.mockResolvedValue(true);
   dbFns.getEffectiveInstanceAccessSettings.mockResolvedValue(settings());
 });
 
@@ -121,6 +123,30 @@ describe('OAuth callback — beta-review: new accounts honour the instance acces
     const res = await callback();
     expect(res.headers.get('location')).toBe('https://community.example/lobby');
     expect(dbFns.findOrCreateGuestUser).toHaveBeenCalled();
+  });
+});
+
+describe('OAuth callback — email verification (docs/EMAIL.md §4.1)', () => {
+  it('asks to mark the account verified for the Google address (new and linked accounts); the query checks it is the account address', async () => {
+    await callback();
+    expect(dbFns.markUserEmailVerifiedForAddress).toHaveBeenCalledWith({ __mockDb: true }, NEW_USER_ID, 'someone@example.com');
+    expect(dbFns.findOrCreateGuestUser).toHaveBeenCalledWith({ __mockDb: true }, expect.objectContaining({ signupChannel: 'oauth' }));
+    dbFns.markUserEmailVerifiedForAddress.mockClear();
+    dbFns.getIdentityLinkByProviderSubject.mockResolvedValue({ id: 'link-9', userId: LINKED_USER_ID });
+    await callback();
+    expect(dbFns.markUserEmailVerifiedForAddress).toHaveBeenCalledWith({ __mockDb: true }, LINKED_USER_ID, 'someone@example.com');
+  });
+
+  it('does not when Google does not, and a failure never blocks the sign-in', async () => {
+    exchangeGoogleCode.mockResolvedValue({ sub: 'google-sub-1', email: 'someone@example.com', emailVerified: false, name: 'Someone', picture: null });
+    await callback();
+    expect(dbFns.markUserEmailVerifiedForAddress).not.toHaveBeenCalled();
+
+    exchangeGoogleCode.mockResolvedValue({ sub: 'google-sub-1', email: 'someone@example.com', emailVerified: true, name: 'Someone', picture: null });
+    dbFns.markUserEmailVerifiedForAddress.mockRejectedValue(new Error('db down'));
+    const res = await callback();
+    expect(res.headers.get('location')).toBe('https://community.example/lobby');
+    expect(res.headers.get('set-cookie')).toContain('lf_guest=');
   });
 });
 

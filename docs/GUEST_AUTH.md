@@ -31,7 +31,7 @@ account (`apps/web/lib/auth-throttle.ts`):
 |---|---|---|
 | sign-in, keyed by the normalised email | `POST /api/auth/login` and `POST /api/auth/desktop-session` (start) | 10 failures / 15 min |
 | sign-in from a known device, keyed by the email and the device cookie's nonce (only while its entry matches the account's current password) | the same two routes | 10 failures / 15 min per device |
-| password change, keyed by user id | `POST /api/auth/password` (current-password check) | 5 failures / 15 min |
+| password change, keyed by user id | `POST /api/auth/password` and `POST /api/auth/email/change` (current-password check) | 5 failures / 15 min |
 
 - Every attempt is counted before the password is checked, atomically, and
   a correct password clears the counter. Once the limit is reached, every
@@ -165,6 +165,7 @@ auth routes.
 | `POST /api/auth/register` | `register` (no invite; the official hub always), `invite_register` (with an invite) | `register`: its switch is `on` (default). With an invite on an **open** instance: `register` **or** `invite_register` is on — an invite never lowers protection, since `@everyone` can create unlimited invites. On an **invite-only** instance `invite_register` alone decides (default off). |
 | `POST /api/auth/guest` | `guest` | the request would create a **new** guest identity (no valid guest cookie) and the surface is `on` (default). A refresh or re-bind never is. |
 | `POST /api/auth/login`, `POST /api/auth/desktop-session` | `login` | `adaptive` (default): the account has at least `loginFailureThreshold` (3) attempts on the sign-in counter above, the client address has that many failed sign-ins in 15 min, or attack mode is on. `always`: every time. Never from a trusted device: a valid `lf_device` entry for the account that still matches its current password and whose own bucket has not tripped. |
+| `POST /api/auth/password/forgot` | `password_reset` | its switch is `on` (default). See "Email verification and password reset" below. |
 
 - The default provider is the built-in **ALTCHA** proof of work: no third
   party, no cookie, no keys. Cloudflare Turnstile and Google reCAPTCHA are
@@ -191,6 +192,53 @@ auth routes.
 - A form token is single use.
 - Never asked on voice, chat, webhooks, the Bot API, LiveKit or the
   gateway.
+
+### Email verification and password reset
+
+The full contract is [EMAIL.md](./EMAIL.md); this is how it changes
+sign-up and sign-in. Nothing changes until an admin configures mail
+(Admin → Settings → Email, or `LOBBYFORGE_SMTP_*`): verification starts
+`off`, and the forgot-password page says "ask your administrator".
+
+- **Sign-up** (`POST /api/auth/register`, local and official hub) still
+  creates the account and signs it in at once, as before; it never waits
+  for mail. In `optional` and `required` modes, a sign-up in scope
+  (`open_register` by default, `invite_register` when the admin turns it
+  on; every hub sign-up is an open one) gets a verification email — a
+  6-digit code and a `/verify-email` link — sent in the background, and the
+  201 answer carries `verificationEmailSent: true`.
+- When the admin blocks disposable addresses, sign-up (and email change)
+  refuses them with 400 `{ "error": "disposable_email" }`, before the
+  challenge.
+- **Unverified accounts.** In `required` mode an account created after the
+  mode was switched on (or any account, once the optional deadline for
+  existing accounts has passed) may sign in, read, edit its settings and
+  profile, change its address and delete itself, but gets 403
+  `{ "error": "email_unverified" }` for messages, DMs, a voice token,
+  creating servers, channels or invites, avatar and banner image uploads
+  (removing a banner and text profile edits stay allowed), bots, bot tokens
+  and webhooks, a note on a join request, and on the hub for publishing
+  plugins or listing a community. Only accounts whose sign-up is in the
+  verification scope are restricted: by default open sign-ups, not invite
+  sign-ups (an invite is already a gate); accounts from before 0046 follow
+  the dates above. The owner and guests are never restricted. `optional`
+  only shows a banner.
+- **Google sign-in** marks the account verified when Google says the
+  address is verified and it is the account's address (migration 0046
+  backfilled existing links on the same rule).
+- **Password reset** (`POST /api/auth/password/forgot`, then
+  `POST /api/auth/password/reset` with the link token or the email + code):
+  the forgot answer is the same 202 for known and unknown addresses; a
+  successful reset sets the password, marks the address verified, revokes
+  every session (none is kept — the reset came from a signed-out browser),
+  drops any pending email change or other reset challenge (as a password
+  change in the settings does),
+  voids every device cookie (they are bound to the password hash), drops
+  pending desktop handoff codes and clears the sign-in lock for the
+  address. It never signs anyone in.
+- **Email change** (`POST /api/auth/email/change`) asks for the current
+  password and shares the password change's per-account counter (5 / 15
+  min). Confirming it revokes the account's other sessions.
 
 Production bootstrap requires `LOBBYFORGE_SETUP_TOKEN`. It is generated by the
 installer independently from the session secret, compared in constant time,

@@ -19,6 +19,7 @@ import { moderateMessage, moderationBlockedBody } from '@/lib/bots/moderation';
 import { readMessageBot } from '@/lib/bots/message-meta';
 import { emitMessageEvent } from '@/lib/bots/events';
 import { publishChatMessageDelete, publishChatMessageUpdate } from '@/lib/chat-bus';
+import { requireVerifiedEmail } from '@/lib/mail/verification';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -201,6 +202,12 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
         { error: 'You are timed out in this server', until: activeTimeout.toISOString() },
         { status: 403 }
       );
+    }
+
+    if (body.content !== undefined) {
+      // docs/EMAIL.md §4.2: an unverified account in `required` mode may read, not do this.
+      const unverified = await requireVerifiedEmail(session.uid, 'message');
+      if (unverified) return unverified;
     }
 
     // A bot's (or the system's) words are not anyone's to rewrite: an edited

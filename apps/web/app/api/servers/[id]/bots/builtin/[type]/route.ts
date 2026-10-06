@@ -23,6 +23,7 @@ import {
 } from '@/lib/bots/settings';
 import { defaultBotText } from '@/lib/bots/templates';
 import { CorePermission, hasPermission } from '@lobbyforge/core';
+import { requireVerifiedEmail } from '@/lib/mail/verification';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -59,6 +60,9 @@ async function handlePut(req: Request, ctx: RouteContext): Promise<NextResponse>
   const auth = await requireBotManager(req, serverId);
   if (!auth.ok) return auth.response;
   const { manager } = auth;
+  // docs/EMAIL.md §4.2: an unverified account in `required` mode may read, not do this.
+  const unverified = await requireVerifiedEmail(manager.uid, 'bot_create');
+  if (unverified) return unverified;
   // A bot acts with the powers it was given: switching on the one that
   // removes members' messages takes the right to remove them yourself.
   if (type === 'moderation' && !manager.isOwner && !hasPermission([...manager.permissions], CorePermission.MANAGE_MESSAGES)) {

@@ -123,8 +123,10 @@ export async function applyAdminCaptchaUpdate(update: AdminCaptchaUpdate): Promi
     write.provider = update.provider;
     changed.push('provider');
   }
-  if (!sameJson(update.surfaces, current.surfaces)) changed.push('surfaces');
-  write.surfaces = update.surfaces;
+  // A client that predates a surface (password_reset) leaves it as stored.
+  const surfaces: CaptchaSurfaces = { ...current.surfaces, ...update.surfaces } as CaptchaSurfaces;
+  if (!sameJson(surfaces, current.surfaces)) changed.push('surfaces');
+  write.surfaces = { ...surfaces };
   if (!current.locked.siteKey && update.siteKey !== undefined && (update.siteKey ?? null) !== stored.siteKey) {
     write.siteKey = update.siteKey ?? null;
     changed.push('siteKey');

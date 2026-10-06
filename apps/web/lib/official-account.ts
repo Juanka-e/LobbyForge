@@ -19,7 +19,7 @@ export type CreateOfficialAccountResult =
 
 export async function createOfficialAccount(
   db: DbClient,
-  input: { email: string; displayName: string; passwordHash: string }
+  input: { email: string; displayName: string; passwordHash: string; signupChannel?: 'open' }
 ): Promise<CreateOfficialAccountResult> {
   // `users.email` is unique: of two sign-ups racing for one address,
   // exactly one insert returns a row, so no advisory lock is needed.
@@ -30,6 +30,8 @@ export async function createOfficialAccount(
       displayName: input.displayName.trim(),
       passwordHash: input.passwordHash,
       isGuest: false,
+      // docs/EMAIL.md §4.2 — every hub sign-up is an open one.
+      signupChannel: input.signupChannel ?? 'open',
     })
     .onConflictDoNothing({ target: users.email })
     .returning({ id: users.id, email: users.email, displayName: users.displayName });
