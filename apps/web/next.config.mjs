@@ -62,7 +62,16 @@ const nextConfig = {
     // Everything except marketplace plugin UI (ADR-007): /api/plugin-ui sets
     // its own headers, and the lobby must be able to frame it — Next appends
     // route headers to these, so a DENY here would win.
-    return [{ source: '/:path((?!api/plugin-ui/).*)', headers }];
+    return [
+      { source: '/:path((?!api/plugin-ui/).*)', headers },
+      // Email links carry one-time tokens (docs/EMAIL.md §4.1, §4.3): no
+      // Referer at all. Later entries win for the same key; middleware.ts
+      // sets the same value.
+      ...['/verify-email', '/reset-password', '/forgot-password'].map((source) => ({
+        source,
+        headers: [{ key: 'Referrer-Policy', value: 'no-referrer' }],
+      })),
+    ];
   },
 };
 

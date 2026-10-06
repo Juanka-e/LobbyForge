@@ -22,6 +22,10 @@ import {
   primaryButtonClass,
   secondaryButtonClass,
 } from '../bots/ui';
+import EmailUnverifiedNotice, {
+  handleEmailUnverified,
+  useEmailRestriction,
+} from '@/components/email-verification/EmailUnverifiedNotice';
 
 /**
  * Incoming webhooks of one text channel (BOT_API_V2 §5.1): an outside
@@ -76,6 +80,10 @@ export function ChannelWebhooks({
   const [notice, setNotice] = useState<Notice>(null);
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [reveal, setReveal] = useState<WebhookSecret | null>(null);
+  // EMAIL.md §4.2: creating webhooks (and their tokens) needs a verified email.
+  const emailLock = useEmailRestriction();
+  const [emailRefused, setEmailRefused] = useState(false);
+  const createLocked = emailLock.restricted || emailRefused;
 
   const load = useCallback(() => {
     setLoadError(null);
@@ -106,6 +114,7 @@ export function ChannelWebhooks({
     setNotice(null);
     const result = await createChannelWebhook(serverId, channel.id, trimmed);
     setBusy(false);
+    if (!result.ok && handleEmailUnverified(result.status, result.body)) return setEmailRefused(true);
     if (!result.ok) return setNotice({ tone: 'danger', text: failureText(t, result) });
     upsert(result.data.webhook);
     setName('');
@@ -141,6 +150,7 @@ export function ChannelWebhooks({
     const result = await rotateChannelWebhook(serverId, channel.id, webhook.id);
     setBusy(false);
     setConfirm(null);
+    if (!result.ok && handleEmailUnverified(result.status, result.body)) return setEmailRefused(true);
     if (!result.ok) return setNotice({ tone: 'danger', text: failureText(t, result) });
     upsert(result.data.webhook);
     setReveal(result.data);
@@ -163,7 +173,7 @@ export function ChannelWebhooks({
             id={nameId}
             value={name}
             maxLength={WEBHOOK_NAME_MAX_LENGTH}
-            disabled={busy || atLimit || webhooks === null}
+            disabled={busy || atLimit || webhooks === null || createLocked}
             placeholder={t('webhooks.namePlaceholder')}
             onChange={(event) => setName(event.target.value)}
             onKeyDown={(event) => {
@@ -178,13 +188,14 @@ export function ChannelWebhooks({
         <button
           type="button"
           onClick={() => void create()}
-          disabled={busy || atLimit || webhooks === null || !name.trim()}
+          disabled={busy || atLimit || webhooks === null || !name.trim() || createLocked}
           className={primaryButtonClass}
         >
           {t('webhooks.create')}
         </button>
       </div>
       {atLimit ? <p className="mt-1 text-xs text-text-muted">{t('webhooks.error.limit', { count: MAX_WEBHOOKS_PER_CHANNEL })}</p> : null}
+      {createLocked ? <EmailUnverifiedNotice action="createWebhook" className="mt-2" /> : null}
 
       {notice ? (
         <p role={notice.tone === 'danger' ? 'alert' : 'status'} className={`mt-2 text-xs ${notice.tone === 'danger' ? 'text-danger' : 'text-success'}`}>

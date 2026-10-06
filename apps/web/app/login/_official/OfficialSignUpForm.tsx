@@ -3,39 +3,17 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useId, useState, type FormEvent } from 'react';
-import tones from '@/app/(marketing)/_components/hub-tones.module.css';
 import { CaptchaField } from '@/components/captcha/CaptchaField';
 import { reportFormValidity } from '@/components/captcha/form-validity';
 import { useCaptchaGate } from '@/components/captcha/useCaptchaGate';
 import { LOBBYFORGE_REPO } from '@/lib/github-repo';
 import { useT } from '@/lib/i18n/client';
 import { rich } from '@/lib/i18n/rich';
-import { MIN_PASSWORD_LENGTH, passwordStrength, type PasswordStrengthLevel } from '@/lib/password-strength';
+import { MIN_PASSWORD_LENGTH } from '@/lib/password-strength';
 import { signUpErrorMessage } from './auth-errors';
 import PasswordField from './PasswordField';
+import PasswordStrengthMeter from './PasswordStrengthMeter';
 import { authInput, authLabel, authLink, authSubmit } from './styles';
-
-const STRENGTH_TEXT: Record<PasswordStrengthLevel, string> = {
-  empty: 'auth.login.passwordPlaceholderNew',
-  tooShort: 'auth.official.strength.tooShort',
-  fair: 'auth.official.strength.fair',
-  strong: 'auth.official.strength.strong',
-  veryStrong: 'auth.official.strength.veryStrong',
-};
-
-/** Meter colours. The words carry the meaning too — colour is never the only cue. */
-function strengthInk(level: PasswordStrengthLevel): string {
-  if (level === 'tooShort') return tones.danger;
-  if (level === 'fair') return 'text-ember';
-  if (level === 'strong' || level === 'veryStrong') return tones.success;
-  return 'text-text-muted';
-}
-
-function strengthFill(level: PasswordStrengthLevel): string {
-  if (level === 'tooShort') return tones.dangerFill;
-  if (level === 'fair') return 'bg-ember';
-  return tones.successFill;
-}
 
 /**
  * The official hub's account creation, over the same `/api/auth/register`
@@ -52,7 +30,6 @@ export default function OfficialSignUpForm() {
   const [agreed, setAgreed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const strength = passwordStrength(password);
   // Hub sign-up is the `register` surface (docs/CAPTCHA.md §2).
   const gate = useCaptchaGate({ surface: 'register' });
 
@@ -147,17 +124,7 @@ export default function OfficialSignUpForm() {
           minLength={MIN_PASSWORD_LENGTH}
           describedBy={`${ids}-strength`}
         >
-          <span aria-hidden className="flex gap-1.5">
-            {[1, 2, 3, 4].map((bar) => (
-              <span
-                key={bar}
-                className={`h-1 flex-1 rounded ${bar <= strength.score ? strengthFill(strength.level) : 'bg-border-subtle'}`}
-              />
-            ))}
-          </span>
-          <p id={`${ids}-strength`} aria-live="polite" className={`text-[13px] ${strengthInk(strength.level)}`}>
-            {t(STRENGTH_TEXT[strength.level])}
-          </p>
+          <PasswordStrengthMeter id={`${ids}-strength`} password={password} />
         </PasswordField>
 
         <div className="flex items-start gap-2.5">

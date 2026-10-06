@@ -44,6 +44,7 @@ import {
 import { VOICE_TEST_STATE_EVENT, type VoiceTestKind } from '@/lib/voice-test-events';
 import { voiceBlockedNotice } from '@/lib/voice-block-notice';
 import { disconnectReasonNotice } from '@/lib/voice-disconnect-notice';
+import { handleEmailUnverified } from '@/components/email-verification/email-status-store';
 import {
   isMicrophoneBlocked,
   publishBlockAtJoin,
@@ -951,6 +952,11 @@ export function LobbyVoiceProvider({
         }
         if (!res.ok) {
           const detail = (await res.json().catch(() => ({}))) as { error?: string };
+          // EMAIL.md §4.2: no voice token without a verified email. Said in
+          // the viewer's language; the shared status locks the channel list.
+          if (handleEmailUnverified(res.status, detail)) {
+            throw new VoiceNoticeError({ key: 'emailVerification.restricted.action.voice' });
+          }
           // Removed for a mislabelled track and blocked for a while: say so
           // in the viewer's language, with how long is left.
           const blockedNotice = voiceBlockedNotice(detail);

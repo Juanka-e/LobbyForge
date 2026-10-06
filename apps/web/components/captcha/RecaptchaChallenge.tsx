@@ -117,6 +117,7 @@ export function RecaptchaChallenge({
       token = value;
       onTokenRef.current?.(value);
     };
+    let failed = false;
     const target = document.createElement('div');
     container.appendChild(target);
     let widgetId: number;
@@ -129,11 +130,13 @@ export function RecaptchaChallenge({
         // attribution sentence below stands in for it.
         badge: 'bottomright',
         callback: (value) => {
+          failed = false;
           publish(value);
           settle(value);
         },
         'expired-callback': () => publish(null),
         'error-callback': () => {
+          failed = true;
           publish(null);
           settle(null);
         },
@@ -155,10 +158,12 @@ export function RecaptchaChallenge({
         return withTimeout(solved, INVISIBLE_TIMEOUT_MS, null);
       },
       reset: () => {
+        failed = false;
         publish(null);
         settle(null);
         api.reset(widgetId);
       },
+      failed: () => failed,
     };
     onReadyRef.current?.(handle);
     return () => {

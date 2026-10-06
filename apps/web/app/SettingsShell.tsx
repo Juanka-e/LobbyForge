@@ -42,6 +42,7 @@ const COMMUNITY_NAV: NavItem[] = [
   { href: '/admin/plugins', labelKey: 'settings.nav.community.plugins', icon: 'extension' },
   { href: '/admin/bandwidth', labelKey: 'settings.nav.community.bandwidth', icon: 'data_usage' },
   { href: '/admin/settings/authentication', labelKey: 'settings.nav.community.authentication', icon: 'shield_lock' },
+  { href: '/admin/settings/email', labelKey: 'settings.nav.community.email', icon: 'mail' },
   { href: '/admin/settings/storage', labelKey: 'settings.nav.community.storage', icon: 'cloud_upload' },
   { href: '/admin/settings/backups', labelKey: 'settings.nav.community.backups', icon: 'backup' },
   { href: '/admin/audit', labelKey: 'settings.nav.community.audit', icon: 'history' },

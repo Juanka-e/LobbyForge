@@ -195,7 +195,11 @@ export function useCaptchaGate({
       const handle = await waitForHandle(current.provider, current.surface);
       if (!handle) return { kind: 'blocked', messageKey: 'captcha.challenge.loadFailed' };
       const token = await handle.execute();
-      if (!token) return { kind: 'blocked', messageKey: 'captcha.error.incomplete' };
+      if (!token) {
+        // A widget that failed (an invisible one that blocks shows nothing to
+        // complete) is told apart from one still waiting for the person.
+        return { kind: 'blocked', messageKey: handle.failed?.() ? 'captcha.error.failed' : 'captcha.error.incomplete' };
+      }
       fields.captchaToken = token;
       fields.captchaProvider = handle.provider;
     }
@@ -217,7 +221,14 @@ export function useCaptchaGate({
         if (collected.fields.captchaToken) handleRef.current?.reset();
         const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
         const refusal = response.status === 400 ? captchaRefusalOf(body) : null;
-        if (!refusal) return { kind: 'response', response, body };
+        if (!refusal) {
+          // The formToken is single use (§4.4) once the server accepted the
+          // challenge — whatever the route answered afterwards (success, 409
+          // email taken, …). A form that stays on screen needs a fresh one
+          // for its next send, or that send is `form_rejected`.
+          if (collected.fields.formToken) void refreshConfig();
+          return { kind: 'response', response, body };
+        }
 
         if (refusal === 'captcha_required') {
           forcedRef.current = true;

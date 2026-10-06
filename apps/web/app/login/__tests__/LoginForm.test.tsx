@@ -45,6 +45,47 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe('LoginForm sign-up refusals in words', () => {
+  it('a disposable address and an address with an account are explained, not shown as codes', async () => {
+    const original = fetchMock.getMockImplementation()!;
+    try {
+      fetchMock.mockImplementation(async (url: string) => {
+        if (url.startsWith('/api/auth/captcha?surface=')) {
+          const surface = new URL(url, 'http://x').searchParams.get('surface') as CaptchaSurface;
+          return jsonResponse(captchaConfig({ surface, provider: 'none', required: false, mode: 'off', formToken: null }));
+        }
+        if (url === '/api/auth/register') return jsonResponse({ error: 'disposable_email' }, 400);
+        return jsonResponse({});
+      });
+      renderForm({ initialMode: 'register' });
+      fireEvent.change(screen.getByLabelText('Display name'), { target: { value: 'Ada' } });
+      fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ada@mailinator.com' } });
+      fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct-horse-battery' } });
+      fireEvent.click(screen.getAllByRole('button', { name: 'Create account' }).at(-1)!);
+      expect(await screen.findByRole('alert')).toHaveTextContent("Addresses from disposable email services can't be used here.");
+      expect(screen.queryByText('disposable_email')).toBeNull();
+
+      fetchMock.mockImplementation(async (url: string) =>
+        url === '/api/auth/register' ? jsonResponse({ error: 'An account with this email already exists.' }, 409) : jsonResponse({})
+      );
+      fireEvent.click(screen.getAllByRole('button', { name: 'Create account' }).at(-1)!);
+      await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('An account with this email already exists.'));
+    } finally {
+      // The module-level mock serves the other suites: put its answers back.
+      fetchMock.mockImplementation(original);
+    }
+  });
+});
+
+describe('LoginForm password reset link (EMAIL.md §4.3)', () => {
+  it('offers "Forgot password?" while signing in, not while creating an account', () => {
+    renderForm();
+    expect(screen.getByRole('link', { name: 'Forgot password?' })).toHaveAttribute('href', '/forgot-password');
+    fireEvent.click(screen.getByRole('tab', { name: 'Create account' }));
+    expect(screen.queryByRole('link', { name: 'Forgot password?' })).toBeNull();
+  });
+});
+
 describe('LoginForm bot protection', { timeout: 20_000 }, () => {
   it('sign-in asks for nothing up front; the guest form fetches its config but shows its widget only once used', async () => {
     renderForm();

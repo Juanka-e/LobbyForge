@@ -12,6 +12,7 @@ import { I18nProvider } from '@/lib/i18n/client';
 import { providerPropsFor } from '@/lib/i18n/catalogue';
 import { LobbyVoiceChannels, disconnectErrorMessage, type LobbyVoiceChannelsProps } from '../LobbyVoiceChannels';
 import { LobbyVoiceContext, type LobbyVoiceContextValue, type LobbyVoiceParticipant } from '../LobbyVoiceProvider';
+import { __resetEmailStatusStoreForTests } from '@/components/email-verification/email-status-store';
 
 vi.mock('next/link', () => ({
   default: ({ children, href, ...rest }: { children: React.ReactNode; href: string }) => (
@@ -301,5 +302,29 @@ describe('disconnectErrorMessage', () => {
     [undefined, 500, 'lobbyMain.voice.disconnectError.generic'],
   ])('%s / %i → %s', (code, status, key) => {
     expect(disconnectErrorMessage(status, code, 'Mallory').key).toBe(key);
+  });
+});
+
+describe('LobbyVoiceChannels — email verification (EMAIL.md §4.2)', () => {
+  it('a restricted account sees the channels but joining asks it to verify instead of connecting', async () => {
+    __resetEmailStatusStoreForTests();
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === '/api/auth/email/status') {
+        return Response.json({ email: 'me@example.org', verified: false, mode: 'required', restricted: true, pendingChange: null, resendAvailableAt: null, mailConfigured: true });
+      }
+      if (url.startsWith('/api/presence')) return Response.json({ presences });
+      return new Response('{}', { status: 404 });
+    });
+    const voice = makeVoice({ activeChannelId: null, connectionState: ConnectionState.Disconnected, participants: [] });
+    renderRoster({}, voice);
+    expect(await screen.findByText('Verify your email to join voice channels.')).toBeInTheDocument();
+    // The channel button (its icon is a ligature, so the name ends with the channel's).
+    const games = screen.getByRole('button', { name: /Games$/ });
+    expect(games).toHaveAccessibleDescription('Verify your email to join voice channels.');
+    fireEvent.click(games);
+    expect(voice.connectToChannel).not.toHaveBeenCalled();
+    expect(await screen.findByRole('dialog', { name: 'Verify your email address' })).toBeInTheDocument();
+    __resetEmailStatusStoreForTests();
   });
 });

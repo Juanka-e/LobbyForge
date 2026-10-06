@@ -94,6 +94,15 @@ describe('OfficialSignUpForm', () => {
     expect(link).toHaveAccessibleName('Code of Conduct (opens in a new tab)');
   });
 
+  it('explains a disposable address in words, never the code', async () => {
+    fetchMock.mockResolvedValue(json({ error: 'disposable_email' }, 400));
+    const user = userEvent.setup();
+    render(<OfficialSignUpForm />);
+    await fillForm(user);
+    await user.click(screen.getByRole('button', { name: 'Create account' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent("Addresses from disposable email services can't be used here.");
+  });
+
   it('explains an address that already has an account', async () => {
     fetchMock.mockResolvedValue(json({ error: 'An account with this email already exists.' }, 409));
     const user = userEvent.setup();

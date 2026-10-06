@@ -15,6 +15,11 @@ export interface MemberView {
   roleColor: string | null;
   roleIds: string[];
   joinedAt: string;
+  /**
+   * EMAIL.md §5: whether the account proved its address. `none` for guests
+   * and accounts without one; absent when it could not be read.
+   */
+  emailState?: 'verified' | 'unverified' | 'none';
 }
 
 export interface RoleOption {
@@ -186,6 +191,31 @@ export default function MembersClient({
     }
   }
 
+  async function markEmailVerified(member: MemberView) {
+    if (busyUserId) return;
+    setBusyUserId(member.userId);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/admin/users/${encodeURIComponent(member.userId)}/verify-email`, {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+      if (!response.ok) {
+        throw new Error(
+          response.status === 404 ? t('adminSettings.members.email.markNotFound') : t('adminSettings.members.email.markFailed')
+        );
+      }
+      setMemberList((current) =>
+        current.map((item) => (item.userId === member.userId ? { ...item, emailState: 'verified' } : item))
+      );
+      setMessage({ tone: 'success', text: t('adminSettings.members.email.marked', { name: member.displayName }) });
+    } catch (err) {
+      setMessage({ tone: 'danger', text: (err as Error).message });
+    } finally {
+      setBusyUserId(null);
+    }
+  }
+
   function toggleDraftRole(roleId: string) {
     setDraftRoles((current) =>
       current.includes(roleId) ? current.filter((id) => id !== roleId) : [...current, roleId]
@@ -312,6 +342,9 @@ export default function MembersClient({
                           <RoleBadge label={t('adminSettings.members.badge.nickname')} tone="primary" />
                         ) : null}
                         {member.isGuest ? <RoleBadge label={guestLabel} tone="muted" /> : null}
+                        {member.emailState === 'verified' || member.emailState === 'unverified' ? (
+                          <EmailStateBadge state={member.emailState} />
+                        ) : null}
                         {protectedMember ? (
                           <RoleBadge label={t('adminSettings.members.badge.owner')} tone="danger" />
                         ) : null}
@@ -371,6 +404,16 @@ export default function MembersClient({
                           ) : null}
                         </div>
                         <div className="flex flex-wrap items-end gap-2 lg:justify-end">
+                          {member.emailState === 'unverified' ? (
+                            <button
+                              type="button"
+                              onClick={() => markEmailVerified(member)}
+                              disabled={busy}
+                              className="rounded-lg border border-border-subtle px-3 py-2 text-xs font-semibold text-text-secondary hover:bg-surface-container hover:text-text-primary disabled:opacity-50"
+                            >
+                              {t('adminSettings.members.email.mark')}
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             onClick={() => saveRoles(member)}
@@ -408,6 +451,24 @@ export default function MembersClient({
 
       <p className="mt-6 text-xs text-text-muted">{t('adminSettings.members.footer')}</p>
     </section>
+  );
+}
+
+/** Words and an icon, never colour alone (verified / not verified). */
+function EmailStateBadge({ state }: { state: 'verified' | 'unverified' }) {
+  const t = useT();
+  const verified = state === 'verified';
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium text-text-primary ${
+        verified ? 'border-success/40 bg-success/10' : 'border-ember/40 bg-ember/10'
+      }`}
+    >
+      <span className={`material-symbols-outlined text-[13px] ${verified ? 'text-success' : 'text-ember'}`} aria-hidden>
+        {verified ? 'verified' : 'mark_email_unread'}
+      </span>
+      {t(verified ? 'adminSettings.members.email.verified' : 'adminSettings.members.email.unverified')}
+    </span>
   );
 }
 

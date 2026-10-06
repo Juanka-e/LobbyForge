@@ -44,10 +44,11 @@ const PRODUCT: Record<CaptchaProviderChoice, string> = {
   recaptcha: 'Google reCAPTCHA',
 };
 
-const TOGGLE_SURFACES: Array<{ key: 'register' | 'invite_register' | 'guest'; id: string }> = [
+const TOGGLE_SURFACES: Array<{ key: 'register' | 'invite_register' | 'guest' | 'password_reset'; id: string }> = [
   { key: 'register', id: 'register' },
   { key: 'invite_register', id: 'inviteRegister' },
   { key: 'guest', id: 'guest' },
+  { key: 'password_reset', id: 'passwordReset' },
 ];
 
 const inputClass =
@@ -425,7 +426,7 @@ export default function BotProtectionCard({ notices }: { notices: PrivacyNoticeS
         <fieldset disabled={off} className="grid min-w-0 gap-3">
           <legend className="sr-only">{t('adminSettings.botProtection.surfaces.title')}</legend>
           {off ? <p className="text-sm text-text-muted">{t('adminSettings.botProtection.offNote')}</p> : null}
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-2">
             {TOGGLE_SURFACES.map((surface) => (
               <Toggle
                 key={surface.key}

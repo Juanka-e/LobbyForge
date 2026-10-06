@@ -5,6 +5,10 @@ import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { buttonOutline, buttonPrimary } from '@/app/(marketing)/_components/styles';
 import { useT } from '@/lib/i18n/client';
+import EmailUnverifiedNotice, {
+  handleEmailUnverified,
+  useEmailRestriction,
+} from '@/components/email-verification/EmailUnverifiedNotice';
 
 export default function CreateInstanceForm() {
   const t = useT();
@@ -12,6 +16,10 @@ export default function CreateInstanceForm() {
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // EMAIL.md §4.2: creating a community needs a verified email in `required` mode.
+  const emailLock = useEmailRestriction();
+  const [emailRefused, setEmailRefused] = useState(false);
+  const locked = emailLock.restricted || emailRefused;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -27,6 +35,11 @@ export default function CreateInstanceForm() {
       error?: string;
       server?: { id: string };
     };
+    if (handleEmailUnverified(response.status, body)) {
+      setEmailRefused(true);
+      setSaving(false);
+      return;
+    }
     if (!response.ok || !body.server) {
       setError(body.error ?? t('hub.instances.new.failed'));
       setSaving(false);
@@ -50,6 +63,7 @@ export default function CreateInstanceForm() {
           placeholder={t('hub.instances.new.namePlaceholder')}
         />
       </label>
+      {locked ? <EmailUnverifiedNotice action="createServer" className="rounded-xl px-3.5 py-2.5" /> : null}
       {error ? (
         <p role="alert" className="rounded-xl border border-danger/40 bg-danger/10 px-3.5 py-2.5 text-sm text-text-primary">
           {error}
@@ -58,7 +72,7 @@ export default function CreateInstanceForm() {
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="submit"
-          disabled={saving || name.trim().length < 2}
+          disabled={saving || name.trim().length < 2 || locked}
           className={`${buttonPrimary} h-12 rounded-[14px] px-6 text-[15px] disabled:cursor-not-allowed disabled:opacity-60`}
         >
           {saving ? t('hub.instances.new.creating') : t('hub.instances.new.submit')}

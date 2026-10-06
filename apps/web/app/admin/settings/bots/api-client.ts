@@ -1,5 +1,7 @@
 import type { Translator } from '@/lib/i18n/core';
 import type { BotJson } from '@/lib/bots/admin';
+import { RESTRICTED_ACTION_KEYS } from '@/components/email-verification/email-status';
+import { handleEmailUnverified } from '@/components/email-verification/email-status-store';
 
 /**
  * Calls to `/api/servers/{id}/bots/**` from the settings page, with every
@@ -10,6 +12,8 @@ import type { BotJson } from '@/lib/bots/admin';
 export interface ApiFailure {
   ok: false;
   message: string;
+  /** Refused for an unverified email (EMAIL.md §4.2): show the verify notice. */
+  emailUnverified?: boolean;
 }
 
 export type ApiResult<T> = { ok: true; data: T } | ApiFailure;
@@ -94,6 +98,9 @@ export async function botApi<T>(
     return { ok: false, message: t('bots.error.network') };
   }
   const body = (await response.json().catch(() => ({}))) as T & ErrorBody;
+  if (!response.ok && handleEmailUnverified(response.status, body)) {
+    return { ok: false, message: t(RESTRICTED_ACTION_KEYS.createBot), emailUnverified: true };
+  }
   if (!response.ok) return { ok: false, message: describeFailure(t, response.status, body) };
   return { ok: true, data: body };
 }

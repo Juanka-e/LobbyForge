@@ -14,7 +14,7 @@ import {
 
 const saved = (overrides: Partial<AdminCaptchaSettings> = {}): AdminCaptchaSettings => ({
   provider: 'altcha',
-  surfaces: { register: 'on', invite_register: 'off', guest: 'on', login: 'adaptive' },
+  surfaces: { register: 'on', invite_register: 'off', guest: 'on', login: 'adaptive', password_reset: 'on' },
   siteKey: null,
   secretSet: false,
   secretHint: null,
@@ -40,7 +40,8 @@ describe('bot protection admin model (docs/CAPTCHA.md §6.1)', () => {
     });
     expect(parsed).toMatchObject({
       provider: 'turnstile',
-      surfaces: { register: 'on', invite_register: 'off', guest: 'on', login: 'always' },
+      // password_reset: absent from the answer → its default, on.
+      surfaces: { register: 'on', invite_register: 'off', guest: 'on', login: 'always', password_reset: 'on' },
       siteKey: 'site',
       secretSet: true,
       secretHint: '…abcd',

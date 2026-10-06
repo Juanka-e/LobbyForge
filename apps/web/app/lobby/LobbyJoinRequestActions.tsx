@@ -14,6 +14,10 @@
 import { useId, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useT } from '@/lib/i18n/client';
+import EmailUnverifiedNotice, {
+  handleEmailUnverified,
+  useEmailRestriction,
+} from '@/components/email-verification/EmailUnverifiedNotice';
 
 /** Same limit as the API (JOIN_REQUEST_NOTE_MAX_LENGTH). */
 const NOTE_MAX_LENGTH = 500;
@@ -29,6 +33,11 @@ export function LobbyJoinRequestActions({ serverId, mode }: { serverId: string; 
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // EMAIL.md §4.2 (`join_request`): a note needs a verified email in
+  // `required` mode; asking without one still works.
+  const emailLock = useEmailRestriction({ enabled: mode === 'ask' });
+  const [noteRefused, setNoteRefused] = useState(false);
+  const noteLocked = emailLock.restricted || noteRefused;
   const url = `/api/servers/${encodeURIComponent(serverId)}/join-requests/mine`;
 
   async function ask(event: FormEvent<HTMLFormElement>) {
@@ -36,7 +45,7 @@ export function LobbyJoinRequestActions({ serverId, mode }: { serverId: string; 
     setBusy(true);
     setError(null);
     try {
-      const trimmed = note.trim();
+      const trimmed = noteLocked ? '' : note.trim();
       const res = await fetch(url, {
         method: 'POST',
         credentials: 'same-origin',
@@ -49,8 +58,11 @@ export function LobbyJoinRequestActions({ serverId, mode }: { serverId: string; 
         router.refresh();
         return;
       }
-      const detail = (await res.json().catch(() => ({}))) as { code?: string };
-      if (res.status === 429) {
+      const detail = (await res.json().catch(() => ({}))) as { code?: string; error?: string };
+      if (handleEmailUnverified(res.status, detail)) {
+        // Only the note was refused: say so; the request can go without it.
+        setNoteRefused(true);
+      } else if (res.status === 429) {
         setError(t('lobby.unavailable.requestLimit'));
       } else if (detail.code && REFRESH_CODES.has(detail.code)) {
         router.refresh();
@@ -118,10 +130,16 @@ export function LobbyJoinRequestActions({ serverId, mode }: { serverId: string; 
           onChange={(event) => setNote(event.target.value)}
           maxLength={NOTE_MAX_LENGTH}
           rows={3}
-          disabled={busy}
+          disabled={busy || noteLocked}
+          aria-describedby={noteLocked ? noteId + '-locked' : undefined}
           placeholder={t('lobby.unavailable.notePlaceholder')}
           className="mt-1 w-full resize-y rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
         />
+        {noteLocked ? (
+          <div id={noteId + '-locked'} className="mt-2">
+            <EmailUnverifiedNotice action="joinRequestNote" />
+          </div>
+        ) : null}
       </div>
       <button
         type="submit"

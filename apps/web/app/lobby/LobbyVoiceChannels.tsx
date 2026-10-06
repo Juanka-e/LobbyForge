@@ -1,11 +1,12 @@
 ﻿'use client';
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '@/lib/i18n/client';
 import type { Params } from '@/lib/i18n/core';
 import { useLobbyVoice, type LobbyVoiceParticipant } from './LobbyVoiceProvider';
 import Link from 'next/link';
+import { useEmailRestriction, useVerifyEmailAction } from '@/components/email-verification/EmailUnverifiedNotice';
 
 /**
  * Voice channels list for the sidebar. Each voice channel is a button
@@ -97,6 +98,11 @@ export function LobbyVoiceChannels({
 }: LobbyVoiceChannelsProps) {
   const t = useT();
   const voice = useLobbyVoice();
+  // EMAIL.md §4.2: no voice for a restricted account. The channels stay
+  // visible (who is in them is still readable); joining asks to verify.
+  const emailLock = useEmailRestriction();
+  const verifyEmail = useVerifyEmailAction();
+  const lockHintId = useId();
   const [moderationError, setModerationError] = useState<string | null>(null);
   const [pendingMute, setPendingMute] = useState<string | null>(null);
   const [pendingDisconnect, setPendingDisconnect] = useState<string | null>(null);
@@ -254,6 +260,13 @@ export function LobbyVoiceChannels({
           add
         </span>
       </div>
+      {emailLock.restricted ? (
+        <p id={lockHintId} className="mb-1.5 flex items-center gap-1.5 px-2 text-[11px] text-text-secondary">
+          <span className="material-symbols-outlined text-[14px]" aria-hidden>lock</span>
+          {t('emailVerification.restricted.action.voice')}
+        </p>
+      ) : null}
+      {verifyEmail.dialog}
       <ul className="space-y-[2px]">
         {channels.length === 0 ? (
           <li className="px-2 py-1 text-label-xs text-text-muted italic">
@@ -263,6 +276,7 @@ export function LobbyVoiceChannels({
         {channels.map((c) => {
           const isConnected = c.id === connectedId;
           const isConnecting = c.id === voice.activeChannelId && voice.connecting;
+          const joinLocked = emailLock.restricted && !isConnected;
 
           // For the connected channel: use LiveKit participants (real-time).
           // For other channels: use polled presence data.
@@ -297,10 +311,13 @@ export function LobbyVoiceChannels({
                   onClick={() => {
                     if (isConnected) {
                       voice.setMainViewMode('voice');
+                    } else if (joinLocked) {
+                      verifyEmail.request();
                     } else {
                       void voice.connectToChannel(c.id);
                     }
                   }}
+                  aria-describedby={joinLocked ? lockHintId : undefined}
                   className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left"
                 >
                   <span
@@ -321,6 +338,11 @@ export function LobbyVoiceChannels({
                   {!isConnected && participants.length > 0 ? (
                     <span className="text-[10px] text-text-muted ml-1">
                       {t('lobbyMain.voice.inVoice', { count: participants.length })}
+                    </span>
+                  ) : null}
+                  {joinLocked ? (
+                    <span className="material-symbols-outlined ml-auto text-[14px] text-text-muted" aria-hidden>
+                      lock
                     </span>
                   ) : null}
                 </button>

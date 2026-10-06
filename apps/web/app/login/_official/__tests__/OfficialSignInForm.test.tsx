@@ -102,6 +102,11 @@ describe('OfficialSignInForm', () => {
     expect(screen.getByRole('link', { name: 'Create an account' })).toHaveAttribute('href', '/register');
   });
 
+  it('offers "Forgot password?" beside the password label (EMAIL.md §4.3)', () => {
+    render(<OfficialSignInForm googleEnabled={false} initialError={null} />);
+    expect(screen.getByRole('link', { name: 'Forgot password?' })).toHaveAttribute('href', '/forgot-password');
+  });
+
   it('lets the password be shown with a toggle button', async () => {
     const user = userEvent.setup();
     render(<OfficialSignInForm googleEnabled={false} initialError={null} />);

@@ -173,7 +173,9 @@ describe('useCaptchaGate', { timeout: 20_000 }, () => {
     const [first, second] = bodiesFor(fetchMock, PROTECTED);
     expect(first).toMatchObject({ captchaToken: 'cf-token', captchaProvider: 'turnstile' });
     expect(second).toMatchObject({ captchaToken: 'pow-fallback', captchaProvider: 'altcha' });
-    await waitFor(() => expect(configCalls()).toBe(2));
+    // The first config, the refetch after captcha_unavailable, and a fresh
+    // formToken once the second send used its one.
+    await waitFor(() => expect(configCalls()).toBe(3));
   });
 
   it('after captcha_invalid, says verification failed and does not retry by itself', async () => {
@@ -186,6 +188,43 @@ describe('useCaptchaGate', { timeout: 20_000 }, () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(message()).toHaveTextContent('Verification failed, try again.'));
     expect(bodiesFor(fetchMock, PROTECTED)).toHaveLength(1);
+  });
+
+  // Real timers race the config refresh's re-render against the second solve
+  // when the whole suite saturates the CPU; the flow itself is pinned end to
+  // end in e2e/email.spec.ts (g2) and e2e/captcha.spec.ts.
+  it('after an answer that used the formToken (success or the route\'s own error), the next send carries a fresh one', { retry: 2 }, async () => {
+    configs.register = [
+      captchaConfig({ formToken: '1790000000000.register.first' }),
+      captchaConfig({ formToken: '1790000000000.register.second' }),
+    ];
+    // e.g. 409 "email taken", then the person tries another address on the same form.
+    protectedAnswers = [jsonResponse({ error: 'email_taken' }, 409), jsonResponse({ ok: true })];
+    renderHarness({ surface: 'register' });
+    await waitFor(() => expect(altchaWidget()).not.toBeNull());
+    afterMinimumFillTime();
+    await solveAltcha('pow-1');
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(message()).toHaveTextContent('status 409'));
+    // A fresh config (and formToken) is fetched right after the answer…
+    await waitFor(() => expect(configCalls()).toBe(2));
+    vi.setSystemTime(BASE_TIME + 10_000);
+    await solveAltcha('pow-2');
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(message()).toHaveTextContent('status 200'));
+    // …and the second send uses it, not the spent one.
+    expect(bodiesFor(fetchMock, PROTECTED).map((body) => body.formToken)).toEqual([
+      '1790000000000.register.first',
+      '1790000000000.register.second',
+    ]);
+  });
+
+  it('a send without a formToken (adaptive sign-in) fetches no config afterwards', async () => {
+    renderHarness({ surface: 'login', prefetch: false });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(message()).toHaveTextContent('status 200'));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(configCalls()).toBe(0);
   });
 
   it('after form_rejected, asks to try again and fetches a fresh formToken', async () => {

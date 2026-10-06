@@ -12,6 +12,8 @@ import {
   type RawOptionValue,
 } from '@/lib/bots/command-options';
 import { invalidateChannelCommands, invokeCommand, invokeErrorKey, type InvokedInteraction } from '@/lib/bots/client-api';
+import { RESTRICTED_ACTION_KEYS } from '@/components/email-verification/email-status';
+import { handleEmailUnverified } from '@/components/email-verification/email-status-store';
 import { moderationBlockedMessageKey } from '@/lib/bots/catalog';
 import { BotBadge } from '../BotIdentity';
 import type { MentionUser } from '../MentionInput';
@@ -150,6 +152,12 @@ export function SlashCommandForm({
     if (refused.length > 0) {
       setErrors(Object.fromEntries(refused.map((name) => [name, t('interactions.form.error.server')])));
       focusFirstInvalid(refused);
+      return;
+    }
+    // EMAIL.md §4.2: running a command counts as posting. Said in words; the
+    // composer locks once the shared status flips.
+    if (handleEmailUnverified(result.status, result.body)) {
+      setServerError(t(RESTRICTED_ACTION_KEYS.message));
       return;
     }
     // The command or its bot changed under us: the next `/` asks again.

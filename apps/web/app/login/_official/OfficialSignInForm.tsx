@@ -118,6 +118,11 @@ export default function OfficialSignInForm({
           onChange={setPassword}
           autoComplete="current-password"
           placeholder={t('auth.official.signIn.passwordPlaceholder')}
+          labelAside={
+            <Link href="/forgot-password" className={`${authLink} text-sm`}>
+              {t('auth.login.forgotPassword')}
+            </Link>
+          }
         />
         <CaptchaField gate={gate} />
         <button type="submit" disabled={busy} className={authSubmit}>

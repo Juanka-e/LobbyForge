@@ -92,11 +92,12 @@ describe('CaptchaChallenge', { timeout: 20_000 }, () => {
     altcha.loadAltcha.mockRejectedValueOnce(new Error('chunk failed'));
     const onLoadError = vi.fn();
     renderIn(<CaptchaChallenge surface="register" config={captchaConfig()} onLoadError={onLoadError} />);
-    expect(await screen.findByRole('alert')).toHaveTextContent('The security check could not load.');
-    expect(onLoadError).toHaveBeenCalled();
+    // Wait for this exact message (not just the first alert) under a loaded run.
+    expect((await screen.findByText(/The security check could not load./)).closest('[role="alert"]')).not.toBeNull();
+    await waitFor(() => expect(onLoadError).toHaveBeenCalled());
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(altchaWidget()).not.toBeNull());
-    expect(altcha.loadAltcha).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(altcha.loadAltcha).toHaveBeenCalledTimes(2));
   });
 
   it('renders nothing when the provider is off', () => {
@@ -150,6 +151,27 @@ describe('CaptchaChallenge', { timeout: 20_000 }, () => {
       });
       act(() => (options.callback as (token: string) => void)('cf-token'));
       expect(onToken).toHaveBeenLastCalledWith('cf-token');
+    });
+
+    it('reports a widget that failed (an invisible one that blocks) apart from one still waiting', async () => {
+      const api = stubTurnstile();
+      let handle: CaptchaHandle | null = null;
+      renderIn(
+        <CaptchaChallenge
+          surface="register"
+          config={captchaConfig({ provider: 'turnstile', siteKey: 'site-key-1' })}
+          onReady={(h) => (handle = h)}
+        />
+      );
+      await waitFor(() => expect(handle).not.toBeNull());
+      expect(handle!.failed?.()).toBe(false);
+      const options = api.render.mock.calls[0]![1] as Record<string, unknown>;
+      act(() => (options['error-callback'] as () => void)());
+      expect(handle!.failed?.()).toBe(true);
+      // No waiting for a token that will not come.
+      await expect(handle!.execute()).resolves.toBeNull();
+      act(() => handle!.reset());
+      expect(handle!.failed?.()).toBe(false);
     });
 
     it('shows the load error when the script is blocked, and retries the script and the config', async () => {
