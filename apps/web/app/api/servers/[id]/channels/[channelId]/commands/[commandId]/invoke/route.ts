@@ -24,6 +24,7 @@ import { commandAllowedInChannel, freeTextOf, readCommandOptions, validateOption
 import { dispatchInteractionCreate, sweepExpiredInteractions } from '@/lib/bots/interactions';
 import { moderateMessage, moderationBlockedBody } from '@/lib/bots/moderation';
 import { botHasPermission } from '@/lib/bots/permissions';
+import { requireVerifiedEmail } from '@/lib/mail/verification';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -63,6 +64,9 @@ async function handlePost(req: Request, ctx: RouteContext): Promise<NextResponse
   const session = requireMaterializedSession(req);
   if (!session.ok) return session.response;
   const uid = session.session.uid;
+  // docs/EMAIL.md §4.2: an unverified account in `required` mode may read, not do this.
+  const unverified = await requireVerifiedEmail(uid, 'message');
+  if (unverified) return unverified;
 
   const limited = rateLimitResponse(await distributedRateLimit(`command-invoke:${uid}`, INVOKE_USER_LIMIT), 'command-invoke');
   if (limited) {

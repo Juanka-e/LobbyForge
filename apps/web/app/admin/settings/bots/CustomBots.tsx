@@ -14,6 +14,7 @@ import {
 import { BotAvatar, BotBadge, TrustBadge } from '@/app/lobby/BotIdentity';
 import { botApi, permissionHint, permissionLabel, type BotResponse } from './api-client';
 import { BotIntegrations } from './BotIntegrations';
+import EmailUnverifiedNotice, { useEmailRestriction } from '@/components/email-verification/EmailUnverifiedNotice';
 import {
   Alert,
   Card,
@@ -118,6 +119,10 @@ export function CustomBots({
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [editing, setEditing] = useState<{ id: string; name: string; permissions: BotPermissionId[] } | null>(null);
 
+  // EMAIL.md §4.2: creating bots and tokens needs a verified email.
+  const emailLock = useEmailRestriction();
+  const [emailRefused, setEmailRefused] = useState(false);
+  const createLocked = emailLock.restricted || emailRefused;
   const disabled = !canMutate || !serverId || busy;
   const atLimit = bots.length >= MAX_CUSTOM_BOTS_PER_SERVER;
 
@@ -130,6 +135,10 @@ export function CustomBots({
       body: { name: name.trim(), permissions },
     });
     setBusy(false);
+    if (!result.ok && result.emailUnverified) {
+      setEmailRefused(true);
+      return;
+    }
     if (!result.ok) {
       setNotice({ tone: 'danger', text: result.message });
       return;
@@ -218,12 +227,13 @@ export function CustomBots({
           <button
             type="button"
             onClick={() => void create()}
-            disabled={disabled || atLimit || !name.trim()}
+            disabled={disabled || atLimit || !name.trim() || createLocked}
             className={primaryButtonClass}
           >
             {busy ? t('bots.working') : t('bots.custom.create')}
           </button>
         </div>
+        {canMutate && createLocked ? <EmailUnverifiedNotice action="createBot" className="mt-3" /> : null}
         {!canMutate ? <p className="mt-3 text-xs text-text-muted">{t('bots.cannotMutate')}</p> : null}
       </Card>
 

@@ -23,6 +23,10 @@ import { CaptchaField } from '@/components/captcha/CaptchaField';
 import { guestFailureMessage } from '@/components/captcha/guest-failure';
 import { useCaptchaGate } from '@/components/captcha/useCaptchaGate';
 import { useT } from '@/lib/i18n/client';
+import EmailUnverifiedNotice, {
+  handleEmailUnverified,
+  useEmailRestriction,
+} from '@/components/email-verification/EmailUnverifiedNotice';
 import { REDEEM_FAILURE_KEYS, classifyRedeemFailure, failureFromInvite } from '@/lib/invite-redeem-error';
 
 /** Same limit as the API (JOIN_REQUEST_NOTE_MAX_LENGTH). */
@@ -73,6 +77,11 @@ export default function JoinPage({ params }: { params: Promise<{ code: string }>
   const [joinRequest, setJoinRequest] = useState<JoinRequestState | null>(null);
   const [note, setNote] = useState('');
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
+  // EMAIL.md §4.2 (`join_request`): the note of a join request needs a
+  // verified email in `required` mode; asking without one still works.
+  const emailLock = useEmailRestriction({ enabled: Boolean(meta?.requiresApproval && guest) });
+  const [noteRefused, setNoteRefused] = useState(false);
+  const noteLocked = emailLock.restricted || noteRefused;
   // Whether the session probe has answered: only a visitor with no session
   // creates a NEW guest, which is what the guest surface protects.
   const [probed, setProbed] = useState(false);
@@ -250,7 +259,7 @@ export default function JoinPage({ params }: { params: Promise<{ code: string }>
     }
     setStatus({ kind: 'busy' });
     try {
-      const trimmedNote = note.trim();
+      const trimmedNote = noteLocked ? '' : note.trim();
       const res = await fetch(`/api/invites/${encodeURIComponent(code)}/redeem`, {
         method: 'POST',
         credentials: 'same-origin',
@@ -266,6 +275,12 @@ export default function JoinPage({ params }: { params: Promise<{ code: string }>
       }
       if (!res.ok) {
         const detail = (await res.json().catch(() => ({}))) as RedeemResponse;
+        // Only the note was refused: the request can be sent again without it.
+        if (handleEmailUnverified(res.status, detail)) {
+          setNoteRefused(true);
+          setStatus({ kind: 'idle' });
+          return;
+        }
         if (res.status === 403 && detail.code === 'join_rejected') {
           setJoinRequest({ status: 'rejected', retryAfter: detail.retryAfter ?? null });
           setStatus({ kind: 'idle' });
@@ -293,7 +308,7 @@ export default function JoinPage({ params }: { params: Promise<{ code: string }>
       // no help to a visitor either.
       setStatus({ kind: 'error', message: t('auth.join.error.generic') });
     }
-  }, [code, guest, meta?.requiresApproval, meta?.serverName, note, showRedeemFailure, t]);
+  }, [code, guest, meta?.requiresApproval, meta?.serverName, note, noteLocked, showRedeemFailure, t]);
 
   const cancelRequest = useCallback(async () => {
     if (!serverId) return;
@@ -379,9 +394,16 @@ export default function JoinPage({ params }: { params: Promise<{ code: string }>
             maxLength={NOTE_MAX_LENGTH}
             rows={3}
             onChange={(e) => setNote(e.target.value)}
+            disabled={noteLocked}
+            aria-describedby={noteLocked ? noteId + '-locked' : undefined}
             placeholder={t('auth.join.notePlaceholder')}
-            className="w-full rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-text-primary placeholder-text-muted outline-none focus:border-primary"
+            className="w-full rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-text-primary placeholder-text-muted outline-none focus:border-primary disabled:cursor-not-allowed disabled:opacity-50"
           />
+          {noteLocked ? (
+            <div id={noteId + '-locked'}>
+              <EmailUnverifiedNotice action="joinRequestNote" />
+            </div>
+          ) : null}
         </div>
       ) : undefined,
       actions: (

@@ -13,6 +13,7 @@ import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { authorizeServerPermission } from '@/lib/permissions';
 import { withApiSecurity } from '@/lib/security-headers';
+import { requireVerifiedEmail } from '@/lib/mail/verification';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -118,6 +119,9 @@ async function handlePost(req: Request, ctx: { params: Promise<{ id: string }> }
     }
     const auth = await authorizeServerPermission(session.uid, serverId, CorePermission.CREATE_INVITE);
     if (!auth.ok) return auth.response;
+    // docs/EMAIL.md §4.2: an unverified account in `required` mode may read, not do this.
+    const unverified = await requireVerifiedEmail(session.uid, 'invite_create');
+    if (unverified) return unverified;
 
     // security-review AUTHZ-002: a timed-out member cannot mint invites —
     // an invite was the first step of the leave-and-rejoin timeout escape,

@@ -82,6 +82,13 @@ dil. "Kanalına katıl", "Ayarlarını kaydet".
 | Event (Bot API) | Olay | "Olayları al", "Olay uç noktası" |
 | Endpoint | Uç nokta | |
 | Only you can see this | Bunu yalnızca sen görebilirsin | Geçici (ephemeral) bot yanıtları |
+| Verify (email) / Verified | Doğrula / Doğrulandı | "E-postanı doğrula", "E-posta doğrulandı" |
+| Verification code (6-digit) | 6 haneli kod / Doğrulama kodu | |
+| Resend (code) | Yeniden gönder | "Kodu yeniden gönder", geri sayımda "{time} sonra yeniden gönder" |
+| Forgot password? / Reset password | Şifreni mi unuttun? / Şifreyi sıfırla | |
+| Mail relay (SMTP) | E-posta aktarıcısı | Sağlayıcı = provider |
+| Disposable email address | Tek kullanımlık e-posta adresi | |
+| Privacy notice | Aydınlatma metni | KVKK bağlamında |
 
 **Kısaltmalar:** saniye "sn", dakika "dk", saat "sa", gün "g", hafta "hf".
 

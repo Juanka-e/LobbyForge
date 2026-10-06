@@ -96,6 +96,7 @@ describe('POST /api/auth/register', { timeout: 20_000 }, () => {
         displayName: validBody.displayName,
         passwordHash: 'scrypt$hash',
         serverId: 'server-id',
+        signupChannel: 'open',
       }
     );
   });
@@ -113,7 +114,7 @@ describe('POST /api/auth/register', { timeout: 20_000 }, () => {
     expect(response.status).toBe(201);
     expect(createLocalAccount).toHaveBeenCalledWith(
       { __test: true },
-      expect.objectContaining({ inviteCode: 'ABCD2345EFGH' })
+      expect.objectContaining({ inviteCode: 'ABCD2345EFGH', signupChannel: 'invite' })
     );
   });
 
@@ -189,7 +190,7 @@ describe('POST /api/auth/register', { timeout: 20_000 }, () => {
       });
       expect(createOfficialAccount).toHaveBeenCalledWith(
         { __test: true },
-        { email: validBody.email, displayName: validBody.displayName, passwordHash: 'scrypt$hash' }
+        { email: validBody.email, displayName: validBody.displayName, passwordHash: 'scrypt$hash', signupChannel: 'open' }
       );
       expect(recordSession).toHaveBeenCalledWith('official-user-id', expect.stringMatching(/^g_/), expect.any(Request));
       // No self-host community machinery: no policy, no first server, no membership.

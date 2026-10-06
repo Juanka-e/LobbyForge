@@ -3,6 +3,8 @@ export * from './client.js';
 export * from './pg-errors.js';
 export * from './queries/users.js';
 export * from './queries/userIdentityLinks.js';
+// Email verification, email change and password reset (0046).
+export * from './queries/email.js';
 export * from './queries/servers.js';
 export * from './queries/memberships.js';
 export * from './queries/channels.js';

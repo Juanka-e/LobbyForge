@@ -12,6 +12,7 @@ import AuthenticationPage from '@/app/admin/settings/authentication/page';
 import BackupsPage from '@/app/admin/settings/backups/page';
 import BotsPage from '@/app/admin/settings/bots/page';
 import ChannelsPage from '@/app/admin/settings/channels/page';
+import EmailPage from '@/app/admin/settings/email/page';
 import InvitesPage from '@/app/admin/settings/invites/page';
 import MembersPage from '@/app/admin/settings/members/page';
 import RolesPage from '@/app/admin/settings/roles/page';
@@ -44,6 +45,7 @@ const PAGES = {
   'settings/backups': BackupsPage,
   'settings/bots': BotsPage,
   'settings/channels': ChannelsPage,
+  'settings/email': EmailPage,
   'settings/invites': InvitesPage,
   'settings/members': MembersPage,
   'settings/roles': RolesPage,

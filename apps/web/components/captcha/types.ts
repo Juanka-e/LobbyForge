@@ -6,7 +6,8 @@
  * form sends back, and the refusals it can get.
  */
 
-export type CaptchaSurface = 'register' | 'invite_register' | 'guest' | 'login';
+/** `password_reset`: the forgot-password form (docs/EMAIL.md §4.3). */
+export type CaptchaSurface = 'register' | 'invite_register' | 'guest' | 'login' | 'password_reset';
 export type CaptchaProvider = 'none' | 'altcha' | 'turnstile' | 'recaptcha';
 export type RecaptchaVersion = 'v2_checkbox' | 'v2_invisible' | 'v3';
 export type TurnstileAppearance = 'always' | 'interaction-only';
@@ -55,12 +56,18 @@ export interface CaptchaHandle {
   execute: () => Promise<string | null>;
   /** Tokens are single use: start over after every request that sent one. */
   reset: () => void;
+  /**
+   * The provider reported a failure (error or timeout), as opposed to still
+   * waiting for the person. An invisible widget that blocks shows nothing to
+   * complete, so the form must say "failed", not "complete the check".
+   */
+  failed?: () => boolean;
 }
 
 /** The token cap of §4.3 — anything longer is refused by the server anyway. */
 export const MAX_TOKEN_LENGTH = 4096;
 
-const SURFACES: readonly CaptchaSurface[] = ['register', 'invite_register', 'guest', 'login'];
+const SURFACES: readonly CaptchaSurface[] = ['register', 'invite_register', 'guest', 'login', 'password_reset'];
 const PROVIDERS: readonly CaptchaProvider[] = ['none', 'altcha', 'turnstile', 'recaptcha'];
 const MODES: readonly CaptchaConfig['mode'][] = ['on', 'off', 'adaptive', 'always'];
 

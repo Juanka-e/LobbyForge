@@ -15,6 +15,8 @@ export interface CaptchaSurfaces {
   invite_register: OnOff;
   guest: OnOff;
   login: LoginMode;
+  /** `POST /api/auth/password/forgot` (EMAIL.md §4.3) — on by default. */
+  password_reset: OnOff;
 }
 
 export interface CaptchaOptions {
@@ -72,6 +74,7 @@ export const DEFAULT_SURFACES: CaptchaSurfaces = {
   invite_register: 'off',
   guest: 'on',
   login: 'adaptive',
+  password_reset: 'on',
 };
 
 export const MIN_SCORE = { min: 0.1, max: 0.9, step: 0.1 } as const;
@@ -113,6 +116,8 @@ export function parseAdminCaptchaSettings(raw: unknown): AdminCaptchaSettings | 
       invite_register: oneOf(surfaces.invite_register, ['on', 'off'] as const, DEFAULT_SURFACES.invite_register),
       guest: oneOf(surfaces.guest, ['on', 'off'] as const, DEFAULT_SURFACES.guest),
       login: oneOf(surfaces.login, ['off', 'adaptive', 'always'] as const, DEFAULT_SURFACES.login),
+      // An older server that does not know the surface yet: the default (on).
+      password_reset: oneOf(surfaces.password_reset, ['on', 'off'] as const, DEFAULT_SURFACES.password_reset),
     },
     siteKey: typeof raw.siteKey === 'string' && raw.siteKey ? raw.siteKey : null,
     secretSet: raw.secretSet === true,

@@ -18,6 +18,7 @@
   "captcha.challenge.retry": "Try again",
   "captcha.error.formRejected": "Something went wrong, try again.",
   "captcha.error.incomplete": "Complete the security check to continue.",
+  "captcha.error.failed": "The security check failed. Reload the page and try again.",
   "captcha.error.invalid": "Verification failed, try again.",
   "captcha.error.network": "Could not reach the server. Check your connection and try again.",
   "captcha.error.required": "Complete the security check, then try again.",

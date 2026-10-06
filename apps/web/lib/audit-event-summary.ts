@@ -81,12 +81,44 @@ export function auditEventSummary(t: Translator, entry: AuditEntryView): AuditSu
       if (fields.length === 0) return { key: 'admin.audit.event.captchaUpdatedNoFields', params, slots };
       return { key: 'admin.audit.event.captchaUpdated', params, slots: { ...slots, fields: listFormat(t.locale, fields) } };
     }
+    case 'instance.mail_updated': {
+      // Email settings (docs/EMAIL.md §5): field NAMES only, never values
+      // (the SMTP password among them).
+      const fields = knownFields(meta.fields, MAIL_FIELDS).map((field) => t(`admin.audit.mailField.${field}`));
+      if (fields.length === 0) return { key: 'admin.audit.event.mailUpdatedNoFields', params, slots };
+      return { key: 'admin.audit.event.mailUpdated', params, slots: { ...slots, fields: listFormat(t.locale, fields) } };
+    }
+    case 'user.email_verified_by_admin':
+      return { key: 'admin.audit.event.emailVerifiedByAdmin', params, slots };
     default:
       return null;
   }
 }
 
 const CAPTCHA_FIELDS = ['provider', 'surfaces', 'siteKey', 'secretKey', 'options', 'attackMode'] as const;
+const MAIL_FIELDS = [
+  'provider',
+  'region',
+  'host',
+  'port',
+  'security',
+  'username',
+  'password',
+  'from',
+  'dailyLimit',
+  'verificationMode',
+  'verificationScope',
+  'existingDeadline',
+  'disposableBlock',
+  'disposableAllow',
+  'disposableBlockExtra',
+] as const;
+
+/** The known field names in an entry's `metadata.fields`, in the fixed order of `known`. */
+function knownFields<T extends string>(value: unknown, known: readonly T[]): T[] {
+  if (!Array.isArray(value)) return [];
+  return known.filter((field) => value.includes(field));
+}
 
 /** "a, b and c" in the reader's language. */
 function listFormat(locale: string, items: string[]): string {

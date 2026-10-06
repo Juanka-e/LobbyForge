@@ -3,6 +3,10 @@
 import { useMemo, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
 import { ChannelWebhooks } from './ChannelWebhooks';
+import EmailUnverifiedNotice, {
+  handleEmailUnverified,
+  useEmailRestriction,
+} from '@/components/email-verification/EmailUnverifiedNotice';
 
 type ChannelType = 'text' | 'voice' | 'activity' | 'announcement' | 'stage';
 
@@ -64,6 +68,9 @@ export default function ChannelsClient({
   });
   const [busyId, setBusyId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  // EMAIL.md §4.2: creating channels needs a verified email in `required` mode.
+  const emailLock = useEmailRestriction();
+  const [emailRefused, setEmailRefused] = useState(false);
   /** The text channel whose incoming webhooks are open. */
   const [webhooksId, setWebhooksId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
@@ -109,6 +116,10 @@ export default function ChannelsClient({
         }),
       });
       const data = (await response.json().catch(() => ({}))) as ApiChannelResponse;
+      if (handleEmailUnverified(response.status, data)) {
+        setEmailRefused(true);
+        return;
+      }
       if (!response.ok || !data.channel) throw new Error(data.error ?? t('adminSettings.channels.createFailed'));
       await refreshChannels();
       setForm(EMPTY_FORM);
@@ -288,13 +299,16 @@ export default function ChannelsClient({
           <button
             type="button"
             onClick={createChannel}
-            disabled={!serverId || isCreating}
+            disabled={!serverId || isCreating || emailLock.restricted}
             className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-on-primary disabled:cursor-not-allowed disabled:opacity-50"
           >
             <span className="material-symbols-outlined text-[18px]">add</span>
             {isCreating ? t('adminSettings.common.creating') : t('adminSettings.common.create')}
           </button>
         </div>
+        {emailLock.restricted || emailRefused ? (
+          <EmailUnverifiedNotice action="createChannel" className="mt-3" />
+        ) : null}
       </div>
 
       <div className="space-y-8">

@@ -21,6 +21,8 @@ export default function PasswordField({
   placeholder,
   minLength,
   describedBy,
+  inputClassName = authInput,
+  labelClassName = 'text-sm font-medium text-text-primary',
   children,
 }: {
   id: string;
@@ -33,6 +35,9 @@ export default function PasswordField({
   placeholder: string;
   minLength?: number;
   describedBy?: string;
+  /** The input's look; the hub's 48 px field unless a self-hosted form passes its own. */
+  inputClassName?: string;
+  labelClassName?: string;
   /** Anything that belongs under the input, e.g. a strength meter. */
   children?: ReactNode;
 }) {
@@ -41,7 +46,7 @@ export default function PasswordField({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between gap-3">
-        <label htmlFor={id} className="text-sm font-medium text-text-primary">
+        <label htmlFor={id} className={labelClassName}>
           {label}
         </label>
         {labelAside}
@@ -58,14 +63,14 @@ export default function PasswordField({
           autoComplete={autoComplete}
           placeholder={placeholder}
           aria-describedby={describedBy}
-          className={`${authInput} pr-12`}
+          className={`${inputClassName} pr-12`}
         />
         <button
           type="button"
           onClick={() => setVisible((shown) => !shown)}
           aria-pressed={visible}
           aria-controls={id}
-          className={`absolute right-0.5 top-0.5 flex size-11 items-center justify-center rounded-[10px] text-text-secondary transition-colors hover:text-text-primary ${focusRing}`}
+          className={`absolute right-0.5 top-1/2 flex size-11 -translate-y-1/2 items-center justify-center rounded-[10px] text-text-secondary transition-colors hover:text-text-primary ${focusRing}`}
         >
           {visible ? <EyeOffIcon size={18} /> : <EyeIcon size={18} />}
           <span className="sr-only">{t('auth.official.showPassword')}</span>

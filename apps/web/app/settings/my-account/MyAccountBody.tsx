@@ -7,6 +7,7 @@ import { ChangePasswordModal } from '@/components/modals/ChangePasswordModal';
 import { retryAfterMinutes } from '@/app/login/login-errors';
 import { useT } from '@/lib/i18n/client';
 import { rich } from '@/lib/i18n/rich';
+import AccountEmailSection from './AccountEmailSection';
 
 /** What the page says after the dialog closed on a successful change. */
 type PasswordNotice = 'changed' | 'sessionsNotRevoked';
@@ -80,11 +81,13 @@ export default function MyAccountBody({
 
         <Section title={t('settings.account.identity.title')}>
           <Row label={t('settings.account.identity.displayName')} value={user.displayName} readOnly />
-          <Row
-            label={t('settings.account.identity.email')}
-            value={user.email ?? t('settings.account.identity.emailNotSet')}
-            readOnly
-          />
+          {user.isGuest ? (
+            <Row
+              label={t('settings.account.identity.email')}
+              value={user.email ?? t('settings.account.identity.emailNotSet')}
+              readOnly
+            />
+          ) : null}
           <Row
             label={t('settings.account.identity.type')}
             value={t(user.isGuest ? 'settings.account.identity.guest' : 'settings.account.identity.local')}
@@ -94,6 +97,14 @@ export default function MyAccountBody({
             {t('settings.account.identity.note')}
           </p>
         </Section>
+
+        {/* EMAIL.md §4.3: the address, its verification and "Change email".
+            `#email` is where every "Change email" link lands. */}
+        {user.isGuest ? null : (
+          <Section id="email" title={t('emailVerification.settings.title')}>
+            <AccountEmailSection email={user.email} />
+          </Section>
+        )}
 
         <Section title={t('settings.account.security.title')}>
           <Row
@@ -173,14 +184,16 @@ export default function MyAccountBody({
 }
 
 function Section({
+  id,
   title,
   children,
 }: {
+  id?: string;
   title: string;
   children: React.ReactNode;
 }) {
   return (
-    <section className="space-y-4">
+    <section id={id} className="scroll-mt-6 space-y-4">
       <h2
         className="text-xs uppercase tracking-wider border-b border-border-subtle pb-2 text-text-secondary"
       >

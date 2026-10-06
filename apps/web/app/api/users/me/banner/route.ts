@@ -6,6 +6,7 @@ import { requireMaterializedSession } from '@/lib/api-auth';
 import { withApiSecurity } from '@/lib/security-headers';
 import { BANNER_LIMITS, checkImageDataUrl } from '@/lib/image-validation';
 import { checkUserImageQuota, quotaExceededResponse } from '@/lib/upload-quota';
+import { requireVerifiedEmail } from '@/lib/mail/verification';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -35,6 +36,10 @@ async function handlePost(req: Request): Promise<NextResponse> {
   }
 
   if (body.dataUrl !== null) {
+    // docs/EMAIL.md §4.2: an unverified account in `required` mode may not
+    // upload an image (an abuse channel); removing the banner stays allowed.
+    const unverified = await requireVerifiedEmail(session.session.uid, 'upload');
+    if (unverified) return unverified;
     // GIF87a/GIF89a accepted (animated banners); min 960×540, max 4096.
     const check = checkImageDataUrl(body.dataUrl, BANNER_LIMITS);
     if (!check.ok) {

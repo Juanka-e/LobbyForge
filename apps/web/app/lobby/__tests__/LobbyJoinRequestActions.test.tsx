@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { I18nProvider } from '@/lib/i18n/client';
 import { providerPropsFor } from '@/lib/i18n/catalogue';
 import { LobbyJoinRequestActions } from '../LobbyJoinRequestActions';
+import { __resetEmailStatusStoreForTests } from '@/components/email-verification/email-status-store';
 
 /**
  * The lobby's "Ask to join" / "Withdraw request" buttons: the page load
@@ -20,14 +21,19 @@ const MINE = `/api/servers/${SERVER}/join-requests/mine`;
 type Call = { url: string; method: string; body: unknown };
 let calls: Call[] = [];
 let respond: (call: Call) => Response;
+/** The account's email status (EMAIL.md §4.3) — answered aside, not counted in `calls`. */
+let emailStatus: Record<string, unknown> = {};
 
 beforeEach(() => {
   calls = [];
   refresh.mockReset();
+  __resetEmailStatusStoreForTests();
+  emailStatus = { email: 'ada@example.org', verified: true, mode: 'off', restricted: false, pendingChange: null, resendAvailableAt: null, mailConfigured: false };
   respond = () => Response.json({ status: 'pending_approval', request: { id: 'jr-1' } }, { status: 202 });
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init: RequestInit = {}) => {
+      if (url === '/api/auth/email/status') return Response.json(emailStatus);
       const call = { url, method: init.method ?? 'GET', body: init.body ? JSON.parse(String(init.body)) : undefined };
       calls.push(call);
       return respond(call);
@@ -47,6 +53,40 @@ function renderActions(mode: 'ask' | 'pending', locale = 'en') {
     </I18nProvider>
   );
 }
+
+describe('LobbyJoinRequestActions — the note and email verification (EMAIL.md §4.2)', () => {
+  it('a restricted account cannot add a note, is told why, and can still ask without one', async () => {
+    emailStatus = { ...emailStatus, verified: false, mode: 'required', restricted: true };
+    renderActions('ask');
+    expect(await screen.findByText('Verify your email to add a note to your request. You can still ask to join without one.')).toBeInTheDocument();
+    const note = screen.getByLabelText('Message to the moderators (optional)');
+    expect(note).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Verify email' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Ask to join' }));
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    expect(calls[0]).toMatchObject({ url: MINE, method: 'POST', body: undefined });
+  });
+
+  it('a note refused with email_unverified is explained, and the next ask goes without it', async () => {
+    respond = (call) =>
+      call.body ? Response.json({ error: 'email_unverified' }, { status: 403 }) : Response.json({ status: 'pending_approval' }, { status: 202 });
+    renderActions('ask');
+    fireEvent.change(screen.getByLabelText('Message to the moderators (optional)'), { target: { value: 'hello' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Ask to join' }));
+    expect(await screen.findByText('Verify your email to add a note to your request. You can still ask to join without one.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Message to the moderators (optional)')).toBeDisabled();
+    expect(refresh).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Ask to join' }));
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    expect(calls[1]).toMatchObject({ url: MINE, method: 'POST', body: undefined });
+  });
+
+  it('speaks Turkish', async () => {
+    emailStatus = { ...emailStatus, verified: false, mode: 'required', restricted: true };
+    renderActions('ask', 'tr');
+    expect(await screen.findByText('İsteğine not eklemek için e-postanı doğrula. Not eklemeden de katılma isteği gönderebilirsin.')).toBeInTheDocument();
+  });
+});
 
 describe('LobbyJoinRequestActions — ask', () => {
   it('sends nothing until the button is pressed, then POSTs the trimmed note and refreshes the page', async () => {

@@ -47,6 +47,8 @@ describe('createOfficialAccount', () => {
       displayName: 'Ada',
       passwordHash: 'scrypt$hash',
       isGuest: false,
+      // docs/EMAIL.md §4.2: every hub sign-up is an open one.
+      signupChannel: 'open',
     });
     // Idempotent on the unique email — no second account for one address.
     expect(calls.conflict).toEqual({ target: 'users.email' });

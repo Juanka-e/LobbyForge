@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
 import { getRealtimeClient } from '@/lib/realtime-client';
 import { useT } from '@/lib/i18n/client';
+import { handleEmailUnverified, requestVerificationFocus } from '@/components/email-verification/email-status-store';
 import type { Translator } from '@/lib/i18n/core';
 import { readMessageInteraction, readMessageWebhook, type MessageInteractionInfo, type MessageWebhookInfo } from '@/lib/bots/interaction-meta';
 import { interactionStore, useInteractionState } from '@/lib/bots/interaction-store';
@@ -522,6 +523,12 @@ function LiveMessage({ message, invokedByName, currentUserId, serverId, channelI
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: trimmed }),
       });
+      // EMAIL.md §4.2: an edit is a post. Keep the edit open and point at
+      // the banner's code field instead of dropping it silently.
+      if (handleEmailUnverified(res.status, await res.clone().json().catch(() => null))) {
+        requestVerificationFocus();
+        return;
+      }
       if (!res.ok) throw new Error(`edit failed: ${res.status}`);
     } catch { /* non-fatal */ }
     setEditing(false);

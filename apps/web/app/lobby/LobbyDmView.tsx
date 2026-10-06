@@ -9,6 +9,10 @@ import {
   formatFullTimestamp,
   formatMessageTimestamp,
 } from '@/lib/chat-time';
+import EmailUnverifiedNotice, {
+  handleEmailUnverified,
+  useEmailRestriction,
+} from '@/components/email-verification/EmailUnverifiedNotice';
 
 /**
  * A direct message, rendered in the centre column.
@@ -52,6 +56,8 @@ export function LobbyDmView({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  // EMAIL.md §4.2: DMs need a verified email in `required` mode.
+  const emailLock = useEmailRestriction();
 
   const load = useCallback(async () => {
     try {
@@ -116,7 +122,11 @@ export function LobbyDmView({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content }),
       });
-      if (!res.ok) throw new Error(t('lobbyMain.dm.sendFailed', { status: res.status }));
+      if (!res.ok) {
+        // The composer locks (and keeps the draft) instead of a raw error.
+        if (handleEmailUnverified(res.status, await res.clone().json().catch(() => null))) return;
+        throw new Error(t('lobbyMain.dm.sendFailed', { status: res.status }));
+      }
       setDraft('');
       await load();
     } catch (err) {
@@ -268,6 +278,11 @@ export function LobbyDmView({
         ) : null}
       </div>
 
+      {emailLock.restricted ? (
+        <div className="px-6 pb-6 pt-2">
+          <EmailUnverifiedNotice action="dm" className="min-h-[50px] rounded-xl px-3" />
+        </div>
+      ) : (
       <form onSubmit={send} className="px-6 pb-6 pt-2">
         <div className="flex items-end gap-2 rounded-xl border border-border-subtle bg-surface-container px-3 py-2 focus-within:border-primary transition-colors">
           <input
@@ -290,6 +305,7 @@ export function LobbyDmView({
           </button>
         </div>
       </form>
+      )}
     </main>
   );
 }

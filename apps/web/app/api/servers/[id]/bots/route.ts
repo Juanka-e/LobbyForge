@@ -21,6 +21,7 @@ import {
   findUngrantableBotPermissions,
 } from '@/lib/bots/permissions';
 import { generateBotToken } from '@/lib/bots/token';
+import { requireVerifiedEmail } from '@/lib/mail/verification';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -62,6 +63,9 @@ async function handlePost(req: Request, ctx: { params: Promise<{ id: string }> }
   const auth = await requireBotManager(req, serverId);
   if (!auth.ok) return auth.response;
   const { manager } = auth;
+  // docs/EMAIL.md §4.2: an unverified account in `required` mode may read, not do this.
+  const unverified = await requireVerifiedEmail(manager.uid, 'bot_create');
+  if (unverified) return unverified;
 
   const parsed = CreateBotSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return invalidBody(parsed.error.issues);

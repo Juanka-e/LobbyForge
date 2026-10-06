@@ -10,6 +10,10 @@ import { MentionInput, type MentionUser } from './MentionInput';
 import { SlashCommandPicker, commandOptionId } from './slash/SlashCommandPicker';
 import { SlashCommandForm, type ComposerChannel } from './slash/SlashCommandForm';
 import { useChannelCommands } from './slash/useChannelCommands';
+import EmailUnverifiedNotice, {
+  handleEmailUnverified,
+  useEmailRestriction,
+} from '@/components/email-verification/EmailUnverifiedNotice';
 
 /**
  * The lobby's message composer. Plain text posts to the channel; typing
@@ -54,6 +58,9 @@ export function LobbyComposer({
   if (picked && picked.channelId !== channelId) setPicked(null);
   const lastTypingRef = useRef<number>(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  // EMAIL.md §4.2: a restricted account reads but does not post. Only a
+  // live channel asks (the demo lobby has no account behind it).
+  const emailLock = useEmailRestriction({ enabled: live });
 
   const canRunCommands = live && Boolean(serverId && channelId);
   const slashMatch = canRunCommands && !command ? SLASH_QUERY.exec(value) : null;
@@ -157,6 +164,8 @@ export function LobbyComposer({
       });
       if (!res.ok) {
         const detail = (await res.json().catch(() => ({}))) as { error?: string; code?: string; rule?: string };
+        // The status was stale: the composer locks now, keeping the draft.
+        if (handleEmailUnverified(res.status, detail)) return;
         // The Moderation Bot's refusal is explained in the reader's language.
         if (detail.code === 'blocked_by_moderation') {
           throw new Error(t(moderationBlockedMessageKey(detail.rule)));
@@ -178,6 +187,15 @@ export function LobbyComposer({
     } finally {
       setSending(false);
     }
+  }
+
+  if (emailLock.restricted) {
+    // The same footprint as the composer, so the transcript does not move.
+    return (
+      <div className="px-4 pb-6 pt-2 bg-background z-10 sm:px-6">
+        <EmailUnverifiedNotice action="message" className="min-h-[50px] px-4" />
+      </div>
+    );
   }
 
   if (command && serverId && channelId) {

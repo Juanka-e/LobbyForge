@@ -6,7 +6,7 @@
  */
 import { z } from 'zod';
 
-export const CAPTCHA_SURFACES = ['register', 'invite_register', 'guest', 'login'] as const;
+export const CAPTCHA_SURFACES = ['register', 'invite_register', 'guest', 'login', 'password_reset'] as const;
 export type CaptchaSurface = (typeof CAPTCHA_SURFACES)[number];
 /** The surfaces whose mode is a plain on/off switch (and that get a `formToken`). */
 export type FormCaptchaSurface = Exclude<CaptchaSurface, 'login'>;
@@ -26,6 +26,8 @@ export interface CaptchaSurfaces {
   invite_register: ToggleMode;
   guest: ToggleMode;
   login: LoginMode;
+  /** The forgot-password form (docs/EMAIL.md §4.3), default on. */
+  password_reset: ToggleMode;
 }
 
 export const DEFAULT_CAPTCHA_SURFACES: Readonly<CaptchaSurfaces> = Object.freeze({
@@ -33,6 +35,7 @@ export const DEFAULT_CAPTCHA_SURFACES: Readonly<CaptchaSurfaces> = Object.freeze
   invite_register: 'off',
   guest: 'on',
   login: 'adaptive',
+  password_reset: 'on',
 });
 
 export type AltchaDifficulty = 'normal' | 'hard';
@@ -65,6 +68,9 @@ export const CaptchaSurfacesSchema = z
     invite_register: ToggleModeSchema,
     guest: ToggleModeSchema,
     login: LoginModeSchema,
+    // Added with email (docs/EMAIL.md §4.3). Optional on write so a client
+    // that predates it keeps the stored value (the admin update merges).
+    password_reset: ToggleModeSchema.optional(),
   })
   .strict();
 
@@ -105,6 +111,7 @@ export function parseCaptchaSurfaces(raw: unknown): CaptchaSurfaces {
     invite_register: toggle('invite_register'),
     guest: toggle('guest'),
     login: login.success ? login.data : DEFAULT_CAPTCHA_SURFACES.login,
+    password_reset: toggle('password_reset'),
   };
 }
 

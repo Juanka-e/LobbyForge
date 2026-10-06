@@ -5,6 +5,7 @@ import { I18nProvider } from '@/lib/i18n/client';
 import { providerPropsFor } from '@/lib/i18n/catalogue';
 import type { BotJson } from '@/lib/bots/admin';
 import BotsClient from '../BotsClient';
+import { __resetEmailStatusStoreForTests } from '@/components/email-verification/email-status-store';
 
 const SERVER = '11111111-1111-4111-8111-111111111111';
 const TOKEN = `lfb_${'a'.repeat(32)}_${'B'.repeat(43)}`;
@@ -34,13 +35,18 @@ function bot(overrides: Partial<BotJson> = {}): BotJson {
 type Call = { url: string; method: string; body: unknown };
 let calls: Call[] = [];
 let respond: (call: Call) => Response;
+/** The account's email status (EMAIL.md §4.3) — answered aside, not counted in `calls`. */
+let emailStatus: Record<string, unknown> = {};
 
 beforeEach(() => {
   calls = [];
   respond = () => Response.json({}, { status: 500 });
+  emailStatus = { email: 'owner@example.org', verified: true, mode: 'off', restricted: false, pendingChange: null, resendAvailableAt: null, mailConfigured: false };
+  __resetEmailStatusStoreForTests();
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init: RequestInit = {}) => {
+      if (url === '/api/auth/email/status') return Response.json(emailStatus);
       const call = { url, method: init.method ?? 'GET', body: init.body ? JSON.parse(String(init.body)) : undefined };
       calls.push(call);
       return respond(call);
@@ -68,6 +74,27 @@ function renderPage(initialBots: BotJson[] = [], locale = 'en') {
 }
 
 describe('BotsClient', () => {
+  it('locks bot creation for an account that must verify its email first (EMAIL.md §4.2)', async () => {
+    emailStatus = { ...emailStatus, verified: false, mode: 'required', restricted: true };
+    renderPage();
+    expect(await screen.findByText('Verify your email to create bots and bot tokens.')).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('Announcer'), { target: { value: 'Herald' } });
+    expect(screen.getByRole('button', { name: 'Create bot' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Verify email' })).toBeInTheDocument();
+    expect(calls).toHaveLength(0);
+  });
+
+  it('explains an email_unverified refusal instead of a raw error', async () => {
+    respond = () => Response.json({ error: 'email_unverified' }, { status: 403 });
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText('Announcer'), { target: { value: 'Herald' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create bot' }));
+    expect(await screen.findByText('Verify your email to create bots and bot tokens.')).toBeInTheDocument();
+    expect(screen.queryByText('You need the Manage Community permission to change bots.')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Create bot' })).toBeDisabled();
+  });
+
+
   it('creates a custom bot and shows its token exactly once', async () => {
     respond = (call) =>
       call.method === 'POST' && call.url === `/api/servers/${SERVER}/bots`

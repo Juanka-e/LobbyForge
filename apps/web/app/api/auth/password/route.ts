@@ -59,6 +59,9 @@ async function handlePost(req: Request): Promise<NextResponse> {
   await clearAccountAttempts(subject);
 
   const newPasswordHash = await hashPassword(input.newPassword);
+  // Also drops the account's live email-change and reset challenges in the
+  // same transaction (docs/EMAIL.md §4.1): a change someone started with the
+  // old password must not survive the password change meant to lock them out.
   const updated = await replaceUserPasswordHash(getDb(), {
     userId: credentials.id,
     currentPasswordHash: credentials.passwordHash,

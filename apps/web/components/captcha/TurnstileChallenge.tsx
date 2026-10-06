@@ -73,6 +73,7 @@ export function TurnstileChallenge({
     if (!api || !container) return;
     let token: string | null = null;
     let interactive = false;
+    let failed = false;
     const waiters = new Set<(value: string | null) => void>();
     const settle = (value: string | null) => {
       for (const resolve of waiters) resolve(value);
@@ -99,15 +100,18 @@ export function TurnstileChallenge({
         'response-field': false,
         callback: (value) => {
           interactive = false;
+          failed = false;
           publish(value);
           settle(value);
         },
         'expired-callback': () => publish(null),
         'timeout-callback': () => {
+          failed = true;
           publish(null);
           settle(null);
         },
         'error-callback': () => {
+          failed = true;
           publish(null);
           settle(null);
         },
@@ -130,14 +134,16 @@ export function TurnstileChallenge({
       surface,
       execute: async () => {
         if (token) return token;
-        if (interactive) return null;
+        if (interactive || failed) return null;
         return withTimeout(new Promise<string | null>((resolve) => waiters.add(resolve)), PENDING_TIMEOUT_MS, null);
       },
       reset: () => {
+        failed = false;
         publish(null);
         settle(null);
         if (widgetId !== undefined) api.reset(widgetId);
       },
+      failed: () => failed,
     };
     onReadyRef.current?.(handle);
     return () => {

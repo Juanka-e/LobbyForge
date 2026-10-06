@@ -18,6 +18,7 @@
   "captcha.challenge.retry": "Tekrar dene",
   "captcha.error.formRejected": "Bir şeyler ters gitti, tekrar dene.",
   "captcha.error.incomplete": "Devam etmek için güvenlik kontrolünü tamamla.",
+  "captcha.error.failed": "Güvenlik kontrolü başarısız oldu. Sayfayı yenileyip yeniden dene.",
   "captcha.error.invalid": "Doğrulama başarısız oldu, tekrar dene.",
   "captcha.error.network": "Sunucuya ulaşılamadı. Bağlantını kontrol edip tekrar dene.",
   "captcha.error.required": "Güvenlik kontrolünü tamamla, sonra tekrar dene.",

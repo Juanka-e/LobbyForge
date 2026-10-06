@@ -166,3 +166,30 @@ describe('auditEventSummaryText — instance.captcha_updated', () => {
     expect(tr(auditActionLabelKey('instance.captcha_updated')!)).toBe('bot koruması ayarlarını değiştirdi');
   });
 });
+
+// Email (docs/EMAIL.md §5): the settings entry names the fields that
+// changed — never their values (the SMTP password among them) — and the
+// owner marking an address verified is a sentence about the member.
+describe('auditEventSummaryText — email', () => {
+  const updated = (metadata: Record<string, unknown>) =>
+    entry({ action: 'instance.mail_updated', targetType: 'instance', targetId: 'self-host', targetName: null, actorName: 'Owner', channelName: null, metadata });
+
+  it('lists the changed mail fields in a fixed order, in English and Turkish, ignoring unknown names', () => {
+    const e = updated({ fields: ['verificationMode', 'password', 'provider', 'password: hunter2'] });
+    expect(auditEventSummaryText(en, e)).toBe('Owner changed the email settings: provider, password, and verification mode.');
+    expect(auditEventSummaryText(tr, e)).toBe('Owner, e-posta ayarlarını değiştirdi: sağlayıcı, şifre ve doğrulama modu.');
+    expect(auditEventSummaryText(en, updated({}))).toBe('Owner changed the email settings.');
+  });
+
+  it('names the member whose address the owner verified', () => {
+    const e = entry({ action: 'user.email_verified_by_admin', targetName: 'Ada', actorName: 'Owner', channelName: null, metadata: {} });
+    expect(auditEventSummaryText(en, e)).toBe('Owner marked the email address of Ada (0a1b2c3d…) as verified.');
+    expect(auditEventSummaryText(tr, e)).toBe('Owner, Ada (0a1b2c3d…) adlı üyenin e-posta adresini doğrulanmış olarak işaretledi.');
+  });
+
+  it('has labels', async () => {
+    const { auditActionLabelKey } = await import('@/lib/audit-action-labels');
+    expect(en(auditActionLabelKey('instance.mail_updated')!)).toBe('changed the email settings');
+    expect(tr(auditActionLabelKey('user.email_verified_by_admin')!)).toBe('bir üyenin e-posta adresini doğrulanmış olarak işaretledi');
+  });
+});

@@ -13,6 +13,7 @@ import { readGuestSession } from '@/lib/guest-session';
 import { BANNER_LIMITS, checkImageDataUrl } from '@/lib/image-validation';
 import { checkUserImageQuota, quotaExceededResponse } from '@/lib/upload-quota';
 import { withApiSecurity } from '@/lib/security-headers';
+import { requireVerifiedEmail } from '@/lib/mail/verification';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -98,6 +99,10 @@ async function handlePost(
     }
 
     if (body.dataUrl !== null) {
+      // docs/EMAIL.md §4.2: an unverified account in `required` mode may not
+      // upload an image (an abuse channel); removing the banner stays allowed.
+      const unverified = await requireVerifiedEmail(session.uid, 'upload');
+      if (unverified) return unverified;
       // GIF87a/GIF89a accepted (animated server banners, Discord-style).
       const check = checkImageDataUrl(body.dataUrl, BANNER_LIMITS);
       if (!check.ok) {

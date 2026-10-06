@@ -9,6 +9,7 @@ import { useLobbyVoice } from './LobbyVoiceProvider';
 import { useBlockList } from './BlockListProvider';
 import { useT } from '@/lib/i18n/client';
 import { userImageUrl } from '@/lib/user-image-url';
+import { handleEmailUnverified, requestVerificationFocus } from '@/components/email-verification/email-status-store';
 import {
   PRESENCE_DOT_CLASS,
   PRESENCE_LABEL_KEYS,
@@ -251,7 +252,13 @@ export function LobbyMembersClient({
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ recipientUserId: userId }),
             })
-              .then((r) => (r.ok ? r.json() : null))
+              .then(async (r) => {
+                if (r.ok) return r.json();
+                // EMAIL.md §4.2: refused for an unverified email — lock
+                // and point at the banner's code field, not a silent no-op.
+                if (handleEmailUnverified(r.status, await r.json().catch(() => null))) requestVerificationFocus();
+                return null;
+              })
               .then((data) => {
                 if (data?.channel?.id) {
                   window.location.assign(`/dm/${data.channel.id}`);

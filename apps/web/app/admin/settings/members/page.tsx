@@ -6,6 +6,7 @@ import {
   listMemberSummariesForServer,
   listRolesForServer,
   listServersForUser,
+  listUserEmailVerification,
 } from '@lobbyforge/db';
 import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
 import { getSessionSecret } from '@/lib/api-auth';
@@ -70,6 +71,14 @@ export default async function MembersSettingsPage() {
             position: role.position,
             permissions: role.permissions,
           }));
+        // EMAIL.md §5: each member's verification state (never the address).
+        // Optional: a database without migration 0046 still lists members.
+        const emailStates = new Map(
+          (await listUserEmailVerification(db, rows.map((row) => row.userId)).catch(() => [])).map((state) => [
+            state.userId,
+            state.isGuest || !state.hasEmail ? 'none' : state.emailVerifiedAt ? 'verified' : 'unverified',
+          ] as const)
+        );
         members = rows.map((row) => ({
           userId: row.userId,
           displayName: row.displayName,
@@ -84,6 +93,7 @@ export default async function MembersSettingsPage() {
           roleColor: row.roleColor,
           roleIds: roleIdsByUser.get(row.userId) ?? [],
           joinedAt: row.joinedAt.toISOString(),
+          emailState: emailStates.get(row.userId),
         }));
       }
     } catch (err) {

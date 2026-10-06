@@ -47,6 +47,14 @@ async function captchaSources(pathname: string): Promise<{ script: string[]; fra
   }
 }
 
+/**
+ * Pages whose URL can carry a one-time token from an email — the
+ * verification link, the password-reset link (docs/EMAIL.md §4.1, §4.3) —
+ * send no Referer at all, not even to this origin. The pages also carry
+ * `<meta name="referrer" content="no-referrer">` from their metadata.
+ */
+const NO_REFERRER_PAGES = new Set(['/verify-email', '/reset-password', '/forgot-password']);
+
 const withSources = (sources: string[]) => (sources.length > 0 ? ` ${sources.join(' ')}` : '');
 
 export async function middleware(request: NextRequest) {
@@ -139,7 +147,10 @@ export async function middleware(request: NextRequest) {
   response.headers.set('x-request-id', requestId);
   response.headers.set('X-Content-Type-Options', 'nosniff');
   response.headers.set('X-Frame-Options', 'DENY');
-  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  response.headers.set(
+    'Referrer-Policy',
+    NO_REFERRER_PAGES.has(request.nextUrl.pathname) ? 'no-referrer' : 'strict-origin-when-cross-origin'
+  );
   response.headers.set('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=(), payment=()');
   if (isProduction) {
     response.headers.set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');

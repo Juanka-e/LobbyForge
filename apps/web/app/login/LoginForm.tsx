@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from 'react';
 import type { Route } from 'next';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { CaptchaField } from '@/components/captcha/CaptchaField';
 import { reportFormValidity } from '@/components/captcha/form-validity';
@@ -9,6 +10,7 @@ import { useCaptchaGate } from '@/components/captcha/useCaptchaGate';
 import { useT } from '@/lib/i18n/client';
 import { completeDesktopHandoff } from './desktop-handoff';
 import { retryAfterMinutes } from './login-errors';
+import { signUpRefusalKey } from './_official/auth-errors';
 
 type RegistrationMode = 'open' | 'invite_only' | 'closed';
 
@@ -86,12 +88,16 @@ export default function LoginForm({
     const { response } = result;
     const body = result.body as { error?: string; retryAfter?: number };
     if (!response.ok) {
+      // A disposable address or one that already has an account: in words, not the route's code or English.
+      const signUpKey = mode === 'register' ? signUpRefusalKey(response.status, body.error) : null;
       setError(
         // A rate limit or the per-account sign-in lock: say how long, in the
         // viewer's language (the route's body is English).
         response.status === 429
           ? t('auth.login.error.rateLimited', { minutes: retryAfterMinutes(body.retryAfter) })
-          : body.error ?? (mode === 'login' ? t('auth.login.signInFailed') : t('auth.login.registerFailed'))
+          : signUpKey
+            ? t(signUpKey)
+            : body.error ?? (mode === 'login' ? t('auth.login.signInFailed') : t('auth.login.registerFailed'))
       );
       setBusy(false);
       return;
@@ -201,6 +207,16 @@ export default function LoginForm({
             placeholder={mode === 'register' ? t('auth.login.passwordPlaceholderNew') : t('auth.login.passwordPlaceholder')}
           />
         </Field>
+        {mode === 'login' ? (
+          <p className="-mt-2 text-right text-sm">
+            <Link
+              href="/forgot-password"
+              className="rounded-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            >
+              {t('auth.login.forgotPassword')}
+            </Link>
+          </p>
+        ) : null}
         {mode === 'register' && (inviteOnly || initialInviteCode) ? (
           <InviteField value={inviteCode} onChange={setInviteCode} required={inviteOnly} />
         ) : null}

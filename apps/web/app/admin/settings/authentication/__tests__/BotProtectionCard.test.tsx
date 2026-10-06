@@ -15,7 +15,7 @@ const NOTICES: PrivacyNoticeSet[] = [
 function settings(overrides: Partial<AdminCaptchaSettings> = {}): AdminCaptchaSettings {
   return {
     provider: 'altcha',
-    surfaces: { register: 'on', invite_register: 'off', guest: 'on', login: 'adaptive' },
+    surfaces: { register: 'on', invite_register: 'off', guest: 'on', login: 'adaptive', password_reset: 'on' },
     siteKey: null,
     secretSet: false,
     secretHint: null,
@@ -138,7 +138,7 @@ describe('BotProtectionCard', { timeout: 20_000 }, () => {
     expect(putBodies()).toEqual([
       {
         provider: 'turnstile',
-        surfaces: { register: 'on', invite_register: 'off', guest: 'on', login: 'adaptive' },
+        surfaces: { register: 'on', invite_register: 'off', guest: 'on', login: 'adaptive', password_reset: 'on' },
         siteKey: '0x4AAA',
         secretKey: 'top-secret',
         options: current.options,
@@ -229,6 +229,30 @@ describe('BotProtectionCard', { timeout: 20_000 }, () => {
       options: { loginFailureThreshold: 10, altchaDifficulty: 'hard' },
       attackMode: true,
     });
+  });
+
+  it('has the password-reset surface, on by default, and saves it', async () => {
+    await loaded();
+    const toggle = screen.getByRole('checkbox', { name: /Password reset/ });
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole('button', { name: 'Save bot protection' }));
+    await waitFor(() => expect(putBodies()).toHaveLength(1));
+    expect(putBodies()[0].surfaces).toEqual({
+      register: 'on',
+      invite_register: 'off',
+      guest: 'on',
+      login: 'adaptive',
+      password_reset: 'off',
+    });
+  });
+
+  it('reads an answer without the password-reset surface as on (an older server)', async () => {
+    current = settings();
+    const legacy = { ...current, surfaces: { register: 'on', invite_register: 'off', guest: 'on', login: 'adaptive' } };
+    fetchMock.mockImplementationOnce(async () => json(legacy));
+    await loaded();
+    expect(screen.getByRole('checkbox', { name: /Password reset/ })).toBeChecked();
   });
 
   it('turning protection off disables what depends on it', async () => {

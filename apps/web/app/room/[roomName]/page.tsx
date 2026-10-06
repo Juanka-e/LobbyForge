@@ -36,6 +36,7 @@ import {
 import { resolveBrowserLiveKitUrl } from '@/lib/public-endpoints';
 import { GuestVerificationDialog } from '@/components/captcha/GuestVerificationDialog';
 import { readCaptchaRefusal } from '@/components/captcha/types';
+import { handleEmailUnverified } from '@/components/email-verification/email-status-store';
 import { getPlugin } from '@/lib/plugin-registry';
 import { useT } from '@/lib/i18n/client';
 import type { Translator } from '@/lib/i18n/core';
@@ -212,6 +213,10 @@ function RoomView({ roomName }: { roomName: string }) {
         if (!res.ok) {
           // The server's own error is shown as-is; ours only when it sent none.
           const detail = (await res.json().catch(() => ({}))) as { error?: string };
+          // EMAIL.md §4.2: said in the viewer's language, not the route's code.
+          if (handleEmailUnverified(res.status, detail)) {
+            throw new Error(tRef.current('emailVerification.restricted.action.voice'));
+          }
           throw new Error(detail.error ?? tRef.current('room.error.token', { status: res.status }));
         }
         const token = (await res.json()) as Token;

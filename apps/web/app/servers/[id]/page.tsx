@@ -30,6 +30,8 @@ import type { Translator } from '@/lib/i18n/core';
 import SettingsModalFrame from '../../SettingsModalFrame';
 import { rich } from '@/lib/i18n/rich';
 import { pluginSummary } from '@/lib/plugin-catalog-text';
+import { RESTRICTED_ACTION_KEYS } from '@/components/email-verification/email-status';
+import { handleEmailUnverified } from '@/components/email-verification/email-status-store';
 
 type Channel = {
   id: string;
@@ -180,10 +182,14 @@ function trustLabel(t: Translator, level: string): string {
 
 const VALID_TABS: Tab[] = ['overview', 'apps', 'access', 'bots', 'roles', 'invites', 'audit'];
 
+/** EMAIL.md §4.2: the action needs a verified email — callers say so in words. */
+class EmailUnverifiedError extends Error {}
+
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { credentials: 'same-origin', ...init });
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}));
+    if (handleEmailUnverified(res.status, detail)) throw new EmailUnverifiedError('email_unverified');
     throw new Error(`HTTP ${res.status} ${JSON.stringify(detail)}`);
   }
   return (await res.json()) as T;
@@ -485,7 +491,9 @@ function Overview({
       setCreateOpen(false);
       await onChanged();
     } catch (err) {
-      setCreateError((err as Error).message);
+      setCreateError(
+        err instanceof EmailUnverifiedError ? t(RESTRICTED_ACTION_KEYS.createChannel) : (err as Error).message
+      );
       throw err;
     } finally {
       setCreating(false);
@@ -1018,7 +1026,11 @@ function InvitesPanel({
         });
         await onChanged();
       } catch (err) {
-        alert(t('hub.servers.invites.createFailed', { error: (err as Error).message }));
+        alert(
+          err instanceof EmailUnverifiedError
+            ? t(RESTRICTED_ACTION_KEYS.createInvite)
+            : t('hub.servers.invites.createFailed', { error: (err as Error).message })
+        );
       } finally {
         setBusy(false);
       }

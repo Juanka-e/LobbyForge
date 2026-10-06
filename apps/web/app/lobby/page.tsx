@@ -50,6 +50,10 @@ import { LobbyJoinRequestActions } from './LobbyJoinRequestActions';
 import DmLinkSection from './DmLinkSection';
 import MobileNav from './MobileNav';
 import { BlockListProvider } from './BlockListProvider';
+import EmailVerificationBanner from '@/components/email-verification/EmailVerificationBanner';
+import { EmailStatusSeed } from '@/components/email-verification/email-status-store';
+import type { EmailStatus } from '@/components/email-verification/email-status';
+import { emailStatusForPage } from '@/lib/email-status-ssr';
 import { isLobbyDemoAllowed } from '@/lib/lobby-mode';
 import { canReadLobbyChannelMessages, resolveLobbyChannelView } from '@/lib/lobby-channel-access';
 import { listVoiceModerationTargets } from '@/lib/voice-moderation-targets';
@@ -818,6 +822,9 @@ export default async function LobbyPage({
     }
   }
 
+  // Read now, so the verification banner is in the first paint (no jump).
+  const emailStatus = hasUser ? await emailStatusForPage(userId) : null;
+
   return (
     <LobbyShell
       serverName={data.serverName}
@@ -825,6 +832,7 @@ export default async function LobbyPage({
       hasUser={hasUser}
       data={data}
       initialDm={initialDm}
+      emailStatus={emailStatus}
     />
   );
 }
@@ -917,6 +925,7 @@ function LobbyShell({
   hasUser,
   data,
   initialDm,
+  emailStatus,
 }: {
   serverName: string;
   isOfficial: boolean;
@@ -924,6 +933,8 @@ function LobbyShell({
   data: LobbyData;
   /** Conversation to open on first paint (from a /dm/<id> deep link). */
   initialDm: { channelId: string; name: string; avatarUrl: string | null } | null;
+  /** The account's email status, read on the server (undefined: the banner asks). */
+  emailStatus?: EmailStatus | null;
 }) {
   // LiveKit is only wired in live mode - demo mode keeps the legacy
   // SSR-only ChannelGroup + VoiceControlFooter so the demo render path
@@ -963,7 +974,16 @@ function LobbyShell({
           voiceProvider={canVoiceConnect}
         />
       </MobileNav>
-      <LobbyMainArea data={data} canVoice={canVoiceConnect} />
+      {/* The centre column. The email-verification banner (EMAIL.md §4.3)
+          sits on top of it, above whichever view the column shows, so it
+          never becomes a page of its own. The inner row keeps the views'
+          own `flex-1` working exactly as before. */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        {hasUser ? <EmailVerificationBanner enabled variant="lobby" /> : null}
+        <div className="flex min-h-0 flex-1">
+          <LobbyMainArea data={data} canVoice={canVoiceConnect} />
+        </div>
+      </div>
       {data.isLive && data.serverId ? (
         <LobbyMembersClient
           serverId={data.serverId}
@@ -980,6 +1000,9 @@ function LobbyShell({
   );
 
   return (
+    // The server-read email status reaches every lock in the lobby (banner,
+    // composer, voice list) for the first paint.
+    <EmailStatusSeed status={emailStatus}>
     <div className="flex w-full h-dvh bg-surface-dim overflow-hidden">
       {canVoiceConnect ? (
         <BlockListProvider>
@@ -999,6 +1022,7 @@ function LobbyShell({
         shell
       )}
     </div>
+    </EmailStatusSeed>
   );
 }
 

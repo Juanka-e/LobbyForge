@@ -11,7 +11,20 @@
  * is hub chrome on the official hub and its own standalone frame on a
  * self-hosted instance (`app/(developers)/layout.tsx`).
  */
-const OWN_CHROME_EXACT = new Set(['/landing', '/home', '/download', '/marketplace', '/register', '/login', '/setup', '/developers']);
+const OWN_CHROME_EXACT = new Set([
+  '/landing',
+  '/home',
+  '/download',
+  '/marketplace',
+  '/register',
+  '/login',
+  // Account recovery and email links draw the sign-in card (app/login/AuthFlowFrame.tsx).
+  '/forgot-password',
+  '/reset-password',
+  '/verify-email',
+  '/setup',
+  '/developers',
+]);
 const OWN_CHROME_PREFIXES = ['/lobby', '/admin', '/settings', '/servers/', '/developers/'];
 
 /**

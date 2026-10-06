@@ -36,6 +36,7 @@ the approval queue stay in place, and phase 0 (§7) adds more.
 | `invite_register` | `POST /api/auth/register` with an invite code — **on invite-only instances only** (see below) | off | `on`, `off` |
 | `guest` | `POST /api/auth/guest` when it would create a **new** guest identity (no valid guest cookie) | on | `on`, `off` |
 | `login` | `POST /api/auth/login`, `POST /api/auth/desktop-session` | adaptive | `off`, `adaptive`, `always` |
+| `password_reset` | `POST /api/auth/password/forgot` (docs/EMAIL.md §4.3) | on | `on`, `off` |
 
 **Adaptive sign-in** asks for a challenge when any of these is true:
 - the account has at least `loginFailureThreshold` failures (default 3) in
@@ -58,6 +59,14 @@ is reused afterwards); requests without one are not looked up early.
 
 Refreshing an existing guest (the re-bind path, or a guest cookie that is
 still valid) never asks.
+
+**As implemented (added with email, docs/EMAIL.md):** `password_reset`
+protects the forgot-password form. It is a plain on/off surface like
+`register` (it gets a `formToken` from §4.1), on by default — also for a
+row saved before it existed: the 0045 column default has no
+`password_reset` key and the app fills in `on`. The route answers 503
+`mail_unavailable` before the challenge when no mail transport is
+configured (nothing to protect then).
 
 **An invite can only ADD protection** (changed after review): on an
 **open** instance `@everyone` may create invites, with no use limit, so a
@@ -83,7 +92,7 @@ of `invite_register` reads the registration mode and answers the same rule
 | Column | Type | Default |
 |---|---|---|
 | `captcha_provider` | text: `none`, `altcha`, `turnstile` or `recaptcha` | `altcha` |
-| `captcha_surfaces` | jsonb `{ register, invite_register, guest, login }` | `{"register":"on","invite_register":"off","guest":"on","login":"adaptive"}` |
+| `captcha_surfaces` | jsonb `{ register, invite_register, guest, login, password_reset }` | `{"register":"on","invite_register":"off","guest":"on","login":"adaptive"}` (a missing `password_reset` reads as `on`) |
 | `captcha_site_key` | text, nullable | null |
 | `captcha_secret_encrypted` | text, nullable (§3.3) | null |
 | `captcha_options` | jsonb (below) | `{}` |
@@ -184,7 +193,7 @@ over HTTPS, or — on a trusted LAN only — set
 - `provider` is what the client must render **now**. It is `altcha` while
   the external-provider breaker is open (§5).
 - `formToken` backs the minimum-fill-time check (§7). It is returned for
-  `register`, `invite_register` and `guest`.
+  `register`, `invite_register`, `guest` and `password_reset`.
 - `Cache-Control: no-store`.
 
 **As implemented:**
@@ -446,7 +455,7 @@ Network rules for the external providers:
   - provider choice (Off / ALTCHA built-in, recommended / Turnstile /
     reCAPTCHA);
   - site key and secret, write-only with a hint;
-  - the provider options and the four surfaces;
+  - the provider options and the five surfaces (`password_reset` added with email);
   - the login threshold;
   - the attack-mode switch, with the automatic state and when it ends;
   - "Test configuration": the server does a dummy siteverify and reports
@@ -470,7 +479,7 @@ this section.
 ```json
 {
   "provider": "altcha",
-  "surfaces": { "register": "on", "invite_register": "off", "guest": "on", "login": "adaptive" },
+  "surfaces": { "register": "on", "invite_register": "off", "guest": "on", "login": "adaptive", "password_reset": "on" },
   "siteKey": null,
   "secretSet": false,
   "secretHint": null,
@@ -488,6 +497,8 @@ this section.
 ```
 
 - `options` always comes back with the defaults filled in.
+- `surfaces` always has all five keys (`password_reset` was added with
+  email; a stored row without it reads as `on`).
 - `autoUntil` and `until` are ISO timestamps or null.
 
 `PUT /api/admin/captcha` takes
@@ -521,7 +532,9 @@ session or the emergency admin token):
 - Audit: written only when something changed, `metadata: { fields: [...] }`
   with the names among `provider`, `surfaces`, `siteKey`, `secretKey`,
   `options`, `attackMode` (making an option's default explicit is no
-  change). It is filed under the instance's first server (so it shows in
+  change). `surfaces.password_reset` is optional on write: a `PUT` without
+  it (a client that predates it) keeps the stored value — the update merges
+  the given surfaces over the current ones. It is filed under the instance's first server (so it shows in
   Admin → Audit, category "System"), `targetType: "instance"`, actor = the
   owner's account (null for the emergency token). Label and summary:
   `admin.audit.action.instance.captcha_updated`,

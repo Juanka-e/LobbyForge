@@ -4,6 +4,7 @@ import { redis } from '@/lib/redis';
 import { requireMaterializedSession } from '@/lib/api-auth';
 import { directoryInstanceIdError, directoryWritesUnavailable } from '@/lib/directory-verification';
 import { withApiSecurity } from '@/lib/security-headers';
+import { requireVerifiedEmail } from '@/lib/mail/verification';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -30,6 +31,9 @@ async function handleGet(req: Request): Promise<NextResponse> {
 
   const sessionResult = requireMaterializedSession(req);
   if (!sessionResult.ok) return sessionResult.response;
+  // docs/EMAIL.md §4.2: an unverified account in `required` mode may read, not do this.
+  const unverified = await requireVerifiedEmail(sessionResult.session.uid, 'directory_listing');
+  if (unverified) return unverified;
 
   const url = new URL(req.url);
   const instanceId = url.searchParams.get('instanceId') ?? '';

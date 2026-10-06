@@ -2,6 +2,55 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Email: verification, email change and password reset - 2026-10-05
+
+### Email (`docs/EMAIL.md`)
+- **One mail layer, one provider registry** (`apps/web/lib/mail/`).
+  - Every provider is a preset over a single transport interface. v1 ships SMTP through nodemailer 10.0.11 (exact pin; every advisory is fixed at or below 10.0.9).
+  - Presets, checked against each provider's docs:
+    - Professional: Amazon SES (default region eu-central-1) and Scaleway TEM.
+    - Free tiers: Brevo, SMTP2GO, Resend, Mailjet, Mailgun, Gmail.
+    - Custom SMTP.
+    - Mailpit for development (never offered on the official hub).
+  - Adding a provider means one registry entry plus its message keys; an HTTP API transport would be a new `transport` kind.
+- **Admin → Settings → Email:**
+  - the provider picker, with each free tier's limits, a KVKK note for relays abroad and a docs link;
+  - a write-only password (AES-256-GCM, through the new `lib/secret-box.ts` shared with CAPTCHA). Changing provider, host or username asks for it again, so a saved password never goes to another server;
+  - a daily limit;
+  - a test email with classified results;
+  - the verification mode and scope, and disposable-domain blocking with allow and block lists.
+  
+  `LOBBYFORGE_SMTP_*` / `LOBBYFORGE_MAIL_*` / `LOBBYFORGE_EMAIL_VERIFICATION` win over the database and show as locked.
+- **Email verification: `off` (default) / `optional` / `required`.**
+  - One email carries a 6-digit code (15 min, 5 attempts reserved atomically) and a link (24 h). The link's GET only shows a page; the button's POST verifies, so mail scanners can't use it up.
+  - A lobby banner offers code entry, resend with a countdown, and change email.
+  - **`required`:**
+    - it restricts only new accounts in scope (open sign-up by default; invite sign-ups are trusted like with CAPTCHA). It never restricts the owner, admins, guests, or accounts from before enforcement unless the admin sets a deadline;
+    - restricted accounts can read and manage their account, but not send messages or DMs, join voice, create servers, channels or invites, upload images, create bots or webhooks, add a join-request note, or publish on the hub. All of these answer `403 email_unverified`, and the UI shows a "verify" notice;
+    - it can't be saved without a passing test of the saved settings from the last 24 hours, or with no working transport.
+- **CAPTCHA:** an invisible Turnstile or reCAPTCHA that blocks now says "The security check failed. Reload the page and try again." instead of asking to complete a check that isn't on screen.
+- **Email change:**
+  - needs the current password;
+  - the code goes to the new address, and the old address gets a notice;
+  - other sessions are revoked;
+  - any pending reset is invalidated.
+- **Password reset** (`/forgot-password`, `/reset-password`, by link or code):
+  - it has a new CAPTCHA surface, `password_reset` (on by default);
+  - the answer is the same whether the account exists or not;
+  - the reset only works while the address is unchanged;
+  - it revokes every session and device cookie.
+  
+  Any password write deletes pending email changes and resets, so an attacker who started a change can't finish it after the owner resets.
+- **Rate limits:** sends are limited per account, per recipient address and per client address. Each send takes its limits atomically, and verification and change emails have separate cooldowns.
+- **Disposable domains:** a vendored CC0 list of about 9,200 domains, refreshed with `scripts/update-disposable-domains.mjs`.
+- **Doctor:** critical when `required` has no transport, or when sends keep failing; plus warnings for failed tests, near-limit sends and undecryptable passwords; hints for port 25, Gmail in production and missing SPF/DMARC.
+- **Migration 0046:**
+  - adds `users.email_verified_at` (backfilled from Google sign-ins whose Google address matches the account) and `users.signup_channel`;
+  - adds the `email_tokens` table;
+  - adds the mail settings on `instance_settings`.
+  
+  It is expand-only; nothing changes until an admin configures mail.
+
 ## [Unreleased] - Fixes from the full end-to-end pass - 2026-10-04
 
 - **Invites with an expiry redeem again.** The redeem locked the invite with a raw `tx.execute`, which returns `expires_at` as a string, so every invite with an expiry (redeem and sign-up through it) failed with a 500. The lock now goes through the query builder; the route logs unexpected failures (JSON-quoted, without the code). Real-Postgres test: valid → redeemed, expired → refused.

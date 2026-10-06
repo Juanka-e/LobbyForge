@@ -4,6 +4,10 @@ import { useMemo, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
 import type { Translator } from '@/lib/i18n/core';
 import { rich } from '@/lib/i18n/rich';
+import EmailUnverifiedNotice, {
+  handleEmailUnverified,
+  useEmailRestriction,
+} from '@/components/email-verification/EmailUnverifiedNotice';
 
 export interface InviteView {
   id: string;
@@ -49,6 +53,9 @@ export default function InvitesClient({
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
   const [busy, setBusy] = useState(false);
+  // EMAIL.md §4.2: creating invites needs a verified email in `required` mode.
+  const emailLock = useEmailRestriction();
+  const [emailRefused, setEmailRefused] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [pendingRevoke, setPendingRevoke] = useState<InviteView | null>(null);
 
@@ -109,6 +116,11 @@ export default function InvitesClient({
       });
       if (!res.ok) {
         const detail = (await res.json().catch(() => ({}))) as { error?: string };
+        // EMAIL.md §4.2: explained by the notice below, not a raw error.
+        if (handleEmailUnverified(res.status, detail)) {
+          setEmailRefused(true);
+          return;
+        }
         throw new Error(detail.error ?? `HTTP ${res.status}`);
       }
       const data = (await res.json()) as { invite: Omit<InviteView, 'creatorName'> };
@@ -223,7 +235,7 @@ export default function InvitesClient({
           <button
             type="button"
             onClick={createInvite}
-            disabled={!canMutate || !serverId || busy}
+            disabled={!canMutate || !serverId || busy || emailLock.restricted}
             className="rounded-lg bg-primary-container px-4 py-2 text-sm font-semibold text-on-primary-container transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {busy ? t('adminSettings.invites.working') : t('adminSettings.invites.create')}
@@ -231,6 +243,9 @@ export default function InvitesClient({
         </div>
         {!canMutate ? (
           <p className="mt-3 text-xs text-text-muted">{t('adminSettings.invites.cannotMutate')}</p>
+        ) : null}
+        {canMutate && (emailLock.restricted || emailRefused) ? (
+          <EmailUnverifiedNotice action="createInvite" className="mt-3" />
         ) : null}
         {message ? <p className="mt-3 text-xs text-text-secondary">{message}</p> : null}
       </section>

@@ -4,6 +4,9 @@ import { useRef, useState } from 'react';
 import type { UserRow } from '@lobbyforge/db';
 import { ChangeAvatarModal } from '@/components/modals/ChangeAvatarModal';
 import { useT } from '@/lib/i18n/client';
+import { RESTRICTED_ACTION_KEYS } from '@/components/email-verification/email-status';
+import { handleEmailUnverified } from '@/components/email-verification/email-status-store';
+import EmailUnverifiedNotice, { useEmailRestriction } from '@/components/email-verification/EmailUnverifiedNotice';
 
 export default function ProfileBody({
   user,
@@ -26,6 +29,8 @@ export default function ProfileBody({
   const [bannerBusy, setBannerBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bannerInputRef = useRef<HTMLInputElement | null>(null);
+  // EMAIL.md §4.2: new avatar and banner images are uploads.
+  const emailLock = useEmailRestriction({ enabled: Boolean(user && !user.isGuest) });
 
   if (!user) {
     return (
@@ -47,6 +52,8 @@ export default function ProfileBody({
     });
     if (!res.ok) {
       const detail = (await res.json().catch(() => ({}))) as { error?: string };
+      // EMAIL.md §4.2 (uploads): explained in the viewer's language.
+      if (handleEmailUnverified(res.status, detail)) throw new Error(t(RESTRICTED_ACTION_KEYS.upload));
       throw new Error(detail.error ?? `HTTP ${res.status}`);
     }
     const body = (await res.json()) as { avatarUrl: string };
@@ -64,6 +71,7 @@ export default function ProfileBody({
       });
       if (!res.ok) {
         const detail = (await res.json().catch(() => ({}))) as { error?: string };
+        if (handleEmailUnverified(res.status, detail)) throw new Error(t(RESTRICTED_ACTION_KEYS.upload));
         throw new Error(detail.error ?? `HTTP ${res.status}`);
       }
       const body = (await res.json()) as { bannerUrl: string | null };
@@ -183,7 +191,7 @@ export default function ProfileBody({
               ) : null}
               <button
                 type="button"
-                disabled={bannerBusy}
+                disabled={bannerBusy || emailLock.restricted}
                 onClick={() => bannerInputRef.current?.click()}
                 className="rounded-md border border-white/20 bg-black/45 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-sm transition-colors hover:bg-black/60 disabled:opacity-50"
               >
@@ -209,12 +217,14 @@ export default function ProfileBody({
             <button
               type="button"
               onClick={() => setAvatarOpen(true)}
-              className="rounded-md border border-border-strong px-3 py-1.5 text-sm text-text-secondary hover:bg-surface-raised transition-colors"
+              disabled={emailLock.restricted}
+              className="rounded-md border border-border-strong px-3 py-1.5 text-sm text-text-secondary hover:bg-surface-raised transition-colors disabled:cursor-not-allowed disabled:opacity-50"
             >
               {t('settings.profile.changeAvatar')}
             </button>
           </div>
         </div>
+        {emailLock.restricted ? <EmailUnverifiedNotice action="upload" /> : null}
 
         <Section title={t('settings.nav.user.profile')}>
           <EditableRow

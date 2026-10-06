@@ -15,6 +15,7 @@ import {
   webhookPath,
   webhookPublicOrigin,
 } from '@/lib/bots/webhooks';
+import { requireVerifiedEmail } from '@/lib/mail/verification';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -46,6 +47,9 @@ async function handlePost(req: Request, ctx: RouteContext): Promise<NextResponse
   const { id: serverId, channelId } = await ctx.params;
   const auth = await requireWebhookManager(req, serverId, channelId);
   if (!auth.ok) return auth.response;
+  // docs/EMAIL.md §4.2: an unverified account in `required` mode may read, not do this.
+  const unverified = await requireVerifiedEmail(auth.manager.uid, 'webhook');
+  if (unverified) return unverified;
   const parsed = CreateSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return invalidBody(parsed.error.issues);
   const { channel } = auth.manager;
