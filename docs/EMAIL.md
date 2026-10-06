@@ -62,6 +62,10 @@ interface MailTransport {
 - The pooled transport (2 connections, 50 messages each) is also rebuilt
   every 10 minutes, so the host is resolved and checked again; a replaced
   one is closed 30 s later. The admin test uses a fresh unpooled transport.
+- The pool's cache key and the last-test fingerprint never take the
+  password: they use `authStamp`, the sealed value as stored (or `env`),
+  which changes whenever the password does. So a new password still
+  rebuilds the pool and invalidates the recorded test.
 - `MailTransport` also has `close()`. `send` answers
   `{ ok: true, messageId }` or `{ ok: false, result, detail?, permanent }`
   (the §5 codes; `permanent` = a 5xx reply).
