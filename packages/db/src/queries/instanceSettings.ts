@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
 import { instanceSettings, servers, users } from '../schema.js';
 import { createServer, type ServerRow } from './servers.js';
@@ -226,6 +226,234 @@ export async function setInstanceCaptchaSettings(
     .returning();
   if (!inserted) throw new Error('setInstanceCaptchaSettings: insert returned no rows');
   return toCaptchaSettings(inserted);
+}
+
+// ---- Email (0046, docs/EMAIL.md §3.1) --------------------------------------
+
+export type EmailVerificationModeSetting = 'off' | 'optional' | 'required';
+export const EMAIL_VERIFICATION_MODE_SETTINGS: readonly EmailVerificationModeSetting[] = ['off', 'optional', 'required'];
+export type SmtpSecuritySetting = 'tls' | 'starttls' | 'none';
+export const SMTP_SECURITY_SETTINGS: readonly SmtpSecuritySetting[] = ['tls', 'starttls', 'none'];
+
+/** The column defaults of 0046 — also what an instance without a settings row gets. */
+export const DEFAULT_EMAIL_VERIFICATION_SCOPE = Object.freeze({ open_register: true, invite_register: false }) as Readonly<{
+  open_register: boolean;
+  invite_register: boolean;
+}>;
+export const DEFAULT_DISPOSABLE_EMAIL_OVERRIDES = Object.freeze({ allow: [], block: [] }) as Readonly<{
+  allow: readonly string[];
+  block: readonly string[];
+}>;
+
+/**
+ * The stored mail + verification settings, as they are in the row. `scope`
+ * and `disposableOverrides` are raw JSON: the web app validates them (it
+ * owns the vocabulary). The SMTP password stays encrypted here; decrypting
+ * it needs the session secret, which this package never sees.
+ */
+export interface InstanceMailSettings {
+  instanceId: string;
+  /** A provider registry id (`ses`, `custom`, …) or `none`. */
+  provider: string;
+  region: string | null;
+  smtpHost: string | null;
+  smtpPort: number | null;
+  smtpSecurity: SmtpSecuritySetting | null;
+  smtpUsername: string | null;
+  smtpPasswordEncrypted: string | null;
+  mailFrom: string | null;
+  dailyLimit: number | null;
+  lastTestAt: Date | null;
+  lastTestResult: string | null;
+  /** HMAC of the connection the last test ran against (the web app computes it). */
+  lastTestFingerprint: string | null;
+  verificationMode: EmailVerificationModeSetting;
+  verificationScope: unknown;
+  enforcedSince: Date | null;
+  existingDeadline: Date | null;
+  disposableBlock: boolean;
+  disposableOverrides: unknown;
+  updatedAt: Date | null;
+}
+
+/** A partial update: `undefined` keeps the stored value, `null` clears a nullable one. */
+export interface SetInstanceMailSettingsInput {
+  instanceId?: string;
+  provider?: string;
+  region?: string | null;
+  smtpHost?: string | null;
+  smtpPort?: number | null;
+  smtpSecurity?: SmtpSecuritySetting | null;
+  smtpUsername?: string | null;
+  smtpPasswordEncrypted?: string | null;
+  mailFrom?: string | null;
+  dailyLimit?: number | null;
+  lastTestAt?: Date | null;
+  lastTestResult?: string | null;
+  lastTestFingerprint?: string | null;
+  verificationMode?: EmailVerificationModeSetting;
+  verificationScope?: Record<string, boolean>;
+  enforcedSince?: Date | null;
+  existingDeadline?: Date | null;
+  disposableBlock?: boolean;
+  disposableOverrides?: { allow: string[]; block: string[] };
+  now?: Date;
+}
+
+function toMailSettings(row: typeof instanceSettings.$inferSelect): InstanceMailSettings {
+  return {
+    instanceId: row.instanceId,
+    provider: row.mailProvider,
+    region: row.mailRegion,
+    smtpHost: row.smtpHost,
+    smtpPort: row.smtpPort,
+    smtpSecurity: (SMTP_SECURITY_SETTINGS as readonly string[]).includes(row.smtpSecurity ?? '')
+      ? (row.smtpSecurity as SmtpSecuritySetting)
+      : null,
+    smtpUsername: row.smtpUsername,
+    smtpPasswordEncrypted: row.smtpPasswordEncrypted,
+    mailFrom: row.mailFrom,
+    dailyLimit: row.mailDailyLimit,
+    lastTestAt: row.mailLastTestAt,
+    lastTestResult: row.mailLastTestResult,
+    lastTestFingerprint: row.mailLastTestFingerprint,
+    verificationMode: (EMAIL_VERIFICATION_MODE_SETTINGS as readonly string[]).includes(row.emailVerificationMode)
+      ? (row.emailVerificationMode as EmailVerificationModeSetting)
+      : 'off',
+    verificationScope: row.emailVerificationScope,
+    enforcedSince: row.emailVerificationEnforcedSince,
+    existingDeadline: row.emailVerificationExistingDeadline,
+    disposableBlock: row.disposableEmailBlock,
+    disposableOverrides: row.disposableEmailOverrides,
+    updatedAt: row.updatedAt,
+  };
+}
+
+/** The 0046 defaults: no transport, verification off. */
+export function defaultInstanceMailSettings(instanceId = DEFAULT_INSTANCE_ID): InstanceMailSettings {
+  return {
+    instanceId,
+    provider: 'none',
+    region: null,
+    smtpHost: null,
+    smtpPort: null,
+    smtpSecurity: null,
+    smtpUsername: null,
+    smtpPasswordEncrypted: null,
+    mailFrom: null,
+    dailyLimit: null,
+    lastTestAt: null,
+    lastTestResult: null,
+    lastTestFingerprint: null,
+    verificationMode: 'off',
+    verificationScope: { ...DEFAULT_EMAIL_VERIFICATION_SCOPE },
+    enforcedSince: null,
+    existingDeadline: null,
+    disposableBlock: false,
+    disposableOverrides: { allow: [], block: [] },
+    updatedAt: null,
+  };
+}
+
+/** The stored mail settings, or the 0046 defaults when there is no settings row yet. */
+export async function getInstanceMailSettings(
+  db: DbClient,
+  instanceId = DEFAULT_INSTANCE_ID
+): Promise<InstanceMailSettings> {
+  const [row] = await db
+    .select()
+    .from(instanceSettings)
+    .where(eq(instanceSettings.instanceId, instanceId))
+    .limit(1);
+  return row ? toMailSettings(row) : defaultInstanceMailSettings(instanceId);
+}
+
+/**
+ * Save the mail settings (a partial update — see the input type). Creates
+ * the settings row when it does not exist yet. Returns the stored result.
+ */
+export async function setInstanceMailSettings(
+  db: DbClient,
+  input: SetInstanceMailSettingsInput
+): Promise<InstanceMailSettings> {
+  const instanceId = input.instanceId ?? DEFAULT_INSTANCE_ID;
+  const now = input.now ?? new Date();
+  const values: Partial<typeof instanceSettings.$inferInsert> = { updatedAt: now };
+  if (input.provider !== undefined) values.mailProvider = input.provider;
+  if (input.region !== undefined) values.mailRegion = input.region;
+  if (input.smtpHost !== undefined) values.smtpHost = input.smtpHost;
+  if (input.smtpPort !== undefined) values.smtpPort = input.smtpPort;
+  if (input.smtpSecurity !== undefined) values.smtpSecurity = input.smtpSecurity;
+  if (input.smtpUsername !== undefined) values.smtpUsername = input.smtpUsername;
+  if (input.smtpPasswordEncrypted !== undefined) values.smtpPasswordEncrypted = input.smtpPasswordEncrypted;
+  if (input.mailFrom !== undefined) values.mailFrom = input.mailFrom;
+  if (input.dailyLimit !== undefined) values.mailDailyLimit = input.dailyLimit;
+  if (input.lastTestAt !== undefined) values.mailLastTestAt = input.lastTestAt;
+  if (input.lastTestResult !== undefined) values.mailLastTestResult = input.lastTestResult;
+  if (input.lastTestFingerprint !== undefined) values.mailLastTestFingerprint = input.lastTestFingerprint;
+  if (input.verificationMode !== undefined) values.emailVerificationMode = input.verificationMode;
+  if (input.verificationScope !== undefined) values.emailVerificationScope = input.verificationScope;
+  if (input.enforcedSince !== undefined) values.emailVerificationEnforcedSince = input.enforcedSince;
+  if (input.existingDeadline !== undefined) values.emailVerificationExistingDeadline = input.existingDeadline;
+  if (input.disposableBlock !== undefined) values.disposableEmailBlock = input.disposableBlock;
+  if (input.disposableOverrides !== undefined) values.disposableEmailOverrides = input.disposableOverrides;
+
+  const [updated] = await db
+    .update(instanceSettings)
+    .set(values)
+    .where(eq(instanceSettings.instanceId, instanceId))
+    .returning();
+  if (updated) return toMailSettings(updated);
+
+  const [inserted] = await db
+    .insert(instanceSettings)
+    .values({ instanceId, instanceName: DEFAULT_INSTANCE_NAME, ...values })
+    .onConflictDoUpdate({ target: instanceSettings.instanceId, set: values })
+    .returning();
+  if (!inserted) throw new Error('setInstanceMailSettings: insert returned no rows');
+  return toMailSettings(inserted);
+}
+
+/**
+ * Record the result of a test send against the SAVED configuration
+ * (docs/EMAIL.md §5), with the fingerprint of the configuration it tested:
+ * `required` unlocks only while the saved configuration still has that
+ * fingerprint. Does not touch `updated_at`: a test is not a change of
+ * settings. No-op when there is no settings row.
+ */
+export async function recordInstanceMailTest(
+  db: DbClient,
+  input: { result: string; fingerprint: string | null; at?: Date; instanceId?: string }
+): Promise<void> {
+  await db
+    .update(instanceSettings)
+    .set({ mailLastTestAt: input.at ?? new Date(), mailLastTestResult: input.result, mailLastTestFingerprint: input.fingerprint })
+    .where(eq(instanceSettings.instanceId, input.instanceId ?? DEFAULT_INSTANCE_ID));
+}
+
+/**
+ * `email_verification_enforced_since` is set the first time the mode is
+ * `required` (docs/EMAIL.md §3.1) and never moved afterwards. Sets it to
+ * `now` when it is still null, and returns the value in force (null when
+ * there is no settings row to write to).
+ */
+export async function ensureEmailVerificationEnforcedSince(
+  db: DbClient,
+  input: { now?: Date; instanceId?: string } = {}
+): Promise<Date | null> {
+  const instanceId = input.instanceId ?? DEFAULT_INSTANCE_ID;
+  const [updated] = await db
+    .update(instanceSettings)
+    .set({ emailVerificationEnforcedSince: input.now ?? new Date() })
+    .where(and(eq(instanceSettings.instanceId, instanceId), isNull(instanceSettings.emailVerificationEnforcedSince)))
+    .returning({ enforcedSince: instanceSettings.emailVerificationEnforcedSince });
+  if (updated) return updated.enforcedSince;
+  const [row] = await db
+    .select({ enforcedSince: instanceSettings.emailVerificationEnforcedSince })
+    .from(instanceSettings)
+    .where(eq(instanceSettings.instanceId, instanceId))
+    .limit(1);
+  return row?.enforcedSince ?? null;
 }
 
 function toMaintenanceStatus(row: typeof instanceSettings.$inferSelect): InstanceMaintenanceStatus {
@@ -534,6 +762,7 @@ export async function completeInitialBootstrap(
           email,
           passwordHash: input.ownerPasswordHash,
           isGuest: false,
+          signupChannel: 'setup',
           updatedAt: input.now ?? new Date(),
         })
         .where(eq(users.id, legacyOwner.id))
@@ -548,6 +777,7 @@ export async function completeInitialBootstrap(
           email,
           passwordHash: input.ownerPasswordHash,
           isGuest: false,
+          signupChannel: 'setup',
         })
         .returning({ id: users.id, displayName: users.displayName, email: users.email });
       if (!createdOwner?.email) throw new Error('Owner creation returned no row.');

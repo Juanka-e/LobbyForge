@@ -5,10 +5,10 @@
  * from the environment or hold state, so they are trivially mockable in
  * route-level tests and re-usable across web / desktop / future CLI.
  */
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
 import { isPgUniqueViolation } from '../pg-errors.js';
-import { membershipRoles, memberships, roles, servers, users } from '../schema.js';
+import { emailTokens, membershipRoles, memberships, roles, servers, users } from '../schema.js';
 import { redeemInvite, type RedeemInviteError } from './invites.js';
 import { EVERYONE_ROLE_NAME } from './roles.js';
 
@@ -71,7 +71,7 @@ const userColumnsWithoutImages = {
  */
 export async function findOrCreateGuestUser(
   db: DbClient,
-  input: { guestKey: string; displayName: string; locale?: string }
+  input: { guestKey: string; displayName: string; locale?: string; signupChannel?: 'oauth' }
 ): Promise<UserRowWithoutImages | null> {
   // Fast path: try the insert. On unique-constraint hit (returning guest),
   // fall through to the select.
@@ -80,6 +80,7 @@ export async function findOrCreateGuestUser(
     isGuest: true as const,
     guestKey: input.guestKey,
     locale: input.locale ?? 'en',
+    ...(input.signupChannel ? { signupChannel: input.signupChannel } : {}),
   };
 
   try {
@@ -199,21 +200,37 @@ export async function getUserCredentialsById(
   return (found as UserCredentials | undefined) ?? null;
 }
 
-/** Replace a password only if the credential verified by the caller is still current. */
+/**
+ * Replace a password only if the credential verified by the caller is still
+ * current. In the same transaction it drops the account's live email
+ * `change` and `reset` challenges (docs/EMAIL.md §4.1): an email change
+ * someone started with the old password must not survive the password
+ * change that was meant to throw them out.
+ */
 export async function replaceUserPasswordHash(
   db: DbClient,
   input: { userId: string; currentPasswordHash: string; newPasswordHash: string },
   now: Date = new Date()
 ): Promise<boolean> {
-  const updated = await db
-    .update(users)
-    .set({ passwordHash: input.newPasswordHash, updatedAt: now })
-    .where(and(
-      eq(users.id, input.userId),
-      eq(users.passwordHash, input.currentPasswordHash)
-    ))
-    .returning({ id: users.id });
-  return updated.length === 1;
+  return db.transaction(async (tx) => {
+    const updated = await tx
+      .update(users)
+      .set({ passwordHash: input.newPasswordHash, updatedAt: now })
+      .where(and(
+        eq(users.id, input.userId),
+        eq(users.passwordHash, input.currentPasswordHash)
+      ))
+      .returning({ id: users.id });
+    if (updated.length !== 1) return false;
+    await tx
+      .delete(emailTokens)
+      .where(and(
+        eq(emailTokens.userId, input.userId),
+        isNull(emailTokens.consumedAt),
+        inArray(emailTokens.purpose, ['change', 'reset'])
+      ));
+    return true;
+  });
 }
 
 export type CreateLocalAccountError =
@@ -251,6 +268,8 @@ export async function createLocalAccount(
     passwordHash: string;
     serverId?: string;
     inviteCode?: string;
+    /** docs/EMAIL.md §4.2 — 'invite' when an invite code is used, else 'open'. */
+    signupChannel?: 'open' | 'invite';
   }
 ): Promise<CreateLocalAccountResult> {
   try {
@@ -266,6 +285,7 @@ export async function createLocalAccount(
           displayName: input.displayName.trim(),
           passwordHash: input.passwordHash,
           isGuest: false,
+          signupChannel: input.signupChannel ?? (input.inviteCode ? 'invite' : 'open'),
         })
         .onConflictDoNothing({ target: users.email })
         .returning({ id: users.id, email: users.email, displayName: users.displayName });

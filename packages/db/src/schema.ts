@@ -8,6 +8,13 @@ const inet = customType<{ data: string }>({
   },
 });
 
+// Raw bytes (postgres.js reads and writes them as Buffer).
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType() {
+    return 'bytea';
+  },
+});
+
 // USERS TABLE
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -34,6 +41,17 @@ export const users = pgTable('users', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  // 0046 (docs/EMAIL.md §3.1): when the account proved it owns `email` —
+  // a verification code or link, an email change, a password reset, a
+  // Google sign-in that says the address is verified, or an admin.
+  // Null = not verified. Cleared when the address changes without proof.
+  emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
+  // 0046: how the account was created — 'open' (sign-up without an invite;
+  // every official hub sign-up), 'invite', 'oauth' or 'setup' (the first
+  // owner). Email verification restricts an account only when its channel
+  // is in the instance's verification scope (docs/EMAIL.md §4.2). Null =
+  // created before 0046 (the enforced_since / deadline rules apply).
+  signupChannel: text('signup_channel'),
 }, (table) => ({
   deletedIdx: index('idx_users_deleted').on(table.deletedAt).where(sql`deleted_at IS NOT NULL`),
   guestKeyIdx: index('idx_users_guest_key').on(table.guestKey).where(sql`guest_key IS NOT NULL`),
@@ -62,6 +80,34 @@ export const userIdentityLinks = pgTable('user_identity_links', {
     table.provider
   ),
   userIdx: index('idx_user_identity_links_user').on(table.userId),
+}));
+
+// 0046 (docs/EMAIL.md §3.1, §4.1): one proof-of-address challenge — a
+// link token and a 6-digit code sent together — for email verification,
+// an email change or a password reset. Only hashes are stored:
+// `token_hash` = sha256 of the 32 random link bytes, `code_hash` =
+// HMAC-SHA256 of the code under a key derived from the session secret with
+// the row id mixed in. At most one live (unconsumed) row per user and
+// purpose (the partial unique index); a new send replaces it. Consuming is
+// one conditional UPDATE (`consumed_at IS NULL AND expires_at > now()`).
+export const emailTokens = pgTable('email_tokens', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  purpose: text('purpose').notNull(),
+  targetEmail: text('target_email').notNull(),
+  tokenHash: bytea('token_hash').notNull(),
+  codeHash: bytea('code_hash').notNull(),
+  codeAttempts: integer('code_attempts').default(0).notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  codeExpiresAt: timestamp('code_expires_at', { withTimezone: true }).notNull(),
+  consumedAt: timestamp('consumed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  tokenHashUnique: uniqueIndex('email_tokens_token_hash_unique').on(table.tokenHash),
+  // A partial unique INDEX (not a constraint): one live row per user and purpose.
+  userPurposeActive: uniqueIndex('email_tokens_user_purpose_active_unique')
+    .on(table.userId, table.purpose)
+    .where(sql`consumed_at IS NULL`),
 }));
 
 // SERVERS TABLE
@@ -550,6 +596,33 @@ export const instanceSettings = pgTable('instance_settings', {
   captchaSecretEncrypted: text('captcha_secret_encrypted'),
   captchaOptions: jsonb('captcha_options').default({}).notNull(),
   captchaAttackMode: boolean('captcha_attack_mode').default(false).notNull(),
+  // 0046 email (docs/EMAIL.md §3.1). The SMTP password is stored only
+  // encrypted (`v1.<iv>.<ciphertext>.<tag>`, AES-256-GCM, key derived from
+  // the session secret) — the CHECK in the migration is the backstop.
+  // Environment overrides (LOBBYFORGE_MAIL_* / LOBBYFORGE_SMTP_* /
+  // LOBBYFORGE_EMAIL_VERIFICATION) win over these columns.
+  mailProvider: text('mail_provider').default('none').notNull(),
+  mailRegion: text('mail_region'),
+  smtpHost: text('smtp_host'),
+  smtpPort: integer('smtp_port'),
+  smtpSecurity: text('smtp_security'),
+  smtpUsername: text('smtp_username'),
+  smtpPasswordEncrypted: text('smtp_password_encrypted'),
+  mailFrom: text('mail_from'),
+  mailDailyLimit: integer('mail_daily_limit'),
+  mailLastTestAt: timestamp('mail_last_test_at', { withTimezone: true }),
+  mailLastTestResult: text('mail_last_test_result'),
+  // HMAC of the connection the last test ran against (host, port, user,
+  // password, from…): `required` unlocks only for exactly that configuration.
+  mailLastTestFingerprint: text('mail_last_test_fingerprint'),
+  emailVerificationMode: text('email_verification_mode').default('off').notNull(),
+  emailVerificationScope: jsonb('email_verification_scope')
+    .default({ open_register: true, invite_register: false })
+    .notNull(),
+  emailVerificationEnforcedSince: timestamp('email_verification_enforced_since', { withTimezone: true }),
+  emailVerificationExistingDeadline: timestamp('email_verification_existing_deadline', { withTimezone: true }),
+  disposableEmailBlock: boolean('disposable_email_block').default(false).notNull(),
+  disposableEmailOverrides: jsonb('disposable_email_overrides').default({ allow: [], block: [] }).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });

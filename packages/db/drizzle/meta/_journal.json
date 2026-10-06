@@ -309,6 +309,13 @@
       "when": 1786768000000,
       "tag": "0045_captcha",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1786854400000,
+      "tag": "0046_email",
+      "breakpoints": true
     }
   ]
 }
