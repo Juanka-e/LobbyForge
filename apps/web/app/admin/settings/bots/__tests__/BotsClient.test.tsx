@@ -154,14 +154,55 @@ describe('BotsClient', () => {
   it('explains a refused permission in the admin’s words', async () => {
     respond = () =>
       Response.json(
-        { error: 'You cannot give a bot permissions you do not have', code: 'ungrantable_permissions', permissions: ['read_audit_log'] },
+        { error: 'You cannot give a bot permissions you do not have', code: 'ungrantable_permissions', permissions: ['read_members'] },
         { status: 403 }
       );
     renderPage();
     fireEvent.change(screen.getByPlaceholderText('Announcer'), { target: { value: 'Spy' } });
-    fireEvent.click(screen.getByRole('checkbox', { name: /View the audit log/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Read member info/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Create bot' }));
-    await screen.findByText('You cannot give a bot permissions you do not have yourself: View the audit log.');
+    await screen.findByText('You cannot give a bot permissions you do not have yourself: Read member info.');
+  });
+
+  it('shows the seven "coming soon" permissions disabled, so they cannot be picked', () => {
+    renderPage();
+    const reserved = ['join_voice', 'publish_audio', 'read_presence', 'moderate_messages', 'manage_game_session', 'manage_music_queue', 'read_audit_log'];
+    const form = screen.getByRole('group', { name: 'Permissions' });
+    for (const permission of reserved) {
+      const label = form.querySelector<HTMLElement>(`[data-permission="${permission}"]`)!;
+      expect(label).toHaveAttribute('data-reserved', 'true');
+      expect(label).toHaveTextContent('(coming soon)');
+      const box = within(label).getByRole('checkbox');
+      expect(box).toBeDisabled();
+      expect(box).toHaveAccessibleDescription("Bots can't use this yet.");
+    }
+    expect(form.querySelectorAll('[data-reserved="true"]')).toHaveLength(7);
+    // Clicking a disabled box changes nothing.
+    fireEvent.click(within(form.querySelector<HTMLElement>('[data-permission="read_audit_log"]')!).getByRole('checkbox'));
+    expect(within(form.querySelector<HTMLElement>('[data-permission="read_audit_log"]')!).getByRole('checkbox')).not.toBeChecked();
+    // What the Bot API honours stays selectable.
+    expect(within(form).getByRole('checkbox', { name: /Use slash commands/ })).toBeEnabled();
+  });
+
+  it('lets a reserved permission a bot already has be removed, but not added back', async () => {
+    renderPage([bot({ permissions: ['send_messages', 'read_audit_log'] })]);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    const row = screen.getByTestId('custom-bot');
+    const audit = within(row).getByRole('checkbox', { name: /View the audit log/ });
+    expect(audit).toBeChecked();
+    expect(audit).toBeEnabled();
+    fireEvent.click(audit);
+    await waitFor(() => expect(within(row).getByRole('checkbox', { name: /View the audit log/ })).not.toBeChecked());
+    expect(within(row).getByRole('checkbox', { name: /View the audit log/ })).toBeDisabled();
+  });
+
+  it('says why a greeting with @everyone is refused, before sending it', async () => {
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Greeting'), { target: { value: 'Hey @everyone, {user} is here!' } });
+    fireEvent.click(within(screen.getByTestId('welcome-bot-card')).getByRole('button', { name: 'Save' }));
+    await screen.findByText("Bot messages can't mention @everyone or @here. Remove it and save again.");
+    expect(screen.queryByText('Some of these values are not valid. Check the fields and try again.')).toBeNull();
+    expect(calls).toHaveLength(0);
   });
 
   it('sets up the Welcome Bot with the chosen channel and greeting', async () => {

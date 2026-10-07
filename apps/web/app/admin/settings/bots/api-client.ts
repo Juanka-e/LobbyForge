@@ -1,5 +1,6 @@
 import type { Translator } from '@/lib/i18n/core';
 import type { BotJson } from '@/lib/bots/admin';
+import { MASS_MENTION_ISSUE } from '@/lib/bots/settings';
 import { RESTRICTED_ACTION_KEYS } from '@/components/email-verification/email-status';
 import { handleEmailUnverified } from '@/components/email-verification/email-status-store';
 
@@ -23,6 +24,27 @@ interface ErrorBody {
   code?: string;
   permissions?: string[];
   limit?: number;
+  /** `invalid_request`: "<path>: <reason>" per refused field (English). */
+  issues?: unknown;
+}
+
+/**
+ * A specific reason for an `invalid_request`, from its `issues`, when it is
+ * one the page can name: a template that pings @everyone/@here, or
+ * allow-list entries that are not domains. Null otherwise (the generic
+ * "Some of these values are not valid" stays the fallback).
+ */
+export function describeInvalidRequest(t: Translator, issues: unknown): string | null {
+  if (!Array.isArray(issues)) return null;
+  const texts = issues.filter((issue): issue is string => typeof issue === 'string');
+  if (texts.some((issue) => issue === MASS_MENTION_ISSUE || issue.endsWith(`: ${MASS_MENTION_ISSUE}`))) {
+    return t('bots.error.massMention');
+  }
+  const domains = texts
+    .map((issue) => /(?:^|: )Not a domain: (.+)$/.exec(issue)?.[1])
+    .filter((domain): domain is string => Boolean(domain));
+  if (domains.length > 0) return t('bots.moderation.invalidDomains', { domains: domains.join(', ') });
+  return null;
 }
 
 const PERMISSION_KEYS: Record<string, string> = {
@@ -70,7 +92,7 @@ export function describeFailure(t: Translator, status: number, body: ErrorBody):
     case 'builtin_permissions_fixed':
       return t('bots.error.builtinFixed');
     case 'invalid_request':
-      return t('bots.error.invalid');
+      return describeInvalidRequest(t, body.issues) ?? t('bots.error.invalid');
     default:
       break;
   }

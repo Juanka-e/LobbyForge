@@ -9,6 +9,7 @@ import { isOfficialDeployment } from '@/lib/deployment-mode';
 import { officialAuthDestination } from '@/lib/hub-routes';
 import { isGoogleOAuthConfigured } from '@/lib/oauth-google';
 import { getTranslator } from '@/lib/i18n/server';
+import { initialOf } from '@/lib/initial';
 import { signInReturnPath } from '@/lib/sign-in-return';
 import LoginForm from './LoginForm';
 import { loginErrorKey } from './login-errors';
@@ -72,7 +73,7 @@ export default async function LoginPage({
       <section className="w-full max-w-md rounded-lg border border-border-subtle bg-surface-raised p-6 md:p-8 shadow-lg">
         <div className="mb-7 flex items-center gap-3">
           <div className="size-11 rounded-lg bg-primary-container flex items-center justify-center font-bold text-on-primary-container">
-            {instanceName.charAt(0).toUpperCase()}
+            {initialOf(instanceName, { locale: t.locale })}
           </div>
           <div className="min-w-0">
             <p className="truncate text-sm text-text-muted">{t('auth.login.communityLabel')}</p>

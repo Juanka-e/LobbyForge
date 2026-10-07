@@ -9,6 +9,7 @@
  * route change is a change here only. Results carry the machine `code`;
  * the UI turns it into a sentence in the reader's language.
  */
+import { SHARED_REFUSAL_KEYS } from '../activity-refusal';
 import { INTERACTION_TTL_MS } from './catalog';
 import { parseChannelCommand, type ChannelCommand, type CommandOption, parseCommandOption } from './command-options';
 
@@ -176,6 +177,15 @@ export function invokeErrorKey(failure: Pick<RequestFailure, 'status' | 'code'>)
       return 'interactions.error.moderation';
     case 'rate_limited':
       return 'interactions.error.rateLimited';
+    case 'bot_offline':
+      return 'interactions.error.botOffline';
+    // A command that drives an activity is refused like the activity
+    // itself; the sentences are shared with the activities surface.
+    case 'session_ended':
+    case 'not_host':
+    case 'voice_required':
+    case 'activity_exists':
+      return SHARED_REFUSAL_KEYS[failure.code];
     default:
       break;
   }

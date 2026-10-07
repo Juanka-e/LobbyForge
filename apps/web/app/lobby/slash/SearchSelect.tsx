@@ -1,6 +1,8 @@
 'use client';
 
 import { useId, useState, type KeyboardEvent, type Ref } from 'react';
+import { useT } from '@/lib/i18n/client';
+import { initialOf } from '@/lib/initial';
 
 /**
  * A small searchable picker (combobox + listbox) for long lists — the
@@ -40,6 +42,7 @@ export function SearchSelect({
   inputRef?: Ref<HTMLInputElement>;
   noResults: string;
 }) {
+  const t = useT();
   const listboxId = useId();
   const selected = items.find((item) => item.id === value) ?? null;
   const [query, setQuery] = useState<string | null>(null);
@@ -139,7 +142,7 @@ export function SearchSelect({
                     // eslint-disable-next-line @next/next/no-img-element -- small same-origin avatar, like the mention list
                     <img src={item.avatarUrl} alt="" className="size-full object-cover" />
                   ) : (
-                    item.label.charAt(0).toUpperCase()
+                    initialOf(item.label, { locale: t.locale })
                   )}
                 </span>
                 <span className="min-w-0 flex-1">

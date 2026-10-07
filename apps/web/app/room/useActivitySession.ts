@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getRealtimeClient } from '@/lib/realtime-client';
 import { postActivityAction } from '@/lib/activity-action-retry';
+import { activityRefusalMessage, parseActivityRefusal } from '@/lib/activity-refusal';
+import { nextHostCheck, parseActivityHost, type ActivityHostState } from '@/lib/activity-host-view';
 import { useT } from '@/lib/i18n/client';
 
 /**
@@ -32,8 +34,16 @@ export interface ActivityDetail {
   pluginId: string;
   status: string;
   state: Record<string, unknown>;
+  /** The host: the creator until hosting moves (the server reports the current one). */
   createdBy: string | null;
   players: Array<{ userId: string; name?: string | null; status: string; score: number }>;
+  /** Where the host stands, for games played over voice; absent otherwise. */
+  host?: ActivityHostState | null;
+}
+
+/** A session GET body's `activity`, with `host` read defensively. */
+function toDetail(raw: ActivityDetail & { host?: unknown }): ActivityDetail {
+  return { ...raw, host: parseActivityHost(raw.host) };
 }
 
 const POLL_INTERVAL_MS = 5_000;
@@ -58,6 +68,25 @@ export function useActivitySession({
   // so a parent re-render doesn't tear down the subscription.
   const onEndedRef = useRef(onEnded);
   onEndedRef.current = onEnded;
+  // The subscription effect reads the translator without re-subscribing
+  // when the language changes.
+  const tRef = useRef(t);
+  tRef.current = t;
+  // The current subscription's re-read, for the host timer below.
+  const refreshRef = useRef<(() => Promise<void>) | null>(null);
+  // The due time the host timer last re-read for (see nextHostCheck).
+  const hostFiredForRef = useRef<number | null>(null);
+
+  /**
+   * A refusal as a sentence in the reader's language (never the server's
+   * English `error`). An ended session also hands the surface back to
+   * whoever shows the picker, so the message is the last thing it shows.
+   */
+  const refuse = useCallback((status: number, code: string | null) => {
+    const message = activityRefusalMessage({ status, code }, 'session');
+    setError(t(message.key, message.params));
+    if (code === 'session_ended') onEndedRef.current();
+  }, [t]);
 
   useEffect(() => {
     if (!serverId || !sessionId) {
@@ -76,32 +105,44 @@ export function useActivitySession({
           cache: 'no-store',
         });
         if (res.status === 404) {
-          if (!cancelled) onEndedRef.current();
+          if (!cancelled) {
+            // Gone for an ordinary reason: an older refusal ("Only the
+            // host can do that.") must not outlive the session.
+            setError(null);
+            onEndedRef.current();
+          }
           return;
         }
-        if (!res.ok) throw new Error(`Could not load the activity (${res.status})`);
+        if (!res.ok) {
+          if (!cancelled) setError(tRef.current('room.activity.error.load', { status: res.status }));
+          return;
+        }
         const data = (await res.json()) as { activity: ActivityDetail };
         if (!cancelled) {
-          setDetail(data.activity);
+          setDetail(toDetail(data.activity));
           setError(null);
         }
-      } catch (err) {
-        if (!cancelled) setError((err as Error).message);
+      } catch {
+        if (!cancelled) setError(tRef.current('room.activity.error.network'));
       }
     };
+    refreshRef.current = fetchOnce;
+    hostFiredForRef.current = null;
 
     const handleEvent = (raw: unknown) => {
       if (cancelled || !raw || typeof raw !== 'object') return;
-      const event = raw as Partial<ActivityDetail> & { type?: string };
+      const event = raw as Partial<ActivityDetail> & { type?: string; host?: unknown };
       if (event.type === 'snapshot' || event.id) {
-        setDetail({
+        setDetail((prev) => ({
           id: event.id ?? '',
           pluginId: event.pluginId ?? '',
           status: event.status ?? '',
           state: event.state ?? {},
           createdBy: event.createdBy ?? null,
           players: Array.isArray(event.players) ? event.players : [],
-        });
+          // A snapshot without `host` keeps the last one the GET reported.
+          host: 'host' in event ? parseActivityHost(event.host) : (prev?.host ?? null),
+        }));
         return;
       }
       if (event.status && event.state) {
@@ -151,12 +192,28 @@ export function useActivitySession({
 
     return () => {
       cancelled = true;
+      if (refreshRef.current === fetchOnce) refreshRef.current = null;
       unsubscribe?.();
       clearTimeout(firstCheck);
       clearInterval(transportTimer);
       if (pollTimer) clearInterval(pollTimer);
     };
   }, [serverId, sessionId]);
+
+  // Hosting moves (and a session becomes abandoned) lazily, when somebody
+  // touches the session. Re-read once at the earliest due moment so the
+  // hand-over happens even if nobody acts. Re-armed after every read (each
+  // read gives a new `host`); never a polling loop (see nextHostCheck).
+  const host = detail?.host ?? null;
+  useEffect(() => {
+    const next = nextHostCheck(host, Date.now(), hostFiredForRef.current);
+    if (!next) return;
+    const timer = setTimeout(() => {
+      hostFiredForRef.current = next.at;
+      void refreshRef.current?.();
+    }, next.delay);
+    return () => clearTimeout(timer);
+  }, [host]);
 
   const dispatch = useCallback(
     async (action: Record<string, unknown>): Promise<boolean> => {
@@ -179,28 +236,30 @@ export function useActivitySession({
           });
           if (current.ok) {
             const data = (await current.json()) as { activity: ActivityDetail };
-            setDetail(data.activity);
+            setDetail(toDetail(data.activity));
           }
           return true;
         }
         if (result.kind === 'error') {
           // A conflict gets here only once every retry lost the race too.
-          if (result.conflict) throw new Error(t('room.activity.conflict'));
-          throw new Error(result.error ?? `The action was rejected (${result.status})`);
+          if (result.conflict) setError(t('room.activity.conflict'));
+          else refuse(result.status, result.code);
+          return false;
         }
         const data = result.data as { activity: { state: Record<string, unknown>; status: string } };
         setDetail((prev) =>
           prev ? { ...prev, state: data.activity.state, status: data.activity.status } : prev
         );
         return true;
-      } catch (err) {
-        setError((err as Error).message);
+      } catch {
+        // fetch itself failed: no answer from the server at all.
+        setError(t('room.activity.error.network'));
         return false;
       } finally {
         setBusy(false);
       }
     },
-    [serverId, sessionId, t]
+    [serverId, sessionId, t, refuse]
   );
 
   const end = useCallback(async (): Promise<boolean> => {
@@ -213,18 +272,19 @@ export function useActivitySession({
         credentials: 'same-origin',
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `Could not end the activity (${res.status})`);
+        const refusal = parseActivityRefusal(res.status, await res.json().catch(() => ({})));
+        refuse(refusal.status, refusal.code);
+        return false;
       }
       onEndedRef.current();
       return true;
-    } catch (err) {
-      setError((err as Error).message);
+    } catch {
+      setError(t('room.activity.error.network'));
       return false;
     } finally {
       setBusy(false);
     }
-  }, [serverId, sessionId]);
+  }, [serverId, sessionId, t, refuse]);
 
   return { detail, error, busy, setError, dispatch, end };
 }

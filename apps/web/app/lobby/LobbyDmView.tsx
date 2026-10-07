@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { getRealtimeClient } from '@/lib/realtime-client';
 import { useT } from '@/lib/i18n/client';
+import { initialOf } from '@/lib/initial';
 import { useLobbyVoice, type ActiveDm } from './LobbyVoiceProvider';
 import {
   formatDaySeparator,
@@ -167,11 +168,11 @@ export function LobbyDmView({
     return out;
   }, [messages, t]);
 
-  const initial = dm.name.trim().charAt(0).toUpperCase() || '?';
+  const initial = initialOf(dm.name, { locale: t.locale });
 
   return (
     <main className="flex-1 flex flex-col bg-background min-w-0 relative text-[14px] animate-fade-in-up">
-      <header className="h-16 px-6 flex items-center justify-between border-b border-border-subtle bg-surface-dim/80 backdrop-blur-md z-10 sticky top-0 shadow-sm">
+      <header className="h-16 pl-16 pr-6 md:pl-6 flex items-center justify-between border-b border-border-subtle bg-surface-dim/80 backdrop-blur-md z-10 sticky top-0 shadow-sm">
         <div className="flex items-center gap-3 min-w-0">
           <div className="w-8 h-8 rounded-full bg-secondary-container flex items-center justify-center overflow-hidden flex-shrink-0">
             {dm.avatarUrl ? (
@@ -237,7 +238,7 @@ export function LobbyDmView({
                         // eslint-disable-next-line @next/next/no-img-element -- user avatar, may be a data URL
                         <img src={dm.avatarUrl} alt="" className="w-full h-full object-cover" />
                       ) : (
-                        author.charAt(0).toUpperCase()
+                        initialOf(author, { locale: t.locale })
                       )}
                     </div>
                     <div className="flex flex-col w-full min-w-0">

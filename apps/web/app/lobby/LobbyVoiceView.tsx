@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '@/lib/i18n/client';
+import { initialOf } from '@/lib/initial';
 import { useLobbyVoice, type LobbyVoiceParticipant } from './LobbyVoiceProvider';
 
 export function LobbyVoiceView({ channelId, channelName }: { channelId: string; channelName: string }) {
@@ -317,7 +318,7 @@ function VoiceOnlyStage({ participants }: { participants: LobbyVoiceParticipant[
               )}
               aria-hidden
             >
-              {participant.name.charAt(0).toUpperCase()}
+              {initialOf(participant.name, { locale: t.locale })}
             </div>
             <div className="flex max-w-full items-center gap-1.5 text-xs text-white/80">
               <span className="truncate font-medium">{participant.name}</span>
@@ -678,6 +679,7 @@ function ParticipantPlaceholder({
   large?: boolean;
   compact?: boolean;
 }) {
+  const t = useT();
   return (
     <div className="absolute inset-0 grid place-items-center bg-[#1a1d23]">
       <div className={cn(
@@ -685,7 +687,7 @@ function ParticipantPlaceholder({
         large ? 'size-20 text-2xl sm:size-24 sm:text-3xl' : compact ? 'size-11 text-sm' : 'size-14 text-lg sm:size-16 sm:text-xl',
         participant.isSpeaking && 'ring-emerald-400'
       )}>
-        {participant.name.charAt(0).toUpperCase()}
+        {initialOf(participant.name, { locale: t.locale })}
       </div>
     </div>
   );

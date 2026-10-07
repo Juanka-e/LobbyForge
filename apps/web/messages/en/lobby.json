@@ -12,6 +12,8 @@
   "lobby.dm.title": "Direct Messages",
   "lobby.meta.description": "Your self-hosted community in a single 1280px window.",
   "lobby.meta.title": "Standalone Lobby - LobbyForge",
+  "lobby.nav.close": "Close navigation menu",
+  "lobby.nav.label": "Servers and channels",
   "lobby.nav.open": "Open navigation menu",
   "lobby.presence.accountSettings": "Profile & account settings",
   "lobby.presence.dnd.description": "Visible, but asking not to be disturbed.",
@@ -124,5 +126,6 @@
   "lobby.voice.settingsAria": "Voice and video settings",
   "lobby.voice.timedOut": "Timed out",
   "lobby.voice.undeafen": "Undeafen",
+  "lobby.voice.unknownMember": "Unknown member",
   "lobby.voice.unmuted": "Unmuted"
 }

@@ -22,7 +22,12 @@ describe('lobby voice client integration', () => {
   });
 
   it('uses LiveKit participant names and no unsupported Room.getStats call', () => {
-    expect(source).toContain('p.name || knownNames[identity] || identity');
+    // The token's name first, then the names the page loaded — and never the
+    // raw identity (a late joiner showed as a user id).
+    expect(source).toContain('resolveParticipantName(identity, p.name, knownNames)');
+    expect(source).toContain('name: resolvedName ?? unknownName');
+    expect(source).not.toContain('|| identity,');
+    expect(source).toContain('RoomEvent.ParticipantNameChanged');
     expect(source).not.toContain('room.getStats()');
   });
 

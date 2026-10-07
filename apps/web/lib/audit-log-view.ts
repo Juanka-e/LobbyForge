@@ -37,6 +37,7 @@ export async function loadAuditEntries(
   for (const row of rows) {
     if (row.actorUserId) userIds.add(row.actorUserId);
     if (row.targetType === 'user' && row.targetId && UUID_RE.test(row.targetId)) userIds.add(row.targetId);
+    for (const id of Object.values(metadataUserIds(row))) userIds.add(id);
     const channelId = metadataChannelId(row);
     if (channelId) channelIds.add(channelId);
   }
@@ -48,6 +49,11 @@ export async function loadAuditEntries(
 
   return rows.map((row) => {
     const channelId = metadataChannelId(row);
+    const metadataNames: Record<string, string> = {};
+    for (const [field, id] of Object.entries(metadataUserIds(row))) {
+      const name = names.get(id);
+      if (name) metadataNames[field] = name;
+    }
     return {
       id: row.id,
       action: row.action,
@@ -57,9 +63,28 @@ export async function loadAuditEntries(
       actorName: row.actorUserId ? names.get(row.actorUserId) ?? null : null,
       targetName: row.targetType === 'user' && row.targetId ? names.get(row.targetId) ?? null : null,
       channelName: channelId ? channelNames.get(channelId) ?? null : null,
+      ...(Object.keys(metadataNames).length > 0 ? { metadataNames } : {}),
       createdAt: row.createdAt.toISOString(),
     };
   });
+}
+
+/**
+ * Members a row names in its metadata, by field — only for the actions
+ * whose summary reads them (`activity.host_transfer`: who had hosting,
+ * who got it). Display names only, like actors and targets.
+ */
+const METADATA_USER_FIELDS: Record<string, readonly string[]> = {
+  'activity.host_transfer': ['fromUserId', 'toUserId'],
+};
+
+function metadataUserIds(row: AuditLogRow): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const field of METADATA_USER_FIELDS[row.action] ?? []) {
+    const value = row.metadata?.[field];
+    if (typeof value === 'string' && UUID_RE.test(value)) out[field] = value;
+  }
+  return out;
 }
 
 function metadataChannelId(row: AuditLogRow): string | null {

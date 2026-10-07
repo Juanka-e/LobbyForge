@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { useContext, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { useT } from '@/lib/i18n/client';
+import { LobbyVoiceContext } from '../LobbyVoiceProvider';
 import type { Translator } from '@/lib/i18n/core';
 import {
   STRING_OPTION_MAX_LENGTH,
@@ -96,7 +97,11 @@ export function SlashCommandForm({
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [serverError, setServerError] = useState<string | null>(null);
+  // `activity_exists`: the voice channel whose running activity to offer.
+  const [existingActivityChannel, setExistingActivityChannel] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Optional: the composer also renders where no voice provider is mounted.
+  const voice = useContext(LobbyVoiceContext);
   const fields = useRef(new Map<string, HTMLElement>());
   const runButton = useRef<HTMLButtonElement | null>(null);
 
@@ -136,6 +141,7 @@ export function SlashCommandForm({
     }
     setSubmitting(true);
     setServerError(null);
+    setExistingActivityChannel(null);
     const result = await invokeCommand(serverId, channelId, command.id, check.values);
     setSubmitting(false);
     if (result.ok) {
@@ -162,6 +168,12 @@ export function SlashCommandForm({
     }
     // The command or its bot changed under us: the next `/` asks again.
     if (result.code && STALE_LIST_CODES.has(result.code)) invalidateChannelCommands(serverId, channelId);
+    if (result.code === 'activity_exists') {
+      // Offer the activity that is already running: in the channel the
+      // refusal names, else the voice channel this member is in.
+      const named = typeof result.body.channelId === 'string' ? result.body.channelId : null;
+      setExistingActivityChannel(named ?? voice?.activeChannelId ?? null);
+    }
     setServerError(
       result.code === 'blocked_by_moderation'
         ? t(moderationBlockedMessageKey(result.body.rule))
@@ -384,9 +396,29 @@ export function SlashCommandForm({
         )}
 
         {serverError ? (
-          <p role="alert" className="mx-3 mb-2 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
-            {serverError}
-          </p>
+          <div
+            role="alert"
+            className="mx-3 mb-2 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger"
+          >
+            <p>{serverError}</p>
+            {existingActivityChannel && voice ? (
+              <button
+                type="button"
+                onClick={() => {
+                  voice.openActivities({
+                    channelId: existingActivityChannel,
+                    channelName:
+                      channels.find((c) => c.id === existingActivityChannel)?.name ?? t('lobbyMain.channel.thisRoom'),
+                  });
+                  onCancel();
+                }}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border-strong bg-surface-raised px-2.5 py-1 text-xs font-medium text-text-primary transition-colors hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+              >
+                <span className="material-symbols-outlined text-[16px]" aria-hidden>stadia_controller</span>
+                {t('interactions.error.openActivity')}
+              </button>
+            ) : null}
+          </div>
         ) : null}
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border-subtle px-3 py-2">

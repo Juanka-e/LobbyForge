@@ -10,6 +10,7 @@ import { buttonOutline, buttonPrimary, focusRing } from '@/app/(marketing)/_comp
 import { isOfficialDeployment } from '@/lib/deployment-mode';
 import { getDb } from '@/lib/db';
 import type { Translator } from '@/lib/i18n/core';
+import { initialOf } from '@/lib/initial';
 import { getTranslator } from '@/lib/i18n/server';
 
 export const dynamic = 'force-dynamic';
@@ -90,7 +91,7 @@ export default async function InstanceDetailPage({
       {/* Identity */}
       <div className="flex flex-col gap-6 sm:flex-row sm:items-start">
         <div className="flex size-20 shrink-0 items-center justify-center rounded-[22px] bg-primary/10 font-display text-3xl font-bold text-primary">
-          {instance.name.charAt(0).toUpperCase()}
+          {initialOf(instance.name, { locale: t.locale })}
         </div>
         <div className="min-w-0 flex-grow">
           <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">

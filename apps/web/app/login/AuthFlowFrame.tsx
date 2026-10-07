@@ -5,6 +5,7 @@ import { HubLogo } from '@/app/(marketing)/_components/HubLogo';
 import { getDb } from '@/lib/db';
 import { isOfficialDeployment } from '@/lib/deployment-mode';
 import { getTranslator } from '@/lib/i18n/server';
+import { initialOf } from '@/lib/initial';
 
 /**
  * The frame of the account-recovery pages (`/forgot-password`,
@@ -35,7 +36,7 @@ export default async function AuthFlowFrame({ children }: { children: ReactNode 
       <section className="w-full max-w-md rounded-lg border border-border-subtle bg-surface-raised p-6 shadow-lg md:p-8">
         <div className="mb-7 flex items-center gap-3">
           <div className="flex size-11 items-center justify-center rounded-lg bg-primary-container font-bold text-on-primary-container">
-            {instanceName.charAt(0).toUpperCase()}
+            {initialOf(instanceName, { locale: t.locale })}
           </div>
           <div className="min-w-0">
             <p className="truncate text-sm text-text-muted">{t('auth.login.communityLabel')}</p>

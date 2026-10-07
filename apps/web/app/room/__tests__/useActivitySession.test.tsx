@@ -115,14 +115,54 @@ describe('useActivitySession dispatch under concurrent actions', () => {
     expect(result.current.error).toBe('Aynı anda çok fazla oyuncu hamle yaptı. Yeniden dene.');
   });
 
-  it('shows any other refusal at once, without retrying', async () => {
-    actionAnswers = [() => Response.json({ error: 'Activity has ended.' }, { status: 409 })];
+  it('shows any other refusal at once, without retrying — translated, never the server’s English', async () => {
+    actionAnswers = [() => Response.json({ error: 'Not the voting phase' }, { status: 409 })];
     const { result } = await mountSession();
     await act(async () => {
       await result.current.dispatch({ type: 'vote' });
     });
     expect(actionBodies).toHaveLength(1);
-    expect(result.current.error).toBe('Activity has ended.');
+    expect(result.current.error).toBe("That didn't work (error 409). Try again.");
+  });
+
+  it.each([
+    ['not_host', 403, 'en', 'Only the host can do that.'],
+    ['voice_required', 403, 'en', 'Join the voice channel to play.'],
+    ['voice_required', 403, 'tr', 'Oynamak için sesli kanala katıl.'],
+    ['rate_limited', 429, 'en', "You're going too fast. Wait a moment and try again."],
+    ['wrong_phase', 409, 'tr', 'Oyunun bu aşamasında bu yapılamaz.'],
+  ])('says the %s refusal in the reader’s language (%s, %s)', async (code, status, locale, text) => {
+    actionAnswers = [() => Response.json({ error: 'English from the server', code }, { status })];
+    const { result } = await mountSession(locale);
+    await act(async () => {
+      await result.current.dispatch({ type: 'vote' });
+    });
+    expect(result.current.error).toBe(text);
+  });
+
+  it('hands the surface back when the session has ended', async () => {
+    actionAnswers = [() => Response.json({ error: 'Activity has ended.', code: 'session_ended' }, { status: 409 })];
+    const onEnded = vi.fn();
+    const hook = renderHook(() => useActivitySession({ serverId: SERVER, sessionId: SESSION, onEnded }), {
+      wrapper: wrapper('en'),
+    });
+    await waitFor(() => expect(hook.result.current.detail?.state).toEqual({ round: 1 }), { timeout: 5000 });
+    await act(async () => {
+      await hook.result.current.dispatch({ type: 'vote' });
+    });
+    expect(hook.result.current.error).toBe('This activity has ended.');
+    expect(onEnded).toHaveBeenCalled();
+  });
+
+  it('says a network failure in words', async () => {
+    actionAnswers = [() => {
+      throw new TypeError('Failed to fetch');
+    }];
+    const { result } = await mountSession('tr');
+    await act(async () => {
+      await result.current.dispatch({ type: 'vote' });
+    });
+    expect(result.current.error).toBe('Sunucuya ulaşılamadı. Bağlantını kontrol et.');
   });
 
   it('re-reads the session when a retry turns out to be a duplicate', async () => {
@@ -136,4 +176,95 @@ describe('useActivitySession dispatch under concurrent actions', () => {
     expect(result.current.error).toBeNull();
     expect(actionBodies).toHaveLength(2);
   });
+});
+
+/**
+ * Hosting moves lazily on the server, when somebody touches the session.
+ * The hook re-reads once when a transfer (or abandonment) falls due, so it
+ * happens without anyone acting — one timer re-armed per read, no loop.
+ */
+describe('useActivitySession host hand-over', () => {
+  function stubDetails(answers: Array<() => Record<string, unknown>>) {
+    const reads: number[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url !== DETAIL) return Response.json({}, { status: 404 });
+        reads.push(Date.now());
+        const answer = answers[Math.min(reads.length - 1, answers.length - 1)]!;
+        return Response.json({ activity: answer() });
+      })
+    );
+    return reads;
+  }
+
+  const activity = (host: Record<string, unknown>, createdBy = 'u-old') => ({
+    id: SESSION,
+    pluginId: 'hushle',
+    status: 'running',
+    state: { phase: 'playing' },
+    createdBy,
+    players: [],
+    host,
+  });
+
+  it('re-reads when the transfer is due and shows the new host, then stops', async () => {
+    const reads = stubDetails([
+      // The host left a minute ago: the transfer is already due.
+      () =>
+        activity({
+          userId: 'u-old',
+          inVoice: false,
+          awaySince: new Date(Date.now() - 61_000).toISOString(),
+          transferAt: new Date(Date.now() - 1_000).toISOString(),
+          abandonAt: new Date(Date.now() + 119_000).toISOString(),
+          abandoned: false,
+        }),
+      // The re-read made the server hand over.
+      () => activity({ userId: 'u-new', inVoice: true, awaySince: null, transferAt: null, abandonAt: null, abandoned: false }, 'u-new'),
+    ]);
+    const hook = renderHook(() => useActivitySession({ serverId: SERVER, sessionId: SESSION, onEnded: () => {} }), {
+      wrapper: wrapper('en'),
+    });
+    await waitFor(() => expect(hook.result.current.detail?.host?.inVoice).toBe(false), { timeout: 5000 });
+    expect(reads).toHaveLength(1);
+
+    await waitFor(() => expect(hook.result.current.detail?.createdBy).toBe('u-new'), { timeout: 6000 });
+    expect(reads).toHaveLength(2);
+    expect(hook.result.current.detail?.host).toMatchObject({ userId: 'u-new', inVoice: true });
+
+    // The host is present now: nothing else is scheduled.
+    await new Promise((resolve) => setTimeout(resolve, 2_500));
+    expect(reads).toHaveLength(2);
+  }, 15_000);
+
+  it('does not loop when the server could not hand over yet', async () => {
+    const stuck = {
+      userId: 'u-old',
+      inVoice: false,
+      awaySince: new Date(Date.now() - 61_000).toISOString(),
+      transferAt: new Date(Date.now() - 1_000).toISOString(),
+      abandonAt: new Date(Date.now() + 119_000).toISOString(),
+      abandoned: false,
+    };
+    const reads = stubDetails([() => activity(stuck)]);
+    renderHook(() => useActivitySession({ serverId: SERVER, sessionId: SESSION, onEnded: () => {} }), {
+      wrapper: wrapper('en'),
+    });
+    await waitFor(() => expect(reads).toHaveLength(2), { timeout: 6000 });
+    // Same past transferAt again: the next re-read waits for abandonment (minutes away).
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    expect(reads).toHaveLength(2);
+  }, 15_000);
+
+  it('reads no host for a plugin that does not need voice, and schedules nothing', async () => {
+    const reads = stubDetails([() => ({ id: SESSION, pluginId: 'poll', status: 'running', state: {}, createdBy: 'u1', players: [] })]);
+    const hook = renderHook(() => useActivitySession({ serverId: SERVER, sessionId: SESSION, onEnded: () => {} }), {
+      wrapper: wrapper('en'),
+    });
+    await waitFor(() => expect(hook.result.current.detail?.pluginId).toBe('poll'), { timeout: 5000 });
+    expect(hook.result.current.detail?.host).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    expect(reads).toHaveLength(1);
+  }, 10_000);
 });

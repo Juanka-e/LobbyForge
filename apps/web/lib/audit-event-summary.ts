@@ -21,6 +21,11 @@ export interface AuditEntryView {
   targetName: string | null;
   /** Name of the channel in `metadata.channelId`, when the viewer may see that channel. */
   channelName: string | null;
+  /**
+   * Display names of members a row names in its metadata, by field
+   * (`activity.host_transfer`: `fromUserId`, `toUserId`). Absent when none.
+   */
+  metadataNames?: Record<string, string>;
   createdAt: string;
 }
 
@@ -90,9 +95,29 @@ export function auditEventSummary(t: Translator, entry: AuditEntryView): AuditSu
     }
     case 'user.email_verified_by_admin':
       return { key: 'admin.audit.event.emailVerifiedByAdmin', params, slots };
+    case 'activity.host_transfer': {
+      // The host left the activity's voice room and hosting moved on its
+      // own (lib/activity-host.ts). Names when known, else a short id; a
+      // session whose creator's account is gone had no host to name.
+      const to = memberLabel(entry, 'toUserId', meta.toUserId);
+      const from = memberLabel(entry, 'fromUserId', meta.fromUserId);
+      return {
+        key: from === null ? 'admin.audit.event.hostTransferNoHost' : 'admin.audit.event.hostTransfer',
+        params,
+        // The server always records `toUserId`; "?" only for a malformed row.
+        slots: { ...slots, from: from ?? '', to: to ?? '?' },
+      };
+    }
     default:
       return null;
   }
+}
+
+/** A member a row names in its metadata: their display name, else a short id; null without an id. */
+function memberLabel(entry: AuditEntryView, field: string, id: unknown): string | null {
+  const name = entry.metadataNames?.[field];
+  if (name) return name;
+  return typeof id === 'string' && id ? shortId(id) : null;
 }
 
 const CAPTCHA_FIELDS = ['provider', 'surfaces', 'siteKey', 'secretKey', 'options', 'attackMode'] as const;

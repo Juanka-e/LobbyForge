@@ -1,5 +1,6 @@
 import { initialsFor } from '@/lib/hub-format';
 import type { Translator } from '@/lib/i18n/core';
+import { initialOf } from '@/lib/initial';
 import tones from '../_components/hub-tones.module.css';
 
 /**
@@ -73,7 +74,7 @@ export default function CommunityPreview({ t }: { t: Translator }) {
               className="flex size-9 shrink-0 items-center justify-center rounded-full text-sm font-bold"
               style={{ backgroundColor: message.tint, color: INITIAL_INK }}
             >
-              {Array.from(message.name)[0]}
+              {initialOf(message.name, { locale: t.locale })}
             </span>
             <span className="flex min-w-0 flex-col gap-1">
               <span className="flex items-center gap-2 text-sm font-semibold text-text-primary">

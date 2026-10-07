@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
+import { initialOf } from '@/lib/initial';
 import JoinRequestsSection from './JoinRequestsSection';
 
 export interface MemberView {
@@ -473,7 +474,8 @@ function EmailStateBadge({ state }: { state: 'verified' | 'unverified' }) {
 }
 
 function Avatar({ name, url }: { name: string; url: string | null }) {
-  const initial = name.trim().charAt(0).toUpperCase() || '?';
+  const t = useT();
+  const initial = initialOf(name, { locale: t.locale });
   return (
     <div className="relative w-10 h-10 rounded-full bg-surface-variant border border-border-strong overflow-hidden flex items-center justify-center text-text-secondary font-label-sm">
       {url ? (

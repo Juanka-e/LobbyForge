@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
+import { initialOf } from '@/lib/initial';
 import { useLobbyVoice } from './LobbyVoiceProvider';
 
 interface DmChannelSummary {
@@ -63,6 +64,7 @@ export default function DmLinkSection({ currentUserId }: { currentUserId: string
               <button
                 key={ch.id}
                 type="button"
+                data-mobile-nav-close
                 aria-current={active ? 'page' : undefined}
                 onClick={() =>
                   voice.openDm({
@@ -82,7 +84,7 @@ export default function DmLinkSection({ currentUserId }: { currentUserId: string
                     // eslint-disable-next-line @next/next/no-img-element -- user avatar, may be a data URL
                     <img src={ch.otherUserAvatarUrl} alt="" className="w-full h-full object-cover" />
                   ) : (
-                    ch.otherUserDisplayName.charAt(0).toUpperCase()
+                    initialOf(ch.otherUserDisplayName, { locale: t.locale })
                   )}
                 </div>
                 <span className="truncate">{ch.otherUserDisplayName}</span>

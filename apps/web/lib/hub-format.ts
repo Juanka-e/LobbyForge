@@ -3,14 +3,19 @@
  * identity colour of each activity.
  */
 
-/** "Night Owls" → "NO", "hushle" → "H". Letters, not bytes: emoji and accents stay whole. */
+import { initialOf } from './initial';
+
+/**
+ * "Night Owls" → "NO", "hushle" → "H". Whole graphemes, not code units or
+ * code points: emoji, flags and accents stay whole (see `lib/initial.ts`).
+ */
 export function initialsFor(name: string, locale: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);
   const letters = words
     .slice(0, 2)
-    .map((word) => Array.from(word)[0] ?? '')
+    .map((word) => initialOf(word, { locale, fallback: '' }))
     .join('');
-  return letters ? letters.toLocaleUpperCase(locale) : '?';
+  return letters || '?';
 }
 
 /**

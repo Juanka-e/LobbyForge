@@ -22,11 +22,18 @@ export function containsMassMention(text: string): boolean {
   return /(^|[^\p{L}\p{N}_])@(everyone|here)(?![\p{L}\p{N}_])/iu.test(text.normalize('NFKC'));
 }
 
+/**
+ * The issue text a template with @everyone/@here is refused with. The admin
+ * page recognises it in the route's `issues` and says it in the admin's
+ * language (it never shows the English).
+ */
+export const MASS_MENTION_ISSUE = 'Templates cannot mention @everyone or @here';
+
 const templateSchema = z
   .string()
   .max(TEMPLATE_MAX_LENGTH)
   .transform((value) => value.trim())
-  .refine((value) => !containsMassMention(value), { message: 'Templates cannot mention @everyone or @here' })
+  .refine((value) => !containsMassMention(value), { message: MASS_MENTION_ISSUE })
   .transform((value) => (value ? value : null))
   .nullable();
 

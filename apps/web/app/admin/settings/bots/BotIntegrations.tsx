@@ -206,6 +206,17 @@ function ChannelAccessSection({
   const empty = mode === 'selected' && selected.length === 0;
   const disabled = !canMutate || saving || access === null;
 
+  // Any edit makes the last notice stale: "Saved" next to "Choose at least
+  // one channel." read as if the empty selection had been saved.
+  function changeMode(next: ChannelAccessMode) {
+    setNotice(null);
+    setMode(next);
+  }
+  function toggleChannel(channelId: string, checked: boolean) {
+    setNotice(null);
+    setSelected((current) => (checked ? [...current, channelId] : current.filter((id) => id !== channelId)));
+  }
+
   async function save() {
     setSaving(true);
     setNotice(null);
@@ -250,7 +261,7 @@ function ChannelAccessSection({
                   value={value}
                   checked={mode === value}
                   disabled={disabled}
-                  onChange={() => setMode(value)}
+                  onChange={() => changeMode(value)}
                   className="mt-0.5 size-4 accent-primary"
                 />
                 <span>
@@ -291,11 +302,7 @@ function ChannelAccessSection({
                             checked={checked}
                             disabled={disabled || locked}
                             aria-describedby={channel.roleGated ? hintId : undefined}
-                            onChange={(event) =>
-                              setSelected((current) =>
-                                event.target.checked ? [...current, channel.id] : current.filter((id) => id !== channel.id)
-                              )
-                            }
+                            onChange={(event) => toggleChannel(channel.id, event.target.checked)}
                             className="mt-0.5 size-4 accent-primary"
                           />
                           <span className="min-w-0">
@@ -352,8 +359,13 @@ function CommandsSection({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
-  const [editing, setEditing] = useState<{ id: string; all: boolean; channelIds: string[] } | null>(null);
+  const [editing, setEditingState] = useState<{ id: string; all: boolean; channelIds: string[] } | null>(null);
   const hasPermission = bot.permissions.includes('slash_commands');
+  // Editing a command's channels makes the last notice stale (see ChannelAccessSection).
+  function setEditing(next: { id: string; all: boolean; channelIds: string[] } | null) {
+    setNotice(null);
+    setEditingState(next);
+  }
 
   const load = useCallback(() => {
     setLoadError(null);
@@ -530,7 +542,8 @@ function CommandsSection({
                             { channelIds: editing.all ? null : editing.channelIds },
                             t('botAdmin.commands.channelsSaved', { command: command.name })
                           );
-                          if (ok) setEditing(null);
+                          // Close the editor but keep the "saved" notice.
+                          if (ok) setEditingState(null);
                         }}
                       >
                         {t('common.save')}
