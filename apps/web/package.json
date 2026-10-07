@@ -37,7 +37,7 @@
     "altcha": "3.2.3",
     "altcha-lib": "2.5.0",
     "clsx": "^2.1.1",
-    "drizzle-orm": "^0.45.2",
+    "drizzle-orm": "^0.45.3",
     "ioredis": "^5.11.1",
     "jose": "^5.9.6",
     "livekit-client": "^2.5.7",
