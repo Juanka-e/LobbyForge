@@ -16,7 +16,7 @@ All notable changes to the LobbyForge monorepo skeleton.
 - **`lfctl`:** a release manifest's `version` and `minimumVersion` must be strict semver as soon as the manifest is loaded, and `.env.prod` writes refuse multi-line values.
 - **Toolchain:** ESLint 10, typescript-eslint 8.71, Vitest 5, React 19.3. Node 22.13 or later is now required to develop (`engines`).
 - **CI:** actions/checkout v7, actions/setup-node v7 and tauri-action v1, still pinned to commit SHAs.
-- **zod stays on 3.x for now.** Moving to zod 4 changes the validation messages clients receive and needs its own migration, so Dependabot ignores zod major versions until then.
+- **zod stays on 3.x for now.** Moving to zod 4 changes the validation messages clients receive and needs its own migration, so Dependabot ignores zod major versions until then. The plan and the trial-upgrade findings are in `docs/ZOD4_MIGRATION.md`.
 
 ## [Unreleased] - Email: verification, email change and password reset - 2026-10-05
 
