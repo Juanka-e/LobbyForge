@@ -28,6 +28,19 @@ updates:
       # delete this rule in the PR that does it.
       - dependency-name: "zod"
         update-types: ["version-update:semver-major"]
+      # tailwind-merge 3 supports only Tailwind CSS 4 and we're on 3.4.
+      # Against Tailwind 3 class names it merges wrongly, e.g. `cn("bg-red-500
+      # bg-opacity-50")` loses the background colour. Move it in the same PR as
+      # the Tailwind 4 migration, and delete this rule there.
+      - dependency-name: "tailwind-merge"
+        update-types: ["version-update:semver-major"]
+      # @types/node has to match the Node we run: 22 LTS in the Dockerfile,
+      # in CI's setup-node and in `engines`. Newer types would let code
+      # type-check against APIs Node 22 doesn't have. 22.x updates still
+      # arrive. When the runtime moves to a new LTS, raise this bound in that
+      # same PR.
+      - dependency-name: "@types/node"
+        versions: [">=23"]
 
   - package-ecosystem: "docker"
     directory: "/"
@@ -53,6 +66,10 @@ updates:
       # upload and download are released as a pair (upload v7 with download v8).
       artifacts:
         patterns: ["actions/upload-artifact", "actions/download-artifact"]
+      # setup-buildx, login, metadata and build-push work together in the
+      # image publish job; test and merge their majors as one change.
+      docker:
+        patterns: ["docker/*"]
   - package-ecosystem: "docker-compose"
     directory: "/infra/docker"
     schedule:
