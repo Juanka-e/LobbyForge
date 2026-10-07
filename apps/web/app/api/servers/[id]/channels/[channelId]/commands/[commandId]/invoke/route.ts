@@ -24,6 +24,7 @@ import { commandAllowedInChannel, freeTextOf, readCommandOptions, validateOption
 import { dispatchInteractionCreate, sweepExpiredInteractions } from '@/lib/bots/interactions';
 import { moderateMessage, moderationBlockedBody } from '@/lib/bots/moderation';
 import { botHasPermission } from '@/lib/bots/permissions';
+import { botCanReceiveInteractions } from '@/lib/bots/reachability';
 import { requireVerifiedEmail } from '@/lib/mail/verification';
 
 export const dynamic = 'force-dynamic';
@@ -55,9 +56,11 @@ const UNAVAILABLE = () => error(404, 'command_not_available', 'This command is n
  * `slash_commands` and reaches the channel; the options validate against
  * the stored schema — `user` options must be members of the server and
  * `channel` options channels the member can see. Free-text options go
- * through the Moderation Bot's content rules like a message. Then the
- * interaction row is written and delivered to the bot's stream and
- * endpoint. 20 runs per minute per member.
+ * through the Moderation Bot's content rules like a message. The bot must
+ * be reachable — a live event-stream connection or an HTTP event endpoint
+ * for interactions — or the run is refused with 409 `bot_offline` and
+ * nothing is written. Then the interaction row is written and delivered to
+ * the bot's stream and endpoint. 20 runs per minute per member.
  */
 async function handlePost(req: Request, ctx: RouteContext): Promise<NextResponse> {
   const { id: serverId, channelId, commandId } = await ctx.params;
@@ -154,7 +157,14 @@ async function handlePost(req: Request, ctx: RouteContext): Promise<NextResponse
     }
   }
 
-  // 7. Record and deliver.
+  // 7. Somebody must be there to answer: a live event-stream connection or
+  //    an HTTP event endpoint. Otherwise say so now — not with a
+  //    "thinking…" row that expires 15 minutes later — and write nothing.
+  if (!(await botCanReceiveInteractions(bot))) {
+    return error(409, 'bot_offline', 'The bot behind this command is offline', { bot: { id: bot.id, name: bot.name } });
+  }
+
+  // 8. Record and deliver.
   const now = new Date();
   void sweepExpiredInteractions(bot.id, now);
   const interaction = await createBotInteraction(

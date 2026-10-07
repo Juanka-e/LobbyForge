@@ -47,6 +47,13 @@ describe('action policies', () => {
     }
   });
 
+  it('watching needs the voice room; only leaving works from outside it', () => {
+    const policies = watchPartyPlugin.actionPolicies!;
+    for (const type of WATCH_PARTY_ACTION_TYPES) {
+      expect(policies[type]?.allowOutsideVoice === true, type).toBe(type === 'leave');
+    }
+  });
+
   it('validates the normalized action the host builds', () => {
     expect(watchPartyPlugin.validateAction?.({ type: 'queue-add', actorId: 'u1', url: 'https://youtu.be/aaaaaaaaaaa' })).toBeNull();
     expect(watchPartyPlugin.validateAction?.({ type: 'queue-add', actorId: 'u1', url: 'https://vimeo.com/1' })).toMatch(/YouTube/);

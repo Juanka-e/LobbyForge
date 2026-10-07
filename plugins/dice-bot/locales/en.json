@@ -1,4 +1,5 @@
 {
+  "catalog.name": "Dice Bot",
   "catalog.summary": "Dice rolls with per-player stats for voice rooms.",
   "dice.die.name": "d{sides}",
   "dice.history.empty": "No rolls yet.",

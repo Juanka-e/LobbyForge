@@ -10,16 +10,20 @@ import {
 } from '../constants';
 import {
   LINK_ERROR,
+  LINK_TOO_LONG_ERROR,
   WATCH_PARTY_ACTION_TYPES,
   canControlPlayback,
   isHostAway,
   positionAt,
   queueRefusal,
   validateWatchPartyAction,
+  watchPartyHostChange,
   watchPartyReducer,
   type WatchPartyAction,
 } from '../reducer';
 import { createWatchPartyInitialState, type WatchPartyItem, type WatchPartyState } from '../state';
+import { YOUTUBE_URL_MAX_LENGTH } from '../youtube';
+import { watchPartyPlugin } from '../index';
 
 const T0 = 1_700_000_000_000;
 const HOST = 'host-1';
@@ -125,6 +129,17 @@ describe('validateWatchPartyAction', () => {
 
   it('explains which links work', () => {
     expect(validateWatchPartyAction({ type: 'queue-add', actorId: ANA, url: 'https://example.com' })).toBe(LINK_ERROR);
+  });
+
+  it('says a link is too long — not "not a YouTube link" — when it is over the limit', () => {
+    const long = `https://youtu.be/${ID_A}?si=${'a'.repeat(YOUTUBE_URL_MAX_LENGTH)}`;
+    expect(validateWatchPartyAction({ type: 'queue-add', actorId: ANA, url: long })).toBe(LINK_TOO_LONG_ERROR);
+    expect(validateWatchPartyAction({ type: 'set-video', actorId: HOST, url: long })).toBe(LINK_TOO_LONG_ERROR);
+    expect(LINK_TOO_LONG_ERROR).toContain(String(YOUTUBE_URL_MAX_LENGTH));
+    // At the limit it is judged on what it is.
+    const atLimit = `https://youtu.be/${ID_A}?si=`.padEnd(YOUTUBE_URL_MAX_LENGTH, 'a');
+    expect(atLimit).toHaveLength(YOUTUBE_URL_MAX_LENGTH);
+    expect(validateWatchPartyAction({ type: 'queue-add', actorId: ANA, url: atLimit })).toBeNull();
   });
 });
 
@@ -582,6 +597,50 @@ describe('host changes', () => {
     const next = act(party({ viewers, hostId: 'u0' }), { type: 'take-host', actorId: 'moderator' }, T0 + 2);
     expect(next.viewers).toHaveLength(VIEWERS_MAX + 1);
     expect(isHostAway(next, T0 + 3)).toBe(false);
+  });
+});
+
+describe('watchPartyHostChange — the session host moved (host left the voice room)', () => {
+  it('the party follows when its host was the old session host', () => {
+    const next = watchPartyHostChange(party(), { previousHostId: HOST, nextHostId: ANA, now: T0 + 70_000 });
+    expect(next.hostId).toBe(ANA);
+    expect(next.hostSince).toBe(T0 + 70_000);
+    expect(next.stampedAt).toBe(T0 + 70_000);
+    expect(next.viewers.find((v) => v.userId === ANA)?.lastSeenAt).toBe(T0 + 70_000);
+  });
+
+  it('a party host the room chose since keeps the controls', () => {
+    const handed = act(party(), { type: 'transfer-host', actorId: HOST, toUserId: BO }, T0 + 5);
+    expect(watchPartyHostChange(handed, { previousHostId: HOST, nextHostId: ANA, now: T0 + 70_000 })).toBe(handed);
+  });
+
+  it('…unless that party host has gone quiet too, or there is none', () => {
+    const handed = act(party(), { type: 'transfer-host', actorId: HOST, toUserId: BO }, T0 + 5);
+    const later = T0 + 5 + HOST_AWAY_MS + 1;
+    expect(watchPartyHostChange(handed, { previousHostId: HOST, nextHostId: ANA, now: later }).hostId).toBe(ANA);
+    expect(watchPartyHostChange(party({ hostId: null }), { previousHostId: null, nextHostId: ANA, now: T0 + 1 }).hostId).toBe(ANA);
+  });
+
+  it('a new host who was not watching is listed (like take-host)', () => {
+    const next = watchPartyHostChange(party(), { previousHostId: HOST, nextHostId: 'newcomer', now: T0 + 9 });
+    expect(next.hostId).toBe('newcomer');
+    expect(next.viewers.at(-1)).toMatchObject({ userId: 'newcomer', joinedAt: T0 + 9, lastSeenAt: T0 + 9 });
+  });
+
+  it('no change: already the party host, or a malformed id', () => {
+    const state = party({ hostId: ANA });
+    expect(watchPartyHostChange(state, { previousHostId: HOST, nextHostId: ANA, now: T0 + 1 })).toBe(state);
+    expect(watchPartyHostChange(party(), { previousHostId: HOST, nextHostId: '', now: T0 + 1 })).toEqual(party());
+  });
+
+  it('the plugin wires it as onHostChange', () => {
+    const next = watchPartyPlugin.onHostChange!(party(), {
+      previousHostId: HOST,
+      nextHostId: ANA,
+      now: T0 + 70_000,
+      reason: 'host_left_voice',
+    });
+    expect(next.hostId).toBe(ANA);
   });
 });
 

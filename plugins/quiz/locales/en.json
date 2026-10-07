@@ -1,4 +1,5 @@
 {
+  "catalog.name": "Quiz",
   "catalog.summary": "Trivia rounds for voice rooms — built-in question packs or your own questions.",
   "quiz.answeredCount": "{answered} of {total} answered",
   "quiz.customTitle": "Custom questions",
@@ -10,7 +11,8 @@
   "quiz.ended.place1": "1st place",
   "quiz.ended.place2": "2nd place",
   "quiz.ended.place3": "3rd place",
-  "quiz.ended.playAgainHint": "Want another round? End this activity and start Quiz again.",
+  "quiz.ended.playAgain": "Play again",
+  "quiz.ended.playAgainHint": "Everyone goes back to the lobby with a clean score, and others can join before you start.",
   "quiz.ended.playerStats": "{correct} of {total} right · best streak {streak}",
   "quiz.ended.podiumScore": "{points} pts",
   "quiz.ended.podiumTitle": "Podium",
@@ -21,6 +23,7 @@
   "quiz.ended.statsTitle": "This quiz",
   "quiz.ended.thanks": "Thanks for playing!",
   "quiz.ended.title": "Final results",
+  "quiz.ended.waitingForHost": "Waiting for the host to start another round…",
   "quiz.host.end": "End quiz",
   "quiz.host.finish": "See final results",
   "quiz.host.next": "Next question",

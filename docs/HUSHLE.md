@@ -120,7 +120,7 @@ unchanged.
 | `set-explainer` | Hands the turn to someone else; the team's rotation then continues after them. |
 | `next-card` | A new card without scoring; counts toward the turn's cards. Refused once the time is up or between turns. |
 | `correct-guess` / `pass` / `penalty` | +1 / 0 / −1 for the explaining team, then the next card on the same clock — or, at the turn's card budget or an empty deck, the end of the turn. Refused once the time is up or between turns. |
-| `bust-forbidden` | The other team's buzzer: the same as `penalty`, accepted only when `bustedBy` (injected by the server from the session) sits on a team other than the explaining one. |
+| `bust-forbidden` | The other team's buzzer: the same as `penalty`, accepted only when `bustedBy` (injected by the server from the session) sits on a team other than the explaining one, AND `cardId` names the card on screen. Two opponents pressing at once (or a double tap) send the same `cardId`: the first costs the penalty and draws the next card, the second names a card that is gone and is ignored — one penalty, no burnt card. `validateAction` answers 400 for a BUST without a `cardId`. |
 | `end-turn` | The next team in order; the next player in its own rotation explains, and its turn starts at once on a fresh clock. |
 | `end-game` | → `ended`: the card and the timer are cleared, scores kept. |
 
@@ -173,8 +173,18 @@ actionPolicies: {
 ```
 
 The host moderates: only they can hear whether a guess was right. BUST is
-the one player action — any server member may send it, the server fills
-`bustedBy` with the caller, and the reducer checks the team.
+the one player action — any server member in the voice room may send it
+(Hushle declares `requiresVoiceRoom`, so the host refuses it from outside
+the room with `voice_required`), the server fills `bustedBy` with the
+caller, and the reducer checks the team and the card.
+
+`restartActions: ['start-game']`: on the final screen the host's **Start
+new game** sends `start-game` with the last game's pack and settings, which
+the host route accepts from the `ended` phase (back to team setup, the
+pack's deck injected again); every other action on a finished game is
+refused with 409 `session_ended`. If the host leaves the voice room, hosting
+moves after 60 s to the longest-present participant there
+([PLUGIN_SDK.md → Voice, hosting and play again](PLUGIN_SDK.md#voice-hosting-and-play-again)).
 
 ## Who sees what
 

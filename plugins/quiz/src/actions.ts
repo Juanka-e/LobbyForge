@@ -44,6 +44,7 @@ import {
   QUIZ_SPEED_POINTS,
   QUIZ_STREAK_MAX_BONUS,
   QUIZ_STREAK_STEP,
+  createQuizInitialState,
   newQuizPlayer,
   publicQuestion,
   type QuizAction,
@@ -183,6 +184,7 @@ export function quizValidateAction(action: unknown): string | null {
     case 'reveal':
     case 'next':
     case 'end':
+    case 'play-again':
       return null;
     default:
       return `Unknown action type: ${String(action.type)}`;
@@ -455,6 +457,23 @@ function answer(state: QuizState, action: Extract<QuizAction, { type: 'answer' }
   return everyoneAnswered(next) ? revealQuestion(next) : next;
 }
 
+/**
+ * "Play again": a finished quiz goes back to the lobby in the same session.
+ * Everyone still playing stays on the roster with a clean slate (score,
+ * streaks, answers); players who had left are dropped, and anyone may join
+ * again before the host starts. The last game's settings are kept; its
+ * deck, answers and reveal are gone — nothing of it reaches the new round.
+ */
+function playAgain(state: QuizState): QuizState {
+  if (state.phase !== 'ended') return state;
+  const fresh = createQuizInitialState(null);
+  return {
+    ...fresh,
+    settings: { ...state.settings },
+    players: state.players.filter((player) => player.active).map((player) => newQuizPlayer(player.id, player.name, 0)),
+  };
+}
+
 export function quizReducer(state: QuizState, action: QuizAction, env: QuizEnv = QUIZ_DEFAULT_ENV): QuizState {
   switch (action.type) {
     case 'start':
@@ -484,6 +503,8 @@ export function quizReducer(state: QuizState, action: QuizAction, env: QuizEnv =
       const allRevealed = state.phase === 'reveal' && state.currentIndex >= state.deck.length - 1;
       return finish(state, allRevealed ? 'completed' : 'host', env.now());
     }
+    case 'play-again':
+      return playAgain(state);
     default:
       return state;
   }

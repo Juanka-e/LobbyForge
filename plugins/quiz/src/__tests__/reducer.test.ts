@@ -431,6 +431,68 @@ describe('late joiners, spectators and leavers', () => {
   });
 });
 
+describe('play again', () => {
+  function finished(env: ReturnType<typeof makeEnv>): QuizState {
+    let state = customGame(['ana', 'ben'], env);
+    state = run(state, [answer('ana', 1), answer('ben', 0), answer('host', 1)], env);
+    state = quizReducer(state, { type: 'leave', playerId: 'ben' }, env);
+    return quizReducer(state, { type: 'end' }, env);
+  }
+
+  it('takes a finished quiz back to the lobby: same players (minus leavers), clean scores, same settings', () => {
+    const env = makeEnv();
+    const ended = finished(env);
+    expect(ended.phase).toBe('ended');
+    expect(ended.players.some((p) => p.score > 0)).toBe(true);
+
+    const again = quizReducer(ended, { type: 'play-again' }, env);
+    expect(again.phase).toBe('lobby');
+    expect(again.players.map((p) => p.id)).toEqual(['host', 'ana']);
+    expect(again.players.every((p) => p.score === 0 && p.correct === 0 && p.answered === 0 && p.streak === 0 && p.active)).toBe(true);
+    expect(again.players.every((p) => p.eligibleFrom === 0 && p.lastResult === null)).toBe(true);
+    expect(again.settings).toEqual(ended.settings);
+    expect(again).toMatchObject({
+      deck: [],
+      questionTotal: 0,
+      questionsRevealed: 0,
+      currentIndex: 0,
+      current: null,
+      answers: {},
+      reveal: null,
+      startedAt: null,
+      endedAt: null,
+      endReason: null,
+    });
+  });
+
+  it('nothing of the last game reaches the new round (no deck, no answers, no reveal)', () => {
+    const env = makeEnv();
+    const again = quizReducer(finished(env), { type: 'play-again' }, env);
+    const json = JSON.stringify(again);
+    expect(json).not.toContain('correctIndex');
+    for (const question of QUESTIONS) expect(json).not.toContain(question.question);
+  });
+
+  it('a new round then plays like the first: anyone may join, the host starts', () => {
+    const env = makeEnv();
+    let state = quizReducer(finished(env), { type: 'play-again' }, env);
+    state = quizReducer(state, { type: 'join', playerId: 'ben' }, env);
+    state = quizReducer(state, { type: 'start', source: 'custom', questions: QUESTIONS, shuffle: false }, env);
+    expect(state.phase).toBe('playing');
+    expect(state.players.map((p) => p.id)).toEqual(['host', 'ana', 'ben']);
+  });
+
+  it('only from the ended phase', () => {
+    const env = makeEnv();
+    const lobby = lobbyWith('ana');
+    expect(quizReducer(lobby, { type: 'play-again' }, env)).toBe(lobby);
+    const playing = customGame(['ana'], env);
+    expect(quizReducer(playing, { type: 'play-again' }, env)).toBe(playing);
+    const revealed = quizReducer(playing, { type: 'reveal' }, env);
+    expect(quizReducer(revealed, { type: 'play-again' }, env)).toBe(revealed);
+  });
+});
+
 describe('hidden information stays in the secret fields', () => {
   it('while a question is open, the public fields carry no answer', () => {
     const env = makeEnv();

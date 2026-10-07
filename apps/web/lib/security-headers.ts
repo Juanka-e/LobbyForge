@@ -342,7 +342,8 @@ export function rateLimitResponse(result: RateLimitResult, identifier?: string):
   console.warn(`[security] rate limit hit: ${identifier ?? 'unknown'}`);
   const retryAfter = Math.max(1, Math.ceil((result.resetAt - Date.now()) / 1000));
   return NextResponse.json(
-    { error: 'Rate limit exceeded', retryAfter, resetAt: new Date(result.resetAt).toISOString() },
+    // `code`: the machine reason clients translate (activity + slash refusals).
+    { error: 'Rate limit exceeded', code: 'rate_limited', retryAfter, resetAt: new Date(result.resetAt).toISOString() },
     {
       status: 429,
       headers: {

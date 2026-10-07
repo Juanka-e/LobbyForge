@@ -1,4 +1,5 @@
 {
+  "catalog.name": "Poll",
   "catalog.summary": "Anonymous one-vote-per-player polls for channels.",
   "poll.closed.newButton": "New poll",
   "poll.closed.noVotes": "The poll closed without any votes.",

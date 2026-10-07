@@ -13,6 +13,10 @@ import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
 import { authorizeSessionChannelVisibility } from '@/lib/permissions';
 import { publishActivityStateChange } from '@/lib/activity-bus';
+import { activityError } from '@/lib/activity-errors';
+import { getVoiceRoomSnapshot, isInVoice, pluginRequiresVoice } from '@/lib/activity-voice';
+import { hostViewJson, resolveActivityHost } from '@/lib/activity-host';
+import { getPluginServer } from '@/lib/plugin-server-registry';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -81,13 +85,46 @@ async function handlePost(
     const visibility = await authorizeSessionChannelVisibility(session.uid, serverId, row, server.ownerUserId);
     if (!visibility.ok) return visibility.response;
 
-    // The host can end its own session; otherwise the caller needs
-    // START_ACTIVITY.
-    const isHost = row.createdBy === session.uid;
+    // The host can end its own session; so can anyone with START_ACTIVITY.
+    // In a game played over voice, a host who left the voice room hands
+    // over or abandons it (lib/activity-host.ts): any voice participant may
+    // end an abandoned session, and a participant who just became host may
+    // end it as host.
+    let isHost = row.createdBy === session.uid;
+    let abandoned = false;
     if (!isHost) {
       const permissions = await getUserPermissions(getDb(), session.uid, serverId);
       if (!hasPermission(permissions, CorePermission.START_ACTIVITY)) {
-        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        const plugin = getPluginServer(row.pluginId);
+        const voice = pluginRequiresVoice(plugin) ? await getVoiceRoomSnapshot(serverId, row.channelId) : null;
+        const host =
+          plugin && voice
+            ? await resolveActivityHost({
+                db: getDb(),
+                row,
+                plugin,
+                voice,
+                ownerUserId: server.ownerUserId ?? null,
+                skipTransferWhenAbandoned: true,
+              })
+            : null;
+        if (!host) return activityError(403, 'not_host', 'Forbidden');
+        const callerInVoice = isInVoice(voice, session.uid);
+        if (host.view.abandoned) {
+          if (!callerInVoice) {
+            return activityError(403, 'voice_required', 'Join the activity’s voice channel to end an abandoned activity.', {
+              abandoned: true,
+            });
+          }
+          abandoned = true;
+        } else if (host.view.hostUserId === session.uid) {
+          // Hosting just moved to the caller (the host had left the room).
+          isHost = true;
+        } else {
+          return activityError(403, 'not_host', 'Forbidden', {
+            host: hostViewJson(host.view),
+          });
+        }
       }
     }
 
@@ -108,7 +145,7 @@ async function handlePost(
       action: 'activity.end',
       targetType: 'session',
       targetId: sessionId,
-      metadata: { pluginId: row.pluginId, wasHost: isHost },
+      metadata: { pluginId: row.pluginId, wasHost: isHost, ...(abandoned ? { reason: 'abandoned' } : {}) },
     }).catch((err) => console.error('[audit] activity.end failed:', (err as Error).message));
     return NextResponse.json(
       { activity: ended && { id: ended.id, status: ended.status, endedAt: ended.endedAt?.toISOString() ?? null } },

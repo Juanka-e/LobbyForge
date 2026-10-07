@@ -64,7 +64,8 @@ Where the spec is silent these are the conventional choices, now the rules:
 
 | Topic | Rule |
 |---|---|
-| Links | Only YouTube **video** links: `youtube.com/watch?v=` (also `m.`, `music.`), `youtu.be/`, `/shorts/`, `/embed/` (also `youtube-nocookie.com/embed/`). A scheme-less paste works. `t=`/`start=` (`90`, `1m30s`, `1h2m3s`) sets the start. Everything else — playlists, channels, `/live/`, lookalike hosts, redirect wrappers, credentials or ports in the URL — is refused. Only the 11-character id is stored. |
+| Links | Only YouTube **video** links: `youtube.com/watch?v=` (also `m.`, `music.`), `youtu.be/`, `/shorts/`, `/embed/` (also `youtube-nocookie.com/embed/`). A scheme-less paste works. `t=`/`start=` (`90`, `1m30s`, `1h2m3s`) sets the start. Everything else — playlists, channels, `/live/`, lookalike hosts, redirect wrappers, credentials or ports in the URL — is refused. Only the 11-character id is stored. A link longer than **2,048** characters is refused as *too long* (`watchParty.add.tooLong`; the server's 400 says the same), not as "not a YouTube link" — it may well be one with a huge tracking tail. |
+| Voice | Watch Party declares `requiresVoiceRoom`: joining, reporting and controlling need the activity's voice room (403 `voice_required` from outside it); `leave` works from anywhere (`allowOutsideVoice`). |
 | First video | If nothing is on screen, the first link anyone adds goes straight up, **paused**. |
 | Queue | At most **25** videos; the same video is not queued twice; a viewer may have **3** waiting at a time — the host is exempt (they run the queue). |
 | Queue rights | The host plays now, reorders, removes and skips; anyone may remove what they added. |
@@ -75,6 +76,7 @@ Where the spec is silent these are the conventional choices, now the rules:
 | Hand-off | The host makes anyone watching the host. |
 | Host gone quiet | A host with no sign of life for **150 s** (since their last report, or since they got the role) counts as away: anyone watching may take over. |
 | Take back | The session's creator and moderators (Start activity permission) can always take the controls (`take-host`, the route's `host` policy). |
+| Session host leaves voice | The app's own rule for voice games: a session host out of the voice room for **60 s** hands the session to the longest-present participant in the room ([PLUGIN_SDK.md → Voice, hosting and play again](PLUGIN_SDK.md#voice-hosting-and-play-again)). The party follows through `onHostChange` (`watchPartyHostChange`) when its host was that old session host, or nobody was running it (no host, or one quiet past 150 s) — the new host gets the controls as `take-host` would. A party host the room chose since (hand-off, claim) keeps them. One hand-over rule, not two. |
 | Watching list | Joined on opening the party, left on closing it; at most 50 listed (more can watch, unlisted). A viewer silent for **12 min** is shown as away and ignored by the sync pill. |
 
 ## Actions

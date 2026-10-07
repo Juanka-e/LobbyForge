@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   YOUTUBE_EMBED_ORIGIN,
+  YOUTUBE_URL_MAX_LENGTH,
   isYouTubeVideoId,
   parseStartSeconds,
   parseYouTubeUrl,
   youTubeEmbedUrl,
+  youTubeLinkProblem,
   youTubeShortLabel,
   youTubeWatchUrl,
 } from '../youtube';
@@ -78,6 +80,24 @@ describe('parseYouTubeUrl — everything else is rejected', () => {
     ['something far too long', `https://youtu.be/${ID}?x=${'a'.repeat(3000)}`],
   ])('%s', (_label, input) => {
     expect(parseYouTubeUrl(input)).toBeNull();
+  });
+});
+
+describe('youTubeLinkProblem', () => {
+  it('null for an accepted link', () => {
+    expect(youTubeLinkProblem(`https://youtu.be/${ID}`)).toBeNull();
+  });
+
+  it('tooLong for anything over the limit — even a real video link with a long tail', () => {
+    expect(youTubeLinkProblem(`https://youtu.be/${ID}?x=${'a'.repeat(3000)}`)).toBe('tooLong');
+    expect(youTubeLinkProblem('x'.repeat(YOUTUBE_URL_MAX_LENGTH + 1))).toBe('tooLong');
+  });
+
+  it('invalid for everything else that is not an accepted form', () => {
+    expect(youTubeLinkProblem('https://example.com')).toBe('invalid');
+    expect(youTubeLinkProblem('')).toBe('invalid');
+    expect(youTubeLinkProblem(42)).toBe('invalid');
+    expect(youTubeLinkProblem(null)).toBe('invalid');
   });
 });
 

@@ -223,7 +223,9 @@ export type QuizAction =
   | { type: 'time-up' }
   | { type: 'reveal' }
   | { type: 'next' }
-  | { type: 'end' };
+  | { type: 'end' }
+  /** A finished quiz goes back to the lobby for another round (host). */
+  | { type: 'play-again' };
 
 /** Actions as the CLIENT sends them — the host injects `playerId`. */
 export type QuizClientAction =
@@ -235,7 +237,8 @@ export type QuizClientAction =
   | { type: 'time-up' }
   | { type: 'reveal' }
   | { type: 'next' }
-  | { type: 'end' };
+  | { type: 'end' }
+  | { type: 'play-again' };
 
 export function defaultQuizSettings(): QuizSettings {
   return {

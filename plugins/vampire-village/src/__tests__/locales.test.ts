@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CATALOG_SUMMARY_KEY, formatMessage, messageArguments } from '@lobbyforge/plugin-sdk';
+import { CATALOG_NAME_KEY, CATALOG_SUMMARY_KEY, formatMessage, messageArguments } from '@lobbyforge/plugin-sdk';
 import { SHIPPED_LOCALES } from '../locales.generated';
 
 /**
@@ -70,6 +70,7 @@ describe('Vampire Village locales', () => {
 
   it('translates its catalogue summary, which the host shows', () => {
     expect(english[CATALOG_SUMMARY_KEY]?.trim()).toBeTruthy();
+    expect(english[CATALOG_NAME_KEY]?.trim()).toBeTruthy();
   });
 
   it('has English for every key the panel renders', () => {
@@ -77,7 +78,7 @@ describe('Vampire Village locales', () => {
   });
 
   it('ships no key the panel never renders', () => {
-    expect(Object.keys(english).filter((key) => !used.includes(key) && key !== CATALOG_SUMMARY_KEY)).toEqual([]);
+    expect(Object.keys(english).filter((key) => !used.includes(key) && key !== CATALOG_SUMMARY_KEY && key !== CATALOG_NAME_KEY)).toEqual([]);
   });
 
   it('formats every English message (valid plural syntax, arguments filled)', () => {

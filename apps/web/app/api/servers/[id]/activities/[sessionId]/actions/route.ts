@@ -31,9 +31,23 @@ import {
   isValidActionId,
   releaseActionId,
 } from '@/lib/action-idempotency';
+import { activityError } from '@/lib/activity-errors';
+import { getVoiceRoomSnapshot, isInVoice, pluginRequiresVoice, type VoiceRoomSnapshot } from '@/lib/activity-voice';
+import { resolveActivityHost } from '@/lib/activity-host';
+import { distributedRateLimit, rateLimitResponse, type RateLimitConfig } from '@/lib/security-headers';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+
+/**
+ * Actions per user per session. The route's own limit (below, in
+ * withApiSecurity) is per client ADDRESS — a household or a LAN party
+ * shares one — so it is only a generous backstop; this is the real one.
+ * A fast Hushle host scores a card every second or two.
+ */
+const ACTION_USER_LIMIT: RateLimitConfig = { windowMs: 60_000, maxRequests: 90 };
+/** The per-address backstop: a dozen people behind one NAT, all playing at full speed. */
+const ACTION_ADDRESS_LIMIT: RateLimitConfig = { windowMs: 60_000, maxRequests: 600 };
 
 /** Session row statuses after which no action may be applied. */
 const TERMINAL_SESSION_STATUSES = new Set(['ended', 'cancelled']);
@@ -74,6 +88,8 @@ async function authorizePluginAction(input: {
   currentState: Record<string, unknown>;
   /** The game_sessions ROW status (lobby/running/paused/ended/cancelled). */
   sessionStatus: string;
+  /** Who is in the activity's voice room; null when the plugin does not require voice. */
+  voice: VoiceRoomSnapshot | null;
 }): Promise<{ ok: true; action: Record<string, unknown> } | { ok: false; response: NextResponse }> {
   const actionType = String(input.action.type);
   const policy = actionPolicyFor(input.plugin, actionType);
@@ -83,30 +99,47 @@ async function authorizePluginAction(input: {
   // `currentState.status`, a field no plugin state has, so actions on an
   // ended session were accepted and broadcast.
   if (isTerminalSessionStatus(input.sessionStatus)) {
-    return { ok: false, response: NextResponse.json({ error: 'Activity has ended.' }, { status: 409 }) };
+    return { ok: false, response: activityError(409, 'session_ended', 'Activity has ended.') };
   }
 
   // LF-014: Phase-based validation — reject actions that don't match the
   // current game phase. The plugin's reducer is the primary authority, but
   // this host-side check provides defense-in-depth against stale clients.
   const phase = (input.currentState as { phase?: string })?.phase;
-  const phaseError = validateActionPhase(input.plugin.manifest.id, actionType, phase);
+  const phaseError = validateActionPhase(input.plugin, actionType, phase);
   if (phaseError) {
-    return { ok: false, response: NextResponse.json({ error: phaseError }, { status: 409 }) };
+    return { ok: false, response: activityError(409, phaseError.code, phaseError.message) };
   }
 
   if (policy.role === 'host' && input.hostUserId !== input.actorUserId) {
     const permissions = await getUserPermissions(getDb(), input.actorUserId, input.serverId);
     if (!hasPermission(permissions, CorePermission.START_ACTIVITY)) {
-      return { ok: false, response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
+      return { ok: false, response: activityError(403, 'not_host', 'Forbidden') };
     }
   }
 
   if (policy.role === 'player') {
     const players = await listPlayersForSession(getDb(), input.sessionId);
     if (!players.some((p) => p.userId === input.actorUserId)) {
-      return { ok: false, response: NextResponse.json({ error: 'Player is not in this activity' }, { status: 403 }) };
+      return { ok: false, response: activityError(403, 'not_player', 'Player is not in this activity') };
     }
+  }
+
+  // A game that is played over voice: its players are in the voice room.
+  // Spectating (reading the state) needs no voice; host actions are never
+  // voice-checked (a moderator runs the table from anywhere, and a host who
+  // left the room hands over — lib/activity-host.ts). When LiveKit cannot
+  // be asked, the check is skipped (fail open, logged).
+  if (
+    policy.role !== 'host' &&
+    policy.allowOutsideVoice !== true &&
+    input.voice?.available &&
+    !isInVoice(input.voice, input.actorUserId)
+  ) {
+    return {
+      ok: false,
+      response: activityError(403, 'voice_required', 'Join the activity’s voice channel to play.'),
+    };
   }
 
   const normalizedAction = { ...input.action };
@@ -118,35 +151,45 @@ async function authorizePluginAction(input: {
 
 /**
  * LF-014: Validate that an action type is allowed in the current game phase.
- * Returns an error message if invalid, null if OK.
+ * Returns the refusal if invalid, null if OK.
  * This is a host-side safety net — the plugin reducer is the primary
  * authority but this prevents stale clients from submitting actions
  * that are nonsensical for the phase.
+ *
+ * A finished game (`phase === 'ended'`) of a plugin that declares
+ * `restartActions` accepts only those ("play again"); every other action
+ * is an action on an ended activity. Plugins that declare none keep
+ * deciding for themselves after the end (Vampire Village's post-game chat).
  */
-function validateActionPhase(pluginId: string, actionType: string, phase: string | undefined): string | null {
+function validateActionPhase(
+  plugin: NonNullable<ReturnType<typeof getPluginServer>>,
+  actionType: string,
+  phase: string | undefined
+): { code: 'session_ended' | 'wrong_phase'; message: string } | null {
   if (!phase) return null; // Can't validate without phase info.
 
+  if (phase === 'ended' && Array.isArray(plugin.restartActions)) {
+    return plugin.restartActions.includes(actionType)
+      ? null
+      : { code: 'session_ended', message: 'Game has ended.' };
+  }
+
+  const pluginId = plugin.manifest.id;
   if (pluginId === 'hushle') {
     // Hushle phases: lobby, team_setup, playing, ended
     const playingActions = ['correct-guess', 'pass', 'penalty', 'next-card', 'end-turn', 'bust-forbidden'];
     if (phase === 'lobby' && [...playingActions, 'end-game'].includes(actionType)) {
-      return 'Game has not started yet.';
-    }
-    if (phase === 'ended' && actionType !== 'end-game') {
-      return 'Game has ended.';
+      return { code: 'wrong_phase', message: 'Game has not started yet.' };
     }
   }
 
   if (pluginId === 'quiz') {
     // Quiz phases: lobby, playing, reveal, ended
     if (phase === 'lobby' && ['answer', 'next'].includes(actionType)) {
-      return 'Quiz has not started yet.';
+      return { code: 'wrong_phase', message: 'Quiz has not started yet.' };
     }
     if (phase === 'reveal' && actionType === 'answer') {
-      return 'Answer period has ended for this question.';
-    }
-    if (phase === 'ended') {
-      return 'Quiz has ended.';
+      return { code: 'wrong_phase', message: 'Answer period has ended for this question.' };
     }
   }
 
@@ -189,6 +232,14 @@ async function handlePost(
   const { id: serverId, sessionId } = await ctx.params;
   const session = await resolveSession(req);
   if (!session.ok) return session.response;
+
+  // Per user and session (the address limit is only a backstop: one
+  // household shares it). Keyed before any database work.
+  const limited = rateLimitResponse(
+    await distributedRateLimit(`activity-action:user:${session.uid}:${sessionId}`, ACTION_USER_LIMIT),
+    'activity-action-user'
+  );
+  if (limited) return limited;
 
   // LF-002: set once the idempotency claim is taken; the outer catch
   // releases it so an unexpected exception doesn't poison the retry —
@@ -265,15 +316,32 @@ async function handlePost(
     const forwardedAction: Record<string, unknown> = { ...body };
     delete forwardedAction.actionId;
 
+    // A game played over voice: who is in its voice room (LiveKit) decides
+    // whether a player may act, and whether a host who left it hands
+    // hosting over (lazily, here — lib/activity-host.ts).
+    const voice = pluginRequiresVoice(plugin) ? await getVoiceRoomSnapshot(serverId, row.channelId) : null;
+    let hostUserId: string | null = row.createdBy ?? null;
+    if (voice && !isTerminalSessionStatus(row.status)) {
+      const host = await resolveActivityHost({
+        db: getDb(),
+        row,
+        plugin,
+        voice,
+        ownerUserId: server.ownerUserId ?? null,
+      });
+      if (host) hostUserId = host.view.hostUserId;
+    }
+
     const actionAuth = await authorizePluginAction({
       serverId,
       sessionId,
       actorUserId: session.uid,
-      hostUserId: row.createdBy,
+      hostUserId,
       plugin,
       action: forwardedAction,
       currentState: row.state as Record<string, unknown>,
       sessionStatus: row.status,
+      voice,
     });
     if (!actionAuth.ok) return actionAuth.response;
 
@@ -365,6 +433,7 @@ async function handlePost(
       serverId,
       pluginId: row.pluginId,
       pendingPlayerId: joiningPlayer ? session.uid : undefined,
+      voiceParticipantIds: voice?.available ? voice.participants.map((p) => p.userId) : undefined,
     });
     // ADR-007: the sandbox ctx also carries the session, its host, the
     // caller's language and ONE clock for the call and its CAS retries.
@@ -372,7 +441,7 @@ async function handlePost(
     if (sandboxed) {
       attachSandboxScope(ctx2, {
         sessionId,
-        hostUserId: row.createdBy ?? null,
+        hostUserId,
         locale: sandboxLocaleFor(req),
         now: Date.now(),
       });
@@ -451,7 +520,7 @@ async function handlePost(
     }
     if (outcome.kind === 'ended') {
       await releaseClaim();
-      return NextResponse.json({ error: 'Activity has ended.' }, { status: 409 });
+      return activityError(409, 'session_ended', 'Activity has ended.');
     }
     if (outcome.kind === 'conflict') {
       // Retryable conflict — release so the client may retry the same id.
@@ -531,7 +600,7 @@ async function handlePost(
         ctx: {
           sessionId,
           serverId,
-          hostUserId: row.createdBy ?? null,
+          hostUserId,
         },
       });
     } catch (err) {
@@ -559,5 +628,6 @@ async function handlePost(
 
 export const POST = withApiSecurity(handlePost, {
   allowedMethods: ['POST'],
-  rateLimit: { identifier: 'activity-action', config: { windowMs: 60_000, maxRequests: 30 } },
+  // Per address: a backstop only (see ACTION_USER_LIMIT for the real limit).
+  rateLimit: { identifier: 'activity-action', config: ACTION_ADDRESS_LIMIT },
 });

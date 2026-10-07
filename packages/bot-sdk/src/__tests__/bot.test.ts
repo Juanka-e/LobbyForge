@@ -73,6 +73,11 @@ class FakeWebSocket implements WebSocketLike {
     this.readyState = 3;
     this.fire('close', { code, reason });
   }
+  /** What Node's built-in WebSocket does when the handshake fails: `error`, and no `close`. */
+  failHandshake(): void {
+    this.readyState = 3;
+    this.fire('error', {});
+  }
 }
 
 /** A Response-like object (microtask-only, works under fake timers). */
@@ -322,6 +327,46 @@ describe('reconnect', () => {
       }
       next.serverClose(1006);
     }
+    bot.close();
+  });
+
+  it('reconnects when a handshake fails with an error and no close (Node 22 WebSocket)', async () => {
+    const { bot, socket } = await connected({ reconnect: { initialDelayMs: 1000, maxDelayMs: 8000 } });
+    const delays: Array<number | null> = [];
+    bot.on('disconnect', (info) => {
+      delays.push(info.delayMs);
+    });
+    socket.serverClose(1006); // the gateway restarts
+    await vi.advanceTimersByTimeAsync(750);
+    await settle();
+    const retry = lastSocket();
+    retry.failHandshake(); // not listening yet: error, no close
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+    // Counted as a 1006 close: another attempt is scheduled instead of the loop stopping.
+    expect(delays).toHaveLength(2);
+    const before = FakeWebSocket.instances.length;
+    await vi.advanceTimersByTimeAsync(delays.at(-1)!);
+    await settle();
+    expect(FakeWebSocket.instances).toHaveLength(before + 1);
+    // A close that does arrive late is not counted twice.
+    retry.serverClose(1006);
+    expect(delays).toHaveLength(2);
+    bot.close();
+  });
+
+  it('gives up on a socket that never opens and tries again', async () => {
+    const { bot } = makeBot({ reconnect: { initialDelayMs: 100 } });
+    void bot.connect().catch(() => undefined);
+    await settle();
+    const stuck = lastSocket();
+    const before = FakeWebSocket.instances.length;
+    await vi.advanceTimersByTimeAsync(15_000);
+    await settle();
+    expect(stuck.closedWith).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(200);
+    await settle();
+    expect(FakeWebSocket.instances.length).toBeGreaterThan(before);
     bot.close();
   });
 

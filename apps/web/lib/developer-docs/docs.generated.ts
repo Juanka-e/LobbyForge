@@ -331,7 +331,9 @@ What your bot posts is your responsibility.
 | Field | Required | What it does |
 |---|---|---|
 | \`manifest\` | yes | \`id\` (permanent; see *Choosing an id* below), \`name\`, \`version\`, \`type\` (\`game\`/\`activity\`/\`utility\`), \`minAppVersion\`, \`permissions\`, \`locales\`, \`entryClient\`, optional \`catalog\` (picker metadata, player config). \`permissions\` is declarative only: nothing enforces it today. |
-| \`actionPolicies\` | no | Per action type: \`role\`, \`actorFields\`, \`joinsRoster\`, \`audit\`. |
+| \`actionPolicies\` | no | Per action type: \`role\`, \`actorFields\`, \`joinsRoster\`, \`audit\`, \`allowOutsideVoice\`. |
+| \`restartActions\` | no | "Play again" action types accepted once \`state.phase === 'ended'\`; declaring it makes the host refuse every other action on a finished game (409 \`session_ended\`). |
+| \`onHostChange(state, change)\` | no | Pure; called when the host hands the session to someone else because its host left the voice room. Return the state with the plugin's own host updated, or the same object. |
 | \`createInitialState(ctx)\` | yes | The initial state. |
 | \`handleAction(ctx, state, action)\` | yes | A synchronous reducer. Return the same object to refuse an action. Randomness and time belong here, on the server. |
 | \`validateAction(action)\` | no | Return an error string (the caller gets a 400) or \`null\`. The host itself only validates \`{ type: string }\`. |
@@ -366,6 +368,11 @@ The **action policy** fields:
   for \`host\` actions and \`false\` for gameplay. Set it to \`false\` on any
   host action whose *type* alone gives a secret away (\`shouldAuditAction\`,
   \`index.ts:167\`).
+- \`allowOutsideVoice: true\` lets a \`member\` / \`player\` action through from
+  someone who is not in the activity's voice room. It only matters for a
+  plugin with \`catalog.requiresVoiceRoom\`, whose other gameplay actions the
+  host refuses from outside the room (403 \`voice_required\`); use it for
+  leaving. See [PLUGIN_SDK.md → Voice, hosting and play again](PLUGIN_SDK.md#voice-hosting-and-play-again).
 
 **Panel props.** The panel receives \`state\` (already projected for this
 viewer), \`dispatch\`, \`actorUserId\`, \`hostUserId\` and \`players\`
@@ -383,7 +390,9 @@ nothing (\`apps/web/lib/plugin-context.ts:98-160\`):
 - \`ctx.messages.sendGameMessage\` only writes to the server log; it does
   not post to chat.
 - \`ctx.timer\`, \`cache\`, \`pubsub\`, \`votes\` and \`scores\` are empty stubs.
-- \`ctx.voice.getParticipants()\` returns \`[]\`.
+- \`ctx.voice.getParticipants()\` returns the user ids in the activity's
+  voice room (from LiveKit, oldest first) for a plugin that requires voice,
+  and \`[]\` for any other.
 
 **Timers.** There is no server tick. Store a *deadline* in state, and
 let a client send a \`time-up\` action that the reducer accepts only after
@@ -1764,8 +1773,18 @@ As implemented:
   \`invalid_options\` with \`issues: ["<option>: …"]\` (unknown names, types,
   ranges, choices, ≤ 1000-char strings, \`user\` not a member of this
   server, \`channel\` not visible to the invoker); 422
-  \`blocked_by_moderation\` (\`rule\`); 429 \`rate_limited\` (20/min per member,
-  plus 60/min per address).
+  \`blocked_by_moderation\` (\`rule\`); 409 \`bot_offline\` (\`bot: { id, name }\`)
+  — nobody is there to answer: the bot has no live event-stream connection
+  and no enabled event endpoint subscribed to \`interaction_create\` (or it
+  lacks \`receive_events\`, which both need). Nothing is written or audited,
+  so the member sees "offline" at once instead of a "thinking…" row that
+  expires 15 minutes later. A bot WITH such an endpoint keeps the 202 (the
+  endpoint is called whether its process is up or not). "Live connection"
+  is read from Redis: the gateway subscribes to \`lf:{env}:bot-events:{botId}\`
+  exactly while a connection for the bot is open, so \`PUBSUB NUMSUB\` on that
+  channel counts them (\`lib/bots/reachability.ts\`); when Redis cannot be
+  asked, the run goes ahead as before. 429 \`rate_limited\` (20/min per
+  member, plus 60/min per address).
 - "Exactly like member posts" for the Moderation Bot means its CONTENT
   rules (blocked words, links, mentions) run over the free-text string
   options (choice values come from the bot's list); its counting rules
@@ -2135,7 +2154,14 @@ As implemented (\`packages/bot-sdk/src/bot.ts\`, \`signature.ts\`,
 Ships two examples under \`packages/bot-sdk/examples/\`: \`roll-bot.mjs\`
 (a \`/roll\` command and \`!roll\` over the socket) and \`http-bot.mjs\` (a
 \`node:http\` endpoint that verifies signatures and answers interactions
-synchronously).
+synchronously). Both turn every refusal into one line a person can act on
+(\`/roll is already registered by another bot on this server — pick another
+name\` for \`command_name_taken\`, a revoked token, a missing permission, a
+port in use) instead of a stack trace, and exit 1 on anything fatal —
+including, for \`roll-bot.mjs\`, a stream the gateway closed for good after
+it was running (4001 token rotated/revoked, 4003 disabled, 4009 another
+copy took over), where a bot would otherwise just stop with exit 0 — and 0
+only after Ctrl+C / SIGTERM.
 
 ## 7. UI
 - Composer: typing \`/\` opens a command picker (keyboard accessible,
@@ -2235,7 +2261,10 @@ import {
   type GamePlugin,
   type RegisteredGamePlugin,
   type GamePluginContext,
+  type GamePluginHostChange,
   registerGamePlugin,
+  CATALOG_SUMMARY_KEY,
+  CATALOG_NAME_KEY,
   // M19 shared locale helper (also exported from the
   // @lobbyforge/plugin-sdk/locale subpath for callers who want
   // the import path to scream "this is locale code"):
@@ -2289,6 +2318,13 @@ type PluginCatalogMetadata = {
 };
 \`\`\`
 
+\`requiresVoiceRoom\` is enforced, not just shown: a game that declares it is
+played over voice, so the host refuses a \`member\` / \`player\` action from
+anyone who is not in the activity's voice room (403, \`code:
+'voice_required'\`) and hands hosting over when the host leaves the room —
+see [Voice, hosting and play again](#voice-hosting-and-play-again). Poll and
+Dice Bot declare \`false\`: anyone who can see the channel takes part.
+
 \`externalAccountRequired\` means the app needs an explicit account-linking
 flow for a third-party service. It must not silently replace instance auth.
 The host still authorizes the user through the local instance session and
@@ -2306,6 +2342,9 @@ interface GamePlugin<TState = unknown, TAction = unknown, TProps = unknown> {
   actionPolicies?: Record<string, GamePluginActionPolicy>;
   createInitialState: (ctx: GamePluginContext<TState>) => TState;
   handleAction: (ctx: GamePluginContext<TState>, state: TState, action: TAction) => TState;
+  validateAction?: (action: unknown) => string | null;
+  restartActions?: readonly string[];
+  onHostChange?: (state: TState, change: GamePluginHostChange) => TState;
   migrateState?: (raw: unknown) => TState;
   renderClient: (props: TProps) => ReactNode;
 }
@@ -2321,6 +2360,19 @@ interface GamePlugin<TState = unknown, TAction = unknown, TProps = unknown> {
   \`setGameSessionState\` writes. Most plugins (quiz included) treat
   this as a \`switch (action.type)\` and never touch \`ctx\` — the SDK
   shape is the same for HTTP and voice-room hosts.
+- \`restartActions\` lists a game's "play again" actions (Hushle
+  \`start-game\`, Quiz \`play-again\`). Declaring it turns on the host's
+  ended-phase guard: once \`state.phase === 'ended'\`, only these action
+  types reach the reducer; every other one is refused with 409 (\`code:
+  'session_ended'\`). Leave it undefined when the reducer should decide
+  everything after the end (Vampire Village keeps its post-game chat and
+  its own \`play-again\`). See [Voice, hosting and play again](#voice-hosting-and-play-again).
+- \`onHostChange(state, change)\` is called when the host hands the session
+  to someone else because its host left the voice room. Pure, like the
+  reducer: return the state with the plugin's own notion of "host"
+  updated, or the same object. Most plugins need nothing here — the
+  panel's \`hostUserId\` and the \`host\` policy follow the session host on
+  their own. Watch Party, which keeps a party host in its state, uses it.
 - \`migrateState(raw)\` (M19+) is the migration seam. The host runs
   it on every read against \`game_sessions.state\`; whatever the
   function returns is what the reducer + \`renderClient\` see. The
@@ -2366,6 +2418,7 @@ type GamePluginActionPolicy = {
   actorFields?: string[];
   joinsRoster?: boolean;
   audit?: boolean;
+  allowOutsideVoice?: boolean;
 };
 \`\`\`
 
@@ -2398,8 +2451,82 @@ type GamePluginActionPolicy = {
   type alone gives a secret away. A refused action (the reducer returned
   the same state) is never audited. \`shouldAuditAction(policy)\` in the SDK
   is the rule the host applies.
+- \`allowOutsideVoice\`: for a plugin with \`catalog.requiresVoiceRoom\`, the
+  host refuses \`member\` / \`player\` actions from anyone who is not in the
+  activity's voice room. Set this on an action that must work from outside
+  the room — leaving the game is the usual one (Quiz, Vampire Village and
+  Watch Party mark \`leave\`). \`host\` actions are never voice-checked.
 
 Do not trust actor identity fields sent by the browser.
+
+## Voice, hosting and play again
+
+The host route (\`apps/web/app/api/servers/[id]/activities/…\`) applies three
+rules on top of the action policies. Every refusal keeps its English
+\`error\` and carries a machine \`code\` the lobby translates:
+\`{ "error": "…", "code": "…" }\`.
+
+| Code | Status | When |
+|---|---|---|
+| \`session_ended\` | 409 | an action on an ended session (its row), or on a finished game (\`phase: 'ended'\`) that is not one of its \`restartActions\` |
+| \`not_host\` | 403 | a \`host\` action, or ending the activity, by someone who is neither the host nor holds Start Activities |
+| \`voice_required\` | 403 | a \`member\` / \`player\` action (or ending an abandoned session) from outside the activity's voice room, for a plugin that requires voice |
+| \`not_player\` | 403 | a \`player\` action from someone who is not on the roster |
+| \`wrong_phase\` | 409 | the host's own phase table refuses the action (Hushle/Quiz: not started yet, answers closed) |
+| \`activity_exists\` | 409 | starting an activity in a channel that already has one open (\`sessionId\` names it) — also when two starts race |
+| \`rate_limited\` | 429 | too many requests (every 429 of the app carries it) |
+
+**Voice.** "In the voice room" means connected to the activity channel's
+LiveKit room, as LiveKit reports it (\`RoomServiceClient.listParticipants\`,
+cached for 2 s per web process; \`apps/web/lib/activity-voice.ts\`) — not the
+browser's presence heartbeat, which lags a departure by up to 90 s. Reading
+the state never needs voice, so spectators keep watching. When LiveKit
+cannot be asked the check is skipped and logged (a game rule, not a
+security boundary: an outage must not freeze every game). The plugin's
+\`ctx.voice.getParticipants()\` returns the room's user ids, oldest first,
+for the action being handled.
+
+**Host transfer.** For a plugin that requires voice, the host is someone in
+the voice room (\`apps/web/lib/activity-host.ts\`):
+
+- after the host has been **out of the room for 60 s**, hosting
+  (\`game_sessions.created_by\`, which the \`host\` policy and the panel's
+  \`hostUserId\` read) moves to the **longest-present participant in the
+  room** — players on the activity's roster first, then anyone else in the
+  room, each by how long they have been connected. Watch Party's own
+  hand-over when its host leaves uses the same order, and its party host
+  follows the session host through \`onHostChange\`;
+- after **3 minutes**, or past the 60 s when nobody in the room can take
+  over, the session is **abandoned**: any voice participant may end it.
+
+It is lazy and deterministic — no timer runs anywhere. The rule is applied
+whenever someone touches the session: an action, a state read (\`GET\`) or an
+end request. "Out of the room since" is a small Redis ledger: the LiveKit
+webhook records \`participant_left\` (ignoring a second connection of the same
+user) and clears it on \`participant_joined\`; a reader that finds the host
+gone with no entry starts the clock then, so it never starts early. The
+move itself is a compare-and-swap on the old host under the session's write
+lock (two requests move it once), audited as \`activity.host_transfer\`
+(actor: none, metadata: from, to, seconds away), and announced on the
+activity bus as \`rosterChanged\` so open panels re-read the session. When
+the host leaves or comes back, the webhook sends the same nudge.
+
+\`GET …/activities/{sessionId}\` adds, for these plugins, \`host: { userId,
+inVoice, awaySince, transferAt, abandonAt, abandoned }\` (ISO times): a panel
+shows "the host left — hosting moves at …" and reads again at \`transferAt\` /
+\`abandonAt\`, which is what applies the rule if nobody acted in between. The
+end route answers a participant who may not end it yet with \`not_host\` and
+the same \`host\` object. Poll and Dice Bot do not require voice: their host
+keeps the session wherever they are; Start Activities holders can always
+end it.
+
+**Play again.** A game that declares \`restartActions\` gets its "play again"
+from the final screen through the normal actions route, with its policy
+(both official ones are \`host\`): Hushle's "Start new game" sends
+\`start-game\` (back to team setup with the same settings), Quiz's "Play
+again" sends \`play-again\` (back to the lobby: the players who stayed keep
+their seats with a clean score, the last game's deck, answers and reveal
+are dropped, anyone may join before the host starts).
 
 ## The \`GamePluginContext\` sub-contexts
 
@@ -2416,7 +2543,7 @@ The context has \`actorUserId\` plus nine sub-contexts, all part of the SDK cont
 | \`timer\` | async | \`start(seconds)\` / \`stop\` — HTTP host is a no-op |
 | \`votes\` | async | \`create(question, options)\` — HTTP host is a no-op |
 | \`scores\` | async | \`add(playerId, score)\` — HTTP host is a no-op |
-| \`voice\` | sync | \`getParticipants()\` — HTTP host returns \`[]\` |
+| \`voice\` | sync | \`getParticipants()\` — the user ids in the activity's voice room, oldest first, for plugins that require voice (\`[]\` otherwise) |
 
 The HTTP host (\`apps/web/lib/plugin-context.ts:buildHttpPluginContext\`)
 implements the contract with the sub-contexts a plugin would
@@ -2541,10 +2668,13 @@ The whole pattern is:
    \`docs/TRANSLATING.md\` → "Plurals"), so pass counts as numbers and let
    each language write its own plural forms.
    Put your catalogue description under the key \`catalog.summary\`
-   (\`CATALOG_SUMMARY_KEY\`): the host shows it in the activity picker and
-   the admin app list in the viewer's language, and the manifest can
-   read its English from the same file —
-   \`summary: LOCALE_TABLES.en[CATALOG_SUMMARY_KEY]\`.
+   (\`CATALOG_SUMMARY_KEY\`) and your activity's name under \`catalog.name\`
+   (\`CATALOG_NAME_KEY\`): the host shows both in the activity picker, the
+   activity header and the admin app list in the viewer's language
+   (falling back to \`manifest.name\` when a language has no name), and the
+   manifest can read its English from the same file —
+   \`summary: LOCALE_TABLES.en[CATALOG_SUMMARY_KEY]\`. A plugin's locale test
+   treats both keys as rendered (by the host).
 4. \`listPluginLocales(pluginId)\` returns the locales the plugin
    actually supports in registration order (so the first registered
    is the primary fallback when the user's preference isn't shipped).
@@ -2808,7 +2938,11 @@ round, everyone buzzes, the host reveals who was first. It shows the
 handshake, host-only controls (the server's \`host\` policy is what actually
 enforces them), its own English and Turkish strings chosen from
 \`init.locale\`, theme variables, and a state where the buzz order stays hidden
-until the reveal because \`projectState\` hides it. \`apps/web/e2e-sandbox/\`
+until the reveal because \`projectState\` hides it. Its \`manifest.json\`
+declares \`"requiresVoiceRoom": true\` — a buzzer is played over voice — so
+only people in the activity's voice room can buzz; a marketplace manifest
+can mark actions \`"allowOutsideVoice": true\` the same way an official one
+does ([PLUGIN_PUBLISHING.md](PLUGIN_PUBLISHING.md)). \`apps/web/e2e-sandbox/\`
 runs it, and a probe that attacks the sandbox from inside, in a real browser.
 
 ## State versioning + migrators (M19)
@@ -3040,6 +3174,7 @@ The example in the repository is a complete, working plugin to copy:
   "ui": true,
   "minPlayers": 1,
   "maxPlayers": 50,
+  "requiresVoiceRoom": true,
   "locales": ["en", "tr"],
   "actionPolicies": {
     "open-round": { "role": "host" },
@@ -3057,8 +3192,9 @@ The example in the repository is a complete, working plugin to copy:
 | \`version\` | strict semver (\`1.0.0\`, \`2.0.0-beta.1\`). Must equal the catalog \`version\`. |
 | \`sdk\` | exactly \`"sandbox-v1"\`. |
 | \`ui\` | \`true\` or \`false\`. \`true\` requires \`ui/index.html\`. |
-| \`actionPolicies\` | an object (may be empty), at most 64 action types of 1–64 characters (\`A-Z a-z 0-9 _ . : -\`). Each value: \`role\` (\`host\`, \`member\` or \`player\`), optional \`actorFields\` (up to 8 field names; not \`type\`), \`joinsRoster\` (boolean), \`audit\` (boolean). Unknown keys are refused, so a typo cannot silently fall back to host-only. |
+| \`actionPolicies\` | an object (may be empty), at most 64 action types of 1–64 characters (\`A-Z a-z 0-9 _ . : -\`). Each value: \`role\` (\`host\`, \`member\` or \`player\`), optional \`actorFields\` (up to 8 field names; not \`type\`), \`joinsRoster\` (boolean), \`audit\` (boolean), \`allowOutsideVoice\` (boolean). Unknown keys are refused, so a typo cannot silently fall back to host-only. |
 | \`minPlayers\`, \`maxPlayers\` | optional integers 1–500, min ≤ max. |
+| \`requiresVoiceRoom\` | optional \`true\` / \`false\` (default \`false\`). \`true\`: the game is played over voice — the host refuses \`member\` / \`player\` actions from anyone who is not in the activity's voice room (403, \`code: "voice_required"\`), except actions marked \`allowOutsideVoice\` (leaving). Reading the state (spectating) is never voice-checked, nor are \`host\` actions. It also turns on host hand-over when the host leaves the room ([PLUGIN_SDK.md → Voice, hosting and play again](PLUGIN_SDK.md#voice-hosting-and-play-again)). |
 | \`locales\` | optional, 1–32 language codes (\`en\`, \`pt-BR\`); defaults to \`["en"]\`. |
 
 Unknown top-level keys are ignored. The manifest is validated by the

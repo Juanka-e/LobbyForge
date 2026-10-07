@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CATALOG_SUMMARY_KEY } from '@lobbyforge/plugin-sdk';
+import { CATALOG_NAME_KEY, CATALOG_SUMMARY_KEY } from '@lobbyforge/plugin-sdk';
 import { SHIPPED_LOCALES } from '../locales.generated';
 
 /**
@@ -59,6 +59,7 @@ describe('Poll locales', () => {
 
   it('translates its catalogue summary, which the host shows', () => {
     expect(english[CATALOG_SUMMARY_KEY]?.trim()).toBeTruthy();
+    expect(english[CATALOG_NAME_KEY]?.trim()).toBeTruthy();
   });
 
   it('has English for every key the panel renders', () => {
@@ -67,8 +68,8 @@ describe('Poll locales', () => {
 
   it('ships no key the panel never renders', () => {
     // A key nobody renders is a translation cost with no payoff.
-    // `catalog.summary` is rendered by the host (activity picker, admin list).
-    expect(Object.keys(english).filter((key) => !used.includes(key) && key !== CATALOG_SUMMARY_KEY)).toEqual([]);
+    // `catalog.summary` and `catalog.name` are rendered by the host (activity picker, admin list).
+    expect(Object.keys(english).filter((key) => !used.includes(key) && key !== CATALOG_SUMMARY_KEY && key !== CATALOG_NAME_KEY)).toEqual([]);
   });
 
   describe.each(onDisk.filter((code) => code !== 'en'))('%s', (code) => {

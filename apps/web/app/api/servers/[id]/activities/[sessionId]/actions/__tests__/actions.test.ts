@@ -35,6 +35,9 @@ vi.mock('@/lib/db', () => ({
 vi.mock('@/lib/security-headers', () => ({
   withApiSecurity: (handler: unknown) => handler,
   applySecurityHeaders: (r: unknown) => r,
+  // The actions route's per-user limit (its own tests cover it).
+  distributedRateLimit: async () => ({ allowed: true, remaining: 1, resetAt: Date.now() + 60_000 }),
+  rateLimitResponse: () => null,
 }));
 
 vi.mock('@/lib/activity-bus', () => ({

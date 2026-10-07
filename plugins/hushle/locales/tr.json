@@ -1,4 +1,5 @@
 {
+  "catalog.name": "Hushle",
   "catalog.summary": "Sesli odalar için tasarlanmış, Tabu tarzı kelime tahmin oyunu.",
   "hushle.between.deckEmptyWaiting": "Kart kalmadı. Oyunu host bitirecek.",
   "hushle.between.hostHint": "Herkes hazır olunca sonraki turu başlat.",

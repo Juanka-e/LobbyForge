@@ -6,6 +6,7 @@ import { LOCALE_TABLES, SHIPPED_LOCALES } from './locales.generated';
 import {
   WATCH_PARTY_ACTION_TYPES,
   validateWatchPartyAction,
+  watchPartyHostChange,
   watchPartyReducer,
   type WatchPartyAction,
 } from './reducer';
@@ -64,13 +65,24 @@ export {
 } from './state';
 export {
   validateWatchPartyAction,
+  watchPartyHostChange,
   watchPartyReducer,
   WATCH_PARTY_ACTION_TYPES,
+  LINK_ERROR,
+  LINK_TOO_LONG_ERROR,
   type WatchPartyAction,
   type WatchPartyActionType,
   type WatchPartyClientAction,
 } from './reducer';
-export { parseYouTubeUrl, youTubeEmbedUrl, YOUTUBE_EMBED_ORIGIN, type YouTubeLink } from './youtube';
+export {
+  parseYouTubeUrl,
+  youTubeLinkProblem,
+  youTubeEmbedUrl,
+  YOUTUBE_EMBED_ORIGIN,
+  YOUTUBE_URL_MAX_LENGTH,
+  type YouTubeLink,
+  type YouTubeLinkProblem,
+} from './youtube';
 export { expectedPositionSec } from './sync';
 export { WatchPartyPanel } from './renderClient';
 export type { WatchPartyPanelClientProps, WatchPartyPanelProps } from './renderClient';
@@ -89,6 +101,9 @@ const actionPolicies: Record<string, GamePluginActionPolicy> = Object.fromEntrie
       actorFields: ['actorId'],
       // Joining puts the viewer on the watching list, by name.
       ...(type === 'join' ? { joinsRoster: true } : {}),
+      // Watching is done from the voice room (the host refuses member
+      // actions from outside it), but anyone can take themselves off the list.
+      ...(type === 'leave' ? { allowOutsideVoice: true } : {}),
     } satisfies GamePluginActionPolicy,
   ])
 );
@@ -143,6 +158,15 @@ export const watchPartyPlugin: GamePlugin<WatchPartyState, WatchPartyAction> = {
     return watchPartyReducer(current, { ...action, actorId } as WatchPartyAction, Date.now());
   },
   migrateState: (raw: unknown) => normalizeWatchPartyState(raw),
+  /**
+   * The session's host left the voice room and the host handed the session
+   * to someone else (docs/PLUGIN_SDK.md, "Host transfer"): the party's own
+   * host follows when it was the old session host, or nobody was running
+   * the party — one hand-over rule, not two. A party host the room chose
+   * later (transfer-host, claim-host) keeps the controls.
+   */
+  onHostChange: (state, change) =>
+    watchPartyHostChange(state?.version === WATCH_PARTY_STATE_VERSION ? state : normalizeWatchPartyState(state), change),
   /**
    * Returns an ELEMENT — it must never CALL the panel. Invoking the
    * component as a plain function would append its hooks to whatever

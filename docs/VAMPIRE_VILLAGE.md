@@ -171,6 +171,12 @@ and **End the game** (no winner; everything is revealed). After the game:
   vote or night choice aimed at them are dropped; the win check runs.
 - Anyone who joins after the roles are dealt (or when the lobby is full)
   watches as a spectator.
+- The game declares `requiresVoiceRoom`: joining, readying, night choices,
+  votes and chat need the activity's voice room (403 `voice_required` from
+  outside it); leaving works from anywhere (`allowOutsideVoice`), and
+  watching never needs voice. A host who leaves the voice room hands the
+  game over after 60 s to the longest-present participant there; see
+  [PLUGIN_SDK.md → Voice, hosting and play again](PLUGIN_SDK.md#voice-hosting-and-play-again).
 
 ## Rule decisions
 

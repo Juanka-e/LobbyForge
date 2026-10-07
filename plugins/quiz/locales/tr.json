@@ -1,4 +1,5 @@
 {
+  "catalog.name": "Quiz",
   "catalog.summary": "Sesli odalar için bilgi yarışması: hazır soru paketleri ya da kendi soruların.",
   "quiz.answeredCount": "Cevaplayan: {answered}/{total}",
   "quiz.customTitle": "Özel sorular",
@@ -10,7 +11,8 @@
   "quiz.ended.place1": "Birinci",
   "quiz.ended.place2": "İkinci",
   "quiz.ended.place3": "Üçüncü",
-  "quiz.ended.playAgainHint": "Bir tur daha mı? Bu etkinliği bitir ve Quiz’i yeniden başlat.",
+  "quiz.ended.playAgain": "Tekrar oyna",
+  "quiz.ended.playAgainHint": "Herkes puanı sıfırlanmış olarak lobiye döner; sen başlatmadan önce başkaları da katılabilir.",
   "quiz.ended.playerStats": "{total} sorudan {correct} doğru · en uzun seri {streak}",
   "quiz.ended.podiumScore": "{points} puan",
   "quiz.ended.podiumTitle": "Podyum",
@@ -21,6 +23,7 @@
   "quiz.ended.statsTitle": "Bu yarışma",
   "quiz.ended.thanks": "Oynadığın için teşekkürler!",
   "quiz.ended.title": "Sonuçlar",
+  "quiz.ended.waitingForHost": "Host yeni bir tur başlatana kadar bekle…",
   "quiz.host.end": "Yarışmayı bitir",
   "quiz.host.finish": "Sonuçları göster",
   "quiz.host.next": "Sonraki soru",

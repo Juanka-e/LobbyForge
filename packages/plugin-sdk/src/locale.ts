@@ -50,6 +50,14 @@ export type LocaleId = string;
  */
 export const CATALOG_SUMMARY_KEY = 'catalog.summary';
 
+/**
+ * The key a plugin's locale files use to translate its catalogue NAME (what
+ * the host shows as the activity's title in pickers, headers and admin
+ * lists). Read the same way as `CATALOG_SUMMARY_KEY`; the host falls back to
+ * `manifest.name` when a language does not have it.
+ */
+export const CATALOG_NAME_KEY = 'catalog.name';
+
 /** Minimal shape of a locale table — flat key→string map. */
 export type LocaleTable = Record<string, string>;
 

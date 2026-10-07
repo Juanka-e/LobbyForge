@@ -18,7 +18,10 @@
     { "name": "ui true with locales and player counts", "patch": { "ui": true, "locales": ["en", "tr", "pt-BR"], "minPlayers": 2, "maxPlayers": 12 } },
     { "name": "unknown top-level keys are ignored", "patch": { "description": "A game", "publisher": "Someone" } },
     { "name": "prerelease semver", "patch": { "version": "2.0.0-beta.1" } },
-    { "name": "action types with dots and colons", "patch": { "actionPolicies": { "round:open": { "role": "host" }, "v2.move": { "role": "player" } } } }
+    { "name": "action types with dots and colons", "patch": { "actionPolicies": { "round:open": { "role": "host" }, "v2.move": { "role": "player" } } } },
+    { "name": "requiresVoiceRoom true", "patch": { "requiresVoiceRoom": true } },
+    { "name": "requiresVoiceRoom false", "patch": { "requiresVoiceRoom": false } },
+    { "name": "allowOutsideVoice on a policy", "patch": { "actionPolicies": { "leave": { "role": "member", "actorFields": ["playerId"], "allowOutsideVoice": true } } } }
   ],
   "invalid": [
     { "name": "not an object", "manifest": ["sandbox-v1"] },
@@ -49,6 +52,8 @@
     { "name": "maxPlayers above 500", "patch": { "maxPlayers": 501 } },
     { "name": "minPlayers above maxPlayers", "patch": { "minPlayers": 5, "maxPlayers": 4 } },
     { "name": "empty locales", "patch": { "locales": [] } },
-    { "name": "bad locale code", "patch": { "locales": ["EN_us"] } }
+    { "name": "bad locale code", "patch": { "locales": ["EN_us"] } },
+    { "name": "requiresVoiceRoom as a string", "patch": { "requiresVoiceRoom": "yes" } },
+    { "name": "allowOutsideVoice as a number", "patch": { "actionPolicies": { "leave": { "role": "member", "allowOutsideVoice": 1 } } } }
   ]
 }

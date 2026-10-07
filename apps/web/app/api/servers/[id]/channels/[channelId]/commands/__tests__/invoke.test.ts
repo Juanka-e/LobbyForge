@@ -48,7 +48,10 @@ vi.mock('@/lib/security-headers', async () => {
   };
 });
 const redisPublish = vi.fn();
-vi.mock('@/lib/redis', () => ({ redis: { publish: redisPublish } }));
+// PUBSUB NUMSUB on the bot's event channel: how many gateways hold a live
+// stream connection for it (lib/bots/reachability.ts).
+const redisPubsub = vi.fn();
+vi.mock('@/lib/redis', () => ({ redis: { publish: redisPublish, pubsub: redisPubsub } }));
 vi.mock('@/lib/chat-bus', () => ({ publishChatMessage: vi.fn() }));
 
 const SECRET = 'x'.repeat(32);
@@ -126,7 +129,7 @@ beforeEach(() => {
   vi.resetModules();
   process.env.LOBBYFORGE_SESSION_SECRET = SECRET;
   counters.clear();
-  for (const fn of [...Object.values(db), redisPublish]) fn.mockReset();
+  for (const fn of [...Object.values(db), redisPublish, redisPubsub]) fn.mockReset();
   perms = { [OWNER]: ['administrator'], [MEMBER]: ['send_messages', 'read_message_history'] };
   db.getServerById.mockResolvedValue({ id: SERVER, name: 'Lobby', ownerUserId: OWNER });
   db.isServerMember.mockImplementation(async (_db: unknown, uid: string) => uid in perms);
@@ -148,6 +151,8 @@ beforeEach(() => {
   db.getActiveBotById.mockResolvedValue(bot());
   db.getBotEventEndpoint.mockResolvedValue(null);
   redisPublish.mockResolvedValue(1);
+  // The bot's stream is connected unless a test says otherwise.
+  redisPubsub.mockImplementation(async (_sub: string, channel: string) => [channel, 1]);
 });
 
 describe('who may run a command', () => {
@@ -280,10 +285,52 @@ describe('a successful run', () => {
     expect(db.logAction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: 'command.invoke', actorUserId: MEMBER, targetId: BOT_ID }));
   });
 
-  it('a bot without receive_events gets no stream publish (its endpoint, if any, is still tried)', async () => {
+  it('a bot without receive_events cannot be reached at all (no stream, no endpoint): 409 bot_offline, nothing written', async () => {
     db.getBotById.mockResolvedValue(bot({ permissions: ['slash_commands'] }));
-    expect((await invoke(MEMBER, { options: { sides: 6 } })).status).toBe(202);
+    db.getBotEventEndpoint.mockResolvedValue({ botId: BOT_ID, url: 'https://bot.example.test/hook', events: ['interaction_create'], enabled: true });
+    const res = await invoke(MEMBER, { options: { sides: 6 } });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: 'bot_offline' });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(redisPublish).not.toHaveBeenCalled();
+    expect(db.createBotInteraction).not.toHaveBeenCalled();
+  });
+});
+
+describe('bot_offline — fail fast instead of a 15-minute "thinking…"', () => {
+  it('409 bot_offline when the bot has no live stream connection and no event endpoint; nothing is recorded or audited', async () => {
+    redisPubsub.mockImplementation(async (_sub: string, channel: string) => [channel, 0]);
+    const res = await invoke(MEMBER, { options: { sides: 6 } });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      code: 'bot_offline',
+      error: expect.any(String),
+      bot: { id: BOT_ID, name: 'Dice' },
+    });
+    expect(redisPubsub).toHaveBeenCalledWith('NUMSUB', expect.stringMatching(new RegExp(`:bot-events:${BOT_ID}$`)));
+    expect(db.createBotInteraction).not.toHaveBeenCalled();
+    expect(db.logAction).not.toHaveBeenCalled();
+  });
+
+  it('202 as before when the bot has an enabled HTTP endpoint for interactions, connected or not', async () => {
+    redisPubsub.mockImplementation(async (_sub: string, channel: string) => [channel, 0]);
+    db.getBotEventEndpoint.mockResolvedValue({ botId: BOT_ID, url: 'https://bot.example.test/hook', events: ['interaction_create'], enabled: true });
+    expect((await invoke(MEMBER, { options: { sides: 6 } })).status).toBe(202);
+    expect(db.createBotInteraction).toHaveBeenCalledTimes(1);
+  });
+
+  it('an endpoint that is switched off, or not subscribed to interaction_create, does not count', async () => {
+    redisPubsub.mockImplementation(async (_sub: string, channel: string) => [channel, 0]);
+    db.getBotEventEndpoint.mockResolvedValueOnce({ botId: BOT_ID, url: 'https://bot.example.test/hook', events: ['interaction_create'], enabled: false });
+    expect(await (await invoke(MEMBER, { options: { sides: 6 } })).json()).toMatchObject({ code: 'bot_offline' });
+    db.getBotEventEndpoint.mockResolvedValueOnce({ botId: BOT_ID, url: 'https://bot.example.test/hook', events: ['message_create'], enabled: true });
+    expect(await (await invoke(MEMBER, { options: { sides: 6 } })).json()).toMatchObject({ code: 'bot_offline' });
+    expect(db.createBotInteraction).not.toHaveBeenCalled();
+  });
+
+  it('keeps the old behaviour (202) when Redis cannot say whether the stream is connected', async () => {
+    redisPubsub.mockRejectedValue(new Error('connection refused'));
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect((await invoke(MEMBER, { options: { sides: 6 } })).status).toBe(202);
   });
 });

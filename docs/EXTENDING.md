@@ -314,7 +314,9 @@ What your bot posts is your responsibility.
 | Field | Required | What it does |
 |---|---|---|
 | `manifest` | yes | `id` (permanent; see *Choosing an id* below), `name`, `version`, `type` (`game`/`activity`/`utility`), `minAppVersion`, `permissions`, `locales`, `entryClient`, optional `catalog` (picker metadata, player config). `permissions` is declarative only: nothing enforces it today. |
-| `actionPolicies` | no | Per action type: `role`, `actorFields`, `joinsRoster`, `audit`. |
+| `actionPolicies` | no | Per action type: `role`, `actorFields`, `joinsRoster`, `audit`, `allowOutsideVoice`. |
+| `restartActions` | no | "Play again" action types accepted once `state.phase === 'ended'`; declaring it makes the host refuse every other action on a finished game (409 `session_ended`). |
+| `onHostChange(state, change)` | no | Pure; called when the host hands the session to someone else because its host left the voice room. Return the state with the plugin's own host updated, or the same object. |
 | `createInitialState(ctx)` | yes | The initial state. |
 | `handleAction(ctx, state, action)` | yes | A synchronous reducer. Return the same object to refuse an action. Randomness and time belong here, on the server. |
 | `validateAction(action)` | no | Return an error string (the caller gets a 400) or `null`. The host itself only validates `{ type: string }`. |
@@ -349,6 +351,11 @@ The **action policy** fields:
   for `host` actions and `false` for gameplay. Set it to `false` on any
   host action whose *type* alone gives a secret away (`shouldAuditAction`,
   `index.ts:167`).
+- `allowOutsideVoice: true` lets a `member` / `player` action through from
+  someone who is not in the activity's voice room. It only matters for a
+  plugin with `catalog.requiresVoiceRoom`, whose other gameplay actions the
+  host refuses from outside the room (403 `voice_required`); use it for
+  leaving. See [PLUGIN_SDK.md → Voice, hosting and play again](PLUGIN_SDK.md#voice-hosting-and-play-again).
 
 **Panel props.** The panel receives `state` (already projected for this
 viewer), `dispatch`, `actorUserId`, `hostUserId` and `players`
@@ -366,7 +373,9 @@ nothing (`apps/web/lib/plugin-context.ts:98-160`):
 - `ctx.messages.sendGameMessage` only writes to the server log; it does
   not post to chat.
 - `ctx.timer`, `cache`, `pubsub`, `votes` and `scores` are empty stubs.
-- `ctx.voice.getParticipants()` returns `[]`.
+- `ctx.voice.getParticipants()` returns the user ids in the activity's
+  voice room (from LiveKit, oldest first) for a plugin that requires voice,
+  and `[]` for any other.
 
 **Timers.** There is no server tick. Store a *deadline* in state, and
 let a client send a `time-up` action that the reducer accepts only after

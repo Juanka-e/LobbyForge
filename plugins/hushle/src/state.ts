@@ -176,8 +176,12 @@ export type HushleAction =
    * verifies the caller really is on another team (teammates and the
    * floater cannot bust their own explainer). Applies the standard
    * penalty (-1 to the explaining team) and draws the next card.
+   *
+   * `cardId` is the card the buster saw: a BUST for any card but the one
+   * on screen is ignored, so two opponents pressing at once (or one
+   * double-tap) cost ONE penalty and never burn the next card.
    */
-  | { type: 'bust-forbidden'; bustedBy?: string }
+  | { type: 'bust-forbidden'; bustedBy?: string; cardId?: string }
   | { type: 'end-turn' }
   | { type: 'end-game' };
 

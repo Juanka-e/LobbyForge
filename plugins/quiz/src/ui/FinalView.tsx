@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { Avatar, Callout, EmptyState, Grid, Panel, SectionLabel, Stack, Stat, lf, tone } from '@lobbyforge/plugin-sdk/ui';
+import { Avatar, Button, EmptyState, Grid, Panel, SectionLabel, Stack, Stat, lf, tone } from '@lobbyforge/plugin-sdk/ui';
 import { quizPodium, rankQuizPlayers } from '../roster';
 import type { QuizUi, ViewProps } from './context';
 import { Leaderboard } from './Leaderboard';
@@ -53,6 +53,18 @@ export function FinalView({ state, ui }: ViewProps) {
               {state.endReason === 'host' ? t('quiz.ended.endedEarly') : t('quiz.ended.thanks')}
             </span>
           </Stack>
+          {ui.isHost ? (
+            <Stack gap={8} style={{ alignItems: 'flex-start' }}>
+              <Button variant="primary" size="lg" onClick={() => ui.dispatch({ type: 'play-again' })}>
+                {t('quiz.ended.playAgain')}
+              </Button>
+              <span style={{ fontSize: 13, color: lf.muted }}>{t('quiz.ended.playAgainHint')}</span>
+            </Stack>
+          ) : (
+            <span role="status" style={{ fontSize: 14, color: lf.text2 }}>
+              {t('quiz.ended.waitingForHost')}
+            </span>
+          )}
           {podium.length === 0 ? (
             <EmptyState title={t('quiz.ended.noScoresTitle')} body={t('quiz.ended.noScoresBody')} />
           ) : (
@@ -152,7 +164,6 @@ export function FinalView({ state, ui }: ViewProps) {
               <Stat label={t('quiz.ended.statPlayers')} value={ui.number(ranked.length)} />
               <Stat label={t('quiz.ended.statAccuracy')} value={t('quiz.ended.accuracyValue', { percent: accuracy })} tone="success" />
             </Grid>
-            {ui.isHost ? <Callout tone="info">{t('quiz.ended.playAgainHint')}</Callout> : null}
           </Stack>
         </Panel>
       </div>

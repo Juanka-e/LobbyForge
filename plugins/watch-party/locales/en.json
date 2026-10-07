@@ -1,4 +1,5 @@
 {
+  "catalog.name": "Watch Party",
   "catalog.summary": "Watch YouTube together in a voice channel — one shared timeline, host controls and a queue anyone can add to.",
   "watchParty.add.duplicate": "That video is already in the queue.",
   "watchParty.add.full": "The queue is full — it holds {max} videos.",
@@ -10,6 +11,7 @@
   "watchParty.add.playNow": "Play now",
   "watchParty.add.queue": "Add to queue",
   "watchParty.add.screenShare": "Not on YouTube? Share your screen from the call controls instead.",
+  "watchParty.add.tooLong": "That link is too long — at most {max, plural, one {# character} other {# characters}}. Paste the video's own link: youtube.com/watch?v=… or youtu.be/….",
   "watchParty.controls.back": "Back 10 seconds",
   "watchParty.controls.controlMode": "Who controls playback",
   "watchParty.controls.forward": "Forward 10 seconds",

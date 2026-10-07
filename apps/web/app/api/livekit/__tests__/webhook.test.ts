@@ -18,16 +18,24 @@ const API_SECRET = 'webhook-test-secret-0123456789abcdef';
 
 const removeParticipant = vi.fn();
 const listRooms = vi.fn();
+const getParticipant = vi.fn();
 const logAction = vi.fn();
+const getActiveGameSessionForChannel = vi.fn();
 const blockVoice = vi.fn();
 const getVoiceBlock = vi.fn();
 const claimVoiceBlockEnforcedAudit = vi.fn();
+const recordVoiceJoined = vi.fn();
+const recordVoiceLeft = vi.fn();
+const forgetVoiceRoomSnapshot = vi.fn();
+const publishActivityStateChange = vi.fn();
 
 vi.mock('@/lib/livekit', () => ({
   requireLiveKitCredentials: () => ({ apiKey: API_KEY, apiSecret: API_SECRET }),
-  getRoomServiceClient: () => ({ removeParticipant, listRooms }),
+  getRoomServiceClient: () => ({ removeParticipant, listRooms, getParticipant }),
 }));
-vi.mock('@lobbyforge/db', () => ({ logAction }));
+vi.mock('@lobbyforge/db', () => ({ logAction, getActiveGameSessionForChannel }));
+vi.mock('@/lib/activity-voice', () => ({ recordVoiceJoined, recordVoiceLeft, forgetVoiceRoomSnapshot }));
+vi.mock('@/lib/activity-bus', () => ({ publishActivityStateChange }));
 // The block list's own behaviour (keys, ladder) is covered in
 // lib/__tests__/voice-block.test.ts; here only how the webhook uses it.
 vi.mock('@/lib/voice-block', () => ({ blockVoice, getVoiceBlock, claimVoiceBlockEnforcedAudit }));
@@ -94,6 +102,12 @@ beforeEach(() => {
   blockVoice.mockReset().mockResolvedValue({ serverId: SERVER_ID, strike: 1, seconds: 600 });
   getVoiceBlock.mockReset().mockResolvedValue(null);
   claimVoiceBlockEnforcedAudit.mockReset().mockResolvedValue(true);
+  getParticipant.mockReset().mockRejectedValue(Object.assign(new Error('participant not found'), { status: 404 }));
+  getActiveGameSessionForChannel.mockReset().mockResolvedValue(null);
+  recordVoiceJoined.mockReset().mockResolvedValue(undefined);
+  recordVoiceLeft.mockReset().mockResolvedValue(undefined);
+  forgetVoiceRoomSnapshot.mockReset();
+  publishActivityStateChange.mockReset();
   vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
 });
@@ -403,4 +417,84 @@ describe('POST /api/livekit/webhook — other events', () => {
       expect(getVoiceBlock).not.toHaveBeenCalled();
     }
   );
+});
+
+describe('POST /api/livekit/webhook — activity host presence', () => {
+  const SESSION_ID = '0a1b2c3d-0000-4000-8000-0000000000ee';
+
+  function presenceEvent(name: 'participant_joined' | 'participant_left', extra: Record<string, unknown> = {}) {
+    return JSON.stringify({
+      event: name,
+      id: 'EV_9',
+      room: { sid: 'RM_1', name: ROOM },
+      participant: { sid: 'PA_9', identity: IDENTITY, tracks: [], ...extra },
+    });
+  }
+
+  it('records when someone left the voice room', async () => {
+    const res = await signedPost(presenceEvent('participant_left'));
+    expect(res.status).toBe(200);
+    await vi.waitFor(() => expect(recordVoiceLeft).toHaveBeenCalledWith(ROOM, IDENTITY, expect.any(Number)));
+    expect(forgetVoiceRoomSnapshot).toHaveBeenCalledWith(ROOM);
+  });
+
+  it('records nothing when the same identity is still connected (a second tab)', async () => {
+    getParticipant.mockResolvedValueOnce({ identity: IDENTITY });
+    await signedPost(presenceEvent('participant_left'));
+    await vi.waitFor(() => expect(getParticipant).toHaveBeenCalledWith(ROOM, IDENTITY));
+    expect(recordVoiceLeft).not.toHaveBeenCalled();
+  });
+
+  it('forgets the absence when they come back', async () => {
+    await signedPost(presenceEvent('participant_joined'));
+    await vi.waitFor(() => expect(recordVoiceJoined).toHaveBeenCalledWith(ROOM, IDENTITY));
+  });
+
+  it("nudges the open activity's panels when its HOST leaves — no identity on the bus", async () => {
+    getActiveGameSessionForChannel.mockResolvedValue({
+      id: SESSION_ID,
+      serverId: SERVER_ID,
+      channelId: CHANNEL_ID,
+      status: 'lobby',
+      createdBy: IDENTITY,
+    });
+    await signedPost(presenceEvent('participant_left'));
+    await vi.waitFor(() =>
+      expect(publishActivityStateChange).toHaveBeenCalledWith({
+        serverId: SERVER_ID,
+        sessionId: SESSION_ID,
+        status: 'lobby',
+        publicSummary: { rosterChanged: true },
+      })
+    );
+  });
+
+  it('does not nudge for someone who is not the host', async () => {
+    getActiveGameSessionForChannel.mockResolvedValue({
+      id: SESSION_ID,
+      serverId: SERVER_ID,
+      channelId: CHANNEL_ID,
+      status: 'lobby',
+      createdBy: '0a1b2c3d-0000-4000-8000-0000000000bb',
+    });
+    await signedPost(presenceEvent('participant_left'));
+    await vi.waitFor(() => expect(getActiveGameSessionForChannel).toHaveBeenCalled());
+    expect(publishActivityStateChange).not.toHaveBeenCalled();
+  });
+
+  it('ignores service participants (egress, agents) and identities that are not user ids', async () => {
+    await signedPost(presenceEvent('participant_left', { kind: 'EGRESS' }));
+    await signedPost(
+      JSON.stringify({
+        event: 'participant_left',
+        id: 'EV_10',
+        room: { sid: 'RM_1', name: ROOM },
+        participant: { sid: 'PA_10', identity: 'g_guestwithoutaccount', tracks: [] },
+      })
+    );
+    // Give a stray fire-and-forget call the chance to run.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(recordVoiceLeft).not.toHaveBeenCalled();
+    expect(getActiveGameSessionForChannel).not.toHaveBeenCalled();
+  });
 });

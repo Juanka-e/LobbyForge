@@ -313,8 +313,18 @@ As implemented:
   `invalid_options` with `issues: ["<option>: …"]` (unknown names, types,
   ranges, choices, ≤ 1000-char strings, `user` not a member of this
   server, `channel` not visible to the invoker); 422
-  `blocked_by_moderation` (`rule`); 429 `rate_limited` (20/min per member,
-  plus 60/min per address).
+  `blocked_by_moderation` (`rule`); 409 `bot_offline` (`bot: { id, name }`)
+  — nobody is there to answer: the bot has no live event-stream connection
+  and no enabled event endpoint subscribed to `interaction_create` (or it
+  lacks `receive_events`, which both need). Nothing is written or audited,
+  so the member sees "offline" at once instead of a "thinking…" row that
+  expires 15 minutes later. A bot WITH such an endpoint keeps the 202 (the
+  endpoint is called whether its process is up or not). "Live connection"
+  is read from Redis: the gateway subscribes to `lf:{env}:bot-events:{botId}`
+  exactly while a connection for the bot is open, so `PUBSUB NUMSUB` on that
+  channel counts them (`lib/bots/reachability.ts`); when Redis cannot be
+  asked, the run goes ahead as before. 429 `rate_limited` (20/min per
+  member, plus 60/min per address).
 - "Exactly like member posts" for the Moderation Bot means its CONTENT
   rules (blocked words, links, mentions) run over the free-text string
   options (choice values come from the bot's list); its counting rules
@@ -684,7 +694,14 @@ As implemented (`packages/bot-sdk/src/bot.ts`, `signature.ts`,
 Ships two examples under `packages/bot-sdk/examples/`: `roll-bot.mjs`
 (a `/roll` command and `!roll` over the socket) and `http-bot.mjs` (a
 `node:http` endpoint that verifies signatures and answers interactions
-synchronously).
+synchronously). Both turn every refusal into one line a person can act on
+(`/roll is already registered by another bot on this server — pick another
+name` for `command_name_taken`, a revoked token, a missing permission, a
+port in use) instead of a stack trace, and exit 1 on anything fatal —
+including, for `roll-bot.mjs`, a stream the gateway closed for good after
+it was running (4001 token rotated/revoked, 4003 disabled, 4009 another
+copy took over), where a bot would otherwise just stop with exit 0 — and 0
+only after Ctrl+C / SIGTERM.
 
 ## 7. UI
 - Composer: typing `/` opens a command picker (keyboard accessible,

@@ -54,12 +54,17 @@ describe('@lobbyforge/quiz — plugin contract', () => {
       reveal: { role: 'host' },
       next: { role: 'host' },
       end: { role: 'host' },
+      'play-again': { role: 'host' },
       // Joining names the player on the public roster; answering never does.
       join: { role: 'member', actorFields: ['playerId'], joinsRoster: true },
-      leave: { role: 'member', actorFields: ['playerId'] },
+      // Playing needs the voice room; leaving does not.
+      leave: { role: 'member', actorFields: ['playerId'], allowOutsideVoice: true },
       answer: { role: 'member', actorFields: ['playerId'] },
       'time-up': { role: 'member' },
     });
+    // A finished quiz accepts "play again" and nothing else.
+    expect(quizPlugin.restartActions).toEqual(['play-again']);
+    expect(quizPlugin.manifest.catalog?.requiresVoiceRoom).toBe(true);
   });
 
   it('ships English and Turkish, with the catalogue summary from the locale files', () => {
@@ -88,6 +93,10 @@ describe('validateAction — the raw HTTP payload guard', () => {
     expect(quizValidateAction({ type: 'answer', index: -1, playerId: 'p1' })).toMatch(/index/);
     expect(quizValidateAction({ type: 'answer', index: 1.5, playerId: 'p1' })).toMatch(/index/);
     expect(quizValidateAction({ type: 'answer', index: '1', playerId: 'p1' })).toMatch(/index/);
+  });
+
+  it('play-again needs nothing but its type', () => {
+    expect(quizValidateAction({ type: 'play-again' })).toBeNull();
   });
 
   it('start: a known pack, or a valid custom list; settings from the allowed sets', () => {

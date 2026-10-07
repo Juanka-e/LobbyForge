@@ -876,7 +876,7 @@ describe('@lobbyforge/hushle', () => {
       vi.setSystemTime(start + 20_000);
       await harness.performAction('p1', { type: 'pass' });
       await harness.performAction('p1', { type: 'next-card' });
-      await harness.performAction('p3', { type: 'bust-forbidden', bustedBy: 'p3' });
+      await harness.performAction('p3', { type: 'bust-forbidden', bustedBy: 'p3', cardId: harness.getState().currentCard!.id });
       expect(harness.getState().timer).toEqual(timer);
       expect(harness.getState().totalCardsPlayed).toBe(3);
     });
@@ -898,7 +898,7 @@ describe('@lobbyforge/hushle', () => {
       ]) {
         await harness.performAction('p1', action);
       }
-      await harness.performAction('p3', { type: 'bust-forbidden', bustedBy: 'p3' });
+      await harness.performAction('p3', { type: 'bust-forbidden', bustedBy: 'p3', cardId: harness.getState().currentCard!.id });
       expect(JSON.stringify(harness.getState())).toBe(over);
       // The host moves on: the next team's turn gets a fresh clock.
       await harness.performAction('p1', { type: 'end-turn' });
@@ -1063,7 +1063,7 @@ describe('@lobbyforge/hushle', () => {
     const beforeCardId = before.currentCard!.id;
 
     // p3 is on team B (opposing) — the buzzer is valid.
-    await harness.performAction('p3', { type: 'bust-forbidden', bustedBy: 'p3' });
+    await harness.performAction('p3', { type: 'bust-forbidden', bustedBy: 'p3', cardId: beforeCardId });
 
     const after = harness.getState();
     expect(after.teams[0]!.penaltyCount).toBe(before.teams[0]!.penaltyCount + 1);
@@ -1077,14 +1077,14 @@ describe('@lobbyforge/hushle', () => {
     const harness = await setupBustHarness();
     const before = JSON.stringify(harness.getState());
     // p2 is on team A with the explainer — no self-busting.
-    await harness.performAction('p2', { type: 'bust-forbidden', bustedBy: 'p2' });
+    await harness.performAction('p2', { type: 'bust-forbidden', bustedBy: 'p2', cardId: harness.getState().currentCard!.id });
     expect(JSON.stringify(harness.getState())).toBe(before);
   });
 
   it('rejects a bust from a player with no team (floater/spectator)', async () => {
     const harness = await setupBustHarness();
     const before = JSON.stringify(harness.getState());
-    await harness.performAction('p4', { type: 'bust-forbidden', bustedBy: 'ghost-player' });
+    await harness.performAction('p4', { type: 'bust-forbidden', bustedBy: 'ghost-player', cardId: harness.getState().currentCard!.id });
     expect(JSON.stringify(harness.getState())).toBe(before);
   });
 
@@ -1092,7 +1092,76 @@ describe('@lobbyforge/hushle', () => {
     const harness = await setupBustHarness();
     const before = JSON.stringify(harness.getState());
     // No bustedBy — the reducer must not trust an anonymous buzz.
-    await harness.performAction('p3', { type: 'bust-forbidden' });
+    await harness.performAction('p3', { type: 'bust-forbidden', cardId: harness.getState().currentCard!.id });
     expect(JSON.stringify(harness.getState())).toBe(before);
+  });
+
+  it('two BUSTs for the same card (both opponents at once, or a double tap) cost ONE penalty and burn no card', async () => {
+    const harness = await setupBustHarness();
+    const before = harness.getState();
+    const cardId = before.currentCard!.id;
+    await harness.performAction('p3', { type: 'bust-forbidden', bustedBy: 'p3', cardId });
+    const afterFirst = harness.getState();
+    await harness.performAction('p4', { type: 'bust-forbidden', bustedBy: 'p4', cardId });
+    const afterSecond = harness.getState();
+    // The second names a card that is no longer on screen: ignored, same object.
+    expect(afterSecond).toBe(afterFirst);
+    expect(afterSecond.teams[0]!.penaltyCount).toBe(before.teams[0]!.penaltyCount + 1);
+    expect(afterSecond.teams[0]!.score).toBe(before.teams[0]!.score - 1);
+    expect(afterSecond.usedCardIds).toHaveLength(before.usedCardIds.length + 1);
+    expect(afterSecond.totalCardsPlayed).toBe(before.totalCardsPlayed + 1);
+  });
+
+  it('ignores a BUST for another card, and one without a card id', async () => {
+    const harness = await setupBustHarness();
+    const before = harness.getState();
+    await harness.performAction('p3', { type: 'bust-forbidden', bustedBy: 'p3', cardId: 'not-the-card-on-screen' });
+    expect(harness.getState()).toBe(before);
+    await harness.performAction('p3', { type: 'bust-forbidden', bustedBy: 'p3' });
+    expect(harness.getState()).toBe(before);
+  });
+
+  it('validateAction: BUST must name a card; other actions pass through to the reducer', () => {
+    const validate = hushlePlugin.validateAction!;
+    expect(validate({ type: 'bust-forbidden', bustedBy: 'p3' })).toMatch(/cardId/);
+    expect(validate({ type: 'bust-forbidden', bustedBy: 'p3', cardId: '' })).toMatch(/cardId/);
+    expect(validate({ type: 'bust-forbidden', bustedBy: 'p3', cardId: 'x'.repeat(129) })).toMatch(/cardId/);
+    expect(validate({ type: 'bust-forbidden', bustedBy: 'p3', cardId: 'en-easy-001' })).toBeNull();
+    expect(validate({ type: 'correct-guess' })).toBeNull();
+    expect(validate(null)).toMatch(/object/);
+  });
+});
+
+describe('Hushle play again (restartActions)', () => {
+  it('declares start-game as its only restart action', () => {
+    expect(hushlePlugin.restartActions).toEqual(['start-game']);
+  });
+
+  it('start-game from the ended phase starts a new game with fresh teams, scores and deck', async () => {
+    const harness = createTestHarness<HushleState, Parameters<typeof hushlePlugin.handleAction>[2]>({
+      plugin: hushlePlugin,
+      players: ['p1', 'p2', 'p3', 'p4'],
+    });
+    await harness.startGame();
+    await harness.performAction('p1', { type: 'start-game', packId: 'hushle-en-basic', language: 'en', createdBy: 'p1' });
+    await harness.performAction('p1', {
+      type: 'set-teams',
+      teams: [
+        { name: 'A', playerIds: ['p1', 'p2'] },
+        { name: 'B', playerIds: ['p3', 'p4'] },
+      ],
+    });
+    await harness.performAction('p1', { type: 'start-turn', teamId: harness.getState().teams[0]!.id, explainerId: 'p1' });
+    await harness.performAction('p1', { type: 'correct-guess' });
+    await harness.performAction('p1', { type: 'end-game' });
+    expect(harness.getState().phase).toBe('ended');
+
+    await harness.performAction('p1', { type: 'start-game', packId: 'hushle-en-basic', language: 'en', createdBy: 'p1' });
+    const again = harness.getState();
+    expect(again.phase).toBe('team_setup');
+    expect(again.teams).toEqual([]);
+    expect(again.usedCardIds).toEqual([]);
+    expect(again.totalCardsPlayed).toBe(0);
+    expect(again.currentCard).toBeNull();
   });
 });

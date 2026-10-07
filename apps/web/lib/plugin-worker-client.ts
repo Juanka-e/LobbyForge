@@ -101,6 +101,8 @@ export interface WorkerPluginInfo {
   locales: string[];
   /** The bundle ships ui/index.html for the sandboxed iframe. */
   ui: boolean;
+  /** manifest.json `requiresVoiceRoom`: players must be in the activity's voice room. */
+  requiresVoiceRoom?: boolean;
   /** Which optional functions server.js defines (reported by the worker). */
   hasValidateAction: boolean;
   hasProjection: boolean;
@@ -188,6 +190,7 @@ export async function describeWorkerPlugin(ref: WorkerBundleRef, root: string = 
   };
   if (manifest.minPlayers !== undefined) info.minPlayers = manifest.minPlayers;
   if (manifest.maxPlayers !== undefined) info.maxPlayers = manifest.maxPlayers;
+  if (manifest.requiresVoiceRoom !== undefined) info.requiresVoiceRoom = manifest.requiresVoiceRoom;
   return info;
 }
 
@@ -250,6 +253,15 @@ export function buildWorkerPlugin(info: WorkerPluginInfo): WorkerBackedPlugin {
     info.minPlayers !== undefined || info.maxPlayers !== undefined
       ? { minPlayers: info.minPlayers, maxPlayers: info.maxPlayers }
       : undefined;
+  // From the web app's own copy of manifest.json (never the worker's answer):
+  // the host applies its voice rule to a marketplace plugin the same way.
+  const catalog =
+    playerConfig || info.requiresVoiceRoom !== undefined
+      ? {
+          ...(playerConfig ? { playerConfig } : {}),
+          ...(info.requiresVoiceRoom !== undefined ? { requiresVoiceRoom: info.requiresVoiceRoom } : {}),
+        }
+      : undefined;
   const plugin = {
     manifest: {
       id: info.id,
@@ -260,7 +272,7 @@ export function buildWorkerPlugin(info: WorkerPluginInfo): WorkerBackedPlugin {
       permissions: [],
       locales: info.locales,
       entryClient: '',
-      ...(playerConfig ? { catalog: { playerConfig } } : {}),
+      ...(catalog ? { catalog } : {}),
     },
     actionPolicies: info.actionPolicies,
     __workerBacked: true as const,
