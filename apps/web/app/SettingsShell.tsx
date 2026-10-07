@@ -46,7 +46,7 @@ const COMMUNITY_NAV: NavItem[] = [
   { href: '/admin/settings/storage', labelKey: 'settings.nav.community.storage', icon: 'cloud_upload' },
   { href: '/admin/settings/backups', labelKey: 'settings.nav.community.backups', icon: 'backup' },
   { href: '/admin/audit', labelKey: 'settings.nav.community.audit', icon: 'history' },
-  { href: '/admin/moderation', labelKey: 'settings.nav.community.moderation', icon: 'moderation' },
+  { href: '/admin/moderation', labelKey: 'settings.nav.community.moderation', icon: 'gavel' },
   { href: '/admin/health', labelKey: 'settings.nav.community.health', icon: 'health_and_safety' },
   { href: '/admin/updates', labelKey: 'settings.nav.community.updates', icon: 'system_update' },
 ];
