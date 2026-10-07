@@ -402,6 +402,10 @@ async function loadManifest(source, channel = DEFAULT_CHANNEL) {
 function validateManifest(manifest) {
   if (!manifest || typeof manifest !== 'object') throw new Error('Manifest must be an object.');
   if (typeof manifest.version !== 'string') throw new Error('Manifest version is required.');
+  // The manifest may come from the network, and apply writes its version
+  // into .env.prod and deployment-state.json: accept strict semver only,
+  // here at the trust boundary, rather than relying on a later parse.
+  parseVersion(manifest.version);
   if (manifest.channel !== undefined && typeof manifest.channel !== 'string') {
     throw new Error('Manifest channel must be a string.');
   }
@@ -411,6 +415,7 @@ function validateManifest(manifest) {
   if (manifest.minimumVersion !== undefined && typeof manifest.minimumVersion !== 'string') {
     throw new Error('Manifest minimumVersion must be a string.');
   }
+  if (manifest.minimumVersion !== undefined) parseVersion(manifest.minimumVersion);
   if (manifest.signature !== undefined && typeof manifest.signature !== 'string') {
     throw new Error('Manifest signature must be a string.');
   }
@@ -524,6 +529,13 @@ async function readEnvProdValue(key) {
 }
 
 async function setEnvProdValue(key, value) {
+  // Values reach here from a release manifest (version, image digest) or
+  // deployment-state.json. A CR/LF would smuggle extra variables into the
+  // env file docker compose reads, so refuse it outright.
+  if (!/^[A-Z][A-Z0-9_]*$/.test(key)) throw new Error(`Invalid .env.prod key: ${JSON.stringify(key)}`);
+  if (typeof value !== 'string' || /[\r\n\0]/.test(value)) {
+    throw new Error(`Refusing to write ${key} to ${ENV_FILE}: the value must be a single-line string.`);
+  }
   const file = fromRoot(ENV_FILE);
   let raw = '';
   try {

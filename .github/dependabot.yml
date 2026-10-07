@@ -14,6 +14,17 @@ updates:
         patterns: ["vitest", "@vitest/*"]
       next:
         patterns: ["next", "react", "react-dom", "@types/react*"]
+    ignore:
+      # zod 4 is a breaking rewrite, not a bump. On 4.x our API routes would
+      # return differently worded `issues` messages to clients and bots,
+      # `.uuid()` / `.datetime()` reject input 3.x accepted, `z.record(enum)`
+      # makes every key required, and a few types stop compiling. Most of
+      # that is not covered by tests. It needs its own PR (zod 3.25 ships
+      # `zod/v4`, so it can move one package at a time). Minor and patch 3.x
+      # updates still arrive. Revisit when that migration is scheduled, and
+      # delete this rule in the PR that does it.
+      - dependency-name: "zod"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "docker"
     directory: "/"

@@ -28,7 +28,7 @@ name: lobbyforge-prod
 services:
   # ── Edge: Nginx reverse proxy + TLS termination ──────────────────
   nginx:
-    image: nginx:1.31-alpine@sha256:72ba65eb42c10344912a84ff42408db7d34f2feb642204570ab8fc5ffd29f1d3
+    image: nginx:1.31-alpine@sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2
     container_name: lobbyforge-nginx
     restart: unless-stopped
     # V4-004: nginx loads certificates ONCE at startup. The certbot
@@ -269,9 +269,14 @@ services:
     networks:
       - internal
 
-  # ── Cache: Redis 7 ───────────────────────────────────────────────
+  # ── Cache: Redis 8 ───────────────────────────────────────────────
+  # Redis 8 (AGPLv3 option) loads a Redis 7 redis-data volume in place, but
+  # rewrites it in a newer RDB format that Redis 7 cannot read: back up the
+  # volume before upgrading. It is not purely a cache — session revocations
+  # and voice blocks live only here — so never "fix" a failed start by
+  # emptying the volume.
   redis:
-    image: redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
+    image: redis:8-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
     container_name: lobbyforge-redis
     restart: unless-stopped
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env.prod}", "--appendonly", "yes"]
