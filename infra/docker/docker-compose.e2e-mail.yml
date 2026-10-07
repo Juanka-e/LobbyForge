@@ -17,10 +17,11 @@
 #     -f infra/docker/docker-compose.e2e-mail.yml \
 #     up -d --no-build --wait
 #
-# Pinned: the dev file follows `latest`, the e2e run should not change under it.
+# Pinned to the same tag and digest as the dev file's `mailpit`, so the e2e
+# run never changes under it; Dependabot bumps both together.
 services:
   mailpit:
-    image: axllent/mailpit:v1.27
+    image: axllent/mailpit:v1.31@sha256:b68349e3a014b90c5610bfb26b2ae36f3892d7b8cf25ee140c6c71c98d2fcf48
     container_name: lobbyforge-e2e-mailpit
     profiles: !reset []
     ports: !override

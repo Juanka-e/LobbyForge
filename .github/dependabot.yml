@@ -14,6 +14,9 @@ updates:
         patterns: ["vitest", "@vitest/*"]
       next:
         patterns: ["next", "react", "react-dom", "@types/react*"]
+      # jest-dom and react peer on @testing-library/dom: move them together.
+      testing-library:
+        patterns: ["@testing-library/*"]
     ignore:
       # zod 4 is a breaking rewrite, not a bump. On 4.x our API routes would
       # return differently worded `issues` messages to clients and bots,
@@ -41,6 +44,15 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 3
+    groups:
+      # init and analyze must run the same version: a PR that bumps only
+      # one of them fails CodeQL ("configuration file for version X, but
+      # running version Y").
+      codeql:
+        patterns: ["github/codeql-action*"]
+      # upload and download are released as a pair (upload v7 with download v8).
+      artifacts:
+        patterns: ["actions/upload-artifact", "actions/download-artifact"]
   - package-ecosystem: "docker-compose"
     directory: "/infra/docker"
     schedule:

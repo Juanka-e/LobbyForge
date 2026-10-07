@@ -40,7 +40,7 @@ const CHANNEL_TYPES: Array<{ value: ChannelType; labelKey: string; icon: string 
   { value: 'text', labelKey: 'adminSettings.channels.type.text', icon: 'tag' },
   { value: 'voice', labelKey: 'adminSettings.channels.type.voice', icon: 'volume_up' },
   { value: 'announcement', labelKey: 'adminSettings.channels.type.announcement', icon: 'campaign' },
-  { value: 'stage', labelKey: 'adminSettings.channels.type.stage', icon: 'podiums' },
+  { value: 'stage', labelKey: 'adminSettings.channels.type.stage', icon: 'podium' },
   { value: 'activity', labelKey: 'adminSettings.channels.type.activity', icon: 'sports_esports' },
 ];
 

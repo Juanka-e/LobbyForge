@@ -2,6 +2,13 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Dependency cleanup, second batch - 2026-10-07
+
+- **Icon font:** material-symbols 0.47.6. Every icon name the app uses is still a ligature in the new font (checked by rendering both fonts).
+- **Mailpit v1.31** (security fixes from v1.30 onward), digest-pinned. The dev compose file now uses the same pin as the e2e mail overlay instead of `latest`.
+- **Tests:** @testing-library/jest-dom 7 (it now requires `@testing-library/dom`, which apps/web declares directly), @testing-library/react 16.3.3, @testing-library/dom 10.4.2. drizzle-kit 0.31.11.
+- **CI:** actions/upload-artifact v7 with actions/download-artifact v8, and CodeQL Action v4 for both `init` and `analyze`. Dependabot now groups these pairs, plus the Testing Library packages, so they arrive in one PR.
+
 ## [Unreleased] - Dependency and security cleanup - 2026-10-07
 
 - **Redis 7.4 → 8.10** (`redis:8-alpine`, digest-pinned in the production and development compose files and in the Trivy scan). Redis 8 is also available under AGPLv3. **The upgrade is one-way:** Redis 8 loads the existing `redis-data` volume, but rewrites it in a format Redis 7 can't read. Back it up before updating:
