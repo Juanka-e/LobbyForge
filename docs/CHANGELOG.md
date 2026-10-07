@@ -2,6 +2,15 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Dependency cleanup, third batch - 2026-10-07
+
+- **Runtime:** drizzle-orm 0.45.3. Apart from a new Netlify driver, its published code is identical to 0.45.2. The ALTCHA widget moves to 3.2.4: the workers, CSS and types are unchanged, and the external build only stops an interrupted audio challenge from throwing an unhandled `AbortError`.
+- **Release pipeline:** docker/setup-buildx-action v4, docker/login-action v4, docker/metadata-action v6 and docker/build-push-action v7, moved together and still pinned to commit SHAs. Dependabot now groups `docker/*` actions.
+- **Dev:** @testing-library/user-event 14.6.7, and @types/node 22.20.5.
+- **Held back, with Dependabot ignore rules:**
+  - tailwind-merge 3 supports only Tailwind CSS 4; it moves with the Tailwind 4 migration.
+  - @types/node 23 or later; the types follow the Node 22 runtime.
+
 ## [Unreleased] - Activities and bots: fixes from a real-browser pass - 2026-10-07
 
 A pre-beta pass played every activity with 4–7 browser players and drove the bots the way an owner would. Hidden information held everywhere. These were the bugs:
