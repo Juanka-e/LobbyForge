@@ -121,7 +121,11 @@ const server = createServer((req, res) => {
       answer = handle(delivery);
     } catch (error) {
       // A payload this bot does not understand must not take the process down.
-      console.error(`Could not handle a ${String(delivery?.event)} delivery: ${error instanceof Error ? error.message : String(error)}`);
+      // JSON keeps whatever the payload holds on one line.
+      console.error(
+        'Could not handle a delivery: %s',
+        JSON.stringify({ event: String(delivery?.event), error: error instanceof Error ? error.message : String(error) })
+      );
       send(res, 500, { error: 'handler failed' });
       return;
     }
