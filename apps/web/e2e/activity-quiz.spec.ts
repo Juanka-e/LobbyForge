@@ -353,7 +353,9 @@ test.describe('Quiz with a host and two players, through the lobby', () => {
       await expect(ranking.getByRole('listitem').first()).toContainText('3 of 3 right');
       await expect(ranking.getByRole('listitem').last()).toContainText('0 of 3 right');
     }
-    await expect(ownerQuiz.getByText('Want another round? End this activity and start Quiz again.')).toBeVisible();
+    // Another round is one press for the host — and only the host.
+    await expect(ownerQuiz.getByRole('button', { name: 'Play again', exact: true })).toBeVisible();
+    await expect(kayaQuiz.getByRole('button', { name: 'Play again', exact: true })).toHaveCount(0);
 
     // ── Done: the host ends it, which frees the channel.
     await owner.getByTitle('End this activity for everyone').click();

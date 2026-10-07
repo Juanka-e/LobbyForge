@@ -3,7 +3,8 @@
  * browser contexts (the owner + five invited guests):
  *
  *   install the app → the owner joins the voice channel and starts
- *   Vampire Village from the activities hub → everyone opens the hub,
+ *   Vampire Village from the activities hub → everyone joins the voice
+ *   channel (the game is played over voice) and opens the hub,
  *   creates a character and readies up → the host starts → each page reads
  *   its own secret role → night 1 (the vampire bites the villager, the seer
  *   looks at the vampire, the doctor protects themself, the survivor stays
@@ -178,8 +179,13 @@ test.describe('Vampire Village through the real lobby UI', () => {
     await host.getByRole('button', { name: /Vampire Village/ }).filter({ hasText: 'Start' }).click();
     await expect(host.getByLabel('Character name')).toBeVisible({ timeout: 20_000 });
 
-    // ── Everyone else opens the hub and lands in the same game.
+    // ── Everyone else joins the voice channel (the game is played over
+    // voice: a villager outside it is refused), opens the hub and lands in
+    // the same game.
     for (const page of pages.slice(1)) {
+      await page.goto(`/lobby?server=${serverId}`);
+      await page.locator('button').filter({ has: page.locator('span', { hasText: 'volume_up' }) }).first().click();
+      await expect(page.getByText('Voice Connected')).toBeVisible({ timeout: 30_000 });
       await openHub(page, serverId);
       await expect(page.getByLabel('Character name')).toBeVisible({ timeout: 20_000 });
     }
