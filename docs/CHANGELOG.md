@@ -2,6 +2,22 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Dependency and security cleanup - 2026-10-07
+
+- **Redis 7.4 → 8.10** (`redis:8-alpine`, digest-pinned in the production and development compose files and in the Trivy scan). Redis 8 is also available under AGPLv3. **The upgrade is one-way:** Redis 8 loads the existing `redis-data` volume, but rewrites it in a format Redis 7 can't read. Back it up before updating:
+  - `docker compose -f infra/docker/docker-compose.prod.yml stop redis`
+  - `docker run --rm -v lobbyforge-prod_redis-data:/data -v "$PWD":/b alpine tar czf /b/redis-data-7.4.tgz -C /data .`
+  
+  To roll back, restore that archive together with the old image. Don't empty the volume to get past a failed start: session revocations and voice blocks are stored only in Redis.
+- **nginx** 1.31-alpine moves to the rebuilt image digest.
+- **Advisories:**
+  - `postcss-selector-parser` is overridden to 7.1.6 (GHSA-rj75-hqrm-r3gf); Tailwind 3's CSS output is byte-identical.
+  - `sharp` is refreshed to 0.35.5 inside next's existing range (GHSA-wq5f-xc86-pv6w).
+- **`lfctl`:** a release manifest's `version` and `minimumVersion` must be strict semver as soon as the manifest is loaded, and `.env.prod` writes refuse multi-line values.
+- **Toolchain:** ESLint 10, typescript-eslint 8.71, Vitest 5, React 19.3. Node 22.13 or later is now required to develop (`engines`).
+- **CI:** actions/checkout v7, actions/setup-node v7 and tauri-action v1, still pinned to commit SHAs.
+- **zod stays on 3.x for now.** Moving to zod 4 changes the validation messages clients receive and needs its own migration, so Dependabot ignores zod major versions until then. The plan and the trial-upgrade findings are in `docs/ZOD4_MIGRATION.md`.
+
 ## [Unreleased] - Email: verification, email change and password reset - 2026-10-05
 
 ### Email (`docs/EMAIL.md`)

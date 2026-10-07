@@ -178,4 +178,15 @@ describe('lfctl update check without --manifest', () => {
     expect(JSON.parse(res.stdout)).toMatchObject({ latestVersion: '0.9.0-rc.9', signature: { status: 'invalid' } });
     expect(res.stderr).toContain('refusing to trust this release source');
   });
+
+  it('a downloaded manifest whose version is not one semver line is rejected, even when signed', async () => {
+    // apply writes the version into .env.prod; a newline would add variables.
+    listing = [
+      { tag_name: 'v0.9.1', draft: false, prerelease: false, body: signedManifest('0.9.1\nLOBBYFORGE_IMAGE=evil:latest') },
+    ];
+    const res = await check([]);
+    expect(res.code).toBe(1);
+    expect(res.stdout).toBe('');
+    expect(res.stderr).toContain('Invalid semantic version');
+  });
 });

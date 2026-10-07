@@ -21,7 +21,8 @@ test('material symbols load locally without leaking ligature text', async ({ pag
       externalGoogleStyles: [...document.styleSheets]
         .map((sheet) => sheet.href)
         .filter((href): href is string => Boolean(href))
-        .filter((href) => href.includes('fonts.googleapis.com')),
+        // Compare the parsed host, not a substring of the whole URL.
+        .filter((href) => new URL(href, document.baseURI).hostname === 'fonts.googleapis.com'),
     };
     probe.remove();
     return response;
