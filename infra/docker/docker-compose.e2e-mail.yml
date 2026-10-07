@@ -20,7 +20,7 @@
 # Pinned: the dev file follows `latest`, the e2e run should not change under it.
 services:
   mailpit:
-    image: axllent/mailpit:v1.27
+    image: axllent/mailpit:v1.31
     container_name: lobbyforge-e2e-mailpit
     profiles: !reset []
     ports: !override
