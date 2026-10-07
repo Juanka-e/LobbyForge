@@ -114,7 +114,13 @@ Current hardening:
 - The route verifies that `channelId` belongs to `{id}`.
 - The channel must be `voice` or `stage`.
 - The route calls `getActiveGameSessionForChannel` and returns 409 when the
-  channel already has an active `lobby`, `running`, or `paused` session.
+  channel already has an active `lobby`, `running`, or `paused` session:
+  `{ error, code: 'activity_exists', sessionId, activity }`. Two starts at
+  the same moment both pass that check; the partial unique index
+  `game_sessions_channel_open_unique` lets one INSERT in, and the loser's
+  unique violation (seen through Drizzle's wrapper with
+  `isPgUniqueViolation`) gets the same 409 with the winner's `sessionId` —
+  never a 500.
 - The selected plugin must be installed and enabled for the server in
   `plugins_enabled`.
 
@@ -128,11 +134,15 @@ without the full `state` blob. Membership-gated (owner shortcut or
 ### `GET /api/servers/{id]/activities/{sessionId}` — read
 
 Returns the full session detail: `{ id, pluginId, status, state,
-publicSummary, players: [...] }`. Membership-gated. 404 if the
+publicSummary, createdBy, players: [...] }` (`createdBy` is the current
+host). Membership-gated. 404 if the
 session is ended, doesn't exist, or belongs to a different server
 than the URL says (defence-in-depth — the URL encodes the server,
 but a malicious caller shouldn't be able to cross-invoke). 60
-req/min.
+req/min. For a plugin that requires voice the read also applies the host
+hand-over rule and adds `host: { userId, inVoice, awaySince, transferAt,
+abandonAt, abandoned }` — see [PLUGIN_SDK.md → Voice, hosting and play
+again](./PLUGIN_SDK.md#voice-hosting-and-play-again).
 
 ### `POST /api/servers/{id]/activities/{sessionId]/actions` — dispatch
 
@@ -142,14 +152,24 @@ route loads the session, resolves the plugin via
 `plugin.handleAction(ctx, state, body)`. The return value is
 persisted via `setGameSessionState`. Audit `activity.action` with
 `{ pluginId, actionType }`. Membership-gated. 409 if the session
-is for a plugin the registry no longer ships. 30 req/min.
+is for a plugin the registry no longer ships. Rate limits: 90 actions/min
+per user per session (keyed on the signed-in user, so a household or a LAN
+party behind one address no longer shares a bucket), plus a 600/min
+per-address backstop; both answer 429 `rate_limited`.
 
 Before `handleAction` runs, the host evaluates the plugin's action policy:
 
-- `host`: session creator or a user with `START_ACTIVITY`.
+- `host`: the session's host (its creator, until hosting moves) or a user
+  with `START_ACTIVITY`; otherwise 403 `not_host`.
 - `member`: any member of the server.
-- `player`: active player in `game_session_players`.
+- `player`: active player in `game_session_players`; otherwise 403
+  `not_player`.
 - missing policy: treated as `host`.
+- a plugin with `catalog.requiresVoiceRoom`: `member` / `player` actions
+  also need the caller in the activity's voice room (403
+  `voice_required`), unless the policy says `allowOutsideVoice`.
+- an ended session is 409 `session_ended`; so is any action on a finished
+  game (`phase: 'ended'`) that is not one of the plugin's `restartActions`.
 
 If the policy has `actorFields`, the host overwrites those fields with the
 local `session.uid`. For example, `vote.voterId`, `join.playerId`, and
@@ -157,9 +177,15 @@ local `session.uid`. For example, `vote.voterId`, `join.playerId`, and
 
 ### `POST /api/servers/{id]/activities/{sessionId]/end` — end
 
-Two paths: the host (session's `createdBy`) can end without
-`START_ACTIVITY`; everyone else needs the admin permission.
-Audit `activity.end` with `{ pluginId, wasHost }`. 10 req/min.
+The host (session's `createdBy`) can end without `START_ACTIVITY`;
+so can anyone holding it. For a plugin that requires voice, a host who
+left the voice room no longer locks the channel: past 60 s hosting moves to
+the longest-present participant in the room (who may then end it as host),
+and once the session is abandoned (host gone 3 min, or 60 s with nobody to
+take over) any voice participant may end it — someone outside the room
+gets 403 `voice_required`, a participant who may not end it yet 403
+`not_host` with the `host` object. Audit `activity.end` with `{ pluginId,
+wasHost }` (+ `reason: 'abandoned'`). 10 req/min.
 
 ### `GET /api/plugins` — registry listing
 
@@ -259,7 +285,11 @@ Activity events land in `audit_logs` with these `action` strings:
 - `activity.action` — `targetType: 'session'`, `targetId: <sessionId>`,
   `metadata: { pluginId, actionType }`.
 - `activity.end` — `targetType: 'session'`, `targetId: <sessionId>`,
-  `metadata: { pluginId, wasHost }`.
+  `metadata: { pluginId, wasHost }`, plus `reason: 'abandoned'` when a
+  voice participant ended a session its host had abandoned.
+- `activity.host_transfer` — `actorUserId: null`, `targetType: 'session'`,
+  `metadata: { pluginId, fromUserId, toUserId, reason: 'host_left_voice',
+  awaySeconds }`: hosting moved because the host left the voice room.
 
 The audit log surface is owner-only (via `VIEW_AUDIT_LOG`, which is
 admin-only). See [`docs/ROLES.md`](./ROLES.md).

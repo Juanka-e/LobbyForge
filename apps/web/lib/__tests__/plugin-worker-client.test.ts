@@ -149,6 +149,14 @@ describe('buildWorkerPlugin', () => {
     expect(buildWorkerPlugin(info({ maxPlayers: 8 })).manifest.catalog).toEqual({ playerConfig: { minPlayers: undefined, maxPlayers: 8 } });
   });
 
+  it('carries manifest.json requiresVoiceRoom into the catalogue the host reads (voice rule)', () => {
+    expect(buildWorkerPlugin(info({ requiresVoiceRoom: true })).manifest.catalog).toEqual({ requiresVoiceRoom: true });
+    expect(buildWorkerPlugin(info({ requiresVoiceRoom: false, maxPlayers: 8 })).manifest.catalog).toEqual({
+      playerConfig: { minPlayers: undefined, maxPlayers: 8 },
+      requiresVoiceRoom: false,
+    });
+  });
+
   it('a refused action (worker: unchanged) returns the SAME state object, and the ctx carries the sandbox scope', async () => {
     const plugin = buildWorkerPlugin(info());
     const ctx = createTestHarness({ plugin: pollPlugin, players: ['u-1', 'u-2'] }).context as unknown as GamePluginContext;

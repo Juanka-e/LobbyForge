@@ -90,6 +90,8 @@ export function LobbyTextChannels({ channels }: LobbyTextChannelsProps) {
             <li key={c.id} className="relative">
               <button
                 type="button"
+                data-mobile-nav-close
+                aria-current={active ? 'page' : undefined}
                 onClick={() => voice.setActiveTextChannel(c.id, c.name)}
                 className={
                   active

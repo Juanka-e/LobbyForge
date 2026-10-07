@@ -83,9 +83,11 @@ describe('action policies', () => {
     // Only joining puts a player on the public roster — never a night
     // action or a vote, whose author must stay hidden.
     expect(policies.join).toEqual({ role: 'member', actorFields: ['playerId'], joinsRoster: true });
-    for (const type of ['leave', 'set-ready', 'timeout', 'night-target', 'night-shield', 'vote', 'chat', 'pack-chat']) {
+    for (const type of ['set-ready', 'timeout', 'night-target', 'night-shield', 'vote', 'chat', 'pack-chat']) {
       expect(policies[type], type).toEqual({ role: 'member', actorFields: ['playerId'] });
     }
+    // Playing needs the voice room (requiresVoiceRoom); leaving works from outside it.
+    expect(policies.leave).toEqual({ role: 'member', actorFields: ['playerId'], allowOutsideVoice: true });
   });
 });
 

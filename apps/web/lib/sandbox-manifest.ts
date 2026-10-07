@@ -20,6 +20,8 @@ export interface SandboxActionPolicy {
   actorFields?: string[];
   joinsRoster?: boolean;
   audit?: boolean;
+  /** A member/player action someone outside the voice room may send (leaving). */
+  allowOutsideVoice?: boolean;
 }
 
 export interface SandboxManifest {
@@ -32,6 +34,8 @@ export interface SandboxManifest {
   maxPlayers?: number;
   locales: string[];
   ui: boolean;
+  /** Players must be in the activity's voice room: the host refuses member/player actions from outside it. */
+  requiresVoiceRoom?: boolean;
 }
 
 export type ManifestValidation = { ok: true; manifest: SandboxManifest } | { ok: false; error: string };
@@ -44,7 +48,7 @@ const ACTION_TYPE_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
 const FIELD_RE = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
 const LOCALE_RE = /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/;
 const ROLES = new Set(['host', 'member', 'player']);
-const POLICY_KEYS = new Set(['role', 'actorFields', 'joinsRoster', 'audit']);
+const POLICY_KEYS = new Set(['role', 'actorFields', 'joinsRoster', 'audit', 'allowOutsideVoice']);
 /** Names that must never become object keys on the host (prototype pollution) or be overwritten. */
 const RESERVED_NAMES = new Set(['__proto__', 'constructor', 'prototype', 'type', 'actionId']);
 
@@ -118,6 +122,12 @@ export function validateSandboxManifest(raw: unknown): ManifestValidation {
       if (typeof policy.audit !== 'boolean') return fail(`actionPolicies["${actionType}"].audit must be a boolean`);
       clean.audit = policy.audit;
     }
+    if (policy.allowOutsideVoice !== undefined) {
+      if (typeof policy.allowOutsideVoice !== 'boolean') {
+        return fail(`actionPolicies["${actionType}"].allowOutsideVoice must be a boolean`);
+      }
+      clean.allowOutsideVoice = policy.allowOutsideVoice;
+    }
     actionPolicies[actionType] = clean;
   }
 
@@ -129,6 +139,9 @@ export function validateSandboxManifest(raw: unknown): ManifestValidation {
   }
   if (isPlayerCount(raw.minPlayers) && isPlayerCount(raw.maxPlayers) && raw.minPlayers > raw.maxPlayers) {
     return fail('"minPlayers" must not exceed "maxPlayers"');
+  }
+  if (raw.requiresVoiceRoom !== undefined && typeof raw.requiresVoiceRoom !== 'boolean') {
+    return fail('"requiresVoiceRoom" must be true or false');
   }
 
   let locales: string[] = ['en'];
@@ -159,6 +172,7 @@ export function validateSandboxManifest(raw: unknown): ManifestValidation {
   };
   if (isPlayerCount(raw.minPlayers)) manifest.minPlayers = raw.minPlayers;
   if (isPlayerCount(raw.maxPlayers)) manifest.maxPlayers = raw.maxPlayers;
+  if (typeof raw.requiresVoiceRoom === 'boolean') manifest.requiresVoiceRoom = raw.requiresVoiceRoom;
   return { ok: true, manifest };
 }
 

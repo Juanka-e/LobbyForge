@@ -98,6 +98,7 @@ describe('postActivityAction', () => {
       kind: 'error',
       status: 409,
       error: CONFLICT.error,
+      code: null,
       conflict: true,
     });
     expect(calls).toHaveBeenCalledTimes(CONFLICT_MAX_ATTEMPTS);
@@ -121,9 +122,20 @@ describe('postActivityAction', () => {
   ])('does not retry %s', async (_label, status, body) => {
     const { fetchImpl, calls } = fakeFetch(() => Response.json(body, { status }));
     const { result, sleep } = run(fetchImpl);
-    await expect(result).resolves.toEqual({ kind: 'error', status, error: body.error, conflict: false });
+    await expect(result).resolves.toEqual({ kind: 'error', status, error: body.error, code: null, conflict: false });
     expect(calls).toHaveBeenCalledTimes(1);
     expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['session_ended', 409],
+    ['not_host', 403],
+    ['voice_required', 403],
+    ['rate_limited', 429],
+  ])('passes the machine code %s through without retrying', async (code, status) => {
+    const { fetchImpl, calls } = fakeFetch(() => Response.json({ error: 'English text', code }, { status }));
+    await expect(run(fetchImpl).result).resolves.toEqual({ kind: 'error', status, error: 'English text', code, conflict: false });
+    expect(calls).toHaveBeenCalledTimes(1);
   });
 
   it('does not retry a network failure', async () => {
@@ -138,6 +150,6 @@ describe('postActivityAction', () => {
 
   it('copes with a refusal that has no JSON body', async () => {
     const { fetchImpl } = fakeFetch(() => new Response('upstream down', { status: 502 }));
-    await expect(run(fetchImpl).result).resolves.toEqual({ kind: 'error', status: 502, error: null, conflict: false });
+    await expect(run(fetchImpl).result).resolves.toEqual({ kind: 'error', status: 502, error: null, code: null, conflict: false });
   });
 });

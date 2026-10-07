@@ -251,6 +251,26 @@ function applyCorrectPassPenalty(
   };
 }
 
+/** Longest card id accepted on the wire (built-in ids are short slugs; DB ids are UUIDs). */
+const CARD_ID_MAX_LENGTH = 128;
+
+/**
+ * The host's outer belt (it answers 400 with the message). Only the fields
+ * a client can get wrong in a way the reducer would not simply ignore are
+ * checked here; the reducer stays defensive on everything.
+ */
+export function validateHushleAction(action: unknown): string | null {
+  if (!action || typeof action !== 'object' || Array.isArray(action)) return 'Action must be an object.';
+  const record = action as Record<string, unknown>;
+  if (record.type === 'bust-forbidden') {
+    const cardId = record.cardId;
+    if (typeof cardId !== 'string' || cardId.length === 0 || cardId.length > CARD_ID_MAX_LENGTH) {
+      return 'bust-forbidden requires the cardId of the card on screen.';
+    }
+  }
+  return null;
+}
+
 export function hushleReducer(state: HushleState, action: HushleAction): HushleState {
   switch (action.type) {
     case 'start-game': {
@@ -417,6 +437,11 @@ export function hushleReducer(state: HushleState, action: HushleAction): HushleS
       if (state.phase !== 'playing') return state;
       if (!state.currentCard) return state;
       if (!state.currentTeamId) return state;
+      // Only a BUST for the card on screen counts. Two opponents pressing
+      // at once: the first applies the penalty and draws the next card, the
+      // second names the old card and is ignored (no double penalty, no
+      // burnt card). A BUST without a card id is refused too.
+      if (typeof action.cardId !== 'string' || action.cardId !== state.currentCard.id) return state;
       const bustedBy = action.bustedBy;
       if (typeof bustedBy !== 'string' || bustedBy.length === 0) return state;
       const busterTeam = state.teams.find((t) => t.playerIds.includes(bustedBy));

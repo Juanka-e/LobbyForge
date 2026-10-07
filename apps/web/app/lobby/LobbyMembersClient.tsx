@@ -8,6 +8,7 @@ import { BotAvatar, BotBadge, BotProfilePopover, type LobbyBot } from './BotIden
 import { useLobbyVoice } from './LobbyVoiceProvider';
 import { useBlockList } from './BlockListProvider';
 import { useT } from '@/lib/i18n/client';
+import { initialOf } from '@/lib/initial';
 import { userImageUrl } from '@/lib/user-image-url';
 import { handleEmailUnverified, requestVerificationFocus } from '@/components/email-verification/email-status-store';
 import {
@@ -412,7 +413,7 @@ function MemberRow({
                 // eslint-disable-next-line @next/next/no-img-element -- User avatars may be validated data URLs.
                 <img src={member.avatarUrl} alt="" className="size-full object-cover" />
               ) : (
-                <span className="flex size-full items-center justify-center text-label-sm font-bold text-text-primary">{member.name.charAt(0).toUpperCase()}</span>
+                <span className="flex size-full items-center justify-center text-label-sm font-bold text-text-primary">{initialOf(member.name, { locale: t.locale })}</span>
               )}
             </div>
             {member.status !== 'offline' ? (

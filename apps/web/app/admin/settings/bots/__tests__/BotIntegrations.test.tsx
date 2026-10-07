@@ -234,6 +234,24 @@ describe('channel access', () => {
     await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ channelIds: ['ch-general'] }));
   });
 
+  it('drops the "saved" notice as soon as the selection changes (no "saved" next to "choose one")', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await openIntegrations(user);
+    const section = await screen.findByTestId('bot-channel-access');
+    await user.click(await within(section).findByRole('radio', { name: /Only the channels I choose/ }));
+    await user.click(within(section).getByRole('checkbox', { name: /#memes/ }));
+    await user.click(within(section).getByRole('button', { name: 'Save channel access' }));
+    await within(section).findByText('Channel access for Dice was saved.');
+
+    // Un-ticking the only channel: the empty-selection error appears and
+    // the stale success notice goes away.
+    await user.click(within(section).getByRole('checkbox', { name: /#memes/ }));
+    expect(within(section).getByText('Choose at least one channel.')).toBeInTheDocument();
+    expect(within(section).queryByText('Channel access for Dice was saved.')).toBeNull();
+    expect(within(section).queryByRole('status')).toBeNull();
+  });
+
   it('explains a refused grant in the admin’s words', async () => {
     routes[`PUT ${BASE}/channel-access`] = () =>
       Response.json({ error: 'Granting a private channel needs the Manage Channels permission', code: 'cannot_grant_channel' }, { status: 403 });
@@ -284,6 +302,10 @@ describe('commands', () => {
     await screen.findByText('Channels for /roll were saved.');
     expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ channelIds: ['ch-memes'] });
     expect(row).toHaveTextContent('#memes');
+
+    // Editing again makes that notice stale.
+    await user.click(within(row).getByRole('button', { name: 'Choose channels' }));
+    expect(screen.queryByText('Channels for /roll were saved.')).toBeNull();
   });
 
   it('says so when the bot has registered nothing', async () => {

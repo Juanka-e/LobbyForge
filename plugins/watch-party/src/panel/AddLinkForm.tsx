@@ -15,7 +15,7 @@ import { Button, Row, TextField } from '@lobbyforge/plugin-sdk/ui';
 import { QUEUE_MAX, QUEUE_MAX_PER_USER } from '../constants';
 import { queueRefusal, type WatchPartyClientAction } from '../reducer';
 import type { WatchPartyState } from '../state';
-import { parseYouTubeUrl } from '../youtube';
+import { YOUTUBE_URL_MAX_LENGTH, parseYouTubeUrl, youTubeLinkProblem } from '../youtube';
 import type { Translate } from './types';
 
 export function AddLinkForm({
@@ -40,7 +40,12 @@ export function AddLinkForm({
     const url = text.trim();
     const link = parseYouTubeUrl(url);
     if (!link) {
-      setError(t('watchParty.add.invalid'));
+      // An over-long link may well be a YouTube link: say what is wrong with it.
+      setError(
+        youTubeLinkProblem(url) === 'tooLong'
+          ? t('watchParty.add.tooLong', { max: YOUTUBE_URL_MAX_LENGTH })
+          : t('watchParty.add.invalid')
+      );
       return;
     }
     if (mode === 'now') {

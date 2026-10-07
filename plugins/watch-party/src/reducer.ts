@@ -40,7 +40,7 @@ import {
   type WatchPartyViewer,
   type WatchPartyViewerStatus,
 } from './state';
-import { parseYouTubeUrl, type YouTubeLink } from './youtube';
+import { YOUTUBE_URL_MAX_LENGTH, parseYouTubeUrl, youTubeLinkProblem, type YouTubeLink } from './youtube';
 
 /**
  * Every action names its actor in `actorId`. Clients never send it: the
@@ -97,6 +97,9 @@ const ACTION_TYPES = new Set<string>(WATCH_PARTY_ACTION_TYPES);
 export const LINK_ERROR =
   'Only YouTube video links are supported: youtube.com/watch?v=…, youtu.be/…, youtube.com/shorts/… or youtube.com/embed/….';
 
+/** The refusal an over-long link gets (it may well be a YouTube link — just far too long). */
+export const LINK_TOO_LONG_ERROR = `The link is too long: at most ${YOUTUBE_URL_MAX_LENGTH} characters.`;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -121,8 +124,10 @@ export function validateWatchPartyAction(action: unknown): string | null {
         ? null
         : 'status must be "ready", "buffering" or "idle".';
     case 'set-video':
-    case 'queue-add':
-      return parseYouTubeUrl(action.url) ? null : LINK_ERROR;
+    case 'queue-add': {
+      const problem = youTubeLinkProblem(action.url);
+      return problem === 'tooLong' ? LINK_TOO_LONG_ERROR : problem ? LINK_ERROR : null;
+    }
     case 'queue-remove':
     case 'queue-play':
       return isItemId(action.itemId) ? null : `${type} requires an itemId.`;
@@ -284,6 +289,33 @@ function reportStatus(
   // Same news again within the heartbeat window: nothing to write.
   if (existing.status === status && now - existing.lastSeenAt < HEARTBEAT_MIN_MS) return state;
   return changed(state, { viewers: withViewer(state.viewers, actor, { status, lastSeenAt: now }) }, now);
+}
+
+/**
+ * The SESSION's host moved: the old one left the voice room and the host
+ * (the app) handed the session to the longest-present participant in it —
+ * the same rule `leave` applies inside the party. The party follows when
+ * its host was that old session host, or nobody was running the party (no
+ * host, or one silent past HOST_AWAY_MS): the new host takes the controls
+ * exactly as `take-host` would. A party host the room chose since
+ * (transfer-host, claim-host) keeps them. Returns the SAME state when
+ * nothing changes.
+ */
+export function watchPartyHostChange(
+  state: WatchPartyState,
+  change: { previousHostId: string | null; nextHostId: string; now: number }
+): WatchPartyState {
+  const next = change.nextHostId;
+  const { now } = change;
+  if (!isUserId(next) || state.hostId === next) return state;
+  const follows = state.hostId === null || state.hostId === change.previousHostId || isHostAway(state, now);
+  if (!follows) return state;
+  const listed = findViewer(state, next) !== undefined;
+  const viewers =
+    listed || state.viewers.length > VIEWERS_MAX
+      ? withViewer(state.viewers, next, { lastSeenAt: now })
+      : [...state.viewers, { userId: next, status: 'idle' as const, joinedAt: now, lastSeenAt: now }];
+  return changed(state, { hostId: next, hostSince: now, viewers }, now);
 }
 
 export function watchPartyReducer(state: WatchPartyState, action: WatchPartyAction, now: number): WatchPartyState {

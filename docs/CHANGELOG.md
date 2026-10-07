@@ -2,6 +2,32 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Activities and bots: fixes from a real-browser pass - 2026-10-07
+
+A pre-beta pass played every activity with 4–7 browser players and drove the bots the way an owner would. Hidden information held everywhere. These were the bugs:
+- **Phones could not reach channels or voice.** The navigation drawer was empty because the sidebar was desktop-only. The drawer now holds the whole sidebar: servers, channels, voice, activities and DMs. It is a proper modal, with focus trapped inside and Escape to close, and it closes when you pick something. Phone headers no longer put the menu button over the channel icon.
+- **Voice-only activities enforce voice.** In Hushle, Quiz, Vampire Village, Watch Party and the sandbox buzzer, player and member actions now need the actor in the voice room (`403 voice_required`). Host actions and reading the state never need it, and Poll and Dice stay open to everyone. Plugins declare this with `requiresVoiceRoom` / `allowOutsideVoice`, documented in `docs/PLUGIN_SDK.md`.
+- **A host who leaves no longer locks the channel.**
+  - **Transfer:** after 60 s out of voice, hosting moves to the longest-present participant (audited as `activity.host_transfer`).
+  - **Abandoned session:** after 3 minutes, or when nobody can take over, any voice participant can end it.
+  - **How it runs:** the check is lazy on the server, and the panel re-reads at the due time, so it happens without anyone acting. Watch Party's own host follows the session host.
+- **Play again:** plugins declare `restartActions`. Hushle's "Start new game" works now, and Quiz gained "Play again".
+- **Hushle:** a BUST names its card, so two players pressing it together cost one penalty, not two plus a burned card.
+- **Two simultaneous starts** answer `409 activity_exists` with the running session instead of a 500, and the UI offers to open it.
+- **Names:** an emoji at the start of a display name no longer breaks avatars or throws a React hydration error; initials use whole graphemes everywhere. LiveKit tokens now carry the member's name, so late joiners show their name, or "Unknown member", never a user id.
+- **Bots:**
+  - A slash command to a bot with no live connection and no HTTP endpoint answers `409 bot_offline` at once, instead of "thinking…" for 15 minutes.
+  - `roll-bot.mjs` explains a taken command name or a revoked token, and exits non-zero.
+  - **bot-sdk reconnects through a gateway restart.** Node 22's built-in WebSocket fires `error` and no `close` when the handshake fails while the gateway is still starting. The SDK waited for a close that never came, and the bot exited 0. Now an error with no close within 1 s counts as a 1006 close, and a socket that doesn't open within 15 s is retried.
+  - The coming-soon bot permissions can't be selected.
+  - The Welcome Bot says why an @everyone template is refused.
+- **Errors and text:**
+  - Activity and slash refusals carry a `code` (`session_ended`, `not_host`, `voice_required`, `activity_exists`, `rate_limited`, `bot_offline`, `wrong_phase`, `not_player`), shown as translated sentences.
+  - Activity names are localized ("Anket").
+  - Marketplace apps get a "Marketplace" badge.
+  - Watch Party says a link is too long instead of "not a YouTube link".
+- **Rate limit:** activity actions are limited per user per session (90/min), with a per-address backstop, so a household or LAN no longer shares one budget.
+
 ## [Unreleased] - Dependency cleanup, second batch - 2026-10-07
 
 - **Icon font:** material-symbols 0.47.6. Every icon name the app uses is still a ligature in the new font (checked by rendering both fonts).

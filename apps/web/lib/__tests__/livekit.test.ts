@@ -38,6 +38,33 @@ describe('issueLiveKitToken', () => {
     expect(video.canPublishData).toBe(true);
   });
 
+  it('carries the participant name, so everyone in the room can read it', async () => {
+    const token = await issueLiveKitToken({
+      apiKey: API_KEY,
+      apiSecret: API_SECRET,
+      identity: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+      name: '  Ayşe 🎮  ',
+      grants: { room: 'lobby' },
+      now: NOW,
+    });
+    const { payload } = await jwtVerify(token, SECRET_BYTES, { currentDate: new Date(NOW * 1000) });
+    expect(payload.name).toBe('Ayşe 🎮');
+    expect(payload.sub).toBe('7c9e6679-7425-40de-944b-e07fc1f90ae7');
+  });
+
+  it('leaves the name claim out when there is no name', async () => {
+    const token = await issueLiveKitToken({
+      apiKey: API_KEY,
+      apiSecret: API_SECRET,
+      identity: 'g_1',
+      name: '   ',
+      grants: { room: 'r' },
+      now: NOW,
+    });
+    const { payload } = await jwtVerify(token, SECRET_BYTES, { currentDate: new Date(NOW * 1000) });
+    expect(payload).not.toHaveProperty('name');
+  });
+
   it('respects the canPublishSources narrowing', async () => {
     const token = await issueLiveKitToken({
       apiKey: API_KEY,

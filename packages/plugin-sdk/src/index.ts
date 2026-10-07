@@ -157,6 +157,27 @@ export interface GamePluginActionPolicy {
    * Refused actions (state unchanged) are never audited.
    */
   audit?: boolean;
+  /**
+   * When the plugin requires voice (`manifest.catalog.requiresVoiceRoom`),
+   * the host refuses `member` / `player` actions from anyone who is not in
+   * the activity's voice room (403, `code: 'voice_required'`). Set this on
+   * an action someone must be able to send from outside the room — leaving
+   * the game is the usual one: a player who dropped out of voice can still
+   * take themselves off the table. `host` actions are never voice-checked.
+   */
+  allowOutsideVoice?: boolean;
+}
+
+/** What `GamePlugin.onHostChange` is told when the host moves hosting to someone else. */
+export interface GamePluginHostChange {
+  /** The previous host (`null` when the session had none — its creator's account is gone). */
+  previousHostId: string | null;
+  /** The new host. */
+  nextHostId: string;
+  /** Server clock (ms) of the change. */
+  now: number;
+  /** Why it moved: today only `host_left_voice` (out of the voice room past the host's grace). */
+  reason: 'host_left_voice';
 }
 
 /**
@@ -184,6 +205,26 @@ export interface GamePlugin<TState = unknown, TAction = unknown, TProps = unknow
    * outer belt, not the only one.
    */
   validateAction?: (action: unknown) => string | null;
+  /**
+   * The "play again" actions of a game whose state has a `phase` field.
+   * Declaring the list turns on the host's ended-phase guard: once
+   * `state.phase === 'ended'`, every action type NOT in this list is
+   * refused with 409 (`code: 'session_ended'`) before the reducer runs, and
+   * the listed ones go through (still under their `actionPolicies` entry),
+   * so the reducer can start a new round in the same session. Leave it
+   * undefined when the reducer should decide everything after the end (a
+   * post-game chat, say).
+   */
+  restartActions?: readonly string[];
+  /**
+   * Called when the host moves the session's hosting to someone else (the
+   * host left the voice room past the grace period — see "Host transfer" in
+   * docs/PLUGIN_SDK.md). Pure, like the reducer: return the state with the
+   * plugin's own notion of "host" updated, or the SAME object when nothing
+   * changes. Most plugins need nothing here — the panel's `hostUserId` and
+   * the `host` action policy follow the session host on their own.
+   */
+  onHostChange?: (state: TState, change: GamePluginHostChange) => TState;
   /**
    * Optional state migrator. The host runs `migrateState(raw)` on the
    * `state` JSONB returned from the database before handing it to the
@@ -213,6 +254,10 @@ export interface RegisteredGamePlugin {
   handleAction: (ctx: GamePluginContext, state: unknown, action: unknown) => unknown;
   /** Mirrors GamePlugin.validateAction (31st-audit runtime guard). */
   validateAction?: (action: unknown) => string | null;
+  /** Mirrors GamePlugin.restartActions (the host's ended-phase guard). */
+  restartActions?: readonly string[];
+  /** Mirrors GamePlugin.onHostChange. */
+  onHostChange?: (state: unknown, change: GamePluginHostChange) => unknown;
   /**
    * Optional state migrator. Mirrors `GamePlugin.migrateState` —
    * the host runs it on every read so old sessions upgrade to the
@@ -237,6 +282,10 @@ export function registerGamePlugin<TState, TAction, TProps>(
         action as TAction
       ),
     validateAction: plugin.validateAction,
+    restartActions: plugin.restartActions,
+    onHostChange: plugin.onHostChange
+      ? (state: unknown, change: GamePluginHostChange) => plugin.onHostChange!(state as TState, change)
+      : undefined,
     migrateState: plugin.migrateState
       ? (raw: unknown) => plugin.migrateState!(raw)
       : undefined,
@@ -258,6 +307,7 @@ export {
   pickBestLocale,
   HOST_LOCALE_ATTRIBUTE,
   CATALOG_SUMMARY_KEY,
+  CATALOG_NAME_KEY,
   __resetPluginLocaleRegistry,
   formatMessage,
   messageArguments,

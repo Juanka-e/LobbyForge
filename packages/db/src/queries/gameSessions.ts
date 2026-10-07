@@ -343,6 +343,43 @@ export async function withGameSessionWriteLock<T>(
 }
 
 /**
+ * Move a session's hosting (`created_by`, which the host reads as "the
+ * host") to another user. Compare-and-swap on the CURRENT host, so two
+ * requests that both decided to move it cannot both win — the loser gets
+ * null and re-reads. A terminal (ended / cancelled) session is refused.
+ *
+ * `state`, when given, is written in the same statement (a plugin's own
+ * notion of host, from `onHostChange`). The revision is bumped either way,
+ * so a writer holding an older revision re-reads before it writes. Call it
+ * inside `withGameSessionWriteLock` (pass its `tx`) to serialize with
+ * actions on the session.
+ */
+export async function transferGameSessionHost(
+  db: DbClient,
+  sessionId: string,
+  input: { fromUserId: string | null; toUserId: string; state?: Record<string, unknown> }
+): Promise<GameSessionRow | null> {
+  const patch: Record<string, unknown> = {
+    createdBy: input.toUserId,
+    revision: sql`${gameSessions.revision} + 1`,
+  };
+  if (input.state !== undefined) patch.state = input.state;
+  const [row] = await db
+    .update(gameSessions)
+    .set(patch)
+    .where(
+      and(
+        eq(gameSessions.id, sessionId),
+        input.fromUserId === null ? isNull(gameSessions.createdBy) : eq(gameSessions.createdBy, input.fromUserId),
+        isNull(gameSessions.endedAt),
+        sql`${gameSessions.status} in ('lobby', 'running', 'paused')`
+      )
+    )
+    .returning();
+  return (row as GameSessionRow | undefined) ?? null;
+}
+
+/**
  * Mark a session as ended. Sets `status = 'ended'` and
  * `endedAt = now()`. Returns the updated row, or null if the session
  * didn't exist.

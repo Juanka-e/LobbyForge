@@ -61,6 +61,7 @@ export function LobbyAppsSection({
 
       <button
         type="button"
+        data-mobile-nav-close
         onClick={openHub}
         disabled={!open}
         aria-current={active ? 'page' : undefined}
@@ -111,6 +112,7 @@ export function LobbyAppsSection({
             <li key={app.id}>
               <button
                 type="button"
+                data-mobile-nav-close
                 onClick={openHub}
                 disabled={!open}
                 title={app.summary ?? t('lobby.apps.start', { name: app.name })}

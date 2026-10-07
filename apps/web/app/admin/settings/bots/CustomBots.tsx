@@ -5,10 +5,10 @@ import { useT } from '@/lib/i18n/client';
 import type { Translator } from '@/lib/i18n/core';
 import type { BotJson } from '@/lib/bots/admin';
 import {
-  BOT_API_PERMISSIONS,
   BOT_NAME_MAX_LENGTH,
   BOT_PERMISSIONS,
   MAX_CUSTOM_BOTS_PER_SERVER,
+  isReservedBotPermission,
   type BotPermissionId,
 } from '@/lib/bots/catalog';
 import { BotAvatar, BotBadge, TrustBadge } from '@/app/lobby/BotIdentity';
@@ -61,23 +61,33 @@ function PermissionPicker({
       {BOT_PERMISSIONS.map((permission) => {
         const id = `${idPrefix}-${permission}`;
         const checked = value.includes(permission);
-        const hint = permissionHint(t, permission);
+        const reserved = isReservedBotPermission(permission);
+        // Not honoured by the Bot API yet, so not offered. A bot that was
+        // given one earlier keeps it ticked, and it can still be removed.
+        const locked = reserved && !checked;
+        const hint = reserved ? t('bots.custom.reservedHint') : permissionHint(t, permission);
         return (
-          <label key={permission} htmlFor={id} className="flex cursor-pointer items-start gap-2 text-sm text-text-primary">
+          <label
+            key={permission}
+            htmlFor={id}
+            data-permission={permission}
+            data-reserved={reserved ? 'true' : undefined}
+            className={`flex items-start gap-2 text-sm ${locked ? 'cursor-not-allowed text-text-secondary' : 'cursor-pointer text-text-primary'}`}
+          >
             <input
               id={id}
               type="checkbox"
               checked={checked}
-              disabled={disabled}
+              disabled={disabled || locked}
               aria-describedby={hint ? `${id}-hint` : undefined}
               onChange={(event) =>
                 onChange(event.target.checked ? [...value, permission] : value.filter((p) => p !== permission))
               }
-              className="mt-0.5 size-4 accent-primary"
+              className="mt-0.5 size-4 accent-primary disabled:cursor-not-allowed"
             />
             <span>
               {permissionLabel(t, permission)}
-              {!BOT_API_PERMISSIONS.includes(permission) ? (
+              {reserved ? (
                 <span className="ml-1 text-xs text-text-muted">{t('bots.custom.reserved')}</span>
               ) : null}
               {hint ? (

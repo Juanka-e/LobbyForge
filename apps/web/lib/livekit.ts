@@ -112,7 +112,15 @@ export async function issueLiveKitToken(input: IssueLiveKitTokenInput): Promise<
   if (input.grants.hidden) grants.hidden = true;
   if (input.grants.recorder) grants.recorder = true;
 
-  const jwt = await new SignJWT({ video: grants, ...(input.metadata ? { metadata: input.metadata } : {}) })
+  // `name` is LiveKit's participant-name claim: every other participant
+  // reads it as `participant.name`. Without it a member who joined after
+  // someone loaded the lobby had no name there and showed as their user id.
+  const name = input.name.trim();
+  const jwt = await new SignJWT({
+    video: grants,
+    ...(name ? { name } : {}),
+    ...(input.metadata ? { metadata: input.metadata } : {}),
+  })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setIssuer(input.apiKey)
     .setSubject(input.identity)

@@ -1,4 +1,5 @@
 {
+  "catalog.name": "Dice Bot",
   "catalog.summary": "Sesli odalar için oyuncu başına istatistik tutan zar atma.",
   "dice.die.name": "d{sides}",
   "dice.history.empty": "Henüz zar atılmadı.",

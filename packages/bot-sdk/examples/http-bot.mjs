@@ -20,6 +20,13 @@
  *   });
  *   await bot.commands.set([{ name: 'roll', description: 'Roll a die',
  *     options: [{ name: 'sides', description: 'Sides', type: 'integer', min: 2, max: 1000 }] }]);
+ *
+ * `commands.set` rejects with a BotApiError whose `code` says why — e.g.
+ * `command_name_taken` (with `details.names`) when another bot of the
+ * server already owns /roll: catch it and pick another name.
+ *
+ * Exit codes: 0 after Ctrl+C / SIGTERM, 1 when it cannot run (no secret, a
+ * bad PORT, the port already in use).
  */
 import { createServer } from 'node:http';
 import { verifySignature } from '../dist/index.js';
@@ -28,6 +35,10 @@ const secret = process.env.LOBBYFORGE_ENDPOINT_SECRET;
 const port = Number(process.env.PORT || 8787);
 if (!secret) {
   console.error('Set LOBBYFORGE_ENDPOINT_SECRET (returned once when the endpoint was set).');
+  process.exit(1);
+}
+if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  console.error(`PORT must be a port number from 1 to 65535 (got "${process.env.PORT}").`);
   process.exit(1);
 }
 
@@ -56,8 +67,8 @@ function handle(delivery) {
     console.info('event %s', JSON.stringify({ event: delivery.event, data: delivery.data }));
     return undefined; // 204: acknowledged
   }
-  const { interaction } = delivery.data;
-  if (interaction.commandName !== 'roll') return undefined;
+  const interaction = delivery.data?.interaction;
+  if (!interaction || interaction.commandName !== 'roll') return undefined;
   const sides = typeof interaction.options.sides === 'number' ? interaction.options.sides : 6;
   return {
     type: 'respond',
@@ -105,12 +116,35 @@ const server = createServer((req, res) => {
     }
     // Retries resend the same delivery id; answering twice is harmless here
     // (the instance accepts one answer per interaction).
-    const answer = handle(delivery);
+    let answer;
+    try {
+      answer = handle(delivery);
+    } catch (error) {
+      // A payload this bot does not understand must not take the process down.
+      console.error(`Could not handle a ${String(delivery?.event)} delivery: ${error instanceof Error ? error.message : String(error)}`);
+      send(res, 500, { error: 'handler failed' });
+      return;
+    }
     if (answer) send(res, 200, answer);
     else send(res, 204);
   });
 });
 
+server.on('error', (error) => {
+  // EADDRINUSE / EACCES: say so in one line, not a stack trace.
+  if (error.code === 'EADDRINUSE') console.error(`Port ${port} is already in use — stop the other process or set PORT.`);
+  else if (error.code === 'EACCES') console.error(`Not allowed to listen on port ${port} — pick a port above 1024 or run with the needed rights.`);
+  else console.error(`The HTTP server failed: ${error.message}`);
+  process.exit(1);
+});
+
 server.listen(port, () => {
   console.info(`LobbyForge HTTP bot listening on :${port}`);
 });
+
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => {
+    server.close();
+    process.exit(0);
+  });
+}

@@ -241,8 +241,16 @@ test.describe('compose stack — real Postgres/Redis', () => {
     // ── 9. Classic-Taboo bust rules: a TEAMMATE (the host is on Team A
     // with the explainer) cannot bust — the state must not change.
     const before = await getState();
-    const bust = await action({ type: 'bust-forbidden', bustedBy: ownerUid });
-    expect(bust.res.status()).toBe(200);
+    const cardId = (before.currentCard as { id: string } | null)?.id ?? 'no-card';
+    const bust = await action({ type: 'bust-forbidden', bustedBy: ownerUid, cardId });
+    // This API client is not in the voice room: with LiveKit reachable the
+    // host refuses the BUST outright (403 voice_required — Hushle requires
+    // voice); without it the check is skipped and the reducer refuses the
+    // self-bust (200, same state). Either way nothing changes.
+    expect([200, 403]).toContain(bust.res.status());
+    if (bust.res.status() === 403) {
+      expect(((await bust.res.json()) as { code?: string }).code).toBe('voice_required');
+    }
     const after = await getState();
     expect(after).toEqual(before); // reducer rejected the self-bust
   });

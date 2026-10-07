@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
-import { initialsFor } from '@/lib/hub-format';
+import { initialOf } from '@/lib/initial';
 import { ChevronDownIcon } from './icons';
 import { focusRing } from './styles';
 
@@ -71,7 +71,7 @@ export default function AccountMenu({ name }: { name: string }) {
         className={`flex h-11 items-center gap-2.5 rounded-full border border-border-subtle bg-surface py-0 pl-1.5 pr-1.5 text-sm text-text-primary transition-colors hover:bg-surface-raised sm:pr-3 ${focusRing}`}
       >
         <span aria-hidden className="flex size-8 items-center justify-center rounded-full bg-ember text-sm font-bold text-on-ember">
-          {Array.from(initialsFor(name, t.locale))[0]}
+          {initialOf(name, { locale: t.locale })}
         </span>
         <span className="hidden max-w-[10rem] truncate sm:inline">{name}</span>
         <ChevronDownIcon size={14} className="hidden sm:block" />

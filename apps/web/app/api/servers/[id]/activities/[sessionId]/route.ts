@@ -13,6 +13,8 @@ import { withApiSecurity } from '@/lib/security-headers';
 import { authorizeSessionChannelVisibility } from '@/lib/permissions';
 import { getPluginServer } from '@/lib/plugin-server-registry';
 import { projectStateForViewer } from '@/lib/plugin-projection';
+import { getVoiceRoomSnapshot, pluginRequiresVoice } from '@/lib/activity-voice';
+import { hostViewJson, resolveActivityHost } from '@/lib/activity-host';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -86,6 +88,27 @@ async function handleGet(
     );
     if (!visibility.ok) return visibility.response;
 
+    // A game played over voice whose host left the voice room hands
+    // hosting over lazily — a state read is one of the moments it happens
+    // (lib/activity-host.ts). `host` tells the panel where that stands.
+    const plugin = getPluginServer(row.pluginId);
+    let hostUserId: string | null = row.createdBy ?? null;
+    let host: Record<string, unknown> | undefined;
+    if (pluginRequiresVoice(plugin) && plugin) {
+      const voice = await getVoiceRoomSnapshot(serverId, row.channelId);
+      const resolved = await resolveActivityHost({
+        db: getDb(),
+        row,
+        plugin,
+        voice,
+        ownerUserId: server.ownerUserId ?? null,
+      });
+      if (resolved) {
+        hostUserId = resolved.view.hostUserId;
+        host = hostViewJson(resolved.view);
+      }
+    }
+
     const players = await listPlayersForSession(getDb(), sessionId);
     // Join with users to include the display name in the player list so
     // the plugin's renderClient can show "Explainer: Alice" instead of
@@ -108,8 +131,11 @@ async function handleGet(
     // safe to run on every read. Awaited: a marketplace plugin migrates
     // in the plugin-worker and returns a Promise (unawaited it reached the
     // client as `{}`).
-    const plugin = getPluginServer(row.pluginId);
-    const state = plugin?.migrateState ? await plugin.migrateState(row.state) : row.state;
+    // After a host change the plugin's own state may have moved too
+    // (`onHostChange`): read it again rather than serve the stale row.
+    const stateRow =
+      hostUserId !== (row.createdBy ?? null) ? ((await getGameSessionById(getDb(), sessionId)) ?? row) : row;
+    const state = plugin?.migrateState ? await plugin.migrateState(stateRow.state) : stateRow.state;
 
     // LF-001: EVERYONE gets the projection — including the host. The
     // canonical projector (lib/activity-projection.ts, shared across all
@@ -126,7 +152,7 @@ async function handleGet(
       ctx: {
         sessionId: row.id,
         serverId: row.serverId,
-        hostUserId: row.createdBy ?? null,
+        hostUserId,
       },
     });
 
@@ -140,7 +166,9 @@ async function handleGet(
           status: row.status,
           state: projectedState,
           publicSummary: row.publicSummary,
-          createdBy: row.createdBy,
+          // The host (the session's creator until hosting moves).
+          createdBy: hostUserId,
+          ...(host ? { host } : {}),
           createdAt: row.createdAt.toISOString(),
           startedAt: row.startedAt ? row.startedAt.toISOString() : null,
           players: players.map((p) => ({

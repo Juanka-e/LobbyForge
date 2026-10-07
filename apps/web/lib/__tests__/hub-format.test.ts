@@ -19,6 +19,8 @@ describe('initialsFor', () => {
   it('keeps emoji and accented letters whole', () => {
     expect(initialsFor('🎮 Gamers', 'en')).toBe('🎮G');
     expect(initialsFor('Émile Zola', 'fr')).toBe('ÉZ');
+    // A flag is two code points; Array.from used to split it in half.
+    expect(initialsFor('🇹🇷 Oyuncular', 'tr')).toBe('🇹🇷O');
   });
 
   it('never renders an empty tile', () => {

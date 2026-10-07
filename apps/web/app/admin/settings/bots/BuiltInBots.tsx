@@ -8,6 +8,7 @@ import {
   DEFAULT_MODERATION_SETTINGS,
   MODERATION_LIMITS,
   TEMPLATE_MAX_LENGTH,
+  containsMassMention,
   normalizeDomain,
   parseModerationSettings,
   parseWelcomeSettings,
@@ -94,6 +95,11 @@ export function WelcomeBotCard({
 
   async function save(nextEnabled: boolean) {
     if (!serverId) return;
+    // The server refuses it too; saying why here saves a round trip.
+    if (containsMassMention(template)) {
+      setNotice({ tone: 'danger', text: t('bots.error.massMention') });
+      return;
+    }
     setSaving(true);
     setNotice(null);
     const result = await botApi<BotResponse>(t, `/api/servers/${serverId}/bots/builtin/welcome`, {
@@ -244,6 +250,9 @@ export function ModerationBotCard({ bot, serverId, canMutate, onSaved }: CardPro
     }
     if (rawDomains.length > MODERATION_LIMITS.allowedDomains) {
       return { ok: false, message: t('bots.moderation.tooManyDomains', { count: MODERATION_LIMITS.allowedDomains }) };
+    }
+    if (containsMassMention(noticeTemplate)) {
+      return { ok: false, message: t('bots.error.massMention') };
     }
     return {
       ok: true,

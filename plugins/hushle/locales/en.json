@@ -1,4 +1,5 @@
 {
+  "catalog.name": "Hushle",
   "catalog.summary": "Taboo-style word guessing built for live voice rooms.",
   "hushle.between.deckEmptyWaiting": "No cards are left. The host will end the game.",
   "hushle.between.hostHint": "Start the next turn when everyone is ready.",

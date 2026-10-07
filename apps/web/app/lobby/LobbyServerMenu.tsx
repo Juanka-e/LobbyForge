@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
+import { initialOf } from '@/lib/initial';
 
 /**
  * The community header in the sidebar, and the dropdown it opens.
@@ -130,7 +131,7 @@ export function LobbyServerMenu({
             />
           ) : (
             <div className="w-8 h-8 rounded-lg bg-secondary-container flex items-center justify-center flex-shrink-0 font-bold text-text-primary">
-              {serverName.charAt(0).toUpperCase()}
+              {initialOf(serverName, { locale: t.locale })}
             </div>
           )}
           <span className="font-label-sm text-text-primary font-semibold whitespace-nowrap truncate">

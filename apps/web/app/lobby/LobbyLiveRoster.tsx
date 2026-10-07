@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
 import { getRealtimeClient } from '@/lib/realtime-client';
 import { useT } from '@/lib/i18n/client';
+import { initialOf } from '@/lib/initial';
 import { handleEmailUnverified, requestVerificationFocus } from '@/components/email-verification/email-status-store';
 import type { Translator } from '@/lib/i18n/core';
 import { readMessageInteraction, readMessageWebhook, type MessageInteractionInfo, type MessageWebhookInfo } from '@/lib/bots/interaction-meta';
@@ -581,7 +582,7 @@ function LiveMessage({ message, invokedByName, currentUserId, serverId, channelI
         <WebhookAvatar className="mt-1" />
       ) : (
         <div data-chat-avatar className="chat-avatar w-10 h-10 rounded-full bg-secondary-container flex-shrink-0 mt-1 flex items-center justify-center font-bold text-text-primary">
-          {message.author.charAt(0).toUpperCase()}
+          {initialOf(message.author, { locale: t.locale })}
         </div>
       )}
       <div className="flex flex-col w-full min-w-0">

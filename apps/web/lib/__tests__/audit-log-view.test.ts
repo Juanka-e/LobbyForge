@@ -57,6 +57,28 @@ beforeEach(() => {
 });
 
 describe('loadAuditEntries', () => {
+  it('names the two members of an activity host transfer, in the same single lookup', async () => {
+    db.listAuditLogsForServer.mockResolvedValue([
+      row({
+        action: 'activity.host_transfer',
+        targetType: 'session',
+        targetId: '0a1b2c3d-0000-4000-8000-000000000099',
+        metadata: { fromUserId: MOD, toUserId: MALLORY, reason: 'host_left_voice', pluginId: 'not-a-uuid' },
+      }),
+    ]);
+    const [entry] = await loadAuditEntries(fakeDb, { serverId: SERVER_ID, ownerUserId: OWNER, viewerUserId: VIEWER });
+    expect(db.listUserDisplayNames).toHaveBeenCalledTimes(1);
+    expect([...db.listUserDisplayNames.mock.calls[0]![1]].sort()).toEqual([MALLORY, MOD].sort());
+    expect(entry!.metadataNames).toEqual({ fromUserId: 'Ayşe', toUserId: 'Mallory' });
+    expect(entry!.targetName).toBeNull();
+  });
+
+  it('adds no metadata names to other actions', async () => {
+    db.listAuditLogsForServer.mockResolvedValue([row({ action: 'voice.disconnect', metadata: { fromUserId: MOD } })]);
+    const [entry] = await loadAuditEntries(fakeDb, { serverId: SERVER_ID, ownerUserId: OWNER, viewerUserId: VIEWER });
+    expect(entry).not.toHaveProperty('metadataNames');
+  });
+
   it('resolves actor and user-target names in one batch, and never loads users one by one', async () => {
     db.listAuditLogsForServer.mockResolvedValue([
       row({ action: 'voice.disconnect', actorUserId: MOD, metadata: { channelId: LOUNGE } }),

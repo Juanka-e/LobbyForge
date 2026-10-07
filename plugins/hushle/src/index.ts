@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import type { GamePlugin } from '@lobbyforge/plugin-sdk';
 import { CATALOG_SUMMARY_KEY, PluginPermission, loadPluginLocale } from '@lobbyforge/plugin-sdk';
-import { hushleReducer } from './actions';
+import { hushleReducer, validateHushleAction } from './actions';
 import { LOCALE_TABLES, SHIPPED_LOCALES } from './locales.generated';
 import { createHushleInitialState, migrateHushleState } from './state';
 import type { HushleAction, HushleState } from './state';
@@ -107,6 +107,11 @@ export const hushlePlugin: GamePlugin<HushleState, HushleAction> = {
     'end-turn': { role: 'host' },
     'end-game': { role: 'host' },
   },
+  // "Start new game" on the final screen: the host accepts `start-game` from
+  // the ended phase (and nothing else — every other action is refused with
+  // `session_ended`). The reducer sends everyone back to team setup.
+  restartActions: ['start-game'],
+  validateAction: validateHushleAction,
   createInitialState: () => createHushleInitialState(),
   handleAction: (_ctx, state, action) => hushleReducer(state, action),
   migrateState: (raw: unknown) => migrateHushleState(raw),

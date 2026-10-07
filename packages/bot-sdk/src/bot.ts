@@ -275,6 +275,10 @@ export interface LobbyForgeBotOptions extends BotClientOptions {
 
 /** Minimum wait after the gateway answered 4029 (rate limited). */
 const RATE_LIMITED_MIN_DELAY_MS = 10_000;
+/** A socket that has not opened by then is given up on (and retried). */
+const CONNECT_TIMEOUT_MS = 15_000;
+/** An `error` with no `close` within this long counts as a 1006 close. */
+const ERROR_CLOSE_GRACE_MS = 1_000;
 
 type ConnectWaiter = { resolve: () => void; reject: (error: Error) => void };
 
@@ -604,7 +608,33 @@ export class LobbyForgeBot {
       return;
     }
     this.socket = socket;
+    // One close per socket. Node's built-in WebSocket fires `error` and NO
+    // `close` when the handshake itself fails (e.g. the gateway is still
+    // restarting), so an error without a close soon after counts as a 1006
+    // close; and a socket that never opens is given up on. Without this the
+    // reconnect loop silently stopped and the process exited.
+    let settled = false;
+    let errorTimer: ReturnType<typeof setTimeout> | undefined;
+    const settle = (code: number, reason: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(errorTimer);
+      clearTimeout(connectTimer);
+      if (this.socket !== socket) return;
+      this.onClose(code, reason);
+    };
+    const connectTimer = setTimeout(() => {
+      try {
+        socket.close();
+      } catch {
+        /* already gone */
+      }
+      settle(1006, 'connect timeout');
+    }, CONNECT_TIMEOUT_MS);
+    // Never keep the process alive just for these timers (close() stops the bot).
+    (connectTimer as { unref?: () => void }).unref?.();
     socket.addEventListener('open', () => {
+      clearTimeout(connectTimer);
       if (this.socket !== socket) return;
       this.lastFrameAt = Date.now();
       try {
@@ -619,11 +649,13 @@ export class LobbyForgeBot {
       this.onFrame(event.data);
     });
     socket.addEventListener('close', (event) => {
-      if (this.socket !== socket) return;
-      this.onClose(typeof event.code === 'number' ? event.code : 1006, typeof event.reason === 'string' ? event.reason : '');
+      settle(typeof event.code === 'number' ? event.code : 1006, typeof event.reason === 'string' ? event.reason : '');
     });
     socket.addEventListener('error', () => {
-      /* a close event always follows */
+      // Usually a close follows; if it does not, treat the failure as one.
+      clearTimeout(errorTimer);
+      errorTimer = setTimeout(() => settle(1006, 'connection failed'), ERROR_CLOSE_GRACE_MS);
+      (errorTimer as { unref?: () => void }).unref?.();
     });
   }
 

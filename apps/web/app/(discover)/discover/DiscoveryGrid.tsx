@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
+import { initialOf } from '@/lib/initial';
 import type { Translator } from '@/lib/i18n/core';
 import { rich } from '@/lib/i18n/rich';
 
@@ -232,7 +233,7 @@ function DirectoryCard({
       >
         <div className="flex items-start gap-3 mb-3">
           <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center text-primary font-bold text-lg flex-shrink-0">
-            {instance.name.charAt(0).toUpperCase()}
+            {initialOf(instance.name, { locale: t.locale })}
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">

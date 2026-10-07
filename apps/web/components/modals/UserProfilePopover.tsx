@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '@/lib/i18n/client';
+import { initialOf } from '@/lib/initial';
 
 interface ProfileRole {
   id: string;
@@ -135,7 +136,7 @@ export function UserProfilePopover({
               <img src={user.avatarUrl} alt="" className="size-full object-cover" />
             ) : (
               <span className="grid size-full place-items-center text-3xl font-semibold text-text-primary">
-                {user.displayName.charAt(0).toUpperCase()}
+                {initialOf(user.displayName, { locale: t.locale })}
               </span>
             )}
           </div>

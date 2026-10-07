@@ -1,4 +1,5 @@
 {
+  "catalog.name": "Watch Party",
   "catalog.summary": "Sesli kanalda YouTube videolarını birlikte izle: herkes aynı anda aynı sahnede, oynatmayı host yönetir, sıraya herkes video ekleyebilir.",
   "watchParty.add.duplicate": "Bu video zaten sırada.",
   "watchParty.add.full": "Sıra dolu, en fazla {max} video alıyor.",
@@ -10,6 +11,7 @@
   "watchParty.add.playNow": "Hemen oynat",
   "watchParty.add.queue": "Sıraya ekle",
   "watchParty.add.screenShare": "YouTube'da değil mi? Onun yerine arama kontrollerinden ekranını paylaş.",
+  "watchParty.add.tooLong": "Bu bağlantı çok uzun; en fazla {max, plural, other {# karakter}} olabilir. Videonun kendi bağlantısını yapıştır: youtube.com/watch?v=… ya da youtu.be/….",
   "watchParty.controls.back": "10 saniye geri",
   "watchParty.controls.controlMode": "Oynatmayı kim yönetir",
   "watchParty.controls.forward": "10 saniye ileri",

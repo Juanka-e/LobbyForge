@@ -42,6 +42,7 @@ import { useT } from '@/lib/i18n/client';
 import type { Translator } from '@/lib/i18n/core';
 import { PluginSurface } from '../PluginSurface';
 import { useActivitySession } from '../useActivitySession';
+import { activityRefusalMessage, parseActivityRefusal } from '@/lib/activity-refusal';
 import { rich } from '@/lib/i18n/rich';
 import { pluginSummary } from '@/lib/plugin-catalog-text';
 import { hasAllowedAudioPublication, isRemotePublicationAllowed } from '@/lib/voice-track-policy';
@@ -652,25 +653,25 @@ function ActivityPicker({
           body: JSON.stringify({ pluginId: selected }),
         }
       );
-      if (res.status === 409) {
+      if (!res.ok) {
+        const refusal = parseActivityRefusal(res.status, await res.json().catch(() => ({})));
         // A channel holds one open activity. Someone else started one
         // between render and click — join it instead of showing the
-        // raw conflict payload.
-        const conflict = (await res.json().catch(() => ({}))) as { activity?: { id: string } };
-        if (conflict.activity?.id) {
-          onStart(conflict.activity.id);
+        // conflict (`activity_exists` with its `sessionId`, or the older
+        // `{ activity }` answer).
+        if (res.status === 409 && refusal.sessionId && (!refusal.code || refusal.code === 'activity_exists')) {
+          onStart(refusal.sessionId);
           return;
         }
-      }
-      if (!res.ok) {
-        // The server's own error is shown as-is; ours only when it sent none.
-        const detail = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(detail.error ?? t('room.picker.startFailed', { status: res.status }));
+        // The reason in the reader's language, never the server's English.
+        const message = activityRefusalMessage(refusal, 'start');
+        setError(t(message.key, message.params));
+        return;
       }
       const data = (await res.json()) as { activity: { id: string } };
       onStart(data.activity.id);
-    } catch (err) {
-      setError((err as Error).message);
+    } catch {
+      setError(t('room.activity.error.network'));
     } finally {
       setBusy(false);
     }

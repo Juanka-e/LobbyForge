@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useT } from '@/lib/i18n/client';
+import { initialOf } from '@/lib/initial';
 import type { JoinRequestJson } from '@/lib/join-requests';
 
 const PAGE_SIZE = 25;
@@ -176,7 +177,7 @@ export default function JoinRequestsSection({ serverId }: { serverId: string }) 
                   aria-hidden
                   className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border-strong bg-surface-variant font-label-sm text-text-secondary"
                 >
-                  {request.displayName.trim().charAt(0).toUpperCase() || '?'}
+                  {initialOf(request.displayName, { locale: t.locale })}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">

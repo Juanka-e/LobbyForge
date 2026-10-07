@@ -300,7 +300,7 @@ describe('"this turn" log', () => {
     const s1 = pinned(hushleReducer(s0, { type: 'correct-guess' }), 'umbrella');
     const s2 = pinned(hushleReducer(s1, { type: 'pass' }), 'pyramid');
     // Cap is 3 cards per turn: this bust ends the turn.
-    const s3 = hushleReducer(s2, { type: 'bust-forbidden', bustedBy: JUNO });
+    const s3 = hushleReducer(s2, { type: 'bust-forbidden', bustedBy: JUNO, cardId: s2.currentCard!.id });
     return [s0, s1, s2, s3];
   };
 

@@ -193,3 +193,50 @@ describe('auditEventSummaryText — email', () => {
     expect(tr(auditActionLabelKey('user.email_verified_by_admin')!)).toBe('bir üyenin e-posta adresini doğrulanmış olarak işaretledi');
   });
 });
+
+// Activity host transfer (lib/activity-host.ts): the system moved hosting
+// because the host left the activity's voice room. The two members are
+// named when the audit loader resolved them, else by a short id.
+describe('auditEventSummaryText — activity.host_transfer', () => {
+  const FROM = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
+  const TO = '1b4e28ba-2fa1-11d2-883f-0016d3cca427';
+  const transfer = (overrides: Partial<AuditEntryView> = {}) =>
+    entry({
+      action: 'activity.host_transfer',
+      targetType: 'session',
+      targetId: 'f47ac10b-58cc-4372-a567-0e02b2c3d479',
+      targetName: null,
+      actorName: null,
+      channelName: null,
+      metadata: { pluginId: 'hushle', fromUserId: FROM, toUserId: TO, reason: 'host_left_voice', awaySeconds: 61 },
+      metadataNames: { fromUserId: 'Ada', toUserId: 'Zeynep' },
+      ...overrides,
+    });
+
+  it('names who had hosting and who got it, in English and Turkish', () => {
+    expect(auditEventSummaryText(en, transfer())).toBe(
+      'System moved hosting of an activity from Ada to Zeynep: the host had left the voice channel.'
+    );
+    expect(auditEventSummaryText(tr, transfer())).toBe(
+      'Sistem, oyunu yöneten kişi sesli kanaldan ayrıldığı için bir etkinliğin yönetimini Ada adlı üyeden Zeynep adlı üyeye devretti.'
+    );
+  });
+
+  it('falls back to a short id for a member whose name is unknown', () => {
+    expect(auditEventSummaryText(en, transfer({ metadataNames: { toUserId: 'Zeynep' } }))).toBe(
+      'System moved hosting of an activity from 7c9e6679… to Zeynep: the host had left the voice channel.'
+    );
+  });
+
+  it('says so when the session had no host at all', () => {
+    const e = transfer({ metadata: { fromUserId: null, toUserId: TO }, metadataNames: { toUserId: 'Zeynep' } });
+    expect(auditEventSummaryText(en, e)).toBe('System gave hosting of an activity that had no host to Zeynep.');
+    expect(auditEventSummaryText(tr, e)).toBe('Sistem, yöneteni kalmamış bir etkinliğin yönetimini Zeynep adlı üyeye verdi.');
+  });
+
+  it('has a label', async () => {
+    const { auditActionLabelKey } = await import('@/lib/audit-action-labels');
+    expect(en(auditActionLabelKey('activity.host_transfer')!)).toBe("handed an activity's hosting to someone in its voice channel");
+    expect(tr(auditActionLabelKey('activity.host_transfer')!)).toBe('bir etkinliğin yönetimini sesli kanaldaki birine devretti');
+  });
+});

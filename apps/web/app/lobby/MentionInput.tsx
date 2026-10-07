@@ -2,6 +2,7 @@
 
 import { useRef, useState, type InputHTMLAttributes, type KeyboardEvent, type MutableRefObject } from 'react';
 import { useT } from '@/lib/i18n/client';
+import { initialOf } from '@/lib/initial';
 
 /**
  * @mention autocomplete dropdown for the lobby message composer.
@@ -179,7 +180,7 @@ export function MentionInput({
                     {user.avatarUrl ? (
                       <img src={user.avatarUrl} alt="" className="w-full h-full object-cover" />
                     ) : (
-                      user.displayName.charAt(0).toUpperCase()
+                      initialOf(user.displayName, { locale: t.locale })
                     )}
                   </div>
                   <div className="min-w-0 flex-1">

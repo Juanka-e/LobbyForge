@@ -5,6 +5,7 @@ import { buttonOutline, buttonPrimary, container, textLink } from '@/app/(market
 import { getDb } from '@/lib/db';
 import { isOfficialDeployment } from '@/lib/deployment-mode';
 import { getTranslator } from '@/lib/i18n/server';
+import { initialOf } from '@/lib/initial';
 import { rich } from '@/lib/i18n/rich';
 
 export const dynamic = 'force-dynamic';
@@ -77,7 +78,7 @@ export default async function GoPage({
         <div className="rounded-[22px] border border-border-subtle/70 bg-surface p-6">
           <div className="mb-5 flex items-center gap-3">
             <div className="flex size-12 shrink-0 items-center justify-center rounded-[14px] bg-primary/10 font-display text-lg font-bold text-primary">
-              {instance.name.charAt(0).toUpperCase()}
+              {initialOf(instance.name, { locale: t.locale })}
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">

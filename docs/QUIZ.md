@@ -36,9 +36,22 @@ before leaving still counts. If the last player still thinking leaves, the
 question is revealed. Coming back re-activates you from the next question.
 
 **Ending early.** The host can end the quiz at any time. A question that is
-still open is void: nobody scores it. `ended` is final — the host's action
-route refuses every action once a quiz has ended — so another round means
-ending the activity and starting Quiz again (the final screen tells the host).
+still open is void: nobody scores it.
+
+**Play again.** The final screen gives the host **Play again**
+(`play-again`, the plugin's only `restartActions` entry): the quiz goes back
+to the lobby in the same session. Everyone still playing keeps their seat
+with a clean slate (score, streaks, answers), players who had left are
+dropped, anyone may join, and the host picks the settings and starts as the
+first time. Nothing of the last game reaches the new round — its deck,
+answers and reveal are gone. Every other action on a finished quiz is
+refused by the host route with 409 `session_ended`. Other players see
+"Waiting for the host to start another round…".
+
+**Voice.** Quiz declares `requiresVoiceRoom`: joining, answering and calling
+time need the activity's voice room (403 `voice_required` from outside it);
+`leave` works from anywhere (`allowOutsideVoice`), and watching never needs
+voice.
 
 **Names** come from the host, never from the client. The activity route adds
 everyone who acts to the session roster before the reducer runs, so on
@@ -226,12 +239,13 @@ text is reachable.
 | `start` | host | `source: 'pack'` + `packId`, `language` (the host injects the pack's `questions` server-side) — or `source: 'custom'` + `questions`; optional `questionCount`, `secondsPerQuestion`, `shuffle` | lobby |
 | `set-questions` | host | `questions` (legacy: starts a custom quiz, all questions, in order) | lobby |
 | `join` | member, `playerId` injected | — | any but ended |
-| `leave` | member, `playerId` injected | — | any but ended |
+| `leave` | member, `playerId` injected, `allowOutsideVoice` | — | any but ended |
 | `answer` | member, `playerId` injected | `index` | playing |
 | `time-up` | member | — | playing, after the deadline |
 | `reveal` | host | — | playing |
 | `next` | host | — | reveal |
 | `end` | host | — | playing, reveal |
+| `play-again` | host | — | ended (→ lobby) |
 
 Every action is checked by `quizValidateAction` before dispatch (and again
 by the reducer); anything invalid or out of phase leaves the state untouched.

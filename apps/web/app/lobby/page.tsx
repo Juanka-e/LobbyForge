@@ -37,6 +37,7 @@ import { CorePermission, hasPermission } from '@lobbyforge/core';
 // Compiled-in AND installed marketplace plugins (ADR-007): a sandboxed
 // plugin needs a launch card like any other app.
 import { listPluginSummariesServer } from '@/lib/plugin-server-registry';
+import { listPluginSummaries } from '@/lib/plugin-registry';
 import { getUserPresenceInChannel, getUserPresenceInServer, setUserPresence } from '@/lib/redis';
 import { LobbyVoiceProvider } from './LobbyVoiceProvider';
 import { LobbyVoiceChannels } from './LobbyVoiceChannels';
@@ -63,7 +64,8 @@ import { toPresenceStatus, type PresenceStatus } from '@/lib/presence-status';
 import { formatMessageTimestamp } from '@/lib/chat-time';
 import { getTranslator } from '@/lib/i18n/server';
 import type { Translator } from '@/lib/i18n/core';
-import { pluginSummary } from '@/lib/plugin-catalog-text';
+import { pluginName, pluginSummary } from '@/lib/plugin-catalog-text';
+import { initialOf } from '@/lib/initial';
 import { projectDmChannel, projectMemberProfile } from '@/lib/profile-privacy';
 import { notifyMemberJoined } from '@/lib/bots/welcome';
 import { resolveAutoJoinServerId } from '@/lib/lobby-auto-join';
@@ -167,6 +169,8 @@ interface LobbyData {
   voiceModerationTargetIds: string[];
   /** MANAGE_SERVER: unlocks the community menu's admin entries. */
   canManageServer: boolean;
+  /** START_ACTIVITY: may end any activity (the end route's rule), not only one they host. */
+  canStartActivities?: boolean;
   /**
    * Apps installed AND enabled for this server. Every member sees them —
    * an activity is something members start together, so hiding the list
@@ -185,6 +189,8 @@ export interface InstalledApp {
   minPlayers: number | null;
   maxPlayers: number | null;
   trustLevel: string | null;
+  /** Installed from the marketplace: it runs in the sandbox (ADR-007). */
+  sandboxed?: boolean;
 }
 
 // ---- Demo fallback (preserves the M19 standalone lobby visual reference) ----
@@ -567,6 +573,7 @@ async function loadLiveData(
     ? listVoiceModerationTargets({ members: memberSummaries, viewerUserId: currentUserId, ownerUserId })
     : [];
   const canManageServer = hasPermission(view.permissions, CorePermission.MANAGE_SERVER);
+  const canStartActivities = hasPermission(view.permissions, CorePermission.START_ACTIVITY);
 
   // Apps the community has installed AND enabled. Members see the same
   // list the activity picker uses, so "what can we play here?" is
@@ -574,18 +581,25 @@ async function loadLiveData(
   const installedApps = await listPluginInstallsForServer(db, serverId)
     .then((installs) => {
       const summaries = new Map(listPluginSummariesServer().map((p) => [p.id, p]));
-      return installs.flatMap((install) => {
+      // Compiled-in plugins ship with LobbyForge; anything else came from
+      // the marketplace and runs in the sandbox (ADR-007).
+      const compiledIds = new Set(listPluginSummaries().map((p) => p.id));
+      return installs.flatMap((install): InstalledApp[] => {
         if (!install.enabled) return [];
         const summary = summaries.get(install.pluginId);
         if (!summary) return [];
+        const sandboxed = !compiledIds.has(summary.id);
         return [
           {
             id: summary.id,
-            name: summary.name,
+            name: pluginName(summary.id, t.locale, summary.name),
             summary: pluginSummary(summary.id, t.locale, summary.catalog?.summary ?? null),
             minPlayers: summary.catalog?.playerConfig?.minPlayers ?? null,
             maxPlayers: summary.catalog?.playerConfig?.maxPlayers ?? null,
-            trustLevel: summary.catalog?.trustLevel ?? null,
+            // A sandboxed bundle's manifest never vouches for itself: its
+            // badge says where it came from, not what it claims to be.
+            trustLevel: sandboxed ? null : (summary.catalog?.trustLevel ?? null),
+            sandboxed,
           },
         ];
       });
@@ -623,6 +637,7 @@ async function loadLiveData(
     canMuteMembers,
     voiceModerationTargetIds,
     canManageServer,
+    canStartActivities,
     installedApps,
     bots: botRows.filter((bot) => bot.enabled).map(toLobbyBot),
   };
@@ -1094,7 +1109,7 @@ async function ServerRail({
                   title={s.name}
                 >
                   <span className="text-sm font-bold">
-                    {s.name.charAt(0).toUpperCase()}
+                    {initialOf(s.name, { locale: t.locale })}
                   </span>
                 </a>
                 <div className="absolute left-16 top-1/2 -translate-y-1/2 px-2 py-1 bg-surface-container-high text-xs rounded opacity-0 rail-tooltip whitespace-nowrap z-[60] border border-border-subtle">
@@ -1112,7 +1127,7 @@ async function ServerRail({
               title={serverName}
             >
               <span className="text-sm font-bold">
-                {serverName.charAt(0).toUpperCase()}
+                {initialOf(serverName, { locale: t.locale })}
               </span>
             </button>
             <div className="absolute left-16 top-1/2 -translate-y-1/2 px-2 py-1 bg-surface-container-high text-xs rounded opacity-0 rail-tooltip whitespace-nowrap z-[60] border border-border-subtle">
@@ -1186,8 +1201,11 @@ async function Sidebar({
   const activityChannel =
     data.voiceChannels.find((c) => c.id === activeVoiceId) ?? data.voiceChannels[0] ?? null;
   return (
+    // Rendered at every width: below md it lives in MobileNav's drawer
+    // (it was `hidden md:flex`, which left the phone drawer empty).
     <nav
-      className="hidden md:flex w-[240px] lg:w-[260px] flex-shrink-0 bg-surface border-r border-border-subtle flex-col h-full z-20 animate-fade-in-right"
+      aria-label={t('lobby.nav.label')}
+      className="flex w-[240px] lg:w-[260px] flex-shrink-0 bg-surface border-r border-border-subtle flex-col h-full z-20 animate-fade-in-right"
     >
       {/* Server header — community name with optional host banner.
           beta-review: no `overflow-hidden` here. It used to clip the
@@ -1251,6 +1269,7 @@ async function Sidebar({
               currentUserId={data.currentUserId}
               canMuteMembers={data.canMuteMembers}
               voiceModerationTargetIds={data.voiceModerationTargetIds}
+              knownNames={buildKnownNames(data)}
             />
           ) : (
             <ChannelGroup
@@ -1405,7 +1424,7 @@ async function ChannelGroup({
                         }
                       >
                         <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-text-primary">
-                          {u.name.charAt(0).toUpperCase()}
+                          {initialOf(u.name, { locale: t.locale })}
                         </span>
                       </div>
                       <span
@@ -1510,8 +1529,8 @@ async function MembersPanel({ data }: { data: LobbyData }) {
       {data.members.length === 0 ? (
         <p className="font-label-xs text-text-muted italic">{t('lobby.roster.empty')}</p>
       ) : null}
-        <MemberSection label={t('lobby.roster.onlineGroup', { count: online.length })} members={online} />
-        <MemberSection label={t('lobby.roster.offlineGroup', { count: offline.length })} members={offline} dimmed />
+        <MemberSection label={t('lobby.roster.onlineGroup', { count: online.length })} members={online} locale={t.locale} />
+        <MemberSection label={t('lobby.roster.offlineGroup', { count: offline.length })} members={offline} locale={t.locale} dimmed />
     </aside>
   );
 }
@@ -1519,10 +1538,13 @@ async function MembersPanel({ data }: { data: LobbyData }) {
 function MemberSection({
   label,
   members,
+  locale,
   dimmed,
 }: {
   label: string;
   members: Member[];
+  /** The reader's language, for casing the avatar initials. */
+  locale: string;
   dimmed?: boolean;
 }) {
   if (members.length === 0) return null;
@@ -1546,7 +1568,7 @@ function MemberSection({
                 }
               >
                 <span className="absolute inset-0 flex items-center justify-center text-label-sm font-bold text-text-primary">
-                  {m.name.charAt(0).toUpperCase()}
+                  {initialOf(m.name, { locale })}
                 </span>
                 {m.status !== 'offline' ? (
                   <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-success border-2 border-surface-dim" />

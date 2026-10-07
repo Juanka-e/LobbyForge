@@ -6,6 +6,7 @@
   "ui": true,
   "minPlayers": 1,
   "maxPlayers": 50,
+  "requiresVoiceRoom": true,
   "locales": ["en", "tr"],
   "actionPolicies": {
     "open-round": { "role": "host" },

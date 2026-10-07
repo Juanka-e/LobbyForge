@@ -103,7 +103,8 @@ export const vampireVillagePlugin: GamePlugin<VillageState, VillageAction> = {
    */
   actionPolicies: {
     join: { ...AS_SELF, joinsRoster: true },
-    leave: AS_SELF,
+    // Playing needs the voice room (requiresVoiceRoom); leaving does not.
+    leave: { ...AS_SELF, allowOutsideVoice: true },
     'set-ready': AS_SELF,
     timeout: AS_SELF,
     'night-target': AS_SELF,

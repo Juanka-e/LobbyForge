@@ -8,6 +8,7 @@ const ACTION_LABEL_KEYS: Record<string, string> = {
   'activity.action': 'admin.audit.action.activity.action',
   'activity.create': 'admin.audit.action.activity.create',
   'activity.end': 'admin.audit.action.activity.end',
+  'activity.host_transfer': 'admin.audit.action.activity.host_transfer',
   'app.uninstall': 'admin.audit.action.app.uninstall',
   'app.upsert': 'admin.audit.action.app.upsert',
   'bot.create': 'admin.audit.action.bot.create',

@@ -47,7 +47,9 @@ const fakePlugin = {
 };
 const getPluginServer = vi.fn((id: string) => (id === 'fake' ? fakePlugin : null));
 
-vi.mock('@lobbyforge/db', () => ({
+vi.mock('@lobbyforge/db', async () => ({
+  // The REAL helper: it must see a unique violation through Drizzle's wrapper.
+  isPgUniqueViolation: (await vi.importActual<typeof import('@lobbyforge/db')>('@lobbyforge/db')).isPgUniqueViolation,
   getServerById,
   getChannelById,
   addPlayerToSession,
@@ -86,6 +88,9 @@ vi.mock('@/lib/plugin-server-registry', () => ({
 vi.mock('@/lib/security-headers', () => ({
   withApiSecurity: (handler: unknown) => handler,
   applySecurityHeaders: (r: unknown) => r,
+  // The actions route's per-user limit (its own tests cover it).
+  distributedRateLimit: async () => ({ allowed: true, remaining: 1, resetAt: Date.now() + 60_000 }),
+  rateLimitResponse: () => null,
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -386,6 +391,53 @@ describe('POST /api/servers/{id}/channels/{channelId}/activities', () => {
       { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID }) }
     );
     expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: 'activity_exists', sessionId: SESSION_ID, activity: { id: SESSION_ID } });
+  });
+
+  it('two starts at once: the loser of the INSERT race gets 409 activity_exists with the winner, not a 500', async () => {
+    getServerById.mockResolvedValue(mockServer());
+    getUserPermissions.mockResolvedValue(['start_activity']);
+    // Both passed the pre-check (nothing open yet); the unique index stops
+    // the second INSERT — and Drizzle wraps the driver's error.
+    getActiveGameSessionForChannel.mockResolvedValueOnce(null).mockResolvedValueOnce(mockSession());
+    const driverError = Object.assign(new Error('duplicate key value violates unique constraint "game_sessions_channel_open_unique"'), {
+      code: '23505',
+    });
+    createGameSession.mockRejectedValueOnce(Object.assign(new Error('Failed query: insert into "game_sessions"'), { cause: driverError }));
+    addPlayerToSession.mockClear();
+    const { POST } = await loadListRoute();
+    const res = await POST(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}/activities`, {
+        method: 'POST',
+        headers: { cookie: makeSessionCookie() },
+        body: JSON.stringify({ pluginId: 'fake' }),
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID }) }
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      code: 'activity_exists',
+      error: 'Channel already has an active activity',
+      sessionId: SESSION_ID,
+    });
+    expect(addPlayerToSession).not.toHaveBeenCalled();
+    expect(logAction).not.toHaveBeenCalled();
+  });
+
+  it('any other insert failure is still a 500', async () => {
+    getServerById.mockResolvedValue(mockServer());
+    getUserPermissions.mockResolvedValue(['start_activity']);
+    createGameSession.mockRejectedValueOnce(Object.assign(new Error('Failed query'), { cause: Object.assign(new Error('boom'), { code: '57P01' }) }));
+    const { POST } = await loadListRoute();
+    const res = await POST(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}/activities`, {
+        method: 'POST',
+        headers: { cookie: makeSessionCookie() },
+        body: JSON.stringify({ pluginId: 'fake' }),
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID }) }
+    );
+    expect(res.status).toBe(500);
   });
 
   it('starts an activity and returns 201', async () => {

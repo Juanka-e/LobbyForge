@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import { activityTone } from '@/lib/hub-format';
 import tones from './hub-tones.module.css';
+import { initialOf } from '@/lib/initial';
 
 const SIZES = {
   sm: 'size-9 rounded-[10px] text-base',
@@ -32,7 +33,7 @@ export default function ActivityMark({
       className={`${tones.tone} flex shrink-0 items-center justify-center font-display font-extrabold ${SIZES[size]} ${className}`}
     >
       {/* Product names are brand words, not prose: no locale casing. */}
-      {Array.from(name.trim())[0]?.toUpperCase() ?? '?'}
+      {initialOf(name)}
     </span>
   );
 }

@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { GamePlugin, GamePluginContext, PluginPermission } from '../index.js';
+import {
+  CATALOG_NAME_KEY,
+  CATALOG_SUMMARY_KEY,
+  GamePlugin,
+  GamePluginContext,
+  PluginPermission,
+  registerGamePlugin,
+} from '../index.js';
 import { createTestHarness } from '../testing.js';
 
 interface MockState {
@@ -65,5 +72,36 @@ describe('plugin-sdk and createTestHarness', () => {
     });
 
     expect(() => harness.getState()).toThrow('Game has not started yet. Call startGame() first.');
+  });
+});
+
+describe('registerGamePlugin', () => {
+  it('carries restartActions and onHostChange to the host registry', () => {
+    const plugin: GamePlugin<MockState & { host?: string }, MockAction> = {
+      ...mockPlugin,
+      restartActions: ['increment'],
+      onHostChange: (state, change) => ({ ...state, host: change.nextHostId }),
+    } as GamePlugin<MockState & { host?: string }, MockAction>;
+    const registered = registerGamePlugin(plugin);
+    expect(registered.restartActions).toEqual(['increment']);
+    expect(
+      registered.onHostChange?.({ score: 1, phase: 'playing' }, {
+        previousHostId: 'a',
+        nextHostId: 'b',
+        now: 1,
+        reason: 'host_left_voice',
+      })
+    ).toEqual({ score: 1, phase: 'playing', host: 'b' });
+  });
+
+  it('leaves both undefined for a plugin that declares neither', () => {
+    const registered = registerGamePlugin(mockPlugin);
+    expect(registered.restartActions).toBeUndefined();
+    expect(registered.onHostChange).toBeUndefined();
+  });
+
+  it('exports the catalogue name key next to the summary key', () => {
+    expect(CATALOG_NAME_KEY).toBe('catalog.name');
+    expect(CATALOG_SUMMARY_KEY).toBe('catalog.summary');
   });
 });

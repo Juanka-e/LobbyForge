@@ -12,6 +12,8 @@
   "lobby.dm.title": "Direkt Mesajlar",
   "lobby.meta.description": "Kendi barındırdığın topluluk, tek bir 1280px pencerede.",
   "lobby.meta.title": "Bağımsız Lobi - LobbyForge",
+  "lobby.nav.close": "Gezinme menüsünü kapat",
+  "lobby.nav.label": "Sunucular ve kanallar",
   "lobby.nav.open": "Gezinme menüsünü aç",
   "lobby.presence.accountSettings": "Profil ve hesap ayarları",
   "lobby.presence.dnd.description": "Görünürsün ama rahatsız edilmek istemiyorsun.",
@@ -124,5 +126,6 @@
   "lobby.voice.settingsAria": "Ses ve görüntü ayarları",
   "lobby.voice.timedOut": "Zaman aşımındasın",
   "lobby.voice.undeafen": "Sağırlaştırmayı kaldır",
+  "lobby.voice.unknownMember": "Bilinmeyen üye",
   "lobby.voice.unmuted": "Mikrofon açık"
 }

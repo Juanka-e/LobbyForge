@@ -56,6 +56,20 @@ export function parseStartSeconds(raw: string | null | undefined): number {
   return Number.isFinite(seconds) && seconds <= POSITION_MAX_SEC ? seconds : 0;
 }
 
+/** Why a pasted link is refused — the panel words each one differently. */
+export type YouTubeLinkProblem = 'tooLong' | 'invalid';
+
+/**
+ * Null when `input` is an accepted video link; otherwise why not. A link
+ * past YOUTUBE_URL_MAX_LENGTH is `tooLong` whatever it holds (a valid
+ * video link with a huge tracking tail is still refused, and saying "not a
+ * YouTube link" about it would be wrong).
+ */
+export function youTubeLinkProblem(input: unknown): YouTubeLinkProblem | null {
+  if (typeof input === 'string' && input.trim().length > YOUTUBE_URL_MAX_LENGTH) return 'tooLong';
+  return parseYouTubeUrl(input) ? null : 'invalid';
+}
+
 /** The video a pasted link points at, or null when it is not one of the accepted forms. */
 export function parseYouTubeUrl(input: unknown): YouTubeLink | null {
   if (typeof input !== 'string') return null;

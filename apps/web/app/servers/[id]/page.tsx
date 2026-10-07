@@ -25,6 +25,7 @@ import { Suspense, useCallback, useEffect, useId, useMemo, useState, type ReactN
 import { useSearchParams } from 'next/navigation';
 import { CreateChannelModal, type CreateChannelInput } from '@/components/modals/CreateChannelModal';
 import { useT } from '@/lib/i18n/client';
+import { initialOf } from '@/lib/initial';
 import { SCROLL_REGION_FOCUS_CLASS } from '@/lib/scroll-region';
 import type { Translator } from '@/lib/i18n/core';
 import SettingsModalFrame from '../../SettingsModalFrame';
@@ -580,7 +581,7 @@ function Overview({
               className="flex min-w-0 items-center gap-3 rounded-lg border border-border-subtle bg-surface px-3 py-2.5"
             >
               <span className="grid size-8 flex-none place-items-center rounded-full bg-surface-container text-xs font-semibold text-text-secondary" aria-hidden>
-                {m.displayName.trim().charAt(0).toUpperCase() || '?'}
+                {initialOf(m.displayName, { locale: t.locale })}
               </span>
               <span className="min-w-0 flex-1 truncate text-sm text-text-primary">{m.displayName}</span>
               {m.isOwner ? <StatusBadge tone="primary">{t('hub.servers.members.owner')}</StatusBadge> : null}

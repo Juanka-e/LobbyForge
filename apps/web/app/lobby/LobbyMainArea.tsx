@@ -7,6 +7,7 @@ import { LobbyActivityView } from './LobbyActivityView';
 import { LobbyLiveRoster } from './LobbyLiveRoster';
 import { LobbyComposer } from './LobbyComposer';
 import { useT } from '@/lib/i18n/client';
+import { initialOf } from '@/lib/initial';
 import { BotAvatar, BotBadge } from './BotIdentity';
 import { WebhookAvatar, WebhookBadge } from './WebhookIdentity';
 import { InteractionAnnouncer, InteractionHeader } from './slash/InteractionRows';
@@ -56,6 +57,7 @@ interface LobbyData {
   isLive: boolean;
   canManageMessages: boolean;
   canManageServer: boolean;
+  canStartActivities?: boolean;
   installedApps: Array<{
     id: string;
     name: string;
@@ -63,6 +65,7 @@ interface LobbyData {
     minPlayers: number | null;
     maxPlayers: number | null;
     trustLevel: string | null;
+    sandboxed?: boolean;
   }>;
   members?: Array<{
     id: string;
@@ -156,6 +159,7 @@ function LobbyMainAreaLive({ data }: { data: LobbyData }) {
         apps={data.installedApps}
         currentUserId={data.currentUserId}
         canManageServer={data.canManageServer}
+        canStartActivities={data.canStartActivities ?? false}
       />
     );
   }
@@ -249,7 +253,7 @@ function ChannelHeader({
 }) {
   const t = useT();
   return (
-    <header className="h-16 px-6 flex items-center justify-between border-b border-border-subtle bg-surface-dim/80 backdrop-blur-md z-10 sticky top-0 shadow-sm">
+    <header className="h-16 pl-16 pr-6 md:pl-6 flex items-center justify-between border-b border-border-subtle bg-surface-dim/80 backdrop-blur-md z-10 sticky top-0 shadow-sm">
       <div className="flex items-center gap-3">
         <span className="material-symbols-outlined text-[24px] text-text-secondary">tag</span>
         <h2 className="font-body-lg font-bold text-text-primary">{channelName}</h2>
@@ -363,7 +367,7 @@ function Message({ message }: { message: ChatMessage }) {
         <WebhookAvatar className="mt-1" />
       ) : (
         <div data-chat-avatar className="chat-avatar w-10 h-10 rounded-full bg-secondary-container flex-shrink-0 mt-1 flex items-center justify-center font-bold text-text-primary">
-          {message.author.charAt(0).toUpperCase()}
+          {initialOf(message.author, { locale: t.locale })}
         </div>
       )}
       <div className="flex flex-col w-full min-w-0">

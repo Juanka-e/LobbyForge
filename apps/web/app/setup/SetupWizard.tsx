@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type FormEvent } from 'react';
 import { useT } from '@/lib/i18n/client';
+import { initialOf } from '@/lib/initial';
 import { rich } from '@/lib/i18n/rich';
 
 type Step = 'name' | 'owner' | 'access' | 'seo' | 'review';
@@ -184,7 +185,7 @@ export default function SetupWizard({
               />
             ) : (
               <div className="size-11 rounded-lg bg-primary-container flex items-center justify-center font-bold text-on-primary-container">
-                {form.instanceName.charAt(0).toUpperCase() || 'L'}
+                {initialOf(form.instanceName, { locale: t.locale, fallback: 'L' })}
               </div>
             )}
             <div className="min-w-0">

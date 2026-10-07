@@ -31,6 +31,7 @@ import { GuestVerificationDialog } from '@/components/captcha/GuestVerificationD
 import { readCaptchaRefusal } from '@/components/captcha/types';
 import { useT } from '@/lib/i18n/client';
 import type { Params } from '@/lib/i18n/core';
+import { resolveParticipantName } from './participant-name';
 import {
   mergeVoiceVideoPreferences,
   type ScreenFps,
@@ -87,7 +88,14 @@ import {
 export interface LobbyVoiceParticipant {
   id: string;
   identity: string;
+  /** What to show: the member's name, or a translated "Unknown member" — never the identity. */
   name: string;
+  /**
+   * False while `name` is only that placeholder. Surfaces that keep names
+   * of their own (a game's bench) pass `null` instead of the placeholder.
+   * Absent means known.
+   */
+  nameKnown?: boolean;
   isLocal: boolean;
   isSpeaking: boolean;
   micEnabled: boolean;
@@ -381,9 +389,11 @@ function screenShareOptions(
 
 function participantToView(
   p: Participant,
-  knownNames: Record<string, string>
+  knownNames: Record<string, string>,
+  unknownName: string
 ): LobbyVoiceParticipant {
   const identity = p.identity;
+  const resolvedName = resolveParticipantName(identity, p.name, knownNames);
   const isLocal = p.isLocal;
   const pubs = Array.from(p.videoTrackPublications.values());
   // beta-review: the MICROPHONE publication (not screen-share audio), and a
@@ -408,7 +418,8 @@ function participantToView(
   return {
     id: identity,
     identity,
-    name: p.name || knownNames[identity] || identity,
+    name: resolvedName ?? unknownName,
+    nameKnown: resolvedName !== null,
     isLocal,
     // LiveKit derives "speaking" from every AUDIO track, mislabelled ones
     // included — a remote participant must publish audio under an audio
@@ -550,6 +561,9 @@ export function LobbyVoiceProvider({
   // Live copy for event handlers (avoid re-subscribing on every render).
   const knownNamesRef = useRef<Record<string, string>>(knownNames);
   knownNamesRef.current = knownNames;
+  // Shown for a participant whose name is not known yet (never their id).
+  const unknownNameRef = useRef(t('lobby.voice.unknownMember'));
+  unknownNameRef.current = t('lobby.voice.unknownMember');
   // beta-review: deafen must also cover publications that appear LATER
   // (new joiners, first unmute, reconnect) — handlers read this ref.
   const deafenRef = useRef(false);
@@ -763,7 +777,7 @@ export function LobbyVoiceProvider({
 
   const collectParticipants = useCallback((room: Room) => {
     const list = [room.localParticipant, ...Array.from(room.remoteParticipants.values())];
-    setParticipants(list.map((p) => participantToView(p, knownNamesRef.current)));
+    setParticipants(list.map((p) => participantToView(p, knownNamesRef.current, unknownNameRef.current)));
   }, []);
 
   const stopHeartbeat = useCallback(() => {
@@ -1042,6 +1056,8 @@ export function LobbyVoiceProvider({
           setConnectionState(ConnectionState.Disconnected);
         });
         room.on(RoomEvent.ParticipantConnected, () => collectParticipants(room));
+        // A name that arrives or changes after the participant joined.
+        room.on(RoomEvent.ParticipantNameChanged, () => collectParticipants(room));
         room.on(RoomEvent.ParticipantDisconnected, (participant) => {
           detachParticipantAudio(participant.identity);
           collectParticipants(room);

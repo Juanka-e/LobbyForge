@@ -61,6 +61,7 @@ The example in the repository is a complete, working plugin to copy:
   "ui": true,
   "minPlayers": 1,
   "maxPlayers": 50,
+  "requiresVoiceRoom": true,
   "locales": ["en", "tr"],
   "actionPolicies": {
     "open-round": { "role": "host" },
@@ -78,8 +79,9 @@ The example in the repository is a complete, working plugin to copy:
 | `version` | strict semver (`1.0.0`, `2.0.0-beta.1`). Must equal the catalog `version`. |
 | `sdk` | exactly `"sandbox-v1"`. |
 | `ui` | `true` or `false`. `true` requires `ui/index.html`. |
-| `actionPolicies` | an object (may be empty), at most 64 action types of 1–64 characters (`A-Z a-z 0-9 _ . : -`). Each value: `role` (`host`, `member` or `player`), optional `actorFields` (up to 8 field names; not `type`), `joinsRoster` (boolean), `audit` (boolean). Unknown keys are refused, so a typo cannot silently fall back to host-only. |
+| `actionPolicies` | an object (may be empty), at most 64 action types of 1–64 characters (`A-Z a-z 0-9 _ . : -`). Each value: `role` (`host`, `member` or `player`), optional `actorFields` (up to 8 field names; not `type`), `joinsRoster` (boolean), `audit` (boolean), `allowOutsideVoice` (boolean). Unknown keys are refused, so a typo cannot silently fall back to host-only. |
 | `minPlayers`, `maxPlayers` | optional integers 1–500, min ≤ max. |
+| `requiresVoiceRoom` | optional `true` / `false` (default `false`). `true`: the game is played over voice — the host refuses `member` / `player` actions from anyone who is not in the activity's voice room (403, `code: "voice_required"`), except actions marked `allowOutsideVoice` (leaving). Reading the state (spectating) is never voice-checked, nor are `host` actions. It also turns on host hand-over when the host leaves the room ([PLUGIN_SDK.md → Voice, hosting and play again](PLUGIN_SDK.md#voice-hosting-and-play-again)). |
 | `locales` | optional, 1–32 language codes (`en`, `pt-BR`); defaults to `["en"]`. |
 
 Unknown top-level keys are ignored. The manifest is validated by the

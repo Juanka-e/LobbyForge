@@ -7,6 +7,7 @@ import SettingsShell from '@/app/SettingsShell';
 import { currentPagePath, signInHref } from '@/lib/sign-in-return';
 import SettingsStickyFooter, { type SettingsStatus } from '@/app/settings/SettingsStickyFooter';
 import { useT } from '@/lib/i18n/client';
+import { initialOf } from '@/lib/initial';
 
 /**
  * User Settings -> Privacy & Activity.
@@ -260,7 +261,7 @@ export default function SettingsPage() {
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-8 h-8 rounded-full bg-secondary-container flex items-center justify-center font-bold text-text-primary text-sm flex-shrink-0">
-                      {b.blockedDisplayName.charAt(0).toUpperCase()}
+                      {initialOf(b.blockedDisplayName, { locale: t.locale })}
                     </div>
                     <span className="text-sm text-text-primary font-medium truncate">
                       {b.blockedDisplayName}

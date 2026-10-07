@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import type { UserRow } from '@lobbyforge/db';
 import { ChangeAvatarModal } from '@/components/modals/ChangeAvatarModal';
 import { useT } from '@/lib/i18n/client';
+import { initialOf } from '@/lib/initial';
 import { RESTRICTED_ACTION_KEYS } from '@/components/email-verification/email-status';
 import { handleEmailUnverified } from '@/components/email-verification/email-status-store';
 import EmailUnverifiedNotice, { useEmailRestriction } from '@/components/email-verification/EmailUnverifiedNotice';
@@ -41,7 +42,7 @@ export default function ProfileBody({
     );
   }
 
-  const initial = displayName.trim().charAt(0).toUpperCase() || '?';
+  const initial = initialOf(displayName, { locale: t.locale });
 
   async function saveAvatar({ croppedDataUrl }: { file: File; croppedDataUrl: string }) {
     setError(null);

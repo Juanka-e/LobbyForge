@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
+import { initialOf } from '@/lib/initial';
 import {
   PRESENCE_DESCRIPTION_KEYS,
   PRESENCE_DOT_CLASS,
@@ -63,7 +64,7 @@ export function LobbyPresenceMenu({
   const name = hasUser
     ? displayName.trim() || t('lobby.presence.you')
     : t('common.guest');
-  const initial = name.charAt(0).toUpperCase() || '?';
+  const initial = initialOf(name, { locale: t.locale });
   const subLabel = voiceLabel ?? t(PRESENCE_LABEL_KEYS[status]);
 
   return (

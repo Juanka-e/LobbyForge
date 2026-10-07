@@ -44,6 +44,15 @@ export const BOT_API_PERMISSIONS: readonly BotPermissionId[] = [
   'receive_events',
 ];
 
+/**
+ * A permission kept for what comes next and not honoured yet. The settings
+ * page shows it as "coming soon" and does not let anyone pick it (a bot
+ * that already has one can still have it removed).
+ */
+export function isReservedBotPermission(permission: BotPermissionId): boolean {
+  return !BOT_API_PERMISSIONS.includes(permission);
+}
+
 // ── Bot API v2 vocabulary (client-safe: the composer and admin UI use it) ──
 
 /** Slash command and option names: lowercase letters, digits, `_` and `-`. */

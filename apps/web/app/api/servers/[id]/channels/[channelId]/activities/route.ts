@@ -10,6 +10,7 @@ import {
   getPluginInstall,
   getServerById,
   getUserPermissions,
+  isPgUniqueViolation,
   isServerMember,
   listGameSessionsForChannel,
   logAction,
@@ -63,6 +64,19 @@ function idList(settings: unknown, key: 'allowedChannelIds' | 'allowedRoleIds'):
   if (!settings || typeof settings !== 'object') return [];
   const value = (settings as Record<string, unknown>)[key];
   return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
+}
+
+/** 409: the channel already has an open activity (one at a time per channel). */
+function activityExists(active: Awaited<ReturnType<typeof listGameSessionsForChannel>>[number] | null): NextResponse {
+  return NextResponse.json(
+    {
+      error: 'Channel already has an active activity',
+      code: 'activity_exists',
+      sessionId: active?.id ?? null,
+      ...(active ? { activity: toSummary(active) } : {}),
+    },
+    { status: 409, headers: { 'Cache-Control': 'no-store' } }
+  );
 }
 
 function toSummary(row: Awaited<ReturnType<typeof listGameSessionsForChannel>>[number]) {
@@ -150,12 +164,7 @@ async function handlePost(
       return NextResponse.json({ error: 'Activities can only start in voice or stage channels' }, { status: 400 });
     }
     const active = await getActiveGameSessionForChannel(getDb(), channelId);
-    if (active) {
-      return NextResponse.json(
-        { error: 'Channel already has an active activity', activity: toSummary(active) },
-        { status: 409 }
-      );
-    }
+    if (active) return activityExists(active);
 
     let body: z.infer<typeof StartActivitySchema>;
     try {
@@ -213,13 +222,24 @@ async function handlePost(
     });
     const initialState = await callCreateInitialState(plugin, ctx) as Record<string, unknown>;
 
-    const created = await createGameSession(getDb(), {
-      serverId,
-      channelId,
-      pluginId: plugin.manifest.id,
-      createdBy: session.uid,
-      state: initialState,
-    });
+    let created: Awaited<ReturnType<typeof createGameSession>>;
+    try {
+      created = await createGameSession(getDb(), {
+        serverId,
+        channelId,
+        pluginId: plugin.manifest.id,
+        createdBy: session.uid,
+        state: initialState,
+      });
+    } catch (err) {
+      // Two starts at once: both passed the check above, and the partial
+      // unique index `game_sessions_channel_open_unique` let one INSERT in.
+      // The loser answers like the check would have (Drizzle wraps the
+      // driver error — isPgUniqueViolation looks through it).
+      if (!isPgUniqueViolation(err)) throw err;
+      const winner = await getActiveGameSessionForChannel(getDb(), channelId).catch(() => null);
+      return activityExists(winner);
+    }
     // The creator is the first player — without this the session's
     // player list stays empty and player-role action policies (and the
     // room panel's player count) see nobody.

@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { WebhookReceiver, type WebhookEvent } from 'livekit-server-sdk';
-import { logAction } from '@lobbyforge/db';
+import { getActiveGameSessionForChannel, logAction } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
+import { publishActivityStateChange } from '@/lib/activity-bus';
 import { getRoomServiceClient, requireLiveKitCredentials } from '@/lib/livekit';
 import { parseLiveKitRoomName } from '@/lib/livekit-room';
 import { withMachineApiSecurity } from '@/lib/security-headers';
@@ -67,7 +68,12 @@ async function handlePost(req: Request): Promise<NextResponse> {
   }
 
   if (event.event === 'participant_joined') {
+    void noteVoicePresence(event, 'joined');
     return handleParticipantJoined(event);
+  }
+  if (event.event === 'participant_left') {
+    void noteVoicePresence(event, 'left');
+    return NextResponse.json({ ok: true });
   }
   if (event.event !== 'track_published') {
     return NextResponse.json({ ok: true });
@@ -203,6 +209,64 @@ async function handleParticipantJoined(event: WebhookEvent): Promise<NextRespons
   }
   await auditBlockEnforced(scope, room, identity, block.retryAfterSeconds);
   return NextResponse.json({ ok: true, removed: true });
+}
+
+const USER_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** ParticipantInfo.Kind.STANDARD (protojson omits the zero value). */
+const STANDARD_KINDS = new Set<unknown>([undefined, 0, 'STANDARD']);
+
+/**
+ * Activity host presence (lib/activity-voice.ts, lib/activity-host.ts):
+ * record WHEN someone left a voice room and forget it when they come back,
+ * so a host who left is handed over after exactly the grace period. If the
+ * person is an open activity's host in that channel, tell its panels to
+ * re-read the session (they learn the host is away, or back).
+ *
+ * Fire-and-forget, after the answer: this must never hold back the room's
+ * webhook queue (LiveKit delivers a room's events one after another), and a
+ * failure only costs precision — the lazy reader starts the clock itself.
+ */
+async function noteVoicePresence(event: WebhookEvent, kind: 'joined' | 'left'): Promise<void> {
+  const room = event.room?.name ?? '';
+  const identity = event.participant?.identity ?? '';
+  const scope = room ? parseLiveKitRoomName(room) : null;
+  if (!scope || !USER_ID_RE.test(identity)) return;
+  if (!STANDARD_KINDS.has(event.participant?.kind as unknown)) return;
+  try {
+    const { forgetVoiceRoomSnapshot, recordVoiceJoined, recordVoiceLeft } = await import('@/lib/activity-voice');
+    forgetVoiceRoomSnapshot(room);
+    if (kind === 'joined') {
+      await recordVoiceJoined(room, identity);
+    } else {
+      // A second connection with the same identity (another tab, or the
+      // new connection LiveKit kept when it replaced a duplicate) means
+      // they never left.
+      if (await stillInRoom(room, identity)) return;
+      await recordVoiceLeft(room, identity, Date.now());
+    }
+    const active = await getActiveGameSessionForChannel(getDb(), scope.channelId);
+    if (active && active.serverId === scope.serverId && active.createdBy === identity) {
+      // No identities on the bus: panels re-read the session (host included).
+      publishActivityStateChange({
+        serverId: scope.serverId,
+        sessionId: active.id,
+        status: active.status,
+        publicSummary: { rosterChanged: true },
+      });
+    }
+  } catch (err) {
+    console.warn('[livekit/webhook] voice presence not recorded:', (err as Error).message);
+  }
+}
+
+async function stillInRoom(room: string, identity: string): Promise<boolean> {
+  try {
+    await getRoomServiceClient().getParticipant(room, identity);
+    return true;
+  } catch {
+    // 404 (gone) — or the room service failed: record the departure.
+    return false;
+  }
 }
 
 /** The deduplicated `voice.block_enforced` row; never throws. */

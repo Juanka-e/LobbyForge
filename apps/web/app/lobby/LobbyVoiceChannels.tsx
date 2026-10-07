@@ -4,6 +4,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useCallba
 import { createPortal } from 'react-dom';
 import { useT } from '@/lib/i18n/client';
 import type { Params } from '@/lib/i18n/core';
+import { initialOf } from '@/lib/initial';
 import { useLobbyVoice, type LobbyVoiceParticipant } from './LobbyVoiceProvider';
 import Link from 'next/link';
 import { useEmailRestriction, useVerifyEmailAction } from '@/components/email-verification/EmailUnverifiedNotice';
@@ -43,6 +44,11 @@ export interface LobbyVoiceChannelsProps {
    * from the page — the route enforces the same rules.
    */
   voiceModerationTargetIds?: readonly string[];
+  /**
+   * user id → name for every member the page loaded, so someone who joins
+   * a channel we are not in is named rather than "Unknown member".
+   */
+  knownNames?: Readonly<Record<string, string>>;
 }
 
 interface PresenceEntry {
@@ -95,6 +101,7 @@ export function LobbyVoiceChannels({
   currentUserId,
   canMuteMembers = false,
   voiceModerationTargetIds = NO_TARGETS,
+  knownNames,
 }: LobbyVoiceChannelsProps) {
   const t = useT();
   const voice = useLobbyVoice();
@@ -181,7 +188,7 @@ export function LobbyVoiceChannels({
 
   // Name cache: userId → displayName. Seeded from SSR, updated by polls.
   const [nameCache, setNameCache] = useState<Record<string, string>>(() => {
-    const cache: Record<string, string> = {};
+    const cache: Record<string, string> = { ...knownNames };
     if (currentUserId) cache[currentUserId] = t('lobbyMain.chat.you');
     for (const users of Object.values(initialVoiceUsersByChannel)) {
       for (const u of users) cache[u.id] = u.name;
@@ -235,13 +242,16 @@ export function LobbyVoiceChannels({
     return () => window.clearInterval(id);
   }, [refreshPresence]);
 
-  // Merge polled names into the cache whenever participants update.
+  // Remember every name the voice room tells us, so a member keeps their
+  // name in another channel's list after they leave ours. A placeholder
+  // ("Unknown member") is never cached; a real name replaces an older one.
   useEffect(() => {
     setNameCache((prev) => {
       let changed = false;
       const next = { ...prev };
       for (const p of voice.participants) {
-        if (p.identity && !next[p.identity]) {
+        if (!p.identity || p.isLocal || p.nameKnown === false || !p.name) continue;
+        if (next[p.identity] !== p.name) {
           next[p.identity] = p.name;
           changed = true;
         }
@@ -288,7 +298,8 @@ export function LobbyVoiceChannels({
             participants = userIds.map((uid) => ({
               id: uid,
               identity: uid,
-              name: nameCache[uid] ?? t('lobbyMain.chat.unknownUser'),
+              name: nameCache[uid] ?? t('lobby.voice.unknownMember'),
+              nameKnown: uid in nameCache,
               isLocal: uid === currentUserId,
               isSpeaking: false,
               micEnabled: true,
@@ -308,6 +319,7 @@ export function LobbyVoiceChannels({
               >
                 <button
                   type="button"
+                  data-mobile-nav-close
                   onClick={() => {
                     if (isConnected) {
                       voice.setMainViewMode('voice');
@@ -349,6 +361,7 @@ export function LobbyVoiceChannels({
                 {isConnected ? (
                   <button
                     type="button"
+                    data-mobile-nav-close
                     onClick={() => voice.setMainViewMode('voice')}
                     className="grid size-7 flex-none place-items-center rounded text-primary hover:bg-surface-raised"
                     title={t('lobbyMain.voice.openTitle')}
@@ -394,7 +407,7 @@ export function LobbyVoiceChannels({
                         }
                       >
                         <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-text-primary">
-                          {u.name.charAt(0).toUpperCase()}
+                          {initialOf(u.name, { locale: t.locale })}
                         </span>
                       </div>
                       <span

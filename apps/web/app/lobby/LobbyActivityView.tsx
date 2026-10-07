@@ -5,10 +5,13 @@ import Link from 'next/link';
 import { getPlugin } from '@/lib/plugin-registry';
 import { useT } from '@/lib/i18n/client';
 import type { Translator } from '@/lib/i18n/core';
+import { activityRefusalMessage, parseActivityRefusal } from '@/lib/activity-refusal';
+import type { ActivityHostState } from '@/lib/activity-host-view';
 import { PluginSurface } from '../room/PluginSurface';
 import { findOpenActivity, useActivitySession } from '../room/useActivitySession';
-import { useLobbyVoice } from './LobbyVoiceProvider';
+import { ConnectionState, useLobbyVoice } from './LobbyVoiceProvider';
 import { PluginFrameSurface } from './PluginFrame';
+import { buildPanelPlayers } from './panel-players';
 import type { InstalledApp } from './page';
 
 /** How often the picker looks for a session someone else started. */
@@ -82,6 +85,7 @@ export function LobbyActivityView({
   apps,
   currentUserId,
   canManageServer,
+  canStartActivities = false,
 }: {
   serverId: string;
   channelId: string;
@@ -89,13 +93,25 @@ export function LobbyActivityView({
   apps: InstalledApp[];
   currentUserId: string | null;
   canManageServer: boolean;
+  /**
+   * START_ACTIVITY: the end route lets this member end any session, not
+   * only their own. A hint for showing End — the route decides.
+   */
+  canStartActivities?: boolean;
 }) {
   const t = useT();
   const voice = useLobbyVoice();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [resolving, setResolving] = useState(true);
   const [launching, setLaunching] = useState<string | null>(null);
-  const [launchError, setLaunchError] = useState<string | null>(null);
+  // A refused start, said in the reader's language. `existingSessionId`
+  // is set when the channel already has an activity: the notice offers
+  // to open it rather than dropping the player into a game they did not pick.
+  const [launchError, setLaunchError] = useState<{
+    text: string;
+    offerOpen: boolean;
+    existingSessionId: string | null;
+  } | null>(null);
   // Word packs for plugins that pick a deck when a game starts (Hushle).
   // Fetched only while the session is still in its lobby phase, so a
   // game already under way doesn't re-request a deck nobody will choose.
@@ -106,7 +122,7 @@ export function LobbyActivityView({
     setResolving(false);
   }, []);
 
-  const { detail, error, busy, dispatch, end } = useActivitySession({
+  const { detail, error, busy, setError, dispatch, end } = useActivitySession({
     serverId,
     sessionId,
     onEnded: handleEnded,
@@ -117,16 +133,11 @@ export function LobbyActivityView({
   // identity is their user id — so a host can seat players by name before
   // they have pressed anything.
   const roster = detail?.players;
-  const panelPlayers = useMemo(() => {
-    const byId = new Map<string, { userId: string; name: string | null }>();
-    for (const p of roster ?? []) byId.set(p.userId, { userId: p.userId, name: p.name ?? null });
-    if (voice.activeChannelId === channelId) {
-      for (const p of voice.participants) {
-        if (!byId.has(p.identity)) byId.set(p.identity, { userId: p.identity, name: p.name || null });
-      }
-    }
-    return [...byId.values()];
-  }, [roster, voice.activeChannelId, voice.participants, channelId]);
+  const voiceParticipants = voice.activeChannelId === channelId ? voice.participants : null;
+  const panelPlayers = useMemo(
+    () => buildPanelPlayers(roster ?? [], voiceParticipants ?? []),
+    [roster, voiceParticipants]
+  );
 
   // Join whatever is already running in this channel, rather than
   // offering a launch that would answer 409.
@@ -165,6 +176,7 @@ export function LobbyActivityView({
     async (pluginId: string) => {
       setLaunching(pluginId);
       setLaunchError(null);
+      setError(null);
       try {
         const res = await fetch(`/api/servers/${serverId}/channels/${channelId}/activities`, {
           method: 'POST',
@@ -172,32 +184,45 @@ export function LobbyActivityView({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ pluginId }),
         });
-        if (res.status === 409) {
-          // Someone else launched between render and click — join theirs.
-          const conflict = (await res.json().catch(() => ({}))) as { activity?: { id: string } };
-          if (conflict.activity?.id) {
-            setSessionId(conflict.activity.id);
+        if (!res.ok) {
+          const refusal = parseActivityRefusal(res.status, await res.json().catch(() => ({})));
+          // An older server answers the conflict with `{ activity }` and no
+          // code: someone launched between render and click — join theirs.
+          if (res.status === 409 && !refusal.code && refusal.sessionId) {
+            setSessionId(refusal.sessionId);
             return;
           }
-        }
-        if (!res.ok) {
-          const body = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
-          // The app's channel / role allow-lists (server settings → Apps).
-          if (body.code === 'app_channel_not_allowed') throw new Error(t('lobbyMain.activities.channelNotAllowed'));
-          if (body.code === 'app_role_not_allowed') throw new Error(t('lobbyMain.activities.roleNotAllowed'));
-          throw new Error(
-            body.error ?? t('lobbyMain.activities.launchFailed', { status: res.status })
-          );
+          const message = activityRefusalMessage(refusal, 'start');
+          const exists = refusal.code === 'activity_exists';
+          setLaunchError({
+            text: t(message.key, message.params),
+            offerOpen: exists,
+            existingSessionId: exists ? refusal.sessionId : null,
+          });
+          return;
         }
         const data = (await res.json()) as { activity: { id: string } };
         setSessionId(data.activity.id);
-      } catch (err) {
-        setLaunchError((err as Error).message);
+      } catch {
+        setLaunchError({ text: t('room.activity.error.network'), offerOpen: false, existingSessionId: null });
       } finally {
         setLaunching(null);
       }
     },
-    [serverId, channelId, t]
+    [serverId, channelId, t, setError]
+  );
+
+  const openExisting = useCallback(
+    async (existingSessionId: string | null) => {
+      setLaunchError(null);
+      if (existingSessionId) {
+        setSessionId(existingSessionId);
+        return;
+      }
+      const open = await findOpenActivity(serverId, channelId);
+      if (open) setSessionId(open.id);
+    },
+    [serverId, channelId]
   );
 
   const inLobbyPhase = (detail?.state as { phase?: unknown } | undefined)?.phase === 'lobby';
@@ -221,6 +246,15 @@ export function LobbyActivityView({
     };
   }, [serverId, inLobbyPhase]);
 
+  // Who may end the session, as the end route decides it: the host, anyone
+  // with START_ACTIVITY, and — once the host has abandoned a game played
+  // over voice — anyone in its voice room.
+  const isHost = Boolean(detail?.createdBy && currentUserId === detail.createdBy);
+  const inVoiceRoom = voice.activeChannelId === channelId && voice.connectionState === ConnectionState.Connected;
+  const host = detail?.host ?? null;
+  const canEnd = isHost || canStartActivities || Boolean(host?.abandoned && inVoiceRoom);
+  const hostNote = hostNoteKey(host, { isHost, inVoiceRoom });
+
   const pluginClient = detail ? getPlugin(detail.pluginId) : null;
   const appName = useMemo(() => {
     if (!detail) return null;
@@ -229,7 +263,7 @@ export function LobbyActivityView({
 
   return (
     <main className="flex-1 flex flex-col bg-background min-w-0 relative text-[14px] animate-fade-in-up">
-      <header className="h-16 px-6 flex items-center justify-between border-b border-border-subtle bg-surface-dim/80 backdrop-blur-md z-10 sticky top-0 shadow-sm">
+      <header className="h-16 pl-16 pr-6 md:pl-6 flex items-center justify-between border-b border-border-subtle bg-surface-dim/80 backdrop-blur-md z-10 sticky top-0 shadow-sm">
         <div className="flex items-center gap-3 min-w-0">
           <span className="material-symbols-outlined text-[24px] text-text-secondary">stadia_controller</span>
           <h2 className="font-body-lg font-bold text-text-primary truncate">
@@ -278,22 +312,36 @@ export function LobbyActivityView({
                 {t('lobbyMain.activities.playerCount', { count: panelPlayers.length })}
               </span>
               <div className="ml-auto flex items-center gap-2">
-                {detail.createdBy && currentUserId === detail.createdBy ? (
+                {isHost ? (
                   <span className="rounded-full bg-primary/15 px-2.5 py-0.5 font-label-xs text-[11px] font-medium text-primary">
                     {t('lobbyMain.activities.host')}
                   </span>
                 ) : null}
-                <button
-                  type="button"
-                  onClick={() => void end()}
-                  disabled={busy}
-                  title={t('lobbyMain.activities.endTitle')}
-                  className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-danger transition-colors hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <span className="material-symbols-outlined text-[16px]">stop_circle</span>
-                  {t('lobbyMain.activities.end')}
-                </button>
+                {canEnd ? (
+                  <button
+                    type="button"
+                    onClick={() => void end()}
+                    disabled={busy}
+                    title={t('lobbyMain.activities.endTitle')}
+                    className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-danger transition-colors hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <span className="material-symbols-outlined text-[16px]" aria-hidden>stop_circle</span>
+                    {t('lobbyMain.activities.end')}
+                  </button>
+                ) : null}
               </div>
+              {hostNote ? (
+                <p
+                  role="status"
+                  data-testid="activity-host-note"
+                  className="flex w-full items-start gap-1.5 font-label-xs text-[12px] text-text-secondary"
+                >
+                  <span className="material-symbols-outlined text-[16px] text-ember" aria-hidden>
+                    person_off
+                  </span>
+                  {t(hostNote)}
+                </p>
+              ) : null}
             </div>
 
             <div className="px-6 py-6">
@@ -397,7 +445,9 @@ export function LobbyActivityView({
                             <span className="font-body-md text-text-secondary line-clamp-2">{app.summary}</span>
                           ) : null}
                           <span className="flex flex-wrap items-center gap-2 font-label-xs text-[11px] text-text-muted">
-                            {app.trustLevel ? (
+                            {app.sandboxed ? (
+                              <MarketplaceBadge />
+                            ) : app.trustLevel ? (
                               <span className="rounded border border-border-subtle px-1.5 py-0.5">
                                 {trustLabel(t, app.trustLevel)}
                               </span>
@@ -420,14 +470,71 @@ export function LobbyActivityView({
               </ul>
             )}
             {launchError ? (
-              <p role="alert" className="mt-4 text-xs text-danger">
-                {launchError}
+              <div role="alert" className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-danger">
+                <p>{launchError.text}</p>
+                {launchError.offerOpen ? (
+                  <button
+                    type="button"
+                    onClick={() => void openExisting(launchError.existingSessionId)}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-border-strong px-2.5 py-1 font-medium text-text-primary transition-colors hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                  >
+                    <span className="material-symbols-outlined text-[16px]" aria-hidden>play_arrow</span>
+                    {t('lobbyMain.activities.openExisting')}
+                  </button>
+                ) : null}
+              </div>
+            ) : error ? (
+              // Left over from the session that just closed (e.g. "This
+              // activity has ended."): the last thing the panel had to say.
+              <p role="status" className="mt-4 text-xs text-text-secondary">
+                {error}
               </p>
             ) : null}
           </section>
         )}
       </div>
     </main>
+  );
+}
+
+/**
+ * What to tell the room when the host of a game played over voice has
+ * left it, or null. The host themselves sees nothing: the notes are about
+ * who takes over and who may end the game.
+ */
+export function hostNoteKey(
+  host: ActivityHostState | null,
+  viewer: { isHost: boolean; inVoiceRoom: boolean }
+): string | null {
+  if (!host || host.inVoice || viewer.isHost) return null;
+  if (host.abandoned) return viewer.inVoiceRoom ? 'lobbyMain.activities.hostLeft' : 'lobbyMain.activities.hostLeftJoin';
+  if (host.transferAt) return 'lobbyMain.activities.hostAwayTransfer';
+  if (host.abandonAt) return 'lobbyMain.activities.hostAwayWaiting';
+  return null;
+}
+
+/**
+ * The badge of an app installed from the marketplace. Official apps say
+ * "Official"; a sandboxed one used to say nothing at all, which read as
+ * the same trust. The hint is in the title for pointers and in the
+ * accessible description for everyone else.
+ */
+function MarketplaceBadge() {
+  const t = useT();
+  const hint = t('lobbyMain.activities.trustMarketplaceHint');
+  return (
+    <span
+      data-testid="marketplace-badge"
+      title={hint}
+      className="inline-flex items-center gap-1 rounded border border-border-subtle px-1.5 py-0.5"
+    >
+      <span className="material-symbols-outlined text-[12px]" aria-hidden>
+        storefront
+      </span>
+      {t('lobbyMain.activities.trustMarketplace')}
+      {/* The card is one button: its text is what a screen reader says. */}
+      <span className="sr-only"> {hint}</span>
+    </span>
   );
 }
 

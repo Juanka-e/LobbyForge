@@ -214,7 +214,9 @@ function TurnColumn({
             style={{ fontWeight: 700, letterSpacing: '0.06em' }}
             onClick={() => {
               setBustedCardId(card.id);
-              void dispatch({ type: 'bust-forbidden' });
+              // The card id scopes the BUST: a second press (by anyone) for
+              // the same card is ignored instead of costing a second penalty.
+              void dispatch({ type: 'bust-forbidden', cardId: card.id });
             }}
           >
             {t('hushle.playing.bust')}

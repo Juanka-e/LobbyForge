@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import type { PluginCatalogRow } from '@lobbyforge/db';
 import { useT } from '@/lib/i18n/client';
+import { initialOf } from '@/lib/initial';
 
 const TRUST_COLORS: Record<string, string> = {
   official: 'text-primary border-primary/30 bg-primary/5',
@@ -89,7 +90,7 @@ function PluginCard({ plugin }: { plugin: PluginCatalogRow }) {
           {plugin.iconUrl ? (
             <img src={plugin.iconUrl} alt="" className="w-full h-full rounded-xl object-cover" />
           ) : (
-            plugin.name.charAt(0).toUpperCase()
+            initialOf(plugin.name, { locale: t.locale })
           )}
         </div>
         <div className="min-w-0 flex-1">

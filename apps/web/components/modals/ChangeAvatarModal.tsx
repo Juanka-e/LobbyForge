@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react';
 import { Modal, ModalCancelButton, ModalPrimaryButton } from '../Modal';
 import { useT } from '@/lib/i18n/client';
+import { initialOf } from '@/lib/initial';
 import type { Translator } from '@/lib/i18n/core';
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
@@ -120,7 +121,7 @@ export function ChangeAvatarModal({
             />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center text-text-muted text-6xl font-medium">
-              {displayName.trim().charAt(0).toUpperCase() || '?'}
+              {initialOf(displayName, { locale: t.locale })}
             </div>
           )}
           <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
@@ -232,7 +233,7 @@ export function ChangeAvatarModal({
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-text-muted text-xl font-medium">
-                  {displayName.trim().charAt(0).toUpperCase() || '?'}
+                  {initialOf(displayName, { locale: t.locale })}
                 </div>
               )}
             </div>

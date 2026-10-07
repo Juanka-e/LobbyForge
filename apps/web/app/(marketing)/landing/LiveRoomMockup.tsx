@@ -1,4 +1,5 @@
 import type { Translator } from '@/lib/i18n/core';
+import { initialOf } from '@/lib/initial';
 import { GamepadIcon, SpeakerIcon } from '../_components/icons';
 
 /**
@@ -68,7 +69,7 @@ export default function LiveRoomMockup({ t }: { t: Translator }) {
               className="flex size-10 items-center justify-center rounded-full text-base font-bold sm:size-14 sm:text-xl"
               style={{ backgroundColor: person.tint, color: INITIAL_INK }}
             >
-              {person.name.charAt(0)}
+              {initialOf(person.name, { locale: t.locale })}
             </span>
             <span className="flex items-center gap-1.5 text-[13px] text-text-primary sm:text-sm">
               {person.name}

@@ -371,11 +371,12 @@ describe('a running turn, seat by seat', () => {
 
     await panel.click(bust);
     await panel.click(bust);
-    expect(panel.actions).toEqual([{ type: 'bust-forbidden' }]);
+    // The card id scopes the BUST (a stale one is ignored by the reducer).
+    expect(panel.actions).toEqual([{ type: 'bust-forbidden', cardId: state.currentCard!.id }]);
     expect(bust.disabled).toBe(true);
 
     // The bust rotates the card; a new card re-arms the button.
-    const busted = hushleReducer(state, { type: 'bust-forbidden', bustedBy: JUNO });
+    const busted = hushleReducer(state, { type: 'bust-forbidden', bustedBy: JUNO, cardId: state.currentCard!.id });
     await panel.rerender({ state: project({ ...busted, currentCard: UMBRELLA }, JUNO) });
     expect(panel.button('BUST! Forbidden word').disabled).toBe(false);
     expect(q(panel, '.hushle-word')?.textContent).toBe('umbrella');
@@ -407,7 +408,7 @@ describe('a running turn, seat by seat', () => {
     expect(panel.buttons('Skip')).toHaveLength(1);
     expect(panel.buttons('Penalty')).toHaveLength(0);
     await panel.click(panel.button('BUST! Forbidden word'));
-    expect(panel.actions).toEqual([{ type: 'bust-forbidden' }]);
+    expect(panel.actions).toEqual([{ type: 'bust-forbidden', cardId: state.currentCard!.id }]);
   });
 
   it('the host keeps the pace: next card, explainer, end turn, end game', async () => {
@@ -524,7 +525,7 @@ describe('this turn', () => {
   it('lists each card and what became of it, words only for those who saw them', async () => {
     const s0 = playingState();
     const s1 = { ...hushleReducer(s0, { type: 'correct-guess' }), currentCard: UMBRELLA };
-    const s2 = { ...hushleReducer(s1, { type: 'bust-forbidden', bustedBy: JUNO }), currentCard: PYRAMID };
+    const s2 = { ...hushleReducer(s1, { type: 'bust-forbidden', bustedBy: JUNO, cardId: s1.currentCard!.id }), currentCard: PYRAMID };
 
     const opponent = await mount({ state: project(s0, JUNO), actorUserId: JUNO });
     expect(opponent.text()).toContain('No cards played yet this turn.');

@@ -41,6 +41,11 @@ export interface BuildPluginContextInput {
   /** Faz E: scopes ctx.storage to (serverId, pluginId). */
   serverId?: string;
   pluginId?: string;
+  /**
+   * The user ids in the activity's voice room (LiveKit), oldest first, when
+   * the route read them — `ctx.voice.getParticipants()` returns them.
+   */
+  voiceParticipantIds?: readonly string[];
 }
 
 /**
@@ -153,10 +158,12 @@ export async function buildHttpPluginContext(
     },
   };
 
+  // Who is in the activity's voice room, as the route read it from LiveKit
+  // for this call (lib/activity-voice.ts) — the actions route reads it for
+  // plugins that require voice. Empty when nobody asked.
+  const voiceSnapshot = [...(input.voiceParticipantIds ?? [])];
   const voiceContext = {
-    // M16 doesn't bridge plugin voice calls to the livekit room.
-    // Returning the players list is the closest meaningful answer.
-    getParticipants: (): string[] => [],
+    getParticipants: (): string[] => [...voiceSnapshot],
   };
 
   // Faz E — persistent Postgres storage, scoped to (serverId, pluginId).

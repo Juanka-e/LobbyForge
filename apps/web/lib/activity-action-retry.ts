@@ -32,6 +32,7 @@ export function conflictRetryDelayMs(retry: number, random: () => number = Math.
 
 interface RefusalBody {
   error?: unknown;
+  code?: unknown;
   duplicate?: unknown;
   retryable?: unknown;
   revision?: unknown;
@@ -54,8 +55,10 @@ export type ActivityActionResult =
   | {
       kind: 'error';
       status: number;
-      /** The server's own message, if it sent one. */
+      /** The server's own message, if it sent one (English; never shown as-is). */
       error: string | null;
+      /** The machine reason (`not_host`, `session_ended`, … — see lib/activity-refusal.ts). */
+      code: string | null;
       /** True when every attempt lost a concurrency race. */
       conflict: boolean;
     };
@@ -105,6 +108,7 @@ export async function postActivityAction(
         kind: 'error',
         status: res.status,
         error: typeof refusal.error === 'string' ? refusal.error : null,
+        code: typeof refusal.code === 'string' && refusal.code ? refusal.code : null,
         conflict,
       };
     }

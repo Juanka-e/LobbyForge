@@ -147,13 +147,19 @@ export const quizPlugin: GamePlugin<QuizState, QuizAction> = {
     reveal: { role: 'host' },
     next: { role: 'host' },
     end: { role: 'host' },
+    // Another round in the same session, from the final results.
+    'play-again': { role: 'host' },
     // Any member plays or watches; the host injects WHO from the session.
     join: { role: 'member', actorFields: ['playerId'], joinsRoster: true },
-    leave: { role: 'member', actorFields: ['playerId'] },
+    // Leaving works from outside the voice room too.
+    leave: { role: 'member', actorFields: ['playerId'], allowOutsideVoice: true },
     answer: { role: 'member', actorFields: ['playerId'] },
     // Anyone may call time — the reducer checks the server clock.
     'time-up': { role: 'member' },
   },
+  // A finished quiz accepts only "play again"; every other action is
+  // refused by the host with `session_ended`.
+  restartActions: ['play-again'],
   // The session's creator is the host and joins as a player.
   createInitialState: (ctx) => createQuizInitialState(ctx?.actorUserId ?? null),
   validateAction: quizValidateAction,
