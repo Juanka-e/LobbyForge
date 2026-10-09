@@ -32,12 +32,21 @@ or build step — the same `.msi` / `.dmg` / `.deb` works for everyone.
 
 ## Download
 
-Pre-built installers are published to **GitHub Releases** (built by the
-`desktop-release.yml` workflow). The tag format is `desktop-v*`:
+Pre-built installers are attached to every LobbyForge **GitHub Release**
+(`v*` tags), next to the server image, with SHA-256 checksums. They are built
+by `desktop-release.yml`, which `release.yml` calls:
 
-- **Windows**: `LobbyForge_x.y.z_x64-setup.exe` (NSIS) or `.msi`
-- **macOS**: `LobbyForge.app` / `.dmg`
-- **Linux**: `.deb` or `.AppImage`
+- **Windows**: `desktop-windows-LobbyForge_x.y.z_x64-setup.exe`. One click,
+  no admin prompt: installs for the current user in `%LOCALAPPDATA%\LobbyForge`
+  and opens the app. An `.msi` (per machine, admin) is added for versions
+  without a pre-release suffix.
+- **macOS**: `.dmg`
+- **Linux**: `.deb`, `.rpm` or `.AppImage`
+
+Code signing turns on when the signing secrets are configured; until then
+Windows SmartScreen and macOS Gatekeeper warn on first run. See
+[DESKTOP_SIGNING.md](DESKTOP_SIGNING.md) for the installer's switches and
+the signing setup.
 
 ## First launch
 
@@ -85,15 +94,14 @@ pnpm --filter @lobbyforge/desktop build  # tsc + tauri build
 
 ### Publish a release
 
-Tag and push:
+Desktop installers ship with the unified release: pushing a `v*` tag runs
+`release.yml`, which calls `desktop-release.yml` to build (and, when
+configured, sign) all three platforms with the tag's version, then attaches
+them to the GitHub Release. `desktop-v*` tags are no longer used.
 
-```sh
-git tag desktop-v0.1.0
-git push origin desktop-v0.1.0
-```
-
-The `desktop-release.yml` workflow builds all three platforms in parallel and
-creates a draft GitHub Release with the installers attached.
+For a test build, run **Actions → desktop-release → Run workflow**: the
+installers are attached to the run, and a Windows smoke test installs,
+launches, reinstalls and uninstalls the NSIS build.
 
 ## Security
 

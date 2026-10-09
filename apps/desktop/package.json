@@ -18,7 +18,9 @@
     "test": "vitest run",
     "lint": "eslint \"src/**/*.ts\"",
     "dev": "tauri dev",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "installer:assets": "node scripts/make-installer-assets.mjs",
+    "sign:local": "node scripts/release-signing.mjs local"
   },
   "dependencies": {
     "@lobbyforge/core": "workspace:*"

@@ -43,10 +43,30 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "publisher": "LobbyForge",
+    "publisher": "LobbyForge contributors",
+    "copyright": "Copyright © 2026 LobbyForge contributors. AGPL-3.0-only.",
+    "homepage": "https://lobbyforge.org",
+    "license": "AGPL-3.0-only",
     "category": "SocialNetworking",
-    "shortDescription": "Self-hostable voice-first community platform",
-    "longDescription": "LobbyForge desktop shell — connect to your self-hosted LobbyForge instance for voice-first community with live activities.",
+    "shortDescription": "Voice-first community client for self-hosted LobbyForge servers",
+    "longDescription": "LobbyForge is the desktop client for LobbyForge, a voice-first, self-hostable community platform with live in-room activities. Enter your server's address on first launch; the same installer works with every LobbyForge server, and there is no central account.",
+    "windows": {
+      "nsis": {
+        "template": "installer/nsis/installer.nsi",
+        "installMode": "currentUser",
+        "languages": ["English", "Turkish"],
+        "displayLanguageSelector": false,
+        "installerIcon": "installer/installer.ico",
+        "uninstallerIcon": "installer/installer.ico",
+        "headerImage": "installer/nsis/header.bmp",
+        "uninstallerHeaderImage": "installer/nsis/header.bmp",
+        "sidebarImage": "installer/nsis/sidebar.bmp"
+      },
+      "wix": {
+        "bannerPath": "installer/wix/banner.bmp",
+        "dialogImagePath": "installer/wix/dialog.bmp"
+      }
+    },
     "macOS": {
       "minimumSystemVersion": "10.15",
       "entitlements": "entitlements.plist",
