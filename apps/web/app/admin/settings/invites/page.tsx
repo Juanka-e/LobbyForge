@@ -1,17 +1,8 @@
 import type { Metadata } from 'next';
-import { cookies } from 'next/headers';
 import { inArray } from 'drizzle-orm';
-import {
-  getInstanceSetupStatus,
-  listInvitesForServer,
-  listServersForUser,
-  users,
-} from '@lobbyforge/db';
-import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
-import { getSessionSecret } from '@/lib/api-auth';
+import { listInvitesForServer, users } from '@lobbyforge/db';
+import { adminPageMetadata, requireAdminSection } from '@/lib/admin-access';
 import { getDb } from '@/lib/db';
-import { getActiveSession } from '@/lib/active-session';
-import { getTranslator } from '@/lib/i18n/server';
 import SettingsShell from '@/app/SettingsShell';
 import InvitesClient, { type InviteView } from './InvitesClient';
 
@@ -19,38 +10,24 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function generateMetadata(): Promise<Metadata> {
-  const t = await getTranslator();
-  return { title: t('adminSettings.invites.metaTitle') };
+  return adminPageMetadata('invites', 'adminSettings.invites.metaTitle');
 }
 
+/**
+ * Every invite of the community, with revoke — Manage Community, as the
+ * invites API requires for listing and revoking other people's invites.
+ */
 export default async function InvitesSettingsPage() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(ADMIN_TOKEN_COOKIE)?.value ?? null;
-  if (!(await isInstanceAdminAllowed(cookieStore.toString(), token))) {
-    const t = await getTranslator();
-    return (
-      <SettingsShell scope="community">
-        <section>
-          <h1 className="text-2xl font-semibold text-text-primary">{t('adminSettings.invites.title')}</h1>
-          <p className="mt-2 text-sm text-danger">{t('common.adminRequired')}</p>
-        </section>
-      </SettingsShell>
-    );
-  }
-
-  const setup = await getInstanceSetupStatus(getDb());
+  const access = await requireAdminSection('invites');
   const db = getDb();
-  const session = await getActiveSession(cookieStore.toString(), getSessionSecret());
-  const userId = session?.uid ?? setup.ownerUserId ?? null;
 
   let serverId: string | null = null;
   let invites: InviteView[] = [];
   let loadError: string | null = null;
 
-  if (userId) {
+  if (access.userId) {
     try {
-      const servers = await listServersForUser(db, userId, { limit: 1 });
-      const firstServer = servers[0];
+      const firstServer = access.server;
       if (firstServer) {
         serverId = firstServer.id;
         const raw = await listInvitesForServer(db, firstServer.id);
@@ -83,12 +60,12 @@ export default async function InvitesSettingsPage() {
   }
 
   return (
-    <SettingsShell scope="community">
+    <SettingsShell scope="community" sections={access.sections}>
       <InvitesClient
         serverId={serverId}
         initialInvites={invites}
         loadError={loadError}
-        canMutate={Boolean(session?.uid && serverId)}
+        canMutate={Boolean(access.sessionUserId && serverId)}
       />
     </SettingsShell>
   );

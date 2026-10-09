@@ -1,13 +1,8 @@
 import type { Metadata } from 'next';
-import { cookies } from 'next/headers';
-import { getInstanceSetupStatus, listServersForUser } from '@lobbyforge/db';
-import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
-import { getSessionSecret } from '@/lib/api-auth';
+import { adminPageMetadata, requireAdminSection } from '@/lib/admin-access';
 import type { AuditEntryView } from '@/lib/audit-event-summary';
 import { loadAuditEntries } from '@/lib/audit-log-view';
 import { getDb } from '@/lib/db';
-import { getActiveSession } from '@/lib/active-session';
-import { getTranslator } from '@/lib/i18n/server';
 import SettingsShell from '@/app/SettingsShell';
 import AuditClient from './AuditClient';
 
@@ -15,8 +10,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function generateMetadata(): Promise<Metadata> {
-  const t = await getTranslator();
-  return { title: t('admin.audit.metaTitle') };
+  return adminPageMetadata('audit', 'admin.audit.metaTitle');
 }
 
 /**
@@ -30,31 +24,16 @@ export async function generateMetadata(): Promise<Metadata> {
  * "where" instead of raw ids.
  */
 export default async function AuditLogPage() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(ADMIN_TOKEN_COOKIE)?.value ?? null;
-  if (!(await isInstanceAdminAllowed(cookieStore.toString(), token))) {
-    const t = await getTranslator();
-    return (
-      <SettingsShell scope="community">
-        <section>
-          <h1 className="text-2xl font-semibold text-text-primary">{t('admin.audit.title')}</h1>
-          <p className="mt-2 text-sm text-danger">{t('common.adminRequired')}</p>
-        </section>
-      </SettingsShell>
-    );
-  }
-
-  const setup = await getInstanceSetupStatus(getDb());
+  // View Audit Log, as GET /api/servers/{id}/audit-logs requires.
+  const access = await requireAdminSection('audit');
   const db = getDb();
-  const session = await getActiveSession(cookieStore.toString(), getSessionSecret());
-  const userId = session?.uid ?? setup.ownerUserId ?? null;
+  const userId = access.userId;
 
   let entries: AuditEntryView[] = [];
   let loadError: string | null = null;
   if (userId) {
     try {
-      const servers = await listServersForUser(db, userId, { limit: 1 });
-      const firstServer = servers[0];
+      const firstServer = access.server;
       if (firstServer) {
         entries = await loadAuditEntries(db, {
           serverId: firstServer.id,
@@ -69,7 +48,7 @@ export default async function AuditLogPage() {
   }
 
   return (
-    <SettingsShell scope="community">
+    <SettingsShell scope="community" sections={access.sections}>
       <AuditClient entries={entries} loadError={loadError} />
     </SettingsShell>
   );

@@ -49,6 +49,11 @@ export interface LobbyVoiceChannelsProps {
    * a channel we are not in is named rather than "Unknown member".
    */
   knownNames?: Readonly<Record<string, string>>;
+  /**
+   * The channel settings page, for a viewer it will open for (Manage
+   * Channels). Null — guests, members — draws no gear at all.
+   */
+  channelSettingsHref?: string | null;
 }
 
 interface PresenceEntry {
@@ -102,6 +107,7 @@ export function LobbyVoiceChannels({
   canMuteMembers = false,
   voiceModerationTargetIds = NO_TARGETS,
   knownNames,
+  channelSettingsHref = null,
 }: LobbyVoiceChannelsProps) {
   const t = useT();
   const voice = useLobbyVoice();
@@ -266,9 +272,15 @@ export function LobbyVoiceChannels({
         <h3 className="font-label-xs uppercase tracking-wider group-hover:text-text-secondary transition-colors text-text-secondary">
           {t('lobbyMain.voice.heading')}
         </h3>
-        <span className="material-symbols-outlined text-[16px] opacity-0 group-hover:opacity-100 transition-opacity text-text-secondary">
-          add
-        </span>
+        {/* A hint that channels can be added — only for those who can. */}
+        {channelSettingsHref ? (
+          <span
+            className="material-symbols-outlined text-[16px] opacity-0 group-hover:opacity-100 transition-opacity text-text-secondary"
+            aria-hidden
+          >
+            add
+          </span>
+        ) : null}
       </div>
       {emailLock.restricted ? (
         <p id={lockHintId} className="mb-1.5 flex items-center gap-1.5 px-2 text-[11px] text-text-secondary">
@@ -370,14 +382,16 @@ export function LobbyVoiceChannels({
                     <span className="material-symbols-outlined text-[16px]" aria-hidden>video_call</span>
                   </button>
                 ) : null}
-                <Link
-                  href="/admin/settings/channels"
-                  className="mr-1 grid size-7 flex-none place-items-center rounded text-text-secondary opacity-0 transition-opacity hover:bg-surface-raised hover:text-text-primary group-hover:opacity-100 focus-visible:opacity-100"
-                  title={t('lobbyMain.voice.settingsTitle')}
-                  aria-label={t('lobbyMain.voice.settingsLabel', { name: c.name })}
-                >
-                  <span className="material-symbols-outlined text-[16px]" aria-hidden>settings</span>
-                </Link>
+                {channelSettingsHref ? (
+                  <Link
+                    href={channelSettingsHref}
+                    className="mr-1 grid size-7 flex-none place-items-center rounded text-text-secondary opacity-0 transition-opacity hover:bg-surface-raised hover:text-text-primary group-hover:opacity-100 focus-visible:opacity-100"
+                    title={t('lobbyMain.voice.settingsTitle')}
+                    aria-label={t('lobbyMain.voice.settingsLabel', { name: c.name })}
+                  >
+                    <span className="material-symbols-outlined text-[16px]" aria-hidden>settings</span>
+                  </Link>
+                ) : null}
               </div>
               {participants.length > 0 ? (
                 <ul className="ml-6 mt-1 space-y-1 pb-2">

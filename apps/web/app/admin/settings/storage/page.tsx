@@ -1,15 +1,8 @@
 import type { Metadata } from 'next';
-import { cookies } from 'next/headers';
 import { sql } from 'drizzle-orm';
-import {
-  attachments,
-  getInstanceSetupStatus,
-  listServersForUser,
-} from '@lobbyforge/db';
-import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
-import { getSessionSecret } from '@/lib/api-auth';
+import { attachments } from '@lobbyforge/db';
+import { adminPageMetadata, requireAdminSection } from '@/lib/admin-access';
 import { getDb } from '@/lib/db';
-import { getActiveSession } from '@/lib/active-session';
 import type { Translator } from '@/lib/i18n/core';
 import { getTranslator } from '@/lib/i18n/server';
 import SettingsShell from '@/app/SettingsShell';
@@ -18,8 +11,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function generateMetadata(): Promise<Metadata> {
-  const t = await getTranslator();
-  return { title: t('adminSettings.storage.metaTitle') };
+  return adminPageMetadata('storage', 'adminSettings.storage.metaTitle');
 }
 
 interface StorageBreakdownRow {
@@ -101,29 +93,9 @@ async function loadStorageSummary(): Promise<StorageSummary> {
  * page is informational only.
  */
 export default async function StorageSettingsPage() {
+  // Instance-wide data: the instance admin alone (lib/admin-access.ts).
+  const access = await requireAdminSection('storage');
   const t = await getTranslator();
-  const cookieStore = await cookies();
-  const token = cookieStore.get(ADMIN_TOKEN_COOKIE)?.value ?? null;
-  if (!(await isInstanceAdminAllowed(cookieStore.toString(), token))) {
-    return (
-      <SettingsShell scope="community">
-        <section>
-          <h1 className="text-2xl font-semibold text-text-primary">{t('adminSettings.storage.title')}</h1>
-          <p className="mt-2 text-sm text-danger">{t('common.adminRequired')}</p>
-        </section>
-      </SettingsShell>
-    );
-  }
-
-  // Owner / server lookup is unused for the storage read itself but
-  // keeps the page consistent with the other settings pages that
-  // resolve a first server. We don't want to silently load data for
-  // the wrong tenant if the admin context changes later.
-  await getInstanceSetupStatus(getDb());
-  const session = await getActiveSession(cookieStore.toString(), getSessionSecret());
-  if (session?.uid) {
-    await listServersForUser(getDb(), session.uid, { limit: 1 });
-  }
 
   let summary: StorageSummary | null = null;
   let loadError: string | null = null;
@@ -134,7 +106,7 @@ export default async function StorageSettingsPage() {
   }
 
   return (
-    <SettingsShell scope="community">
+    <SettingsShell scope="community" sections={access.sections}>
       <StorageBody t={t} summary={summary} loadError={loadError} />
     </SettingsShell>
   );

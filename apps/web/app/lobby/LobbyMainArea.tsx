@@ -8,6 +8,7 @@ import { LobbyLiveRoster } from './LobbyLiveRoster';
 import { LobbyComposer } from './LobbyComposer';
 import { useT } from '@/lib/i18n/client';
 import { initialOf } from '@/lib/initial';
+import type { LobbyAdminLinks } from '@/lib/admin-sections';
 import { BotAvatar, BotBadge } from './BotIdentity';
 import { WebhookAvatar, WebhookBadge } from './WebhookIdentity';
 import { InteractionAnnouncer, InteractionHeader } from './slash/InteractionRows';
@@ -56,7 +57,8 @@ interface LobbyData {
   messages: ChatMessage[];
   isLive: boolean;
   canManageMessages: boolean;
-  canManageServer: boolean;
+  /** Settings links resolved for this viewer (null: draw no control). */
+  adminLinks: Pick<LobbyAdminLinks, 'appSettings'>;
   canStartActivities?: boolean;
   installedApps: Array<{
     id: string;
@@ -158,7 +160,7 @@ function LobbyMainAreaLive({ data }: { data: LobbyData }) {
         channelName={voice.activeActivityChannel.channelName}
         apps={data.installedApps}
         currentUserId={data.currentUserId}
-        canManageServer={data.canManageServer}
+        appSettingsHref={data.adminLinks.appSettings}
         canStartActivities={data.canStartActivities ?? false}
       />
     );

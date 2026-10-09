@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { I18nProvider } from '@/lib/i18n/client';
 import { providerPropsFor } from '@/lib/i18n/catalogue';
+import { ADMIN_SECTIONS, type AdminSection } from '@/lib/admin-sections';
 import { SCROLL_REGION_FOCUS_CLASS } from '@/lib/scroll-region';
 
 /**
@@ -34,16 +35,51 @@ afterEach(() => {
   pathname = '/admin/settings/members';
 });
 
-async function renderShell(scope: 'community' | 'user', locale = 'en') {
+async function renderShell(
+  scope: 'community' | 'user',
+  locale = 'en',
+  sections: readonly AdminSection[] = ADMIN_SECTIONS
+) {
   const { default: SettingsShell } = await import('../SettingsShell');
+  const body = <p>Read-only content with nothing focusable</p>;
   render(
     <I18nProvider {...providerPropsFor(locale)}>
-      <SettingsShell scope={scope}>
-        <p>Read-only content with nothing focusable</p>
-      </SettingsShell>
+      {scope === 'community' ? (
+        <SettingsShell scope="community" sections={sections}>
+          {body}
+        </SettingsShell>
+      ) : (
+        <SettingsShell scope="user">{body}</SettingsShell>
+      )}
     </I18nProvider>
   );
 }
+
+/** The community nav's link targets, in order. */
+function navHrefs(): string[] {
+  const nav = screen.getByRole('navigation');
+  return Array.from(nav.querySelectorAll('a')).map((a) => a.getAttribute('href') ?? '');
+}
+
+describe('community settings nav', () => {
+  it('lists every section for the instance admin', async () => {
+    await renderShell('community');
+    expect(navHrefs()).toHaveLength(ADMIN_SECTIONS.length);
+    expect(navHrefs()[0]).toBe('/admin/settings');
+  });
+
+  it('shows a moderator with Kick Members only Members', async () => {
+    await renderShell('community', 'en', ['members']);
+    expect(navHrefs()).toEqual(['/admin/settings/members']);
+    expect(screen.queryByRole('link', { name: 'Roles' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Overview' })).toBeNull();
+  });
+
+  it('keeps nav order for a mixed set of sections', async () => {
+    await renderShell('community', 'en', ['audit', 'channels', 'members']);
+    expect(navHrefs()).toEqual(['/admin/settings/members', '/admin/settings/channels', '/admin/audit']);
+  });
+});
 
 describe('settings shell scroll region', () => {
   it('is focusable and named after the open section', async () => {
@@ -78,7 +114,7 @@ describe('settings shell scroll region', () => {
 });
 
 describe('the hub server settings page', () => {
-  const source = readFileSync(join(process.cwd(), 'app', 'servers', '[id]', 'page.tsx'), 'utf8');
+  const source = readFileSync(join(process.cwd(), 'app', 'servers', '[id]', 'ServerSettingsClient.tsx'), 'utf8');
 
   it('makes its scrolling main focusable, named by the tab heading', () => {
     const main = source.slice(source.indexOf('<main'), source.indexOf('>', source.indexOf('className={`min-h-0', source.indexOf('<main'))));

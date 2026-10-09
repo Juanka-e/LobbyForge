@@ -1,14 +1,7 @@
 import type { Metadata } from 'next';
-import { cookies } from 'next/headers';
-import {
-  getInstanceSetupStatus,
-  listPluginInstallsForServer,
-  listServersForUser,
-} from '@lobbyforge/db';
-import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
-import { getSessionSecret } from '@/lib/api-auth';
+import { listPluginInstallsForServer } from '@lobbyforge/db';
+import { adminPageMetadata, requireAdminSection } from '@/lib/admin-access';
 import { getDb } from '@/lib/db';
-import { getActiveSession } from '@/lib/active-session';
 import { getTranslator } from '@/lib/i18n/server';
 import { listPluginSummaries } from '@/lib/plugin-registry';
 import SettingsShell from '@/app/SettingsShell';
@@ -19,8 +12,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function generateMetadata(): Promise<Metadata> {
-  const t = await getTranslator();
-  return { title: t('admin.apps.metaTitle') };
+  return adminPageMetadata('apps', 'admin.apps.metaTitle');
 }
 
 /**
@@ -33,33 +25,17 @@ export async function generateMetadata(): Promise<Metadata> {
  * which is why an owner could not start an activity at all.
  */
 export default async function AppsSettingsPage() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(ADMIN_TOKEN_COOKIE)?.value ?? null;
+  const access = await requireAdminSection('apps');
   const t = await getTranslator();
-  if (!(await isInstanceAdminAllowed(cookieStore.toString(), token))) {
-    return (
-      <SettingsShell scope="community">
-        <section>
-          <h1 className="text-2xl font-semibold text-text-primary">{t('admin.apps.title')}</h1>
-          <p className="mt-2 text-sm text-danger">{t('common.adminRequired')}</p>
-        </section>
-      </SettingsShell>
-    );
-  }
-
   const db = getDb();
-  const setup = await getInstanceSetupStatus(db);
-  const session = await getActiveSession(cookieStore.toString(), getSessionSecret());
-  const userId = session?.uid ?? setup.ownerUserId ?? null;
 
   let serverId: string | null = null;
   let apps: AppView[] = [];
   let loadError: string | null = null;
 
-  if (userId) {
+  if (access.userId) {
     try {
-      const servers = await listServersForUser(db, userId, { limit: 1 });
-      const firstServer = servers[0];
+      const firstServer = access.server;
       if (firstServer) {
         serverId = firstServer.id;
         const installs = await listPluginInstallsForServer(db, firstServer.id);
@@ -86,7 +62,7 @@ export default async function AppsSettingsPage() {
   }
 
   return (
-    <SettingsShell scope="community">
+    <SettingsShell scope="community" sections={access.sections}>
       <AppsClient serverId={serverId} initialApps={apps} loadError={loadError} />
     </SettingsShell>
   );

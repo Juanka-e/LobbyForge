@@ -1,6 +1,6 @@
-import { cookies } from 'next/headers';
+import type { Metadata } from 'next';
 import { getEffectiveInstanceMaintenance, listSystemUpdateRuns, type SystemUpdateRunRow } from '@lobbyforge/db';
-import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
+import { adminPageMetadata, requireAdminSection } from '@/lib/admin-access';
 import { getDb } from '@/lib/db';
 import type { Translator } from '@/lib/i18n/core';
 import { getTranslator } from '@/lib/i18n/server';
@@ -56,20 +56,13 @@ function labelFor(t: Translator, keys: Record<string, string>, value: string): s
   return key ? t(key) : value;
 }
 
+export async function generateMetadata(): Promise<Metadata> {
+  return adminPageMetadata('updates', 'admin.updates.title');
+}
+
 export default async function UpdatesPage() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(ADMIN_TOKEN_COOKIE)?.value ?? null;
+  const access = await requireAdminSection('updates');
   const t = await getTranslator();
-  if (!(await isInstanceAdminAllowed(cookieStore.toString(), token))) {
-    return (
-      <SettingsShell scope="community">
-        <section>
-          <h1 className="text-2xl font-semibold text-text-primary">{t('admin.updates.title')}</h1>
-          <p className="mt-2 text-sm text-danger">{t('common.adminRequired')}</p>
-        </section>
-      </SettingsShell>
-    );
-  }
 
   const plan = buildUpdatePlan(await loadReleaseManifest());
   const maintenance = await getEffectiveInstanceMaintenance(getDb()).catch((err: unknown) => ({
@@ -88,7 +81,7 @@ export default async function UpdatesPage() {
   }
 
   return (
-    <SettingsShell scope="community">
+    <SettingsShell scope="community" sections={access.sections}>
       <section>
         <h1 className="text-2xl font-semibold text-text-primary">{t('admin.updates.title')}</h1>
         <p className="mt-1 text-sm text-text-secondary">

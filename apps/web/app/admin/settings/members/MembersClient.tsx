@@ -31,6 +31,31 @@ export interface RoleOption {
   permissions: string[];
 }
 
+/**
+ * What the viewer may do, worked out on the server from the same rules the
+ * routes apply: a control the viewer could only be refused is not drawn.
+ */
+export interface MemberCapabilities {
+  /** Manage Roles — the role picker and Save roles. */
+  setRoles: boolean;
+  /** Kick Members — Kick (leaving yourself is always allowed). */
+  kick: boolean;
+  /** Ban Members. */
+  ban: boolean;
+  /** Kick Members or Manage Community — the join-request queue. */
+  reviewJoinRequests: boolean;
+  /** Instance admin — marking an address verified. */
+  verifyEmail: boolean;
+}
+
+const ALL_CAPABILITIES: MemberCapabilities = {
+  setRoles: true,
+  kick: true,
+  ban: true,
+  reviewJoinRequests: true,
+  verifyEmail: true,
+};
+
 type SortMode = 'recent' | 'oldest' | 'name';
 
 export default function MembersClient({
@@ -40,6 +65,7 @@ export default function MembersClient({
   members,
   roles,
   loadError,
+  capabilities = ALL_CAPABILITIES,
 }: {
   serverId: string | null;
   currentUserId: string | null;
@@ -47,6 +73,7 @@ export default function MembersClient({
   members: MemberView[];
   roles: RoleOption[];
   loadError: string | null;
+  capabilities?: MemberCapabilities;
 }) {
   const t = useT();
   const [memberList, setMemberList] = useState(members);
@@ -230,7 +257,7 @@ export default function MembersClient({
         <p className="mt-1 text-sm text-text-secondary">{t('adminSettings.members.subtitle')}</p>
       </header>
 
-      {serverId ? <JoinRequestsSection serverId={serverId} /> : null}
+      {serverId && capabilities.reviewJoinRequests ? <JoinRequestsSection serverId={serverId} /> : null}
 
       <div className="flex flex-col md:flex-row gap-4 mb-6">
         <div className="relative flex-1">
@@ -330,6 +357,12 @@ export default function MembersClient({
               const protectedMember = member.userId === ownerUserId;
               const self = member.userId === currentUserId;
               const busy = busyUserId === member.userId;
+              // Only the actions this viewer may take on this member; with
+              // none, the row offers no drawer at all.
+              const showMarkVerified = capabilities.verifyEmail && member.emailState === 'unverified';
+              const showKick = !protectedMember && (capabilities.kick || self);
+              const showBan = capabilities.ban && !protectedMember && !self;
+              const hasActions = capabilities.setRoles || showMarkVerified || showKick || showBan;
               return (
                 <li key={member.userId} className="hover:bg-surface-raised/50 transition-colors">
                   <div className="grid grid-cols-[auto_1fr_auto_auto_auto] gap-4 px-6 py-4 items-center">
@@ -364,18 +397,23 @@ export default function MembersClient({
                         color={member.roleColor}
                       />
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => openMember(member)}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border-subtle text-text-secondary hover:bg-surface-container hover:text-text-primary"
-                      aria-label={t('adminSettings.members.manage', { name: member.displayName })}
-                    >
-                      <span className="material-symbols-outlined text-[18px]">{expanded ? 'expand_less' : 'more_horiz'}</span>
-                    </button>
+                    {hasActions ? (
+                      <button
+                        type="button"
+                        onClick={() => openMember(member)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border-subtle text-text-secondary hover:bg-surface-container hover:text-text-primary"
+                        aria-label={t('adminSettings.members.manage', { name: member.displayName })}
+                      >
+                        <span className="material-symbols-outlined text-[18px]">{expanded ? 'expand_less' : 'more_horiz'}</span>
+                      </button>
+                    ) : (
+                      <span className="h-8 w-8" aria-hidden />
+                    )}
                   </div>
-                  {expanded ? (
+                  {expanded && hasActions ? (
                     <div className="border-t border-border-subtle bg-surface-container-low px-6 py-4">
                       <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
+                        {capabilities.setRoles ? (
                         <div>
                           <p className="mb-3 text-xs uppercase tracking-wider text-text-muted">
                             {t('adminSettings.members.roles')}
@@ -404,8 +442,11 @@ export default function MembersClient({
                             <p className="mt-3 text-xs text-danger">{t('adminSettings.members.adminWarning')}</p>
                           ) : null}
                         </div>
+                        ) : (
+                          <div />
+                        )}
                         <div className="flex flex-wrap items-end gap-2 lg:justify-end">
-                          {member.emailState === 'unverified' ? (
+                          {showMarkVerified ? (
                             <button
                               type="button"
                               onClick={() => markEmailVerified(member)}
@@ -415,30 +456,36 @@ export default function MembersClient({
                               {t('adminSettings.members.email.mark')}
                             </button>
                           ) : null}
-                          <button
-                            type="button"
-                            onClick={() => saveRoles(member)}
-                            disabled={busy}
-                            className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-on-primary disabled:opacity-50"
-                          >
-                            {t('adminSettings.members.saveRoles')}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => kickMember(member)}
-                            disabled={busy || protectedMember}
-                            className="rounded-lg border border-border-subtle px-3 py-2 text-xs font-semibold text-text-secondary disabled:opacity-50"
-                          >
-                            {self ? t('adminSettings.members.leave') : t('adminSettings.members.kick')}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => banMember(member)}
-                            disabled={busy || protectedMember || self}
-                            className="rounded-lg border border-danger/40 px-3 py-2 text-xs font-semibold text-danger disabled:opacity-50"
-                          >
-                            {t('adminSettings.members.ban')}
-                          </button>
+                          {capabilities.setRoles ? (
+                            <button
+                              type="button"
+                              onClick={() => saveRoles(member)}
+                              disabled={busy}
+                              className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-on-primary disabled:opacity-50"
+                            >
+                              {t('adminSettings.members.saveRoles')}
+                            </button>
+                          ) : null}
+                          {showKick ? (
+                            <button
+                              type="button"
+                              onClick={() => kickMember(member)}
+                              disabled={busy}
+                              className="rounded-lg border border-border-subtle px-3 py-2 text-xs font-semibold text-text-secondary disabled:opacity-50"
+                            >
+                              {self ? t('adminSettings.members.leave') : t('adminSettings.members.kick')}
+                            </button>
+                          ) : null}
+                          {showBan ? (
+                            <button
+                              type="button"
+                              onClick={() => banMember(member)}
+                              disabled={busy}
+                              className="rounded-lg border border-danger/40 px-3 py-2 text-xs font-semibold text-danger disabled:opacity-50"
+                            >
+                              {t('adminSettings.members.ban')}
+                            </button>
+                          ) : null}
                         </div>
                       </div>
                     </div>

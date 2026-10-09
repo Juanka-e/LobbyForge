@@ -1,9 +1,7 @@
 import type { Metadata } from 'next';
-import { cookies } from 'next/headers';
 import { listCardPackSummaries } from '@lobbyforge/db';
-import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
+import { adminPageMetadata, requireAdminSection } from '@/lib/admin-access';
 import { getDb } from '@/lib/db';
-import { getTranslator } from '@/lib/i18n/server';
 import SettingsShell from '@/app/SettingsShell';
 import PluginsClient, { type CardPackView, type CardView } from './PluginsClient';
 
@@ -11,24 +9,12 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function generateMetadata(): Promise<Metadata> {
-  const t = await getTranslator();
-  return { title: t('admin.plugins.metaTitle') };
+  return adminPageMetadata('plugins', 'admin.plugins.metaTitle');
 }
 
+/** Word packs are instance-wide: `/api/admin/card-packs` is instance-admin only, so is this page. */
 export default async function PluginsSettingsPage() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(ADMIN_TOKEN_COOKIE)?.value ?? null;
-  if (!(await isInstanceAdminAllowed(cookieStore.toString(), token))) {
-    const t = await getTranslator();
-    return (
-      <SettingsShell scope="community">
-        <section>
-          <h1 className="text-2xl font-semibold text-text-primary">{t('admin.plugins.title')}</h1>
-          <p className="mt-2 text-sm text-danger">{t('common.adminRequired')}</p>
-        </section>
-      </SettingsShell>
-    );
-  }
+  const access = await requireAdminSection('plugins');
 
   let packs: CardPackView[] = [];
   let loadError: string | null = null;
@@ -52,7 +38,7 @@ export default async function PluginsSettingsPage() {
   }
 
   return (
-    <SettingsShell scope="community">
+    <SettingsShell scope="community" sections={access.sections}>
       <PluginsClient initialPacks={packs} loadError={loadError} />
     </SettingsShell>
   );

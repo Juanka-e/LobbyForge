@@ -41,7 +41,7 @@ describe('BotBadge / BotAvatar', () => {
 
 describe('BotProfilePopover', () => {
   it('shows who installed the bot and what it may do', () => {
-    renderIn('en', <BotProfilePopover bot={BOT} anchorRect={null} onClose={() => {}} canManage={false} />);
+    renderIn('en', <BotProfilePopover bot={BOT} anchorRect={null} onClose={() => {}} settingsHref={null} />);
     const dialog = screen.getByRole('dialog', { name: 'Announcer bot profile' });
     expect(dialog).toHaveTextContent('BOT');
     expect(dialog).toHaveTextContent('Unverified');
@@ -54,13 +54,13 @@ describe('BotProfilePopover', () => {
   });
 
   it('gives managers a shortcut to the bot settings', () => {
-    renderIn('en', <BotProfilePopover bot={BOT} anchorRect={null} onClose={() => {}} canManage />);
+    renderIn('en', <BotProfilePopover bot={BOT} anchorRect={null} onClose={() => {}} settingsHref="/admin/settings/bots" />);
     expect(screen.getByRole('link', { name: /Bot settings/ })).toHaveAttribute('href', '/admin/settings/bots');
   });
 
   it('closes on Escape and on the close button', () => {
     const onClose = vi.fn();
-    renderIn('en', <BotProfilePopover bot={BOT} anchorRect={null} onClose={onClose} canManage={false} />);
+    renderIn('en', <BotProfilePopover bot={BOT} anchorRect={null} onClose={onClose} settingsHref={null} />);
     fireEvent.keyDown(document, { key: 'Escape' });
     fireEvent.click(screen.getByRole('button', { name: 'Close bot profile' }));
     expect(onClose).toHaveBeenCalledTimes(2);
@@ -73,7 +73,7 @@ describe('BotProfilePopover', () => {
         bot={{ ...BOT, builtIn: true, trustLevel: 'official', installedBy: null }}
         anchorRect={null}
         onClose={() => {}}
-        canManage={false}
+        settingsHref={null}
       />
     );
     const dialog = screen.getByRole('dialog', { name: 'Announcer bot profili' });

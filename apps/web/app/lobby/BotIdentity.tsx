@@ -100,19 +100,20 @@ export function TrustBadge({ level }: { level: BotTrustLevel }) {
 
 /**
  * The bot profile: who it is, who installed it and what it may do.
- * Managers get a shortcut to the bot settings. Same placement and
- * dismissal rules as the member profile popover.
+ * Viewers who may open the bot settings get a shortcut there
+ * (`settingsHref`, null for everyone else). Same placement and dismissal
+ * rules as the member profile popover.
  */
 export function BotProfilePopover({
   bot,
   anchorRect,
   onClose,
-  canManage,
+  settingsHref,
 }: {
   bot: LobbyBot;
   anchorRect: DOMRect | null;
   onClose: () => void;
-  canManage: boolean;
+  settingsHref: string | null;
 }) {
   const t = useT();
   const ref = useRef<HTMLDivElement | null>(null);
@@ -213,9 +214,9 @@ export function BotProfilePopover({
         </div>
       </dl>
 
-      {canManage ? (
+      {settingsHref ? (
         <a
-          href="/admin/settings/bots"
+          href={settingsHref}
           className="mt-4 inline-flex items-center gap-1.5 rounded-md border border-border-strong px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-container hover:text-text-primary"
         >
           <span className="material-symbols-outlined text-[16px]" aria-hidden>settings</span>

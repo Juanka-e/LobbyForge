@@ -1,49 +1,49 @@
 import type { Metadata } from 'next';
-import { cookies } from 'next/headers';
+import { CorePermission, hasPermission } from '@lobbyforge/core';
 import {
-  getInstanceSetupStatus,
   listMembersForServer,
   listMemberSummariesForServer,
   listRolesForServer,
-  listServersForUser,
   listUserEmailVerification,
 } from '@lobbyforge/db';
-import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
-import { getSessionSecret } from '@/lib/api-auth';
+import { adminPageMetadata, requireAdminSection, type AdminAccess } from '@/lib/admin-access';
 import { getDb } from '@/lib/db';
-import { getActiveSession } from '@/lib/active-session';
-import { getTranslator } from '@/lib/i18n/server';
+import { canReviewJoinRequests } from '@/lib/join-requests';
 import SettingsShell from '@/app/SettingsShell';
-import MembersClient, { type MemberView } from './MembersClient';
+import MembersClient, { type MemberCapabilities, type MemberView } from './MembersClient';
 import { projectMemberProfile } from '@/lib/profile-privacy';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function generateMetadata(): Promise<Metadata> {
-  const t = await getTranslator();
-  return { title: t('adminSettings.members.metaTitle') };
+  return adminPageMetadata('members', 'adminSettings.members.metaTitle');
+}
+
+/**
+ * What this viewer may do here — the same rules the routes behind each
+ * action apply, so no control is drawn that would only be refused.
+ * Marking an email verified is an instance-admin route.
+ */
+function capabilitiesFor(access: AdminAccess): MemberCapabilities {
+  if (access.instanceAdmin) {
+    return { setRoles: true, kick: true, ban: true, reviewJoinRequests: true, verifyEmail: true };
+  }
+  const can = (permission: CorePermission) => hasPermission(access.permissions, permission);
+  return {
+    setRoles: can(CorePermission.MANAGE_ROLES),
+    kick: can(CorePermission.KICK_MEMBERS),
+    ban: can(CorePermission.BAN_MEMBERS),
+    reviewJoinRequests: canReviewJoinRequests(access.permissions),
+    verifyEmail: false,
+  };
 }
 
 export default async function MembersSettingsPage() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(ADMIN_TOKEN_COOKIE)?.value ?? null;
-  if (!(await isInstanceAdminAllowed(cookieStore.toString(), token))) {
-    const t = await getTranslator();
-    return (
-      <SettingsShell scope="community">
-        <section>
-          <h1 className="text-2xl font-semibold text-text-primary">{t('adminSettings.members.title')}</h1>
-          <p className="mt-2 text-sm text-danger">{t('common.adminRequired')}</p>
-        </section>
-      </SettingsShell>
-    );
-  }
-
-  const setup = await getInstanceSetupStatus(getDb());
+  const access = await requireAdminSection('members');
+  const capabilities = capabilitiesFor(access);
   const db = getDb();
-  const session = await getActiveSession(cookieStore.toString(), getSessionSecret());
-  const userId = session?.uid ?? setup.ownerUserId ?? null;
+  const userId = access.userId;
 
   let members: MemberView[] = [];
   let roles: Array<{ id: string; name: string; color: string | null; position: number; permissions: string[] }> = [];
@@ -52,8 +52,7 @@ export default async function MembersSettingsPage() {
   let loadError: string | null = null;
   if (userId) {
     try {
-      const servers = await listServersForUser(db, userId, { limit: 1 });
-      const firstServer = servers[0];
+      const firstServer = access.server;
       if (firstServer) {
         serverId = firstServer.id;
         ownerUserId = firstServer.ownerUserId;
@@ -71,10 +70,15 @@ export default async function MembersSettingsPage() {
             position: role.position,
             permissions: role.permissions,
           }));
-        // EMAIL.md §5: each member's verification state (never the address).
-        // Optional: a database without migration 0046 still lists members.
+        // EMAIL.md §5: each member's verification state (never the address),
+        // for the instance admin who can act on it — the members API gives
+        // moderators no such field. Optional: a database without migration
+        // 0046 still lists members.
         const emailStates = new Map(
-          (await listUserEmailVerification(db, rows.map((row) => row.userId)).catch(() => [])).map((state) => [
+          (capabilities.verifyEmail
+            ? await listUserEmailVerification(db, rows.map((row) => row.userId)).catch(() => [])
+            : []
+          ).map((state) => [
             state.userId,
             state.isGuest || !state.hasEmail ? 'none' : state.emailVerifiedAt ? 'verified' : 'unverified',
           ] as const)
@@ -102,7 +106,7 @@ export default async function MembersSettingsPage() {
   }
 
   return (
-    <SettingsShell scope="community">
+    <SettingsShell scope="community" sections={access.sections}>
       <MembersClient
         serverId={serverId}
         currentUserId={userId}
@@ -110,6 +114,7 @@ export default async function MembersSettingsPage() {
         members={members}
         roles={roles}
         loadError={loadError}
+        capabilities={capabilities}
       />
     </SettingsShell>
   );

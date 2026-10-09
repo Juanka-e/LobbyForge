@@ -72,6 +72,8 @@ import { resolveAutoJoinServerId } from '@/lib/lobby-auto-join';
 import { readMessageBot } from '@/lib/bots/message-meta';
 import { readMessageInteraction, readMessageWebhook } from '@/lib/bots/interaction-meta';
 import { botTrustLevel, isBuiltInType } from '@/lib/bots/catalog';
+import { adminSectionsForServer, getAdminAccess, type AdminAccess } from '@/lib/admin-access';
+import { buildLobbyAdminLinks, NO_LOBBY_ADMIN_LINKS, type LobbyAdminLinks } from '@/lib/admin-sections';
 import type { LobbyBot } from './BotIdentity';
 
 export const dynamic = 'force-dynamic';
@@ -167,8 +169,12 @@ interface LobbyData {
   canMuteMembers: boolean;
   /** With MUTE_MEMBERS: members this viewer outranks, offered "Disconnect from voice". */
   voiceModerationTargetIds: string[];
-  /** MANAGE_SERVER: unlocks the community menu's admin entries. */
-  canManageServer: boolean;
+  /**
+   * Every lobby control that leads into settings, resolved by the same
+   * guard the settings pages use: present only when the page will open
+   * for this viewer (lib/admin-access.ts). Guests and members get none.
+   */
+  adminLinks: LobbyAdminLinks;
   /** START_ACTIVITY: may end any activity (the end route's rule), not only one they host. */
   canStartActivities?: boolean;
   /**
@@ -412,11 +418,31 @@ function buildMessages(
   });
 }
 
+/**
+ * The settings links this viewer gets for the community in view. On the
+ * official hub `/admin` is the operator's, so a community's own managers
+ * (Manage Community there, not a guest) get its `/servers/{id}` page.
+ */
+function lobbyAdminLinks(input: {
+  access: AdminAccess;
+  serverId: string;
+  official: boolean;
+  canManageServer: boolean;
+}): LobbyAdminLinks {
+  const { access, serverId, official, canManageServer } = input;
+  if (access.guest) return NO_LOBBY_ADMIN_LINKS;
+  return buildLobbyAdminLinks({
+    sections: adminSectionsForServer(access, serverId),
+    serverSettingsHref: official && canManageServer ? `/servers/${encodeURIComponent(serverId)}` : null,
+  });
+}
+
 async function loadLiveData(
   db: ReturnType<typeof getDb>,
   serverId: string,
   currentUserId: string | null,
-  ownerUserId: string | null
+  ownerUserId: string | null,
+  viewer: { access: AdminAccess; official: boolean }
 ): Promise<LobbyData | null> {
   // beta-review (S3): everything below is serialized into the page, so
   // it must be authorized for THIS viewer — no viewer, no data.
@@ -572,7 +598,12 @@ async function loadLiveData(
   const voiceModerationTargetIds = canMuteMembers
     ? listVoiceModerationTargets({ members: memberSummaries, viewerUserId: currentUserId, ownerUserId })
     : [];
-  const canManageServer = hasPermission(view.permissions, CorePermission.MANAGE_SERVER);
+  const adminLinks = lobbyAdminLinks({
+    access: viewer.access,
+    serverId,
+    official: viewer.official,
+    canManageServer: hasPermission(view.permissions, CorePermission.MANAGE_SERVER),
+  });
   const canStartActivities = hasPermission(view.permissions, CorePermission.START_ACTIVITY);
 
   // Apps the community has installed AND enabled. Members see the same
@@ -636,7 +667,7 @@ async function loadLiveData(
     canManageMessages,
     canMuteMembers,
     voiceModerationTargetIds,
-    canManageServer,
+    adminLinks,
     canStartActivities,
     installedApps,
     bots: botRows.filter((bot) => bot.enabled).map(toLobbyBot),
@@ -766,7 +797,10 @@ export default async function LobbyPage({
         (requested && servers.find((s) => s.id === requested)) || servers[0];
       if (srv?.name) serverName = srv.name;
       if (srv?.id) {
-        liveData = await loadLiveData(db, srv.id, userId, srv.ownerUserId ?? null);
+        liveData = await loadLiveData(db, srv.id, userId, srv.ownerUserId ?? null, {
+          access: await getAdminAccess(),
+          official: isOfficial,
+        });
         if (liveData) {
           liveData.serverName = serverName;
           liveData.serverBannerUrl = (srv as { bannerUrl?: string | null }).bannerUrl ?? null;
@@ -812,7 +846,7 @@ export default async function LobbyPage({
     canManageMessages: false,
     canMuteMembers: false,
     voiceModerationTargetIds: [],
-    canManageServer: false,
+    adminLinks: NO_LOBBY_ADMIN_LINKS,
     installedApps: [],
     bots: [],
   };
@@ -872,6 +906,8 @@ async function LobbyUnavailable({
   const t = await getTranslator();
   const joinState =
     reason === 'join_refused' || reason === 'join_available' || reason === 'join_pending' || reason === 'join_rejected';
+  // Doctor is for the instance admin; anyone else would only find a 404 there.
+  const canOpenHealth = !joinState && (await getAdminAccess()).sections.includes('health');
   const hopeful = reason === 'join_pending' || reason === 'join_available';
   return (
     <div className="grid h-dvh w-full place-items-center bg-background p-6">
@@ -923,7 +959,7 @@ async function LobbyUnavailable({
             {joinServerId && <LobbyJoinRequestActions key="pending" serverId={joinServerId} mode="pending" />}
           </div>
         )}
-        {!joinState && (
+        {canOpenHealth && (
           <Link href="/admin/health" className="mt-5 inline-flex items-center gap-2 rounded-md border border-border-strong px-4 py-2 text-sm text-text-secondary hover:bg-surface-container">
             <span className="material-symbols-outlined text-lg" aria-hidden>health_and_safety</span>
             {t('lobby.unavailable.openHealth')}
@@ -1006,7 +1042,7 @@ function LobbyShell({
           voiceChannelIds={data.voiceChannels.map((c) => c.id)}
           currentUserId={data.currentUserId}
           bots={data.bots}
-          canManageServer={data.canManageServer}
+          botSettingsHref={data.adminLinks.botSettings}
         />
       ) : (
         <MembersPanel data={data} />
@@ -1224,7 +1260,7 @@ async function Sidebar({
           serverName={serverName}
           instanceLogoUrl={data.instanceLogoUrl}
           serverId={data.isLive ? data.serverId : null}
-          canManageServer={data.canManageServer}
+          adminMenu={data.adminLinks.menu}
           isOfficial={isOfficial}
         />
         {isOfficial ? (
@@ -1250,7 +1286,10 @@ async function Sidebar({
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
         <div className="animate-fade-in-up stagger-1">
           {voiceProvider ? (
-            <LobbyTextChannels channels={data.textChannels} />
+            <LobbyTextChannels
+              channels={data.textChannels}
+              channelSettingsHref={data.adminLinks.channelSettings}
+            />
           ) : (
             <ChannelGroup
               title={t('lobbyMain.text.heading')}
@@ -1270,6 +1309,7 @@ async function Sidebar({
               canMuteMembers={data.canMuteMembers}
               voiceModerationTargetIds={data.voiceModerationTargetIds}
               knownNames={buildKnownNames(data)}
+              channelSettingsHref={data.adminLinks.channelSettings}
             />
           ) : (
             <ChannelGroup
@@ -1288,7 +1328,7 @@ async function Sidebar({
               serverId={data.serverId}
               voiceChannelId={activityChannel?.id ?? null}
               voiceChannelName={activityChannel?.name ?? t('lobbyMain.channel.thisRoom')}
-              canManageServer={data.canManageServer}
+              appSettingsHref={data.adminLinks.appSettings}
             />
           </div>
         ) : null}

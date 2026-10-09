@@ -1,7 +1,6 @@
 import type { AlertLevel, DoctorCategory, DoctorReport } from '@lobbyforge/core';
 import type { Metadata } from 'next';
-import { cookies } from 'next/headers';
-import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
+import { adminPageMetadata, requireAdminSection } from '@/lib/admin-access';
 import { collectDoctorReport } from '@/lib/doctor';
 import { getDb } from '@/lib/db';
 import type { Translator } from '@/lib/i18n/core';
@@ -16,8 +15,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function generateMetadata(): Promise<Metadata> {
-  const t = await getTranslator();
-  return { title: t('admin.health.metaTitle') };
+  return adminPageMetadata('health', 'admin.health.metaTitle');
 }
 
 /**
@@ -30,19 +28,8 @@ export async function generateMetadata(): Promise<Metadata> {
  * every request via `collectDoctorReport()`.
  */
 export default async function HealthPage() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(ADMIN_TOKEN_COOKIE)?.value ?? null;
+  const access = await requireAdminSection('health');
   const t = await getTranslator();
-  if (!(await isInstanceAdminAllowed(cookieStore.toString(), token))) {
-    return (
-      <SettingsShell scope="community">
-        <section>
-          <h1 className="text-2xl font-semibold text-text-primary">{t('admin.health.title')}</h1>
-          <p className="mt-2 text-sm text-danger">{t('common.adminRequired')}</p>
-        </section>
-      </SettingsShell>
-    );
-  }
   const { report } = await collectDoctorReport();
 
   // Fetch bandwidth totals for the sidebar summary. Non-fatal — if Redis
@@ -66,7 +53,7 @@ export default async function HealthPage() {
   }
 
   return (
-    <SettingsShell scope="community">
+    <SettingsShell scope="community" sections={access.sections}>
       <DoctorBody report={report} bandwidth={bandwidth} t={t} />
     </SettingsShell>
   );

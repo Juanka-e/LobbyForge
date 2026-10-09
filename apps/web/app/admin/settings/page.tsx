@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { cookies } from 'next/headers';
 import {
   getInstanceSetupStatus,
   getUserById,
@@ -7,12 +6,9 @@ import {
   listChannelsForServer,
   listInvitesForServer,
   listMembersForServer,
-  listServersForUser,
 } from '@lobbyforge/db';
-import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
-import { getSessionSecret } from '@/lib/api-auth';
+import { adminPageMetadata, requireAdminSection } from '@/lib/admin-access';
 import { getDb } from '@/lib/db';
-import { getActiveSession } from '@/lib/active-session';
 import type { Translator } from '@/lib/i18n/core';
 import { getTranslator } from '@/lib/i18n/server';
 import InstanceLogoCard from './InstanceLogoCard';
@@ -24,8 +20,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function generateMetadata(): Promise<Metadata> {
-  const t = await getTranslator();
-  return { title: t('adminSettings.overview.metaTitle') };
+  return adminPageMetadata('overview', 'adminSettings.overview.metaTitle');
 }
 
 interface Stats {
@@ -46,38 +41,21 @@ interface Stats {
  * 1:1. If the admin has no servers yet, we render a friendly empty
  * state pointing at the invites / members pages.
  *
- * Auth gate: admin token cookie is required. Without it the sidebar
- * still renders, but the body shows the standard "Admin token required"
- * note so the admin can see which page they tried to visit.
+ * Instance admin only (it carries the instance logo); anyone else gets a
+ * 404 from the guard (lib/admin-access.ts).
  */
 export default async function CommunitySettingsOverviewPage() {
+  const access = await requireAdminSection('overview');
   const t = await getTranslator();
-  const cookieStore = await cookies();
-  const token = cookieStore.get(ADMIN_TOKEN_COOKIE)?.value ?? null;
-  if (!(await isInstanceAdminAllowed(cookieStore.toString(), token))) {
-    return (
-      <SettingsShell scope="community">
-        <section>
-          <h1 className="text-2xl font-semibold text-text-primary">{t('adminSettings.overview.title')}</h1>
-          <p className="mt-2 text-sm text-danger">{t('common.adminRequired')}</p>
-        </section>
-      </SettingsShell>
-    );
-  }
-
   const setup = await getInstanceSetupStatus(getDb());
   const db = getDb();
-  const sessionCookie = cookieStore.toString();
-  const session = await getActiveSession(sessionCookie, getSessionSecret());
-  const userId = session?.uid ?? setup.ownerUserId ?? null;
 
   let stats: Stats | null = null;
   let recentAudit: { id: string; action: string; actorLabel: string; createdAt: Date }[] = [];
 
-  if (userId) {
+  if (access.userId) {
     try {
-      const servers = await listServersForUser(db, userId, { limit: 1 });
-      const firstServer = servers[0];
+      const firstServer = access.server;
       if (firstServer) {
         const [members, channels, invites, audit] = await Promise.all([
           listMembersForServer(db, firstServer.id),
@@ -109,7 +87,7 @@ export default async function CommunitySettingsOverviewPage() {
   }
 
   return (
-    <SettingsShell scope="community">
+    <SettingsShell scope="community" sections={access.sections}>
       <OverviewBody
         t={t}
         instanceName={setup.instanceName}

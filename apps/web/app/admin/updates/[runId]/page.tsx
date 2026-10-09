@@ -1,9 +1,10 @@
-import { cookies } from 'next/headers';
+import type { Metadata } from 'next';
 import { getSystemUpdateRunById, listSystemUpdateEvents } from '@lobbyforge/db';
-import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
+import { adminPageMetadata, requireAdminSection } from '@/lib/admin-access';
 import { getDb } from '@/lib/db';
 import type { Translator } from '@/lib/i18n/core';
 import { getTranslator } from '@/lib/i18n/server';
+import SettingsShell from '@/app/SettingsShell';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -34,19 +35,18 @@ interface PageProps {
   params: Promise<{ runId: string }>;
 }
 
-export default async function UpdateRunPage({ params }: PageProps) {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(ADMIN_TOKEN_COOKIE)?.value ?? null;
-  const t = await getTranslator();
-  if (!(await isInstanceAdminAllowed(cookieStore.toString(), token))) {
-    return (
-      <section>
-        <h1 style={{ marginTop: 0 }}>{t('admin.updates.run.title')}</h1>
-        <p style={{ color: '#e36049' }}>{t('common.adminRequired')}</p>
-      </section>
-    );
-  }
+export async function generateMetadata(): Promise<Metadata> {
+  return adminPageMetadata('updates', 'admin.updates.run.title');
+}
 
+/**
+ * One update run, under the updates section. The admin layout no longer
+ * draws the settings shell (a refused page must not show its 404 inside
+ * it), so this page draws its own like every other admin page.
+ */
+export default async function UpdateRunPage({ params }: PageProps) {
+  const access = await requireAdminSection('updates');
+  const t = await getTranslator();
   const { runId } = await params;
   const [run, events] = await Promise.all([
     getSystemUpdateRunById(getDb(), runId),
@@ -54,6 +54,7 @@ export default async function UpdateRunPage({ params }: PageProps) {
   ]);
   if (!run) {
     return (
+      <SettingsShell scope="community" sections={access.sections}>
       <section>
         <h1 style={{ marginTop: 0 }}>{t('admin.updates.run.title')}</h1>
         <p style={{ color: '#e36049' }}>{t('admin.updates.run.notFound')}</p>
@@ -63,12 +64,14 @@ export default async function UpdateRunPage({ params }: PageProps) {
           </a>
         </p>
       </section>
+      </SettingsShell>
     );
   }
 
   const rollbackCommand = typeof run.plan.rollbackCommand === 'string' ? run.plan.rollbackCommand : null;
 
   return (
+    <SettingsShell scope="community" sections={access.sections}>
     <section>
       <p>
         <a href="/admin/updates" style={{ color: '#8fb7ff' }}>
@@ -157,6 +160,7 @@ export default async function UpdateRunPage({ params }: PageProps) {
         <pre style={preStyle}>{JSON.stringify(run.plan, null, 2)}</pre>
       </section>
     </section>
+    </SettingsShell>
   );
 }
 
