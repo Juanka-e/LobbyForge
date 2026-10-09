@@ -27,7 +27,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, copyFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
@@ -231,9 +231,15 @@ function runPlan(args) {
   }
   let configPath = '';
   if (plan.tauriConfig) {
-    configPath = resolve(argValue(args, '--out-config') ?? join(tmpdir(), 'tauri.signing.conf.json'));
+    // A private directory (mkdtemp, 0700) rather than a fixed name in the
+    // shared temp dir, and a file only this user can read: another local
+    // user must not pre-create or swap the config the bundler signs with.
+    const outConfig = argValue(args, '--out-config');
+    configPath = outConfig
+      ? resolve(outConfig)
+      : join(mkdtempSync(join(process.env.RUNNER_TEMP || tmpdir(), 'lf-signing-')), 'tauri.signing.conf.json');
     mkdirSync(dirname(configPath), { recursive: true });
-    writeFileSync(configPath, `${JSON.stringify(plan.tauriConfig, null, 2)}\n`);
+    writeFileSync(configPath, `${JSON.stringify(plan.tauriConfig, null, 2)}\n`, { mode: 0o600 });
   }
   setOutput('windows-signing', plan.windows);
   setOutput('macos-signing', plan.macos);
