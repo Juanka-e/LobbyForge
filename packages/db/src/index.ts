@@ -45,6 +45,8 @@ export * from './queries/userImages.js';
 export * from './queries/instanceReports.js';
 export * from './queries/componentMigrations.js';
 export * from './queries/dmChannels.js';
+// Account recovery by the server operator (`lfctl user …`).
+export * from './queries/operatorAccounts.js';
 export { sql, eq, and, or, desc, asc } from 'drizzle-orm';
 
 export interface DatabaseConfig {

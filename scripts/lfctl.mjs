@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises';
-import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign, verify as verifySignature } from 'node:crypto';
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, randomInt, sign, verify as verifySignature } from 'node:crypto';
 import path from 'node:path';
 import process from 'node:process';
 import { execFile, spawn } from 'node:child_process';
@@ -79,8 +79,21 @@ Usage:
   node scripts/lfctl.mjs directory heartbeat --url <directory-origin> --instance-id <directory-id> --key-file <pem>
       [--online-users N] [--public-rooms N] [--stats-version V] [--doctor-score N]
       [--once | --interval <seconds>] [--json]
+  node scripts/lfctl.mjs user reset-password --email <address> [--password-stdin | --generate] [--json]
+  node scripts/lfctl.mjs user list-admins [--json]
 
 Notes:
+  user reset-password sets a new password for a forgotten account and signs
+  it out everywhere (sessions, remembered devices, pending email-change and
+  reset links). It asks for the password twice on the terminal without
+  echo, reads one line from a pipe with --password-stdin, or makes one up
+  with --generate and prints it once. A password is never accepted as an
+  argument (shell history, ps). user list-admins shows the instance owner
+  and the server owners (email + display name). Both run inside the
+  running web container with the app's own code (docker compose exec web).
+  Exit codes: 1 bad usage or password, 2 refused (no install, stack not
+  running, unknown email), 3 password changed but sessions not signed out,
+  130 cancelled at the prompt.
   update check/plan/apply default to the release-manifest.json of the newest
   release of the channel in ${DEFAULT_RELEASE_REPO} (looked up through the
   GitHub API). --channel stable (the default) takes full releases only; any
@@ -138,6 +151,15 @@ function parseArgs(argv) {
     else if (arg === '--doctor-score') options.doctorScore = Number(rest[++i]);
     else if (arg === '--once') options.once = true;
     else if (arg === '--interval') options.interval = Number(rest[++i]);
+    // Account recovery options (lfctl user …)
+    else if (arg === '--email') options.email = rest[++i];
+    else if (arg === '--password-stdin') options.passwordStdin = true;
+    else if (arg === '--generate') options.generate = true;
+    // Never a password on the command line — and never echo one back.
+    else if (isPasswordArgument(arg)) throw new LfctlError(PASSWORD_ARGUMENT_REFUSED, EXIT_USAGE);
+    else if (domain === 'user' && !arg.startsWith('-')) {
+      throw new LfctlError(`Unexpected argument (not shown, in case it is a password). ${PASSWORD_ARGUMENT_REFUSED}`, EXIT_USAGE);
+    }
     else throw new Error(`Unknown argument: ${arg}`);
   }
 
@@ -815,6 +837,354 @@ async function sendDirectoryHeartbeat({ directoryOrigin, signed }) {
   return { ok: false, status: res.status, error: detail.error ?? `HTTP ${res.status}` };
 }
 
+// ── Account recovery: lfctl user reset-password / list-admins ────────
+// For the person with shell access to the server when the admin password
+// (or address) is forgotten and mail is not configured. The work runs
+// INSIDE the running web container (apps/web/scripts/operator-user.mjs):
+// the app's own scrypt hash, the sign-up policy, and the password-reset
+// machinery (every session revoked, desktop handoff codes dropped, the
+// sign-in lock cleared; device cookies die with the old hash; pending email
+// change/reset challenges dropped and an audit entry written in the same
+// transaction). lfctl only gathers the password and passes it on STDIN —
+// never in argv, which shows up in `ps` and in shell history, here and in
+// the container. Defined above main(): see the TDZ note at the top.
+
+/** An error with its own exit code (main() exits 1 for any other). */
+class LfctlError extends Error {
+  constructor(message, exitCode) {
+    super(message);
+    this.exitCode = exitCode;
+  }
+}
+const EXIT_USAGE = 1;
+const EXIT_REFUSED = 2;
+const EXIT_SESSIONS_NOT_REVOKED = 3;
+const EXIT_CANCELLED = 130;
+
+// Twin of the sign-up rule: MIN_PASSWORD_LENGTH in
+// apps/web/lib/password-strength.ts and the 128 cap of /api/auth/register.
+// Checked here for a quick answer before anything runs; the container
+// checks again with the app's own code. Pinned by lfctl-user.test.ts.
+const PASSWORD_MIN_LENGTH = 12;
+const PASSWORD_MAX_LENGTH = 128;
+const PASSWORD_STDIN_MAX_BYTES = 4096;
+const OPERATOR_COMMAND = [
+  'node',
+  // Node 22.18+ strips types by default; the flag covers older 22.x.
+  '--experimental-strip-types',
+  '--disable-warning=ExperimentalWarning',
+  // Relative to the web image's working directory, /app/apps/web.
+  'scripts/operator-user.mjs',
+];
+const OPERATOR_TIMEOUT_MS = 120_000;
+// No 0/O, 1/l/I: easy to read off a screen and type. 56 symbols, 24 drawn: ~139 bits.
+const GENERATED_PASSWORD_ALPHABET = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const PASSWORD_ARGUMENT_REFUSED =
+  'lfctl never takes a password on the command line: it would end up in your shell history and in `ps`. ' +
+  'Leave it out to be asked on the terminal, pipe it in with --password-stdin, or use --generate.';
+
+/** --password, --new-password=…, -p, --pw … (but not --password-stdin, matched before). */
+function isPasswordArgument(arg) {
+  return arg === '-p' || /^-{1,2}(new-?)?(password|passwd|pass|pw)\b/i.test(arg);
+}
+
+function passwordPolicyMessage(password) {
+  if (password.length < PASSWORD_MIN_LENGTH) {
+    return `The password must be at least ${PASSWORD_MIN_LENGTH} characters long (the sign-up rule). Nothing was changed.`;
+  }
+  if (password.length > PASSWORD_MAX_LENGTH) {
+    return `The password must be at most ${PASSWORD_MAX_LENGTH} characters long (the sign-up rule). Nothing was changed.`;
+  }
+  return null;
+}
+
+function operatorEmail(raw) {
+  if (raw === undefined) {
+    throw new LfctlError(
+      'user reset-password requires --email <address>. `lfctl user list-admins` shows the owner and admin addresses.',
+      EXIT_USAGE
+    );
+  }
+  const email = String(raw).trim().toLowerCase();
+  if (email.length > 320 || !/^[^\s@]+@[^\s@]+$/.test(email)) {
+    throw new LfctlError(`--email ${JSON.stringify(String(raw))} is not an email address.`, EXIT_USAGE);
+  }
+  return email;
+}
+
+function generatePassword() {
+  const groups = [];
+  for (let group = 0; group < 4; group += 1) {
+    let chars = '';
+    for (let i = 0; i < 6; i += 1) chars += GENERATED_PASSWORD_ALPHABET[randomInt(GENERATED_PASSWORD_ALPHABET.length)];
+    groups.push(chars);
+  }
+  return groups.join('-');
+}
+
+async function readPasswordFromStdin() {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of process.stdin) {
+    size += chunk.length;
+    if (size > PASSWORD_STDIN_MAX_BYTES) {
+      throw new LfctlError(`--password-stdin: more than ${PASSWORD_STDIN_MAX_BYTES} bytes on stdin; expected one line.`, EXIT_USAGE);
+    }
+    chunks.push(chunk);
+  }
+  // One line; its line break (LF or CRLF) is not part of the password.
+  const value = Buffer.concat(chunks).toString('utf8').replace(/\r?\n$/, '');
+  if (value === '') throw new LfctlError('--password-stdin: nothing was piped in.', EXIT_USAGE);
+  if (/[\r\n]/.test(value)) throw new LfctlError('--password-stdin: expected exactly one line.', EXIT_USAGE);
+  return value;
+}
+
+/** Ask on the terminal without echo. The prompt goes to stderr so --json stdout stays clean. */
+function promptHidden(question) {
+  return new Promise((resolve, reject) => {
+    const input = process.stdin;
+    const output = process.stderr;
+    let value = '';
+    const done = (fn) => {
+      input.removeListener('data', onData);
+      input.setRawMode(false);
+      input.pause();
+      output.write('\n');
+      fn();
+    };
+    function onData(chunk) {
+      for (const ch of chunk) {
+        if (ch === '\r' || ch === '\n') return done(() => resolve(value));
+        if (ch === '\u0003' || (ch === '\u0004' && value === '')) {
+          return done(() => reject(new LfctlError('Cancelled. Nothing was changed.', EXIT_CANCELLED)));
+        }
+        if (ch === '\u007f' || ch === '\b') value = Array.from(value).slice(0, -1).join('');
+        else if (ch === '\u0015') value = ''; // Ctrl-U
+        else if (ch === '\u001b') break; // an arrow or function key: drop the escape sequence
+        else if (ch >= ' ') value += ch;
+      }
+      return undefined;
+    }
+    output.write(question);
+    input.setEncoding('utf8');
+    input.setRawMode(true);
+    input.resume();
+    input.on('data', onData);
+  });
+}
+
+async function promptNewPassword() {
+  const first = await promptHidden('New password: ');
+  const weak = passwordPolicyMessage(first);
+  if (weak) throw new LfctlError(weak, EXIT_USAGE);
+  const second = await promptHidden('Repeat the new password: ');
+  if (first !== second) throw new LfctlError('The two passwords do not match. Nothing was changed.', EXIT_USAGE);
+  return first;
+}
+
+/** Account data printed to a terminal: no control characters or bidi overrides from a display name. */
+function printable(value) {
+  return String(value ?? '').replace(/[\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g, '?');
+}
+
+function lastLine(text) {
+  const lines = String(text ?? '').trim().split(/\r?\n/).filter(Boolean);
+  return lines[lines.length - 1] ?? '';
+}
+
+async function requireInstall() {
+  try {
+    await fs.access(fromRoot(ENV_FILE));
+  } catch {
+    throw new LfctlError(
+      `No LobbyForge install found in ${ROOT_DIR}: ${ENV_FILE} is missing.\n` +
+        'Run lfctl from the checkout install.sh set up (or set LFCTL_ROOT to it).',
+      EXIT_REFUSED
+    );
+  }
+}
+
+async function requireRunningWeb() {
+  let stdout;
+  try {
+    ({ stdout } = await composeExec(['ps', '-q', 'web'], 60_000));
+  } catch (err) {
+    if (err && err.code === 'ENOENT') {
+      throw new LfctlError(`Docker was not found (${DOCKER_PREFIX[0]}). lfctl user … runs inside the web container.`, EXIT_REFUSED);
+    }
+    throw new LfctlError(`Could not ask Docker about the web container: ${lastLine(err.stderr) || err.message}`, EXIT_REFUSED);
+  }
+  if (!stdout.trim()) {
+    throw new LfctlError(
+      'The web container is not running. Start the stack first:\n' +
+        `  docker compose -f ${COMPOSE_FILE} --env-file ${ENV_FILE} up -d --wait`,
+      EXIT_REFUSED
+    );
+  }
+}
+
+/** docker compose exec with a request on stdin; resolves with the exit code and output. */
+function composeExecWithInput(args, input, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(DOCKER_PREFIX[0], dockerArgs([...COMPOSE_BASE_ARGS, ...args]), { stdio: ['pipe', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new LfctlError(`The web container did not answer within ${timeoutMs / 1000}s.`, EXIT_REFUSED));
+    }, timeoutMs);
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      resolve({ code, stdout, stderr });
+    });
+    child.stdin.on('error', () => {}); // EPIPE when the child exits without reading
+    child.stdin.end(input);
+  });
+}
+
+/** Run one request through the web container's operator script; returns its JSON answer. */
+async function runOperatorScript(request) {
+  let result;
+  try {
+    result = await composeExecWithInput(['exec', '-T', 'web', ...OPERATOR_COMMAND], `${JSON.stringify(request)}\n`, OPERATOR_TIMEOUT_MS);
+  } catch (err) {
+    if (err instanceof LfctlError) throw err;
+    throw new LfctlError(`Could not run docker compose exec: ${err.message}`, EXIT_REFUSED);
+  }
+  try {
+    const body = JSON.parse(lastLine(result.stdout));
+    if (body && typeof body === 'object' && typeof body.ok === 'boolean') return body;
+  } catch {
+    // not an answer: explained below
+  }
+  const output = `${result.stderr}\n${result.stdout}`;
+  if (/Cannot find module[^\n]*operator-user/.test(output)) {
+    throw new LfctlError(
+      'The running LobbyForge image does not have the account recovery command yet.\n' +
+        'Update it first (node scripts/lfctl.mjs update apply), or rebuild a locally built install.',
+      EXIT_REFUSED
+    );
+  }
+  if (/is not running/.test(output)) {
+    throw new LfctlError('The web container stopped. Start the stack and try again.', EXIT_REFUSED);
+  }
+  throw new LfctlError(
+    `The account command failed inside the web container (exit ${result.code}): ${lastLine(result.stderr) || '(no output)'}`,
+    EXIT_REFUSED
+  );
+}
+
+const OPERATOR_ERRORS = {
+  invalid_request: () => 'The web container did not understand the request. Are lfctl and the running image from the same release?',
+  invalid_email: (email) => `${email} is not an email address.`,
+  weak_password: () => `The password must be at least ${PASSWORD_MIN_LENGTH} characters long (the sign-up rule). Nothing was changed.`,
+  password_too_long: () => `The password must be at most ${PASSWORD_MAX_LENGTH} characters long (the sign-up rule). Nothing was changed.`,
+  unknown_email: (email) => `No account uses ${email}. Nothing was changed. \`lfctl user list-admins\` shows the owner and admin addresses.`,
+  deleted_account: (email) => `The account ${email} was deleted; its password cannot be reset.`,
+  guest_account: (email) => `${email} belongs to a guest account, which has no password.`,
+};
+
+function operatorFailure(body, email) {
+  const describe = OPERATOR_ERRORS[body.error];
+  return new LfctlError(describe ? describe(email) : `The web container refused: ${printable(body.error)}`, EXIT_REFUSED);
+}
+
+async function userResetPassword(options) {
+  const email = operatorEmail(options.email);
+  if (options.passwordStdin && options.generate) {
+    throw new LfctlError('Use either --password-stdin or --generate, not both.', EXIT_USAGE);
+  }
+  if (options.passwordStdin && process.stdin.isTTY) {
+    throw new LfctlError('--password-stdin reads a pipe. On a terminal, leave it out to be asked without echo.', EXIT_USAGE);
+  }
+  if (!options.passwordStdin && !options.generate && !process.stdin.isTTY) {
+    throw new LfctlError('No terminal to ask for the password on: pipe it in with --password-stdin, or use --generate.', EXIT_USAGE);
+  }
+  // Before asking for anything: is there an install, and is it running?
+  await requireInstall();
+  await requireRunningWeb();
+
+  let password;
+  if (options.generate) password = generatePassword();
+  else if (options.passwordStdin) password = await readPasswordFromStdin();
+  else password = await promptNewPassword();
+  const weak = passwordPolicyMessage(password);
+  if (weak) throw new LfctlError(weak, EXIT_USAGE);
+
+  const body = await runOperatorScript({ action: 'reset-password', email, password });
+  if (!body.ok) throw operatorFailure(body, email);
+
+  const notRevoked = body.warning === 'sessions_not_revoked';
+  if (options.json) {
+    console.log(JSON.stringify({
+      reset: true,
+      email: body.email,
+      displayName: body.displayName,
+      sessionsRevoked: body.sessionsRevoked,
+      ...(notRevoked ? { warning: body.warning } : {}),
+      ...(options.generate ? { password } : {}),
+    }, null, 2));
+  } else {
+    console.log(`Password reset for ${printable(body.email)} (${printable(body.displayName)}).`);
+    if (!notRevoked) {
+      console.log(
+        `Signed out everywhere: ${body.sessionsRevoked} session(s) revoked; remembered devices, desktop sign-in ` +
+          'codes and pending email-change/reset links no longer work.'
+      );
+    }
+    if (options.generate) {
+      console.log('\nNew password (shown once, store it now):');
+      console.log(`  ${password}`);
+    }
+  }
+  if (notRevoked) {
+    console.error(
+      '\nWARNING: the password WAS changed, but existing sessions could not be signed out (is Redis up?).\n' +
+        'They stay signed in until they expire. Run the command again once Redis is healthy.'
+    );
+    process.exitCode = EXIT_SESSIONS_NOT_REVOKED;
+  }
+}
+
+async function userListAdmins(options) {
+  if (options.email !== undefined || options.passwordStdin || options.generate) {
+    throw new LfctlError('user list-admins takes no --email, --password-stdin or --generate.', EXIT_USAGE);
+  }
+  await requireInstall();
+  await requireRunningWeb();
+  const body = await runOperatorScript({ action: 'list-admins' });
+  if (!body.ok || !Array.isArray(body.accounts)) throw operatorFailure(body, '');
+  const accounts = body.accounts.map((account) => ({
+    email: account.email ?? null,
+    displayName: account.displayName,
+    instanceOwner: account.instanceOwner === true,
+    ownedServers: Array.isArray(account.ownedServers) ? account.ownedServers : [],
+  }));
+  if (options.json) {
+    console.log(JSON.stringify({ accounts }, null, 2));
+    return;
+  }
+  if (accounts.length === 0) {
+    console.log('No owner or admin accounts yet: /setup has not been completed on this instance.');
+    return;
+  }
+  const width = Math.max(...accounts.map((account) => printable(account.email ?? '(no email)').length));
+  console.log('Owner and admin accounts (reset one with: lfctl user reset-password --email <address>):');
+  for (const account of accounts) {
+    const roles = [];
+    if (account.instanceOwner) roles.push('instance owner');
+    if (account.ownedServers.length > 0) roles.push(`owns ${account.ownedServers.map(printable).join(', ')}`);
+    const email = printable(account.email ?? '(no email)').padEnd(width);
+    console.log(`  ${email}  ${printable(account.displayName)}  (${roles.join('; ')})`);
+  }
+}
+
 async function main() {
   const { domain, action, options } = parseArgs(process.argv.slice(2));
   if (!domain || domain === '--help' || domain === '-h') {
@@ -949,6 +1319,12 @@ async function main() {
       console.log('\nSet LOBBYFORGE_SETUP_TOKEN before exposing the instance. Rotate or remove it after setup.');
     }
     return;
+  }
+
+  if (domain === 'user') {
+    if (action === 'reset-password') return userResetPassword(options);
+    if (action === 'list-admins') return userListAdmins(options);
+    throw new LfctlError(`Unknown user action: ${action ?? '(missing)'} (reset-password, list-admins)`, EXIT_USAGE);
   }
 
   if (domain !== 'update') throw new Error(`Unknown command domain: ${domain}`);
@@ -1284,7 +1660,7 @@ async function main() {
 
 main().catch((err) => {
   console.error(err instanceof Error ? err.message : String(err));
-  process.exitCode = 1;
+  process.exitCode = err instanceof LfctlError ? err.exitCode : 1;
 });
 
 // ── Backup create / restore ──────────────────────────────────────────
