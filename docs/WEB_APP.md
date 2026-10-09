@@ -266,10 +266,38 @@ The latest security pass added these concrete guards:
 ### Canonical settings surface
 
 Settings routes render as one full-viewport modal surface above the lobby.
-`admin/layout.tsx` and `settings/layout.tsx` own the shared `SettingsShell`; a
-compatibility guard prevents legacy page-level wrappers from creating nested
-dialogs while those wrappers are removed incrementally. Server settings use
-the same `SettingsModalFrame` around their server-specific navigation.
+`settings/layout.tsx` owns the user `SettingsShell`. Admin pages draw their
+own community shell, after their guard (see below), so a refused page never
+shows its 404 inside admin chrome; a compatibility guard keeps a nested
+shell from creating a second dialog. Server settings use the same
+`SettingsModalFrame` around their server-specific navigation.
+
+### Who sees the admin area
+
+`lib/admin-access.ts` is the single decision. Every page under `app/admin/**`
+calls `requireAdminSection('<section>')` first (and `adminPageMetadata` for
+its title); anyone who may not open it gets Next's `notFound()` — the same
+404 as a page that does not exist, with no admin chrome. Signed-out visitors,
+guests and ordinary members get 404 for the whole area (`admin/layout.tsx`
+and the `@modal` interceptor call `requireAdminArea()`).
+`lib/__tests__/admin-pages-guarded.test.ts` fails the build if a page skips
+the guard.
+
+| Section | Opens with (any of; Administrator and the owner open all) |
+|---|---|
+| Members | Kick Members, Ban Members, Manage Roles, Manage Community |
+| Channels | Manage Channels |
+| Roles | Manage Roles |
+| Invites, Voice & Media, Apps, Bots | Manage Community |
+| Audit log | View Audit Log |
+| Overview, Plugins & Word Packs, Bandwidth, Authentication, Email, Storage, Backups, Moderation, Health, Updates | instance owner / operator token only |
+
+On the official hub `/admin` is the operator's; a community's managers use
+`/servers/{id}`, which needs Manage Community there (same 404 otherwise).
+The settings nav, the lobby's community menu, the voice channel gear,
+"install an app", the bot profile's settings link and the header's health
+link are drawn only for sections the viewer may open
+(`buildLobbyAdminLinks` in `lib/admin-sections.ts`).
 
 The interaction contract is fixed:
 
