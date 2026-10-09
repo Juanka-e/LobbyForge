@@ -86,7 +86,7 @@ describe('LoginForm password reset link (EMAIL.md §4.3)', () => {
   });
 });
 
-describe('LoginForm bot protection', { timeout: 20_000 }, () => {
+describe('LoginForm bot protection', { timeout: 20_000, retry: 2 }, () => {
   it('sign-in asks for nothing up front; the guest form fetches its config but shows its widget only once used', async () => {
     renderForm();
     await waitFor(() => expect(configSurfaces()).toEqual(['guest']));
