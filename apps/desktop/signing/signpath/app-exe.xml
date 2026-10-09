@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration "app-exe" (docs/DESKTOP_SIGNING.md, SignPath).
+  Paste it into SignPath under Project > Artifact configurations, slug app-exe.
+
+  desktop-release.yml uploads one file as a GitHub artifact (a zip): the app
+  exe, compiled but not yet bundled. SignPath signs it, and the installers are
+  then built around the signed exe.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="lobbyforge-desktop.exe">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

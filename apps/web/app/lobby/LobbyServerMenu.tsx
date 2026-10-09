@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { AdminMenuLink } from '@/lib/admin-sections';
 import { useT } from '@/lib/i18n/client';
 import { initialOf } from '@/lib/initial';
 
@@ -16,8 +17,10 @@ import { initialOf } from '@/lib/initial';
  * close, `aria-expanded` for assistive tech) rendered outside any
  * clipping container.
  *
- * Entries are permission-gated: members see only what they may use, and
- * the admin links appear solely for MANAGE_SERVER holders.
+ * Entries are permission-gated: each settings entry is one the page guard
+ * will let this viewer open (`adminMenu`, resolved on the server by
+ * lib/admin-access.ts) — a moderator with Kick Members gets Members and
+ * nothing else; guests and members get none.
  */
 
 export interface LobbyServerMenuProps {
@@ -25,8 +28,8 @@ export interface LobbyServerMenuProps {
   instanceLogoUrl: string | null;
   /** Live server id — null in demo mode, where the menu is inert. */
   serverId: string | null;
-  /** MANAGE_SERVER: unlocks the admin entries. */
-  canManageServer: boolean;
+  /** The settings entries this viewer may open, in order (usually none). */
+  adminMenu: readonly AdminMenuLink[];
   /** Official hub: offers "Add a community"; self-host is single-server. */
   isOfficial: boolean;
 }
@@ -44,29 +47,18 @@ type MenuItem = {
 };
 
 export function buildServerMenuItems({
-  canManageServer,
+  adminMenu,
   isOfficial,
 }: {
-  canManageServer: boolean;
+  adminMenu: readonly AdminMenuLink[];
   isOfficial: boolean;
 }): MenuItem[] {
-  const items: MenuItem[] = [];
-  if (canManageServer) {
-    items.push(
-      { href: '/admin/settings', icon: 'admin_panel_settings', labelKey: 'lobby.server.settings' },
-      { href: '/admin/settings/members', icon: 'group', labelKey: 'lobby.server.members' },
-      { href: '/admin/settings/channels', icon: 'forum', labelKey: 'lobby.server.channels' },
-      { href: '/admin/settings/roles', icon: 'shield', labelKey: 'lobby.server.roles' },
-      { href: '/admin/settings/invites', icon: 'link', labelKey: 'lobby.server.invites' },
-      { href: '/admin/apps', icon: 'extension', labelKey: 'lobby.server.apps' },
-      { href: '/admin/health', icon: 'health_and_safety', labelKey: 'lobby.server.health' }
-    );
-  }
+  const items: MenuItem[] = adminMenu.map((link) => ({ ...link }));
   items.push({
     href: '/settings',
     icon: 'manage_accounts',
     labelKey: 'lobby.server.userSettings',
-    separated: canManageServer,
+    separated: adminMenu.length > 0,
   });
   if (isOfficial) {
     items.push({ href: '/discover', icon: 'explore', labelKey: 'lobby.server.discover' });
@@ -79,7 +71,7 @@ export function LobbyServerMenu({
   serverName,
   instanceLogoUrl,
   serverId,
-  canManageServer,
+  adminMenu,
   isOfficial,
 }: LobbyServerMenuProps) {
   const t = useT();
@@ -103,7 +95,7 @@ export function LobbyServerMenu({
     };
   }, [open, close]);
 
-  const items = serverId ? buildServerMenuItems({ canManageServer, isOfficial }) : [];
+  const items = serverId ? buildServerMenuItems({ adminMenu, isOfficial }) : [];
 
   return (
     <div ref={rootRef} className="relative">

@@ -61,7 +61,7 @@ describe('members panel', () => {
         initialMembers={[{ id: 'u1', name: 'Ayşe', status: 'online' }]}
         voiceChannelIds={[]}
         currentUserId="u1"
-        canManageServer
+        botSettingsHref="/admin/settings/bots"
         bots={[
           {
             id: 'bot-1',

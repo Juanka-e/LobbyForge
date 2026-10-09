@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration "installers" (docs/DESKTOP_SIGNING.md, SignPath).
+  Paste it into SignPath under Project > Artifact configurations, slug installers.
+
+  desktop-release.yml uploads the Windows installers as a GitHub artifact (a
+  zip): always the NSIS setup.exe, plus the MSI for versions without a
+  pre-release suffix. SignPath signs both as they are. The app exe inside was
+  already signed by the app-exe request; SignPath cannot open NSIS installers.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="LobbyForge_*-setup.exe">
+      <authenticode-sign />
+    </pe-file>
+    <msi-file path="LobbyForge_*.msi" min-matches="0">
+      <authenticode-sign />
+    </msi-file>
+  </zip-file>
+</artifact-configuration>

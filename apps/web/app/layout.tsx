@@ -100,7 +100,7 @@ export default async function RootLayout({ children, modal }: { children: ReactN
           choice={i18n.choice}
         >
           <AppearanceRuntime />
-          <GlobalHeader official={official} />
+          <GlobalHeader official={official} showHealth={isAdmin} />
           <Suspense fallback={null}>
             <SettingsReturnTracker />
           </Suspense>

@@ -359,7 +359,9 @@ export default function JoinPage({ params }: { params: Promise<{ code: string }>
     acceptStep = {
       description: meta?.serverName ? t('auth.join.memberOf', { name: meta.serverName }) : t('auth.join.memberOfUnnamed'),
       actions: (
-        <a href={`/servers/${joinedServerId}`} className="text-sm font-medium text-success underline">
+        // The community itself — its settings page (/servers/{id}) is for
+        // the people who manage it, and a new member would find a 404 there.
+        <a href={`/lobby?server=${encodeURIComponent(joinedServerId)}`} className="text-sm font-medium text-success underline">
           {t('auth.join.openServer')}
         </a>
       ),

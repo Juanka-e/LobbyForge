@@ -20,14 +20,15 @@ export function LobbyAppsSection({
   voiceChannelId,
   voiceChannelName,
   serverId,
-  canManageServer,
+  appSettingsHref,
 }: {
   apps: InstalledApp[];
   /** Where an activity would start — the active or first voice channel. */
   voiceChannelId: string | null;
   voiceChannelName: string;
   serverId: string | null;
-  canManageServer: boolean;
+  /** Where this viewer installs apps — null when they may not (no link drawn). */
+  appSettingsHref: string | null;
 }) {
   const t = useT();
   const voice = useLobbyVoice();
@@ -47,9 +48,9 @@ export function LobbyAppsSection({
         <h3 className="font-label-xs uppercase tracking-wider text-text-muted font-bold">
           {t('lobby.apps.title')}
         </h3>
-        {canManageServer ? (
+        {appSettingsHref ? (
           <Link
-            href="/admin/apps"
+            href={appSettingsHref}
             title={t('lobby.apps.manage')}
             aria-label={t('lobby.apps.manage')}
             className="text-text-muted hover:text-text-primary transition-colors"
@@ -94,10 +95,10 @@ export function LobbyAppsSection({
 
       {apps.length === 0 ? (
         <p className="mt-1 px-2 text-[11px] leading-relaxed text-text-muted">
-          {canManageServer ? (
+          {appSettingsHref ? (
             <>
               {t('lobby.apps.emptyLead')}{' '}
-              <Link href="/admin/apps" className="text-primary hover:underline">
+              <Link href={appSettingsHref} className="text-primary hover:underline">
                 {t('lobby.apps.emptyInstallLink')}
               </Link>
               .

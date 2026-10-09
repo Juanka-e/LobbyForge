@@ -84,7 +84,7 @@ export function LobbyActivityView({
   channelName,
   apps,
   currentUserId,
-  canManageServer,
+  appSettingsHref,
   canStartActivities = false,
 }: {
   serverId: string;
@@ -92,7 +92,8 @@ export function LobbyActivityView({
   channelName: string;
   apps: InstalledApp[];
   currentUserId: string | null;
-  canManageServer: boolean;
+  /** Where this viewer installs apps — null when they may not (no link drawn). */
+  appSettingsHref: string | null;
   /**
    * START_ACTIVITY: the end route lets this member end any session, not
    * only their own. A hint for showing End — the route decides.
@@ -402,13 +403,13 @@ export function LobbyActivityView({
                   {t('lobbyMain.activities.emptyTitle')}
                 </h2>
                 <p className="mx-auto mt-1 max-w-sm font-body-md text-text-secondary">
-                  {canManageServer
+                  {appSettingsHref
                     ? t('lobbyMain.activities.emptyManage')
                     : t('lobbyMain.activities.emptyMember')}
                 </p>
-                {canManageServer ? (
+                {appSettingsHref ? (
                   <Link
-                    href="/admin/apps"
+                    href={appSettingsHref}
                     className="mt-5 inline-flex items-center gap-2 rounded-lg bg-primary-container px-4 py-2 text-sm font-semibold text-on-primary-container transition-all hover:brightness-110"
                   >
                     <span className="material-symbols-outlined text-[18px]">add</span>

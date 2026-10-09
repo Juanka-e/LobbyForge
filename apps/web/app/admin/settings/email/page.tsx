@@ -1,6 +1,5 @@
 import type { Metadata } from 'next';
-import { cookies } from 'next/headers';
-import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
+import { adminPageMetadata, requireAdminSection } from '@/lib/admin-access';
 import { isOfficialDeployment } from '@/lib/deployment-mode';
 import { getTranslator } from '@/lib/i18n/server';
 import { offeredMailProviders } from '@/lib/mail/providers';
@@ -11,8 +10,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function generateMetadata(): Promise<Metadata> {
-  const t = await getTranslator();
-  return { title: t('adminSettings.email.metaTitle') };
+  return adminPageMetadata('email', 'adminSettings.email.metaTitle');
 }
 
 /**
@@ -22,19 +20,8 @@ export async function generateMetadata(): Promise<Metadata> {
  * `/api/admin` route the card talks to.
  */
 export default async function EmailSettingsPage() {
+  const access = await requireAdminSection('email');
   const t = await getTranslator();
-  const cookieStore = await cookies();
-  const token = cookieStore.get(ADMIN_TOKEN_COOKIE)?.value ?? null;
-  if (!(await isInstanceAdminAllowed(cookieStore.toString(), token))) {
-    return (
-      <SettingsShell scope="community">
-        <section>
-          <h1 className="text-2xl font-semibold text-text-primary">{t('adminSettings.email.title')}</h1>
-          <p className="mt-2 text-sm text-danger">{t('common.adminRequired')}</p>
-        </section>
-      </SettingsShell>
-    );
-  }
 
   // Mailpit (the development preset) on every instance but the official hub
   // (EMAIL.md §2.2): `localhost:19525` on a dev host, `mailpit:1025` (the
@@ -46,7 +33,7 @@ export default async function EmailSettingsPage() {
   });
 
   return (
-    <SettingsShell scope="community">
+    <SettingsShell scope="community" sections={access.sections}>
       <section>
         <h1 className="text-2xl font-semibold text-text-primary">{t('adminSettings.email.title')}</h1>
         <p className="mt-1 text-sm text-text-secondary">{t('adminSettings.email.subtitle')}</p>

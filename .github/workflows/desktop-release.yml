@@ -1,45 +1,120 @@
 name: desktop-release
 
-# Builds the Tauri 2 native shell installers (Windows MSI/NSIS, macOS DMG/app,
-# Linux deb/AppImage) and publishes them to the GitHub Release when a version
-# tag (desktop-v*) is pushed.
+# The ONE pipeline that builds the desktop installers (Windows NSIS + MSI,
+# macOS .app/.dmg, Linux deb/rpm/AppImage) and signs them when signing
+# secrets exist.
 #
-# The shell is an official client with a connect-to-server model: it asks the
-# user for their instance URL on first launch and works against any self-hosted
-# LobbyForge instance. There is no per-instance branding step — one installer
-# serves every instance.
+#   * release.yml calls it (workflow_call) for every v* tag, with the tag as
+#     the version; release.yml's github-release job then publishes the
+#     installers next to the server release with one SHA256SUMS.txt. Desktop
+#     and server share one version (21st-audit).
+#   * Run it by hand (workflow_dispatch) for a test build: the installers are
+#     attached to the run, and a Windows smoke test installs, launches,
+#     reinstalls and uninstalls the NSIS build.
 #
-# Trigger manually (workflow_dispatch) for a test build, or push a tag like
-# `desktop-v0.1.0` to publish a release.
+# Windows installers used to be built twice: here with tauri-action on
+# desktop-v* tags, and again in release.yml. Two copies of the signing steps
+# is how one of them ships unsigned one day, so both entry points now run
+# this file and desktop-v* tags are retired (docs/DESKTOP_SIGNING.md).
+#
+# Code signing (docs/DESKTOP_SIGNING.md): apps/desktop/scripts/
+# release-signing.mjs decides per platform from which secrets are set.
+# No secrets: unsigned build, green. Half a provider: the build fails.
+#   Windows: Certum SimplySign (ssign, inside `tauri bundle`) or SignPath
+#            (its action, after the build). Configure one, not both.
+#   macOS:   Developer ID certificate, plus notarization credentials.
+# Secrets are mapped into ONE step each (never the compile step, so no build
+# script or dependency sees them) and never printed.
+#
+# security-review §7.1: read-only token; actions pinned to commit SHAs.
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - 'desktop-v*'
+  workflow_call:
+    inputs:
+      version:
+        description: 'Release tag or version to stamp into the app (v0.3.0, 0.3.0-rc.1). Empty keeps tauri.conf.json.'
+        type: string
+        default: ''
+      allow-failure:
+        description: 'Report a failed platform without failing the caller (the server release must not wait on the desktop).'
+        type: boolean
+        default: false
+    # Passed by name from release.yml, so the desktop build never receives
+    # unrelated secrets such as LF_RELEASE_SIGNING_KEY.
+    secrets:
+      CERTUM_EMAIL:
+        required: false
+      CERTUM_OTP:
+        required: false
+      SIGNPATH_API_TOKEN:
+        required: false
+      SIGNPATH_ORGANIZATION_ID:
+        required: false
+      APPLE_CERTIFICATE:
+        required: false
+      APPLE_CERTIFICATE_PASSWORD:
+        required: false
+      APPLE_SIGNING_IDENTITY:
+        required: false
+      APPLE_ID:
+        required: false
+      APPLE_PASSWORD:
+        required: false
+      APPLE_TEAM_ID:
+        required: false
+      APPLE_API_ISSUER:
+        required: false
+      APPLE_API_KEY:
+        required: false
+      APPLE_API_PRIVATE_KEY:
+        required: false
 
-# security-review §7.1: read-only by default; only `publish` (tauri-action
-# creates the draft release and uploads installers on a desktop-v* tag)
-# gets contents:write. Actions are pinned to full commit SHAs.
 permissions:
   contents: read
 
 jobs:
-  publish:
+  build:
+    name: Desktop bundles (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    # release.yml sets allow-failure: a broken platform is a visible failed
+    # check but does not block the server release. A failed platform uploads
+    # nothing, so it is MISSING from the release rather than shipped unsigned.
+    continue-on-error: ${{ inputs.allow-failure == true }}
+    # Long enough for two SignPath approvals (up to an hour each).
+    timeout-minutes: 150
     permissions:
-      contents: write
+      contents: read
+      # SignPath's connector reads this job and downloads the unsigned artifact.
+      actions: read
+    # Signing secrets live in this environment, not in repository secrets.
+    # GitHub creates it, unprotected, on first use. Add required reviewers in
+    # Settings → Environments → desktop-signing to approve every signing run.
+    # deployment: false keeps builds out of the Deployments list.
+    environment:
+      name: desktop-signing
+      deployment: false
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: windows-latest
-            args: ''
-          - platform: macos-latest
-            args: ''
-          - platform: ubuntu-22.04
-            args: ''
-
-    runs-on: ${{ matrix.platform }}
+          - os: windows-latest
+            target: windows
+          - os: macos-latest
+            target: macos
+          # The oldest supported Ubuntu, so the AppImage/deb run on more distros.
+          - os: ubuntu-22.04
+            target: linux
+    env:
+      TAURI_DIR: apps/desktop/src-tauri
+      # ssign: Certum SimplySign client over HTTPS (github.com/Le-Syl21/ssign,
+      # MIT). Pinned by version AND hash; bump both together after checking
+      # the release.
+      SSIGN_VERSION: '0.1.7'
+      SSIGN_SHA256: 4ee5389a74ddbeb67e18fe8c8b963734ca13de7b24beffbe430c3f427ecc5e40
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -68,96 +143,332 @@ jobs:
         with:
           workspaces: apps/desktop/src-tauri -> target
 
-      # Linux needs webkit2gtk + file-switcher libs for the webview.
       - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04'
+        if: matrix.target == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
 
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build TS contracts (the shell re-exports them)
-        run: pnpm --filter @lobbyforge/desktop build:ts
+      # Workspace packages the desktop shell imports must be built first.
+      - name: Build workspace packages
+        run: pnpm build:packages
 
-      - name: Build Tauri installers
-        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
+      # 21st-audit: installer file names and metadata follow the release tag.
+      - name: Inject release version
+        if: inputs.version != ''
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LF_VERSION: ${{ inputs.version }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const version = process.env.LF_VERSION.replace(/^v/, "");
+            for (const file of ["apps/desktop/src-tauri/tauri.conf.json", "apps/desktop/package.json"]) {
+              const json = JSON.parse(fs.readFileSync(file, "utf8"));
+              json.version = version;
+              fs.writeFileSync(file, JSON.stringify(json, null, 2) + "\n");
+            }
+            console.log("desktop version ->", version);
+          '
+
+      - name: Type-check the shell contracts
+        run: pnpm --filter @lobbyforge/desktop exec tsc
+
+      # Compile first, with no signing secret in the environment: cargo build
+      # scripts and npm packages run here. Bundling (below) reuses the binary.
+      - name: Compile the app
+        run: pnpm --filter @lobbyforge/desktop exec tauri build --no-bundle
+
+      - name: Plan code signing
+        id: signing
+        env:
+          # Only the presence of these is read here; values are never printed.
+          CERTUM_EMAIL: ${{ matrix.target == 'windows' && secrets.CERTUM_EMAIL || '' }}
+          CERTUM_OTP: ${{ matrix.target == 'windows' && secrets.CERTUM_OTP || '' }}
+          SIGNPATH_API_TOKEN: ${{ matrix.target == 'windows' && secrets.SIGNPATH_API_TOKEN || '' }}
+          SIGNPATH_ORGANIZATION_ID: ${{ matrix.target == 'windows' && (vars.SIGNPATH_ORGANIZATION_ID || secrets.SIGNPATH_ORGANIZATION_ID) || '' }}
+          SIGNPATH_POLICY_SLUG: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          SIGNPATH_TEST_POLICY_SLUG: ${{ vars.SIGNPATH_TEST_POLICY_SLUG }}
+          APPLE_CERTIFICATE: ${{ matrix.target == 'macos' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ matrix.target == 'macos' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_ID: ${{ matrix.target == 'macos' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ matrix.target == 'macos' && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ matrix.target == 'macos' && secrets.APPLE_TEAM_ID || '' }}
+          APPLE_API_ISSUER: ${{ matrix.target == 'macos' && secrets.APPLE_API_ISSUER || '' }}
+          APPLE_API_KEY: ${{ matrix.target == 'macos' && secrets.APPLE_API_KEY || '' }}
+          APPLE_API_PRIVATE_KEY: ${{ matrix.target == 'macos' && secrets.APPLE_API_PRIVATE_KEY || '' }}
+        run: |
+          release_ref=()
+          # SignPath release signing (manual approval) only for release tags.
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then release_ref=(--release-ref); fi
+          node apps/desktop/scripts/release-signing.mjs plan \
+            --platform "${{ matrix.target }}" \
+            --version "$(node -p 'require("./apps/desktop/src-tauri/tauri.conf.json").version')" \
+            --ssign "$RUNNER_TEMP/ssign/ssign.exe" \
+            --out-config "$RUNNER_TEMP/tauri.signing.conf.json" \
+            "${release_ref[@]}"
+
+      - name: Install ssign (Certum cloud signing)
+        if: steps.signing.outputs.windows-signing == 'certum'
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'ssign.zip'
+          Invoke-WebRequest -Uri "https://github.com/Le-Syl21/ssign/releases/download/v$env:SSIGN_VERSION/ssign-windows-x86_64.zip" -OutFile $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne $env:SSIGN_SHA256) { throw "ssign download hash $hash does not match the pinned $env:SSIGN_SHA256" }
+          Expand-Archive $zip -DestinationPath (Join-Path $env:RUNNER_TEMP 'ssign') -Force
+          & (Join-Path $env:RUNNER_TEMP 'ssign\ssign.exe') --version
+
+      # SignPath signs workflow artifacts, not files on the runner, so it
+      # cannot be a Tauri signCommand. Two requests: the app exe before
+      # bundling (so the installer carries a signed app) and the installers
+      # after. The uninstaller NSIS generates stays unsigned on this path.
+      - name: 'SignPath: stage the app exe'
+        if: steps.signing.outputs.windows-signing == 'signpath'
+        run: |
+          node apps/desktop/scripts/release-signing.mjs prepatch-exe \
+            "$TAURI_DIR/target/release/lobbyforge-desktop.exe" \
+            "$RUNNER_TEMP/signpath-app/lobbyforge-desktop.exe"
+
+      - name: 'SignPath: upload the app exe'
+        id: signpath-app-artifact
+        if: steps.signing.outputs.windows-signing == 'signpath'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          projectPath: apps/desktop
-          tauriScript: pnpm tauri
-          # Release inputs ONLY on a real desktop-v* tag push. On
-          # workflow_dispatch (no tag) they must stay EMPTY — a non-empty
-          # tagName makes tauri-action attempt a release upload, which
-          # fails with 'No artifacts were found' and discards the
-          # successfully built installers. Without them tauri-action skips
-          # every upload (v1's uploadWorkflowArtifacts stays at its default,
-          # false) and the next step attaches the bundles to the workflow
-          # run as artifacts (downloadable, nothing published).
-          tagName: ${{ startsWith(github.ref, 'refs/tags/desktop-v') && github.ref_name || '' }}
-          releaseName: 'LobbyForge Desktop ${{ github.ref_name }}'
-          releaseBody: |
-            ## LobbyForge Desktop
+          name: signpath-unsigned-app
+          path: ${{ runner.temp }}/signpath-app/
+          retention-days: 1
+          overwrite: true
+          if-no-files-found: error
 
-            The official native client for LobbyForge — a voice-first, self-hostable
-            community platform with live in-room activities.
+      - name: 'SignPath: sign the app exe'
+        if: steps.signing.outputs.windows-signing == 'signpath'
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID || secrets.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'LobbyForge' }}
+          signing-policy-slug: ${{ steps.signing.outputs.signpath-policy }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_APP_ARTIFACT_CONFIG || 'app-exe' }}
+          github-artifact-id: ${{ steps.signpath-app-artifact.outputs.artifact-id }}
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: ${{ runner.temp }}/signpath-app-signed
 
-            **First launch asks for your instance URL** (e.g. `https://my.lobbyforge.dev`).
-            It works against any self-hosted LobbyForge instance; there is no central
-            account server.
-          releaseDraft: true
-          prerelease: false
+      - name: 'SignPath: put the signed app exe in place'
+        if: steps.signing.outputs.windows-signing == 'signpath'
+        run: cp "$RUNNER_TEMP/signpath-app-signed/lobbyforge-desktop.exe" "$TAURI_DIR/target/release/lobbyforge-desktop.exe"
 
-      # tauri-action only uploads to a RELEASE when tagName is set; on
-      # manual runs we must attach the bundles to the workflow run
-      # ourselves so the smoke job (and humans) can download them.
+      - name: Bundle installers
+        env:
+          BUNDLES: ${{ steps.signing.outputs.bundles }}
+          SIGNING_CONFIG: ${{ steps.signing.outputs.config }}
+          # The only step that sees signing secrets, and only the ones the
+          # plan chose for this platform.
+          CERTUM_EMAIL: ${{ steps.signing.outputs.windows-signing == 'certum' && secrets.CERTUM_EMAIL || '' }}
+          CERTUM_OTP: ${{ steps.signing.outputs.windows-signing == 'certum' && secrets.CERTUM_OTP || '' }}
+          APPLE_CERTIFICATE: ${{ steps.signing.outputs.macos-signing != 'none' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ steps.signing.outputs.macos-signing != 'none' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ steps.signing.outputs.macos-signing != 'none' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          APPLE_ID: ${{ steps.signing.outputs.macos-signing == 'notarize' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ steps.signing.outputs.macos-signing == 'notarize' && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ steps.signing.outputs.macos-signing == 'notarize' && secrets.APPLE_TEAM_ID || '' }}
+          APPLE_API_ISSUER: ${{ steps.signing.outputs.macos-signing == 'notarize' && secrets.APPLE_API_ISSUER || '' }}
+          APPLE_API_KEY: ${{ steps.signing.outputs.macos-signing == 'notarize' && secrets.APPLE_API_KEY || '' }}
+          APPLE_API_PRIVATE_KEY: ${{ steps.signing.outputs.macos-signing == 'notarize' && secrets.APPLE_API_PRIVATE_KEY || '' }}
+        run: |
+          # Tauri treats a variable that is SET but empty as configured (it
+          # would try to import an empty certificate), so drop the empty ones.
+          for v in CERTUM_EMAIL CERTUM_OTP APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD \
+                   APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID \
+                   APPLE_API_ISSUER APPLE_API_KEY APPLE_API_PRIVATE_KEY; do
+            [ -n "${!v:-}" ] || unset "$v"
+          done
+          # API-key notarization: Tauri reads the .p8 key from a file.
+          if [ -n "${APPLE_API_PRIVATE_KEY:-}" ]; then
+            key_dir="$RUNNER_TEMP/private_keys"
+            mkdir -p "$key_dir"
+            trap 'rm -rf "$key_dir"' EXIT
+            printf '%s\n' "$APPLE_API_PRIVATE_KEY" > "$key_dir/AuthKey_${APPLE_API_KEY}.p8"
+            export APPLE_API_KEY_PATH="$key_dir/AuthKey_${APPLE_API_KEY}.p8"
+            unset APPLE_API_PRIVATE_KEY
+          fi
+          args=()
+          if [ -n "$BUNDLES" ]; then args+=(--bundles "$BUNDLES"); fi
+          if [ -n "$SIGNING_CONFIG" ]; then args+=(--config "$SIGNING_CONFIG"); fi
+          pnpm --filter @lobbyforge/desktop exec tauri bundle "${args[@]}"
+
+      - name: 'SignPath: stage the installers'
+        if: steps.signing.outputs.windows-signing == 'signpath'
+        run: |
+          mkdir -p "$RUNNER_TEMP/signpath-installers"
+          find "$TAURI_DIR/target/release/bundle" -type f \( -name '*-setup.exe' -o -name '*.msi' \) \
+            -exec cp '{}' "$RUNNER_TEMP/signpath-installers/" ';'
+          ls -la "$RUNNER_TEMP/signpath-installers"
+
+      - name: 'SignPath: upload the installers'
+        id: signpath-installers-artifact
+        if: steps.signing.outputs.windows-signing == 'signpath'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signpath-unsigned-installers
+          path: ${{ runner.temp }}/signpath-installers/
+          retention-days: 1
+          overwrite: true
+          if-no-files-found: error
+
+      - name: 'SignPath: sign the installers'
+        if: steps.signing.outputs.windows-signing == 'signpath'
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID || secrets.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'LobbyForge' }}
+          signing-policy-slug: ${{ steps.signing.outputs.signpath-policy }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_INSTALLERS_ARTIFACT_CONFIG || 'installers' }}
+          github-artifact-id: ${{ steps.signpath-installers-artifact.outputs.artifact-id }}
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: ${{ runner.temp }}/signpath-installers-signed
+
+      - name: 'SignPath: put the signed installers in place'
+        if: steps.signing.outputs.windows-signing == 'signpath'
+        run: |
+          for f in "$RUNNER_TEMP"/signpath-installers-signed/*; do
+            name=$(basename "$f")
+            dest=$(find "$TAURI_DIR/target/release/bundle" -type f -name "$name" | head -n 1)
+            if [ -z "$dest" ]; then echo "::error::SignPath returned $name, which this build did not produce"; exit 1; fi
+            cp "$f" "$dest"
+          done
+
+      - name: Verify Windows signatures
+        if: matrix.target == 'windows' && steps.signing.outputs.expect-signature != 'none'
+        shell: pwsh
+        env:
+          EXPECT: ${{ steps.signing.outputs.expect-signature }}
+        run: |
+          $files = @(Get-ChildItem "$env:TAURI_DIR/target/release/bundle" -Recurse -Include *-setup.exe,*.msi)
+          # The app exe inside the NSIS installer, extracted with the runner's 7-Zip.
+          $inner = Join-Path $env:RUNNER_TEMP 'nsis-inner'
+          foreach ($setup in ($files | Where-Object Name -like '*-setup.exe')) {
+            & 7z e -y "-o$inner" $setup.FullName 'lobbyforge-desktop.exe' -r | Out-Null
+          }
+          $app = Get-ChildItem $inner -Filter 'lobbyforge-desktop.exe' -ErrorAction SilentlyContinue
+          if ($app) { $files += $app } else { "::warning::Could not extract the app exe from the NSIS installer; only the installers were checked." }
+          $bad = 0
+          foreach ($f in $files) {
+            $s = Get-AuthenticodeSignature -LiteralPath $f.FullName
+            "{0}: {1}; signer: {2}; timestamp: {3}" -f $f.Name, $s.Status, $s.SignerCertificate.Subject, $s.TimeStamperCertificate.Subject
+            if (-not $s.SignerCertificate) { $bad++ }
+            elseif ($env:EXPECT -eq 'trusted' -and $s.Status -ne 'Valid') { $bad++ }
+          }
+          if ($bad -gt 0) { throw "$bad file(s) are not signed as expected ($env:EXPECT)" }
+
+      - name: Verify macOS signature
+        if: matrix.target == 'macos' && steps.signing.outputs.macos-signing != 'none'
+        env:
+          MACOS_SIGNING: ${{ steps.signing.outputs.macos-signing }}
+        run: |
+          app=$(find "$TAURI_DIR/target/release/bundle/macos" -maxdepth 1 -name '*.app' | head -n 1)
+          codesign --verify --deep --strict --verbose=2 "$app"
+          if [ "$MACOS_SIGNING" = notarize ]; then
+            xcrun stapler validate "$app"
+            spctl --assess --type execute --verbose "$app"
+          fi
+
+      # 21st-audit: FLAT staging with platform-prefixed unique names, so the
+      # release's one SHA256SUMS.txt matches the asset names users download.
+      - name: Collect bundles (flat, platform-prefixed)
+        run: |
+          set -euo pipefail
+          ROOT="${GITHUB_WORKSPACE:-$(pwd)}"
+          BUNDLE_DIR="$ROOT/$TAURI_DIR/target/release/bundle"
+          mkdir -p "$ROOT/release-artifacts"
+          while IFS= read -r -d '' f; do
+            cp "$f" "$ROOT/release-artifacts/desktop-${{ matrix.target }}-$(basename "$f")"
+          done < <(find "$BUNDLE_DIR" -type f \
+            \( -name '*.dmg' -o -name '*.msi' -o -name '*-setup.exe' \
+               -o -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' \) -print0)
+          ls -la "$ROOT/release-artifacts"
+
       - name: Upload installers as run artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: LobbyForge-${{ matrix.platform }}
-          path: |
-            apps/desktop/src-tauri/target/release/bundle/**/*.msi
-            apps/desktop/src-tauri/target/release/bundle/**/*.exe
-            apps/desktop/src-tauri/target/release/bundle/**/*.dmg
-            apps/desktop/src-tauri/target/release/bundle/**/*.app.tar.gz
-            apps/desktop/src-tauri/target/release/bundle/**/*.AppImage
-            apps/desktop/src-tauri/target/release/bundle/**/*.deb
+          name: desktop-${{ matrix.target }}
+          path: release-artifacts/
           if-no-files-found: error
 
-  # DP-17: install-and-run smoke on Windows. Catches the class of bugs
-  # the gap analysis found (missing mic permissions, dead PTT bridge) —
-  # a build that compiles is not a build that RUNS.
+  # DP-17: install-and-run smoke on Windows. A build that compiles is not a
+  # build that runs (missing mic permissions, a dead PTT bridge). Manual runs
+  # only; release builds rely on the same bundle having passed here.
   smoke:
     name: Windows install smoke
-    needs: publish
+    needs: build
     if: github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: pwsh
     steps:
-      - name: Download the NSIS installer artifact
+      - name: Download the Windows installers
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: LobbyForge*
-          merge-multiple: true
+          name: desktop-windows
+          path: installers
 
       - name: Install silently
-        shell: powershell
         run: |
-          $exe = Get-ChildItem -Recurse -Filter "*-setup.exe" | Select-Object -First 1
-          if (-not $exe) { throw "NSIS installer not found in artifacts" }
-          Start-Process -FilePath $exe.FullName -ArgumentList "/S" -Wait -NoNewWindow
+          $setup = Get-ChildItem installers -Filter '*-setup.exe' | Select-Object -First 1
+          if (-not $setup) { throw 'NSIS installer not found in the desktop-windows artifact' }
+          "SETUP=$($setup.FullName)" >> $env:GITHUB_ENV
+          $p = Start-Process $setup.FullName -ArgumentList '/S' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installer exited with $($p.ExitCode)" }
+
+      - name: Check the per-user install
+        run: |
+          $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\LobbyForge'
+          if (-not (Test-Path $key)) { throw 'no per-user (HKCU) uninstall entry' }
+          if (Test-Path 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\LobbyForge') { throw 'installed per machine (HKLM); expected per user' }
+          $entry = Get-ItemProperty $key
+          # Tauri's currentUser mode installs to %LOCALAPPDATA%\<productName>
+          # (not %LOCALAPPDATA%\Programs\...). The uninstall entry is the
+          # source of truth; the fixed paths are fallbacks.
+          $dirs = @($entry.InstallLocation, "$env:LOCALAPPDATA\LobbyForge", "$env:LOCALAPPDATA\Programs\LobbyForge") |
+            Where-Object { $_ } | ForEach-Object { $_.Trim('"') }
+          $bin = if ($entry.MainBinaryName) { $entry.MainBinaryName } else { 'lobbyforge-desktop.exe' }
+          $exe = $dirs | ForEach-Object { Join-Path $_ $bin } | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $exe) { throw "$bin not found in: $($dirs -join ', ')" }
+          if (-not $exe.StartsWith($env:LOCALAPPDATA, [StringComparison]::OrdinalIgnoreCase)) { throw "installed outside %LOCALAPPDATA%: $exe" }
+          "APP_EXE=$exe" >> $env:GITHUB_ENV
+          "APP_DIR=$(Split-Path $exe)" >> $env:GITHUB_ENV
+          "Installed $exe (version $($entry.DisplayVersion), publisher $($entry.Publisher))"
 
       - name: Launch and verify the process stays alive
-        shell: powershell
         run: |
-          $exe = "LobbyForge.exe"
-          $proc = Start-Process -FilePath "$env:LOCALAPPDATA\Programs\LobbyForge\$exe" -PassThru -ErrorAction SilentlyContinue
-          if (-not $proc) {
-            # NSIS default may install elsewhere — search.
-            $proc = Start-Process -FilePath (Get-ChildItem "C:\Program Files*","$env:LOCALAPPDATA" -Recurse -Filter $exe -ErrorAction SilentlyContinue | Select-Object -First 1).FullName -PassThru
-          }
+          $proc = Start-Process -FilePath $env:APP_EXE -PassThru
           Start-Sleep -Seconds 8
           if ($proc.HasExited) { throw "LobbyForge exited during startup (exit code $($proc.ExitCode))" }
-          "Process alive: OK"
+          'Process alive: OK'
           Stop-Process -Id $proc.Id -Force
+
+      - name: Reinstall over the existing install
+        run: |
+          $p = Start-Process $env:SETUP -ArgumentList '/S' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "reinstall exited with $($p.ExitCode)" }
+          if (-not (Test-Path $env:APP_EXE)) { throw 'app missing after reinstall' }
+
+      - name: Uninstall silently
+        run: |
+          # The NSIS uninstaller copies itself to %TEMP% and returns at once.
+          Start-Process (Join-Path $env:APP_DIR 'uninstall.exe') -ArgumentList '/S' -Wait
+          $deadline = (Get-Date).AddMinutes(1)
+          while ((Test-Path $env:APP_EXE) -or (Test-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\LobbyForge')) {
+            if ((Get-Date) -gt $deadline) { throw 'uninstall did not finish within a minute' }
+            Start-Sleep -Milliseconds 500
+          }
+          if (Test-Path (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\LobbyForge.lnk')) { throw 'Start Menu shortcut left behind' }
+          'Uninstalled cleanly'

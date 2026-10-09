@@ -14,6 +14,13 @@ pnpm lfctl update plan --manifest infra/update/release-manifest.example.json --j
 pnpm lfctl backup verify --manifest infra/update/backup-manifest.example.json
 ```
 
+The same CLI recovers a forgotten account on a server without mail:
+`lfctl user list-admins` shows the owner's address and
+`lfctl user reset-password --email <address>` sets a new password (asked on
+the terminal, `--password-stdin` or `--generate`; never an argument) and
+signs the account out everywhere. Both run inside the running web container.
+See [GUEST_AUTH.md](./GUEST_AUTH.md#account-recovery-by-the-server-operator).
+
 Without `--manifest`, `update check/plan/apply` read the `release-manifest.json`
 asset of the newest release of the channel, found through the GitHub API
 (`/repos/{owner}/{repo}/releases`; drafts and releases without the asset are

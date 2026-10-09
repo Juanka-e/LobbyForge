@@ -90,7 +90,7 @@ export function LobbyMembersClient({
   voiceChannelIds,
   currentUserId,
   bots = [],
-  canManageServer = false,
+  botSettingsHref = null,
 }: {
   serverId: string;
   initialMembers: Member[];
@@ -98,7 +98,8 @@ export function LobbyMembersClient({
   currentUserId: string | null;
   /** The server's enabled bots — their own group, always with the BOT badge. */
   bots?: LobbyBot[];
-  canManageServer?: boolean;
+  /** The bot settings page, for viewers who may open it (else no link). */
+  botSettingsHref?: string | null;
 }) {
   const t = useT();
   const [members, setMembers] = useState<Member[]>(initialMembers);
@@ -219,7 +220,7 @@ export function LobbyMembersClient({
         <MemberSection label={t('lobby.roster.offlineGroup', { count: offline.length })} members={offline} dimmed currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} onClosePopover={() => setOpenUserId(null)} />
       </aside>
       {openBot ? (
-        <BotProfilePopover bot={openBot} anchorRect={anchorRect} onClose={closeBotPopover} canManage={canManageServer} />
+        <BotProfilePopover bot={openBot} anchorRect={anchorRect} onClose={closeBotPopover} settingsHref={botSettingsHref} />
       ) : null}
       {openMember ? (
         <UserProfilePopover

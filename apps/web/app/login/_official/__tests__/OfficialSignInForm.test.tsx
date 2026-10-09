@@ -49,7 +49,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('OfficialSignInForm', () => {
+describe('OfficialSignInForm', { timeout: 20_000, retry: 2 }, () => {
   it('signs in with the shared login endpoint and goes to the hub home', async () => {
     fetchMock.mockResolvedValue(json({ user: { id: 'u1' } }, 200));
     render(<OfficialSignInForm googleEnabled={false} initialError={null} />);

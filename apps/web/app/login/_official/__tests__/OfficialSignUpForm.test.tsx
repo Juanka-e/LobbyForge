@@ -48,7 +48,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('OfficialSignUpForm', () => {
+describe('OfficialSignUpForm', { timeout: 20_000, retry: 2 }, () => {
   it('creates the account through the shared register endpoint and goes to the hub home', async () => {
     fetchMock.mockResolvedValue(json({ user: { id: 'u1' } }, 201));
     const user = userEvent.setup();

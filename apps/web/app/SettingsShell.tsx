@@ -3,6 +3,7 @@
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { createContext, useContext, type ReactNode } from 'react';
+import { ADMIN_SECTIONS, ADMIN_SECTION_PATH, type AdminSection } from '@/lib/admin-sections';
 import { useT } from '@/lib/i18n/client';
 import { SCROLL_REGION_FOCUS_CLASS } from '@/lib/scroll-region';
 import SettingsModalFrame from './SettingsModalFrame';
@@ -20,36 +21,51 @@ type NavItem = { href: string; labelKey: string; icon: string };
  * component, which renders the sidebar + content area and uses
  * usePathname() to highlight the active route.
  *
- * Adding a new settings page:
- *   1. Drop the href into COMMUNITY_NAV or USER_NAV below.
- *   2. Create the route at apps/web/app/<href>/page.tsx.
- *   3. Wrap the page body with <SettingsShell scope="community|user">.
+ * The community nav lists only the sections the viewer may open
+ * (`sections`, from the page's `requireAdminSection` guard): a moderator
+ * with Kick Members sees Members and nothing else, never a nav of links
+ * that answer 404.
+ *
+ * Adding a new admin page:
+ *   1. Add its section to `lib/admin-sections.ts` and its rule to
+ *      `lib/admin-access.ts`, and its label/icon to COMMUNITY_NAV_META.
+ *   2. Create the route at apps/web/app/<href>/page.tsx, guarded with
+ *      `requireAdminSection` (a test fails the build otherwise).
+ *   3. Wrap the page body with <SettingsShell scope="community" sections={access.sections}>.
  *
  * Do not inline-style the sidebar — the shell is the single source of
  * truth for visual rhythm (width, divider, hover, active) across all
  * settings surfaces.
  */
 
-const COMMUNITY_NAV: NavItem[] = [
-  { href: '/admin/settings', labelKey: 'settings.nav.community.overview', icon: 'dashboard' },
-  { href: '/admin/settings/members', labelKey: 'settings.nav.community.members', icon: 'group' },
-  { href: '/admin/settings/channels', labelKey: 'settings.nav.community.channels', icon: 'forum' },
-  { href: '/admin/settings/roles', labelKey: 'settings.nav.community.roles', icon: 'shield' },
-  { href: '/admin/settings/invites', labelKey: 'settings.nav.community.invites', icon: 'qr_code_2' },
-  { href: '/admin/settings/voice-media', labelKey: 'settings.nav.community.voiceMedia', icon: 'mic' },
-  { href: '/admin/apps', labelKey: 'settings.nav.community.apps', icon: 'stadia_controller' },
-  { href: '/admin/settings/bots', labelKey: 'settings.nav.community.bots', icon: 'smart_toy' },
-  { href: '/admin/plugins', labelKey: 'settings.nav.community.plugins', icon: 'extension' },
-  { href: '/admin/bandwidth', labelKey: 'settings.nav.community.bandwidth', icon: 'data_usage' },
-  { href: '/admin/settings/authentication', labelKey: 'settings.nav.community.authentication', icon: 'shield_lock' },
-  { href: '/admin/settings/email', labelKey: 'settings.nav.community.email', icon: 'mail' },
-  { href: '/admin/settings/storage', labelKey: 'settings.nav.community.storage', icon: 'cloud_upload' },
-  { href: '/admin/settings/backups', labelKey: 'settings.nav.community.backups', icon: 'backup' },
-  { href: '/admin/audit', labelKey: 'settings.nav.community.audit', icon: 'history' },
-  { href: '/admin/moderation', labelKey: 'settings.nav.community.moderation', icon: 'gavel' },
-  { href: '/admin/health', labelKey: 'settings.nav.community.health', icon: 'health_and_safety' },
-  { href: '/admin/updates', labelKey: 'settings.nav.community.updates', icon: 'system_update' },
-];
+const COMMUNITY_NAV_META: Record<AdminSection, Omit<NavItem, 'href'>> = {
+  overview: { labelKey: 'settings.nav.community.overview', icon: 'dashboard' },
+  members: { labelKey: 'settings.nav.community.members', icon: 'group' },
+  channels: { labelKey: 'settings.nav.community.channels', icon: 'forum' },
+  roles: { labelKey: 'settings.nav.community.roles', icon: 'shield' },
+  invites: { labelKey: 'settings.nav.community.invites', icon: 'qr_code_2' },
+  voiceMedia: { labelKey: 'settings.nav.community.voiceMedia', icon: 'mic' },
+  apps: { labelKey: 'settings.nav.community.apps', icon: 'stadia_controller' },
+  bots: { labelKey: 'settings.nav.community.bots', icon: 'smart_toy' },
+  plugins: { labelKey: 'settings.nav.community.plugins', icon: 'extension' },
+  bandwidth: { labelKey: 'settings.nav.community.bandwidth', icon: 'data_usage' },
+  authentication: { labelKey: 'settings.nav.community.authentication', icon: 'shield_lock' },
+  email: { labelKey: 'settings.nav.community.email', icon: 'mail' },
+  storage: { labelKey: 'settings.nav.community.storage', icon: 'cloud_upload' },
+  backups: { labelKey: 'settings.nav.community.backups', icon: 'backup' },
+  audit: { labelKey: 'settings.nav.community.audit', icon: 'history' },
+  moderation: { labelKey: 'settings.nav.community.moderation', icon: 'gavel' },
+  health: { labelKey: 'settings.nav.community.health', icon: 'health_and_safety' },
+  updates: { labelKey: 'settings.nav.community.updates', icon: 'system_update' },
+};
+
+/** The community nav for a viewer who may open `sections`, in nav order. */
+export function communityNav(sections: readonly AdminSection[]): NavItem[] {
+  return ADMIN_SECTIONS.filter((section) => sections.includes(section)).map((section) => ({
+    href: ADMIN_SECTION_PATH[section],
+    ...COMMUNITY_NAV_META[section],
+  }));
+}
 
 const USER_NAV: NavItem[] = [
   { href: '/settings/my-account', labelKey: 'settings.nav.user.account', icon: 'manage_accounts' },
@@ -65,11 +81,17 @@ const USER_NAV: NavItem[] = [
 
 const SettingsShellContext = createContext(false);
 
-export default function SettingsShell({ scope, children }: { scope: 'community' | 'user'; children: ReactNode }) {
+type SettingsShellProps =
+  | { scope: 'user'; children: ReactNode }
+  /** `sections`: what the viewer may open — the page guard's `access.sections`. */
+  | { scope: 'community'; sections: readonly AdminSection[]; children: ReactNode };
+
+export default function SettingsShell(props: SettingsShellProps) {
+  const { scope, children } = props;
   const t = useT();
   const nested = useContext(SettingsShellContext);
   const pathname = usePathname();
-  const nav = scope === 'community' ? COMMUNITY_NAV : USER_NAV;
+  const nav = props.scope === 'community' ? communityNav(props.sections) : USER_NAV;
   const title = t(scope === 'community' ? 'settings.nav.communityTitle' : 'settings.nav.userTitle');
   const isActive = (item: NavItem) =>
     pathname === item.href ||

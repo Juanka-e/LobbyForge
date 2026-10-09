@@ -1,18 +1,12 @@
 import type { Metadata } from 'next';
-import { cookies } from 'next/headers';
 import {
   getAllChannelRoleOverridesForServer,
-  getInstanceSetupStatus,
   listChannelsForServer,
   listRolesBriefForServer,
-  listServersForUser,
   type ChannelRow,
 } from '@lobbyforge/db';
-import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
-import { getSessionSecret } from '@/lib/api-auth';
+import { adminPageMetadata, requireAdminSection } from '@/lib/admin-access';
 import { getDb } from '@/lib/db';
-import { getActiveSession } from '@/lib/active-session';
-import { getTranslator } from '@/lib/i18n/server';
 import SettingsShell from '@/app/SettingsShell';
 import ChannelsClient, { type ChannelView } from './ChannelsClient';
 
@@ -20,29 +14,12 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function generateMetadata(): Promise<Metadata> {
-  const t = await getTranslator();
-  return { title: t('adminSettings.channels.metaTitle') };
+  return adminPageMetadata('channels', 'adminSettings.channels.metaTitle');
 }
 
 export default async function ChannelsSettingsPage() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(ADMIN_TOKEN_COOKIE)?.value ?? null;
-  if (!(await isInstanceAdminAllowed(cookieStore.toString(), token))) {
-    const t = await getTranslator();
-    return (
-      <SettingsShell scope="community">
-        <section>
-          <h1 className="text-2xl font-semibold text-text-primary">{t('adminSettings.channels.title')}</h1>
-          <p className="mt-2 text-sm text-danger">{t('common.adminRequired')}</p>
-        </section>
-      </SettingsShell>
-    );
-  }
-
+  const access = await requireAdminSection('channels');
   const db = getDb();
-  const setup = await getInstanceSetupStatus(db);
-  const session = await getActiveSession(cookieStore.toString(), getSessionSecret());
-  const userId = session?.uid ?? setup.ownerUserId ?? null;
 
   let serverId: string | null = null;
   let channels: ChannelRow[] = [];
@@ -50,10 +27,9 @@ export default async function ChannelsSettingsPage() {
   let roles: Array<{ id: string; name: string; position: number }> = [];
   let loadError: string | null = null;
 
-  if (userId) {
+  if (access.userId) {
     try {
-      const servers = await listServersForUser(db, userId, { limit: 1 });
-      const firstServer = servers[0];
+      const firstServer = access.server;
       if (firstServer) {
         serverId = firstServer.id;
         channels = await listChannelsForServer(db, firstServer.id, { limit: 200 });
@@ -74,7 +50,7 @@ export default async function ChannelsSettingsPage() {
   }
 
   return (
-    <SettingsShell scope="community">
+    <SettingsShell scope="community" sections={access.sections}>
       <ChannelsClient
         serverId={serverId}
         initialChannels={channels.map((c) => ({

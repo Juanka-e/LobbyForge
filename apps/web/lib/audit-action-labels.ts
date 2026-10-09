@@ -48,6 +48,7 @@ const ACTION_LABEL_KEYS: Record<string, string> = {
   'server.banner.clear': 'admin.audit.action.server.banner.clear',
   'server.banner.update': 'admin.audit.action.server.banner.update',
   'user.email_verified_by_admin': 'admin.audit.action.user.email_verified_by_admin',
+  'user.password_reset_by_operator': 'admin.audit.action.user.password_reset_by_operator',
   'voice.block_enforced': 'admin.audit.action.voice.block_enforced',
   'voice.disconnect': 'admin.audit.action.voice.disconnect',
   'voice.mute': 'admin.audit.action.voice.mute',

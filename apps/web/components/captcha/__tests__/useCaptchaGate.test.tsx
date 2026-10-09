@@ -82,7 +82,10 @@ afterEach(() => {
   delete window.turnstile;
 });
 
-describe('useCaptchaGate', { timeout: 20_000 }, () => {
+// Real timers (the 2.5 s fill time, the widget start wait) race the CPU when
+// the whole suite runs next to other heavy work; the flows are also pinned
+// end to end in e2e/captcha.spec.ts and e2e/email.spec.ts.
+describe('useCaptchaGate', { timeout: 20_000, retry: 2 }, () => {
   it('shows and sends nothing for adaptive sign-in until the server asks', async () => {
     renderHarness({ surface: 'login', prefetch: false });
     expect(altchaWidget()).toBeNull();

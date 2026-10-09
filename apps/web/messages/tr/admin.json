@@ -63,6 +63,7 @@
   "admin.audit.action.server.banner.clear": "topluluk afişini kaldırdı",
   "admin.audit.action.server.banner.update": "topluluk afişini değiştirdi",
   "admin.audit.action.user.email_verified_by_admin": "bir üyenin e-posta adresini doğrulanmış olarak işaretledi",
+  "admin.audit.action.user.password_reset_by_operator": "bir hesabın şifresini sunucu konsolundan (lfctl) sıfırladı",
   "admin.audit.action.voice.block_enforced": "ses engeli sürerken yeniden katılan bir üyeyi çıkardı",
   "admin.audit.action.voice.disconnect": "bir üyenin ses bağlantısını kesti",
   "admin.audit.action.voice.mute": "bir üyeyi sunucuda susturdu",

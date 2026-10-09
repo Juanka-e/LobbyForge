@@ -2,6 +2,77 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [0.2.0-rc.8] - 2026-10-09
+
+The first release candidate since rc.7. It collects everything below, down to and including "official hub, plugin UI kit, finished games and bots".
+
+- **Security:** a full security review was carried out and every finding fixed, including the follow-ups.
+  - Device cookies stop password guessing from locking out an account's owner.
+  - Voice moderation adds a disconnect action, and every anti-cheat block is written to the audit log.
+- **Bots:** Bot API v2, with slash commands, incoming and outgoing webhooks, an event stream and SDK v2. Developer docs are on the hub at `/developers`.
+- **Marketplace:** plugins run in a sandbox, with QuickJS on the server and a sandboxed iframe for the UI (ADR-007).
+- **Bot protection:** the built-in ALTCHA challenge is on by default. Cloudflare Turnstile and Google reCAPTCHA can be used instead.
+- **Email:** one provider registry (SES, Scaleway, the free tiers, custom SMTP), email verification (`off` / `optional` / `required`), email change, and password reset.
+- **Activities and bots:**
+  - fixes from a real-browser pass with several players:
+    - phone navigation;
+    - voice is now enforced;
+    - hosting moves to someone else when the host leaves;
+    - "play again";
+    - `bot_offline`;
+  - fixes from the full end-to-end pass, including expiring invites and concurrent actions.
+- **Admin pages** are hidden from anyone who can't use them (404), and so are their entry points.
+- **Operations:** `lfctl user reset-password` / `list-admins` recover an admin account from the server shell. Signed manifests set their channel by version.
+- **Desktop:** a one-click, branded, per-user Windows installer (English and Turkish). The code-signing pipeline turns on once secrets are added (`docs/DESKTOP_SIGNING.md`).
+- **Dependencies:**
+  - React 19.3, ESLint 10, Vitest 5;
+  - Redis 8.10.2 (**back up `redis-data` before upgrading**: Redis 8 rewrites the file in a format Redis 7 can't read);
+  - current GitHub Actions;
+  - zod 4 and tailwind-merge 3 are deferred.
+- **Upgrade notes:**
+  - migrations 0039–0046 are expand-only;
+  - bot protection (ALTCHA) turns on for sign-up and new guests, and `LOBBYFORGE_CAPTCHA_PROVIDER=none` restores the old behaviour;
+  - email stays off until it's configured.
+
+## [Unreleased] - Admin pages are invisible to people who cannot use them - 2026-10-09
+
+- **No more "admin token required" screens.**
+  - **Who gets a 404:** signed-out visitors, guests, and members without the permission get a real 404 on every `/admin/**` page and on `/servers/{id}`. The check runs on the server before any settings UI or data loads, so refused pages are indistinguishable from missing ones.
+  - **Where the guard lives:** `lib/admin-access.ts` holds one guard per section. A source-shape test makes every admin page go through it.
+- **Each page opens with the permission its API already enforces:**
+
+  | Page | Opens with |
+  |---|---|
+  | Members | Kick, Ban or Manage Roles, or Manage Community for the join queue |
+  | Channels | Manage Channels |
+  | Roles | Manage Roles |
+  | Invites, Voice & Media, Apps, Bots | Manage Community |
+  | Audit | View Audit Log |
+  | Instance-wide pages | the instance owner or the operator token only |
+
+- **Entry points:**
+  - The community menu, voice-channel gear, channel hints, "install an app", the bot profile link and the header Health link appear only when their page would open.
+  - The settings navigation lists only the sections the viewer may open.
+  - Inside Members, moderators see only the actions they hold.
+
+## [Unreleased] - One-click Windows installer and code-signing pipeline - 2026-10-09
+
+- **Windows installer, one click.** Double-clicking the setup.exe installs for the current user in `%LOCALAPPDATA%\LobbyForge` with no admin prompt, shows a small dark LobbyForge progress window for a second or two, and opens the app. Running a newer installer closes the app, updates it in place (shortcuts and settings kept) and reopens it. `/WIZARD` brings back the classic pages; `/S` stays silent and does not open the app. English and Turkish, picked from the Windows display language.
+  - **How:** a copy of Tauri's NSIS template (tauri-bundler 2.9.4, the one in `@tauri-apps/cli` 2.11.4) with four fenced changes: brand colours, passive mode by default, a compact progress window, and launch when done. Uninstall, upgrade, WebView2 and shortcut code is Tauri's. A unit test fails when the CLI version changes, as a reminder to rebase it (docs/DESKTOP_SIGNING.md, "Upgrading Tauri").
+  - **Artwork:** `apps/desktop/scripts/make-installer-assets.mjs` draws the NSIS header and sidebar, the WiX banner and dialog image and the installer icon from the app icon in the web theme's dark colours.
+- **Code signing, off until configured.** `desktop-release.yml` signs Windows and macOS builds as soon as their secrets exist in the `desktop-signing` environment; without secrets builds stay unsigned and green, and half a configuration fails the build. Windows: Certum SimplySign through `ssign` (app, uninstaller and installer), or SignPath Foundation through its action (app exe, then installers). macOS: Developer ID signing and notarization (`APPLE_*`). Secrets reach only the bundling step, never the compile step, and are never printed; signatures are verified after bundling. A release-day fallback signs on the owner's machine with a one-time SimplySign code: `pnpm --filter @lobbyforge/desktop sign:local`. Owner steps: docs/DESKTOP_SIGNING.md; ADR-005 amended.
+- **One desktop pipeline.** `release.yml` now calls `desktop-release.yml` for `v*` tags instead of building installers itself, passing only the signing secrets by name. The tauri-action build on `desktop-v*` tags is retired; desktop releases ship with the unified `v*` release. A platform whose build or signature check fails uploads nothing, so it is missing from the release instead of published unsigned; the server release still goes out. Linux bundles are now built on Ubuntu 22.04 for both entry points.
+- **Metadata:** publisher "LobbyForge contributors" (it was "LobbyForge", the product name, which the Microsoft Store rejects), copyright, homepage `https://lobbyforge.org`, licence and clearer descriptions. The exe's company name and copyright follow.
+- **Windows smoke test fixed.** It looked for `LobbyForge.exe` in `%LOCALAPPDATA%\Programs\LobbyForge`; the app is `lobbyforge-desktop.exe` in `%LOCALAPPDATA%\LobbyForge`, so even its fallback search could not find it. It now reads the install folder and binary name from the per-user uninstall entry (with both folders as fallbacks), asserts a per-user install, and also reinstalls and uninstalls.
+
+## [Unreleased] - Account recovery from the server shell - 2026-10-09
+
+- **`lfctl user reset-password --email <address>`** resets a forgotten password from the server's shell. Until now, an install without mail had to wipe its database to recover a forgotten admin password.
+  - **The password:** asked twice without echo, read with `--password-stdin`, or created with `--generate` and printed once. A password on the command line is refused.
+  - **Same code as the app:** it runs inside the web container with the app's own scrypt hash and sign-up policy.
+  - **Afterwards:** every session and device cookie is revoked, and so are pending email-change/reset links and desktop sign-in codes. The sign-in lock is cleared and the reset is audited as `user.password_reset_by_operator`.
+- **`lfctl user list-admins`** shows the owner's and the server owners' addresses. See docs/GUEST_AUTH.md, "Account recovery by the server operator".
+
 ## [Unreleased] - Dependency cleanup, third batch - 2026-10-07
 
 - **Runtime:** drizzle-orm 0.45.3. Apart from a new Netlify driver, its published code is identical to 0.45.2. The ALTCHA widget moves to 3.2.4: the workers, CSS and types are unchanged, and the external build only stops an interrupted audio challenge from throwing an unhandled `AbortError`.

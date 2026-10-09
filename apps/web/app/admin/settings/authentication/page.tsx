@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
-import { cookies } from 'next/headers';
 import { getEffectiveInstanceAccessSettings, getInstanceBootstrapStatus } from '@lobbyforge/db';
-import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
+import { adminPageMetadata, requireAdminSection } from '@/lib/admin-access';
 import { getDb } from '@/lib/db';
 import { getDiscovery, readCatalogue } from '@/lib/i18n/catalogue';
 import { getTranslator } from '@/lib/i18n/server';
@@ -14,8 +13,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function generateMetadata(): Promise<Metadata> {
-  const t = await getTranslator();
-  return { title: t('adminSettings.auth.metaTitle') };
+  return adminPageMetadata('authentication', 'adminSettings.auth.metaTitle');
 }
 
 /**
@@ -39,26 +37,14 @@ function privacyNotices(): PrivacyNoticeSet[] {
 }
 
 export default async function AuthenticationSettingsPage() {
+  const access = await requireAdminSection('authentication');
   const t = await getTranslator();
-  const cookieStore = await cookies();
-  const token = cookieStore.get(ADMIN_TOKEN_COOKIE)?.value ?? null;
-  if (!(await isInstanceAdminAllowed(cookieStore.toString(), token))) {
-    return (
-      <SettingsShell scope="community">
-        <section>
-          <h1 className="text-2xl font-semibold text-text-primary">{t('adminSettings.auth.title')}</h1>
-          <p className="mt-2 text-sm text-danger">{t('common.adminRequired')}</p>
-        </section>
-      </SettingsShell>
-    );
-  }
-
   const [settings, bootstrap] = await Promise.all([
     getEffectiveInstanceAccessSettings(getDb()),
     getInstanceBootstrapStatus(getDb()),
   ]);
   return (
-    <SettingsShell scope="community">
+    <SettingsShell scope="community" sections={access.sections}>
       <section>
         <h1 className="text-2xl font-semibold text-text-primary">{t('adminSettings.auth.title')}</h1>
         <p className="mt-1 text-sm text-text-secondary">{t('adminSettings.auth.subtitle')}</p>

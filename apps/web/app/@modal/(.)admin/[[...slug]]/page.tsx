@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import { requireAdminArea } from '@/lib/admin-access';
 import AppsPage from '@/app/admin/apps/page';
 import AuditPage from '@/app/admin/audit/page';
 import BandwidthPage from '@/app/admin/bandwidth/page';
@@ -31,6 +32,10 @@ import VoiceMediaPage from '@/app/admin/settings/voice-media/page';
  * was registered here. `admin-modal-routes.test.ts` now walks
  * `app/admin/**` and fails the build if a page is not represented,
  * so the next admin page cannot silently 404 the same way.
+ *
+ * The admin layout does not wrap this slot, so its guard runs here too;
+ * each page then applies its own (`requireAdminSection`). A refused page
+ * takes the same `notFound()` as a slug that is not in the map.
  */
 const PAGES = {
   apps: AppsPage,
@@ -57,6 +62,7 @@ const PAGES = {
 const UPDATE_RUN_PREFIX = 'updates/';
 
 export default async function InterceptedAdminSettings({ params }: { params: Promise<{ slug?: string[] }> }) {
+  await requireAdminArea();
   const key = (await params).slug?.join('/') ?? '';
   const Page = PAGES[key as keyof typeof PAGES];
   if (Page) return <Page />;

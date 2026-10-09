@@ -81,7 +81,7 @@ function renderView(locale = 'en', voice = makeVoice()) {
           channelName="Lounge"
           apps={APPS}
           currentUserId="u-me"
-          canManageServer={false}
+          appSettingsHref={null}
         />
       </LobbyVoiceContext.Provider>
     </I18nProvider>
@@ -193,7 +193,7 @@ describe('LobbyActivityView host left', () => {
             channelName="Lounge"
             apps={APPS}
             currentUserId={props.currentUserId ?? 'u-me'}
-            canManageServer={false}
+            appSettingsHref={null}
             canStartActivities={props.canStartActivities ?? false}
           />
         </LobbyVoiceContext.Provider>

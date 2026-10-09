@@ -1,6 +1,5 @@
 import type { Metadata } from 'next';
-import { cookies } from 'next/headers';
-import { ADMIN_TOKEN_COOKIE, isInstanceAdminAllowed } from '@/lib/admin-auth';
+import { adminPageMetadata, requireAdminSection } from '@/lib/admin-access';
 import {
   loadBackupManifest,
   verifyBackupManifest,
@@ -14,8 +13,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function generateMetadata(): Promise<Metadata> {
-  const t = await getTranslator();
-  return { title: t('adminSettings.backups.metaTitle') };
+  return adminPageMetadata('backups', 'adminSettings.backups.metaTitle');
 }
 
 interface BackupState {
@@ -25,24 +23,12 @@ interface BackupState {
 }
 
 export default async function BackupsSettingsPage() {
+  const access = await requireAdminSection('backups');
   const t = await getTranslator();
-  const cookieStore = await cookies();
-  const token = cookieStore.get(ADMIN_TOKEN_COOKIE)?.value ?? null;
-  if (!(await isInstanceAdminAllowed(cookieStore.toString(), token))) {
-    return (
-      <SettingsShell scope="community">
-        <section>
-          <h1 className="text-2xl font-semibold text-text-primary">{t('adminSettings.backups.title')}</h1>
-          <p className="mt-2 text-sm text-danger">{t('common.adminRequired')}</p>
-        </section>
-      </SettingsShell>
-    );
-  }
-
   const state = await loadBackupState(t);
 
   return (
-    <SettingsShell scope="community">
+    <SettingsShell scope="community" sections={access.sections}>
       <BackupsBody t={t} state={state} />
     </SettingsShell>
   );

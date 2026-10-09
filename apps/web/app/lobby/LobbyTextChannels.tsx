@@ -21,6 +21,11 @@ export interface LobbyTextChannelsProps {
   channels: Channel[];
   /** Server ID for fetching unread counts. */
   serverId?: string | null;
+  /**
+   * The channel settings page, for a viewer it will open for (Manage
+   * Channels). Without it the list shows no settings or add hints.
+   */
+  channelSettingsHref?: string | null;
 }
 
 const STORAGE_KEY = 'lf-last-seen-channels';
@@ -39,7 +44,8 @@ function markSeen(channelId: string) {
   } catch { /* storage disabled */ }
 }
 
-export function LobbyTextChannels({ channels }: LobbyTextChannelsProps) {
+export function LobbyTextChannels({ channels, channelSettingsHref = null }: LobbyTextChannelsProps) {
+  const canManageChannels = Boolean(channelSettingsHref);
   const t = useT();
   const voice = useLobbyVoice();
   const activeId = voice.activeTextChannelId;
@@ -72,9 +78,15 @@ export function LobbyTextChannels({ channels }: LobbyTextChannelsProps) {
         <h3 className="font-label-xs uppercase tracking-wider group-hover:text-text-secondary transition-colors text-text-secondary">
           {t('lobbyMain.text.heading')}
         </h3>
-        <span className="material-symbols-outlined text-[16px] opacity-0 group-hover:opacity-100 transition-opacity text-text-secondary">
-          add
-        </span>
+        {/* Hints that channels can be added or configured — only for those who can. */}
+        {canManageChannels ? (
+          <span
+            className="material-symbols-outlined text-[16px] opacity-0 group-hover:opacity-100 transition-opacity text-text-secondary"
+            aria-hidden
+          >
+            add
+          </span>
+        ) : null}
       </div>
       <ul className="space-y-[2px]">
         {channels.length === 0 ? (
@@ -113,8 +125,11 @@ export function LobbyTextChannels({ channels }: LobbyTextChannelsProps) {
                     {c.name}
                   </span>
                 </div>
-                {active ? (
-                  <span className="material-symbols-outlined text-[16px] opacity-0 group-hover:opacity-100 transition-opacity text-text-secondary">
+                {active && canManageChannels ? (
+                  <span
+                    className="material-symbols-outlined text-[16px] opacity-0 group-hover:opacity-100 transition-opacity text-text-secondary"
+                    aria-hidden
+                  >
                     settings
                   </span>
                 ) : isUnread ? (

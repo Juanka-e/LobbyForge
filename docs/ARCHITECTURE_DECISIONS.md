@@ -78,6 +78,58 @@ set up macOS Developer ID + notarization, add SHA-256 checksums and
 GitHub artifact attestations to the release workflow, pin release
 actions to commit SHAs.
 
+**Amended 2026-10-09: signing is wired, off until secrets exist.** The
+choice of certificate follows
+[DESKTOP_SIGNING_INSTALLER_RESEARCH_2026-10.md](DESKTOP_SIGNING_INSTALLER_RESEARCH_2026-10.md):
+no free route removes the SmartScreen warning today; Certum Open Source
+(SimplySign cloud, from €49) is the cheapest route open to an individual in
+Turkey; SignPath Foundation is free but asks for reputation the project does
+not have yet. Azure Artifact Signing is not available in Turkey.
+
+As implemented (owner guide: [DESKTOP_SIGNING.md](DESKTOP_SIGNING.md)):
+- **One pipeline.** `desktop-release.yml` is the only place installers are
+  built; `release.yml` calls it for `v*` tags (version stamped in), and it
+  can be run by hand for test builds plus a Windows install smoke test.
+  The tauri-action build on `desktop-v*` tags is retired: two copies of the
+  signing steps would drift, and desktop versions already follow the
+  unified release.
+- **Off until configured.** `apps/desktop/scripts/release-signing.mjs`
+  reads which secrets are set (environment `desktop-signing`). No secrets:
+  unsigned, green. Half a provider, or two Windows providers: the build
+  fails rather than silently shipping unsigned. Signing settings never
+  live in the committed `tauri.conf.json`; CI passes them with `--config`.
+- **Windows, Certum:** `CERTUM_EMAIL` + `CERTUM_OTP` (the TOTP seed) →
+  `bundle.windows.signCommand` runs `ssign` (HTTPS client for SimplySign,
+  downloaded and hash-pinned), so Tauri signs the app, the NSIS plugins,
+  the uninstaller and the installer. MSI is skipped in these builds
+  (ssign cannot sign MSI). Fallback without storing the seed:
+  `pnpm --filter @lobbyforge/desktop sign:local` on the owner's machine
+  with a one-time code, or a certificate thumbprint from the Windows
+  store.
+- **Windows, SignPath:** `SIGNPATH_API_TOKEN` + `SIGNPATH_ORGANIZATION_ID`
+  → the app exe is signed through SignPath's action before bundling
+  (pre-patched with the bundle-type marker so the bundler leaves the
+  signature intact) and the installers after; release tags only, unless a
+  test policy is configured. The NSIS-generated uninstaller stays unsigned
+  on this route.
+- **macOS:** `APPLE_CERTIFICATE` + `APPLE_CERTIFICATE_PASSWORD` sign;
+  `APPLE_ID`/`APPLE_PASSWORD`/`APPLE_TEAM_ID` or an App Store Connect API
+  key notarize. Empty variables are unset before Tauri runs.
+- **Least exposure.** The compile step sees no secret; only the bundling
+  step gets the chosen provider's secrets; values are never printed;
+  signatures are verified after bundling, and a platform that fails
+  uploads nothing instead of an unsigned installer.
+- **Installer.** A custom NSIS template (Tauri's, four fenced changes)
+  makes the default install one-click, per user (`%LOCALAPPDATA%`, no UAC),
+  with a compact branded progress window that opens the app when done;
+  `/WIZARD` keeps Tauri's pages. English and Turkish follow the system
+  language. Publisher is "LobbyForge contributors" (it was the product
+  name, which the Microsoft Store rejects).
+
+Still open: buying the certificate or SignPath's acceptance; macOS
+Developer ID when Mac users arrive; Microsoft Store (MSIX) and winget
+channels; the Tauri updater.
+
 ## ADR-006: No Central Authentication — the Hub Is Unauthenticated
 
 **Decision**: The Official Hub (lobbyforge.org) has NO login/register
