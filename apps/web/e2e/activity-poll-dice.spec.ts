@@ -281,14 +281,14 @@ test.describe('Poll and Dice Bot with two players, through the lobby', () => {
     await guest.getByRole('button', { name: 'Close activities', exact: true }).click();
     await openActivities(guest);
     const guestDice = guest.getByRole('region', { name: 'Dice Bot', exact: true });
-    await expect(guestDice.getByRole('button', { name: /^Roll d6/ })).toBeVisible({ timeout: 15_000 });
+    await expect(guestDice.getByRole('button', { name: /^Roll a 6-sided die/ })).toBeVisible({ timeout: 15_000 });
 
-    // ── Both roll: the host picks a d20, the guest keeps the default d6.
-    await ownerDice.getByRole('group', { name: 'Die' }).getByRole('button', { name: 'd20', exact: true }).click();
-    await ownerDice.getByRole('button', { name: /^Roll d20/ }).click();
-    await expect(ownerDice.getByRole('status')).toHaveText(/^You rolled d20 · \d+$/, { timeout: 15_000 });
-    await guestDice.getByRole('button', { name: /^Roll d6/ }).click();
-    await expect(guestDice.getByRole('status')).toHaveText(/^You rolled d6 · \d+$/, { timeout: 15_000 });
+    // ── Both roll: the host picks a 20-sided die, the guest keeps the default 6-sided one.
+    await ownerDice.getByRole('group', { name: 'Die (number of sides)' }).getByRole('button', { name: '20-sided', exact: true }).click();
+    await ownerDice.getByRole('button', { name: /^Roll a 20-sided die/ }).click();
+    await expect(ownerDice.getByRole('status')).toHaveText(/^You rolled a 20-sided die\s· \d+$/, { timeout: 15_000 });
+    await guestDice.getByRole('button', { name: /^Roll a 6-sided die/ }).click();
+    await expect(guestDice.getByRole('status')).toHaveText(/^You rolled a 6-sided die\s· \d+$/, { timeout: 15_000 });
 
     // Each screen marks the viewer's own row "You" (a badge after their name,
     // or the name itself when the host does not know it); the other row is
@@ -313,7 +313,7 @@ test.describe('Poll and Dice Bot with two players, through the lobby', () => {
     }
 
     // ── The guest rolls again: their count moves on both screens, the host's does not.
-    await guestDice.getByRole('button', { name: /^Roll d6/ }).click();
+    await guestDice.getByRole('button', { name: /^Roll a 6-sided die/ }).click();
     await expect(cells(mine(guestDice)).nth(0)).toHaveText('2', { timeout: 15_000 });
     await expect(cells(theirs(ownerDice)).nth(0)).toHaveText('2', { timeout: 15_000 });
     await expect(cells(mine(ownerDice)).nth(0)).toHaveText('1');
