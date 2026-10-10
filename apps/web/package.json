@@ -43,7 +43,7 @@
     "livekit-client": "^2.5.7",
     "livekit-server-sdk": "^2.19.1",
     "material-symbols": "0.47.6",
-    "next": "^16.3.6",
+    "next": "^16.4.0",
     "nodemailer": "10.0.14",
     "postgres": "^3.4.9",
     "react": "^19.3.0",
