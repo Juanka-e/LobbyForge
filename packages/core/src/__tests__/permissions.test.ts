@@ -14,4 +14,11 @@ describe('Permissions utility', () => {
     expect(hasPermission(adminPerms, CorePermission.BAN_MEMBERS)).toBe(true);
     expect(hasPermission(adminPerms, CorePermission.MANAGE_SERVER)).toBe(true);
   });
+
+  it('create_polls is its own permission: sending messages does not imply it, administrator does', () => {
+    expect(CorePermission.CREATE_POLLS).toBe('create_polls');
+    expect(hasPermission([CorePermission.SEND_MESSAGES], CorePermission.CREATE_POLLS)).toBe(false);
+    expect(hasPermission([CorePermission.CREATE_POLLS], CorePermission.CREATE_POLLS)).toBe(true);
+    expect(hasPermission([CorePermission.ADMINISTRATOR], CorePermission.CREATE_POLLS)).toBe(true);
+  });
 });

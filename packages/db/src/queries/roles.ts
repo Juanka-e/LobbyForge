@@ -84,6 +84,7 @@ export const DEFAULT_ADMIN_PERMISSIONS: CorePermissionT[] = [
   CorePermission.DEAFEN_MEMBERS,
   CorePermission.VIEW_AUDIT_LOG,
   CorePermission.START_ACTIVITY,
+  CorePermission.CREATE_POLLS,
 ];
 
 function normalizePermissions(input: string[]): string[] {
