@@ -9,10 +9,11 @@ export default defineConfig({
       '@': r('./'),
     },
   },
-  esbuild: {
+  oxc: {
     // Match Next.js's automatic JSX runtime so component tests don't need
-    // an explicit `import React from 'react'`.
-    jsx: 'automatic',
+    // an explicit `import React from 'react'`. (Vite 8 transforms with Oxc;
+    // this was `esbuild: { jsx: 'automatic' }` on Vite 6.)
+    jsx: { runtime: 'automatic' },
   },
   test: {
     environment: 'node',

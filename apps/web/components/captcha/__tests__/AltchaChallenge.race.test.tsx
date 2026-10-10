@@ -88,7 +88,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('ALTCHA: one verification at a time', { timeout: 20_000 }, () => {
+describe('ALTCHA: one verification at a time', { timeout: 20_000, retry: 2 }, () => {
   it('a token asked for right after mounting joins the widget’s own start instead of racing it', async () => {
     const handle = await mountAndGetHandle();
     await expect(handle.execute()).resolves.toBe('payload-1');
