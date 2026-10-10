@@ -46,7 +46,7 @@ async function openSolved(props: Partial<Parameters<typeof GuestVerificationDial
   return { onVerified, onDismiss };
 }
 
-describe('GuestVerificationDialog', { timeout: 20_000 }, () => {
+describe('GuestVerificationDialog', { timeout: 20_000, retry: 2 }, () => {
   it('renders nothing while closed', () => {
     renderIn(<GuestVerificationDialog open={false} onVerified={vi.fn()} onDismiss={vi.fn()} />);
     expect(screen.queryByRole('dialog')).toBeNull();

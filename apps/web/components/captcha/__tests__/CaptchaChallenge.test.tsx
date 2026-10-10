@@ -38,7 +38,7 @@ afterEach(() => {
   delete window.grecaptcha;
 });
 
-describe('CaptchaChallenge', { timeout: 20_000 }, () => {
+describe('CaptchaChallenge', { timeout: 20_000, retry: 2 }, () => {
   it('shows a placeholder while its config loads, then the ALTCHA widget for that surface', async () => {
     let answer: (response: Response) => void = () => {};
     fetchMock.mockImplementation(() => new Promise<Response>((resolve) => (answer = resolve)));

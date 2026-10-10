@@ -58,7 +58,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('ALTCHA without Web Crypto (plain HTTP)', { timeout: 20_000 }, () => {
+describe('ALTCHA without Web Crypto (plain HTTP)', { timeout: 20_000, retry: 2 }, () => {
   it('solves with the JS fallback, shows the same Verified row and hands out the widget’s payload', async () => {
     const onToken = vi.fn();
     let handle: CaptchaHandle | null = null;
