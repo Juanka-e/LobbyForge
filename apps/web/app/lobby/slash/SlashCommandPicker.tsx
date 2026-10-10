@@ -10,7 +10,9 @@ import { BotBadge } from '../BotIdentity';
  * commands grouped by bot, each group headed by the bot's name and the BOT
  * badge. Focus stays in the composer input (a combobox); the input owns
  * the keyboard and points at the active option with
- * `aria-activedescendant` — this component only renders.
+ * `aria-activedescendant` — this component only renders. An offline bot's
+ * commands stay listed (so `/roll` does not seem to vanish) but greyed
+ * out and not selectable, under an "Offline" label.
  */
 
 export function commandOptionId(listboxId: string, command: ChannelCommand): string {
@@ -71,9 +73,16 @@ export function SlashCommandPicker({
               <div id={headerId} className="flex items-center gap-1.5 px-3 pb-1 pt-1.5 text-xs font-semibold text-text-secondary">
                 <span className="truncate">{group.bot.name || t('lobbyMain.chat.unknownBot')}</span>
                 <BotBadge />
+                {group.bot.online ? null : (
+                  <span className="inline-flex items-center gap-1 font-normal text-text-muted">
+                    <span aria-hidden className="material-symbols-outlined text-[14px]">cloud_off</span>
+                    {t('interactions.picker.offline')}
+                  </span>
+                )}
               </div>
               {group.commands.map((command) => {
                 const active = command.id === activeId;
+                const offline = !command.bot.online;
                 return (
                   <div
                     key={command.id}
@@ -81,15 +90,18 @@ export function SlashCommandPicker({
                     data-command-id={command.id}
                     role="option"
                     aria-selected={active}
+                    aria-disabled={offline || undefined}
                     onMouseDown={(event) => {
                       event.preventDefault();
-                      onSelect(command);
+                      if (!offline) onSelect(command);
                     }}
                     onMouseMove={() => {
-                      if (!active) onHover(command);
+                      if (!active && !offline) onHover(command);
                     }}
-                    className={`flex cursor-pointer flex-col gap-0.5 px-3 py-2 sm:flex-row sm:items-baseline sm:gap-3 ${
-                      active ? 'bg-primary/10' : 'hover:bg-surface-container'
+                    className={`flex flex-col gap-0.5 px-3 py-2 sm:flex-row sm:items-baseline sm:gap-3 ${
+                      offline
+                        ? 'cursor-not-allowed opacity-60'
+                        : `cursor-pointer ${active ? 'bg-primary/10' : 'hover:bg-surface-container'}`
                     }`}
                   >
                     <span className="font-mono text-sm font-medium text-text-primary">/{command.name}</span>

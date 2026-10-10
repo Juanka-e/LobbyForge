@@ -443,7 +443,8 @@ The whole pattern is:
    Put your catalogue description under the key `catalog.summary`
    (`CATALOG_SUMMARY_KEY`) and your activity's name under `catalog.name`
    (`CATALOG_NAME_KEY`): the host shows both in the activity picker, the
-   activity header and the admin app list in the viewer's language
+   activity header, the admin and community app lists, the hub's landing
+   and marketplace pages in the viewer's language
    (falling back to `manifest.name` when a language has no name), and the
    manifest can read its English from the same file —
    `summary: LOCALE_TABLES.en[CATALOG_SUMMARY_KEY]`. A plugin's locale test

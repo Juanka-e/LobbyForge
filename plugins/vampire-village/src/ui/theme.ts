@@ -62,9 +62,9 @@ color:var(--lfui-text)}
 --lfui-accent-soft:rgba(168,52,79,.10);--lfui-accent-line:rgba(168,52,79,.40)}
 .vv-veil{inset:0;border-radius:inherit;pointer-events:none;opacity:0}
 .vv-veil-dusk{background:radial-gradient(ellipse at center,rgba(10,4,14,0) 30%,rgba(10,4,14,.85) 100%);animation:vv-dusk 1.3s ease-in-out}
-.vv-veil-dawn{background:linear-gradient(180deg,rgba(255,228,170,.38) 0%,rgba(255,228,170,0) 70%);animation:vv-dawn 1.2s ease-out}
+.vv-veil-dawn{background:linear-gradient(180deg,rgba(255,228,170,.38) 0%,rgba(255,228,170,0) 35%,rgba(255,228,170,0) 100%) 0 100%/100% 200% no-repeat;animation:vv-dawn 1.2s ease-out}
 @keyframes vv-dusk{0%{opacity:0}35%{opacity:1}100%{opacity:0}}
-@keyframes vv-dawn{0%{opacity:1;transform:translateY(-100%)}60%{opacity:.8}100%{opacity:0;transform:translateY(0)}}
+@keyframes vv-dawn{0%{opacity:1;background-position:0 100%}60%{opacity:.8}100%{opacity:0;background-position:0 0}}
 .vv-stars{top:0;left:0;right:0;height:140px;border-radius:26px 26px 0 0;pointer-events:none;opacity:.55;
 background-image:radial-gradient(1.5px 1.5px at 12% 30%,#F3C1CA 50%,transparent 51%),radial-gradient(1px 1px at 28% 62%,#fff 50%,transparent 51%),
 radial-gradient(1.5px 1.5px at 47% 22%,#fff 50%,transparent 51%),radial-gradient(1px 1px at 63% 48%,#F3C1CA 50%,transparent 51%),

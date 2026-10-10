@@ -35,7 +35,8 @@ export interface ChannelCommand {
   name: string;
   description: string;
   options: CommandOption[];
-  bot: { id: string; name: string };
+  /** `online: false` — invoking now would answer `bot_offline`; the picker greys the command out. */
+  bot: { id: string; name: string; online: boolean };
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -90,7 +91,8 @@ export function parseChannelCommand(value: unknown): ChannelCommand | null {
     options: Array.isArray(raw.options)
       ? raw.options.map(parseCommandOption).filter((o): o is CommandOption => Boolean(o))
       : [],
-    bot: { id: bot.id, name: typeof bot.name === 'string' ? bot.name : '' },
+    // A server that does not say is treated as online (the invoke route still answers bot_offline).
+    bot: { id: bot.id, name: typeof bot.name === 'string' ? bot.name : '', online: bot.online !== false },
   };
 }
 
@@ -124,9 +126,10 @@ export function groupCommandsByBot(
   return [...groups.values()];
 }
 
-/** The order the picker shows (and the arrow keys walk): grouped by bot. */
+/** The order the picker shows: grouped by bot, offline bots last. */
 export function commandsInDisplayOrder(commands: ChannelCommand[]): ChannelCommand[] {
-  return groupCommandsByBot(commands).flatMap((group) => group.commands);
+  const groups = groupCommandsByBot(commands);
+  return [...groups.filter((g) => g.bot.online), ...groups.filter((g) => !g.bot.online)].flatMap((group) => group.commands);
 }
 
 /** What the form holds per option before it is checked. */

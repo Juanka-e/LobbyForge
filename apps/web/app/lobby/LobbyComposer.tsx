@@ -68,7 +68,9 @@ export function LobbyComposer({
   const commandsState = useChannelCommands(serverId, channelId, query !== null);
   const pickerOpen = query !== null && focused && !pickerDismissed;
   const visible = pickerOpen ? commandsInDisplayOrder(filterCommands(commandsState.commands, query ?? '')) : [];
-  const active = visible.find((c) => c.id === activeId) ?? visible[0] ?? null;
+  // An offline bot's commands are shown greyed out; the keys skip them.
+  const selectable = visible.filter((c) => c.bot.online);
+  const active = selectable.find((c) => c.id === activeId) ?? selectable[0] ?? null;
 
   function focusInput() {
     requestAnimationFrame(() => inputRef.current?.focus());
@@ -129,17 +131,22 @@ export function LobbyComposer({
       }
       return false;
     }
-    const index = active ? visible.indexOf(active) : -1;
+    const index = active ? selectable.indexOf(active) : -1;
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       const step = event.key === 'ArrowDown' ? 1 : -1;
-      const next = visible[(index + step + visible.length) % visible.length];
+      const next = selectable[(index + step + selectable.length) % selectable.length];
       if (next) setActiveId(next.id);
       return true;
     }
     if ((event.key === 'Enter' || event.key === 'Tab') && active && !event.shiftKey) {
       event.preventDefault();
       pick(active);
+      return true;
+    }
+    if (event.key === 'Enter' && !active) {
+      // Every match belongs to an offline bot: don't post "/roll" as text.
+      event.preventDefault();
       return true;
     }
     return false;

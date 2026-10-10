@@ -11,7 +11,7 @@ import { getHubViewer } from '@/lib/hub-viewer';
 import type { Translator } from '@/lib/i18n/core';
 import { rich } from '@/lib/i18n/rich';
 import { getTranslator } from '@/lib/i18n/server';
-import { pluginSummary } from '@/lib/plugin-catalog-text';
+import { pluginName, pluginSummary } from '@/lib/plugin-catalog-text';
 import { listPluginSummaries } from '@/lib/plugin-registry';
 import ActivityMark from '../_components/ActivityMark';
 import tones from '../_components/hub-tones.module.css';
@@ -317,7 +317,7 @@ function MarketplacePicks({ t }: { t: Translator }) {
   const picks = listPluginSummaries()
     .map((plugin) => ({
       id: plugin.id,
-      name: plugin.name,
+      name: pluginName(plugin.id, t.locale, plugin.name),
       summary: pluginSummary(plugin.id, t.locale, plugin.catalog?.summary ?? null),
     }));
   return (

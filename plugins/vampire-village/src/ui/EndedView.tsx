@@ -104,14 +104,19 @@ export function EndedView(props: EndedViewProps) {
                         <span style={{ flex: '1 1 110px', minWidth: 0, fontSize: 15, fontWeight: 600, overflowWrap: 'anywhere' }}>
                           {p.name}
                         </span>
-                        {role ? (
-                          <span style={{ flex: '1 1 120px', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 14 }}>
-                            <RoleIcon role={role} size={18} />
-                            {t(ROLE_NAME[role])}
-                          </span>
-                        ) : null}
+                        <span style={{ flex: '1 1 120px', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 14 }}>
+                          {role ? (
+                            <>
+                              <RoleIcon role={role} size={18} />
+                              {t(ROLE_NAME[role])}
+                            </>
+                          ) : null}
+                        </span>
                         <span style={{ flex: '1 1 140px', fontSize: 13, color: lf.text2 }}>{status}</span>
-                        {winners.has(p.id) ? <Badge tone="success">{t('vampire.end.winner')}</Badge> : null}
+                        {/* Every row keeps the badge's width, so losers' columns line up with winners'. */}
+                        <span style={{ flex: '0 0 auto', visibility: winners.has(p.id) ? 'visible' : 'hidden' }}>
+                          <Badge tone="success">{t('vampire.end.winner')}</Badge>
+                        </span>
                       </li>
                     );
                   })}

@@ -8,8 +8,8 @@ import {
   type CommandOption,
 } from '../command-options';
 
-const dice = { id: 'b-dice', name: 'Dice' };
-const poll = { id: 'b-poll', name: 'Pollster' };
+const dice = { id: 'b-dice', name: 'Dice', online: true };
+const poll = { id: 'b-poll', name: 'Pollster', online: true };
 
 function command(id: string, name: string, bot = dice): ChannelCommand {
   return { id, name, description: '', options: [], bot };
@@ -33,12 +33,17 @@ describe('parseChannelCommand', () => {
       id: 'c1',
       name: 'roll',
       description: 'Roll dice',
-      bot: { id: 'b1', name: 'Dice' },
+      bot: { id: 'b1', name: 'Dice', online: true },
       options: [
         { name: 'sides', description: '', type: 'integer', required: true, min: 2, max: 1000 },
         { name: 'mode', description: '', type: 'string', required: false, choices: [{ name: 'Public', value: 'public' }] },
       ],
     });
+  });
+
+  it('keeps a bot the server reports offline; a server that does not say means online', () => {
+    expect(parseChannelCommand({ id: 'c1', name: 'roll', bot: { id: 'b1', name: 'Dice', online: false } })?.bot.online).toBe(false);
+    expect(parseChannelCommand({ id: 'c1', name: 'roll', bot: { id: 'b1', name: 'Dice' } })?.bot.online).toBe(true);
   });
 
   it('refuses a command without an id or a bot', () => {
@@ -59,6 +64,12 @@ describe('filterCommands / commandsInDisplayOrder', () => {
 
   it('walks the commands bot by bot, as the picker shows them', () => {
     expect(commandsInDisplayOrder(all).map((c) => c.name)).toEqual(['roll', 'reroll', 'rps', 'poll']);
+  });
+
+  it('puts an offline bot after the online ones', () => {
+    const asleep = { ...dice, online: false };
+    const mixed = [command('1', 'roll', asleep), command('2', 'poll', poll), command('3', 'rps', asleep)];
+    expect(commandsInDisplayOrder(mixed).map((c) => c.name)).toEqual(['poll', 'roll', 'rps']);
   });
 });
 

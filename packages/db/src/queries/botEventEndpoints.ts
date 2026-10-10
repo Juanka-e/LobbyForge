@@ -8,7 +8,7 @@
  * cannot under-count: the 20th consecutive failure switches the endpoint
  * off with `disabled_reason`, a success resets the counter.
  */
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
 import { botEventEndpoints, bots } from '../schema.js';
 import { normalizeBotChannelAccessMode, type BotChannelAccessMode } from './botChannelAccess.js';
@@ -46,6 +46,14 @@ function normalizeEndpoint(row: Record<string, unknown>): BotEventEndpointRow {
 export async function getBotEventEndpoint(db: DbClient, botId: string): Promise<BotEventEndpointRow | null> {
   const rows = await db.select().from(botEventEndpoints).where(eq(botEventEndpoints.botId, botId)).limit(1);
   return rows[0] ? normalizeEndpoint(rows[0] as Record<string, unknown>) : null;
+}
+
+/** The endpoints of several bots in one query, keyed by bot id (bots without one are absent). */
+export async function listBotEventEndpoints(db: DbClient, botIds: string[]): Promise<Map<string, BotEventEndpointRow>> {
+  if (botIds.length === 0) return new Map();
+  const rows = await db.select().from(botEventEndpoints).where(inArray(botEventEndpoints.botId, botIds));
+  const endpoints = rows.map((row) => normalizeEndpoint(row as Record<string, unknown>));
+  return new Map(endpoints.map((endpoint) => [endpoint.botId, endpoint]));
 }
 
 /**

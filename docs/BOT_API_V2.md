@@ -334,11 +334,17 @@ As implemented:
 - Audit `command.invoke` (actor = member, target = bot, with command name,
   channel and interaction id).
 - The composer list answers `{ commands: [{ id, name, description,
-  options, bot: { id, name } }] }`, ordered by bot then name, and hides
+  options, bot: { id, name, online } }] }`, ordered by bot then name, and hides
   everything the invoke would refuse on the command's side (disabled
   command or bot, missing `slash_commands`, channel restrictions, bot
   access, `requiredPermission` the member lacks). A fixed number of
   queries whatever the number of bots.
+- `online: false` means the invoke would answer `bot_offline` right now
+  (no live event stream, no endpoint taking `interaction_create`). The
+  picker keeps those commands listed after the online bots, greyed out
+  under an "Offline" label, and the keys and clicks skip them. Same rule
+  and same fail-open as the invoke check, in one endpoint query and one
+  `PUBSUB NUMSUB`.
 - Managers: `GET /api/servers/{id}/bots/{botId}/commands` → `{ commands:
   [... + adminChannelIds] }`; `PATCH …/commands/{commandId}` `{ enabled?,
   channelIds?: [...] | null }` (the managers' restriction, text channels

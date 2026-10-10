@@ -99,6 +99,7 @@
   "hushle.playing.endGame": "End game",
   "hushle.playing.endTurn": "End turn",
   "hushle.playing.explainerHint": "Describe the word without saying any of the forbidden words. The host scores each card.",
+  "hushle.playing.explainingTeam": "Explaining: {team}",
   "hushle.playing.forbiddenWords": "Don't say",
   "hushle.playing.nextCard": "Next card",
   "hushle.playing.noCard": "No card drawn yet",

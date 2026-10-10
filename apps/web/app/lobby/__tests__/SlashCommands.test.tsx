@@ -48,10 +48,12 @@ const COMMANDS = {
 
 type Call = { url: string; method: string; body: unknown };
 let calls: Call[] = [];
+let commandsBody: unknown = COMMANDS;
 let invokeResponse: () => Response;
 
 beforeEach(() => {
   calls = [];
+  commandsBody = COMMANDS;
   invalidateChannelCommands();
   interactionStore.reset();
   invokeResponse = () => Response.json({ interaction: { id: 'int-1', status: 'pending' } }, { status: 202 });
@@ -60,7 +62,7 @@ beforeEach(() => {
     vi.fn(async (url: string, init: RequestInit = {}) => {
       const call = { url, method: init.method ?? 'GET', body: init.body ? JSON.parse(String(init.body)) : undefined };
       calls.push(call);
-      if (url === COMMANDS_URL) return Response.json(COMMANDS);
+      if (url === COMMANDS_URL) return Response.json(commandsBody);
       if (url.endsWith('/invoke')) return invokeResponse();
       return Response.json({});
     })
@@ -169,6 +171,46 @@ describe('slash command picker', () => {
     expect(screen.queryByRole('form')).toBeNull();
     await waitFor(() => expect(screen.getByRole('combobox')).toHaveFocus());
     expect(screen.getByRole('combobox')).toHaveValue('');
+    expect(invokeCalls()).toHaveLength(0);
+  });
+
+  it('greys out an offline bot: listed last, labelled, skipped by the keys and not selectable', async () => {
+    commandsBody = {
+      commands: COMMANDS.commands.map((c) => (c.bot.id === 'b-dice' ? { ...c, bot: { ...c.bot, online: false } } : c)),
+    };
+    const user = userEvent.setup();
+    renderComposer();
+    const input = screen.getByRole('combobox');
+    await user.type(input, '/');
+    const listbox = await screen.findByRole('listbox');
+    await within(listbox).findAllByRole('option');
+
+    expect(within(listbox).getAllByRole('option').map((o) => o.textContent)).toEqual([
+      '/pollStart a poll',
+      '/rollRoll dice',
+      '/rpsRock paper scissors',
+    ]);
+    const dice = within(listbox).getByRole('group', { name: /Dice/ });
+    expect(within(dice).getByText('Offline')).toBeInTheDocument();
+    const roll = within(dice).getByRole('option', { name: /\/roll/ });
+    expect(roll).toHaveAttribute('aria-disabled', 'true');
+
+    // Only /poll can be active, whatever the arrows do.
+    const poll = within(listbox).getByRole('option', { name: /\/poll/ });
+    expect(poll).toHaveAttribute('aria-selected', 'true');
+    await user.keyboard('{ArrowDown}{ArrowDown}');
+    expect(poll).toHaveAttribute('aria-selected', 'true');
+    expect(roll).toHaveAttribute('aria-selected', 'false');
+
+    await user.click(roll);
+    expect(screen.queryByRole('form')).toBeNull();
+
+    // Every match offline: Enter neither picks nor posts "/r" as text.
+    await user.clear(input);
+    await user.type(input, '/r');
+    await user.keyboard('{Enter}');
+    expect(screen.queryByRole('form')).toBeNull();
+    expect(calls.some((c) => c.url.endsWith('/messages'))).toBe(false);
     expect(invokeCalls()).toHaveLength(0);
   });
 
