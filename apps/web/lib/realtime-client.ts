@@ -216,7 +216,16 @@ export class RealtimeClient {
       } catch {
         return;
       }
-      if (parsed.type === 'event') {
+      if (parsed.type === 'hello') {
+        // The gateway authenticates the socket (an async session and
+        // revocation check) before it reads any message; a subscribe sent
+        // between `open` and `hello` is dropped, and the topic never
+        // delivers. Replay the desired state once authenticated — a topic
+        // that did get through answers `subscribed` again, harmlessly.
+        for (const topic of this.subscriptions.keys()) {
+          this.send({ type: 'subscribe', topic });
+        }
+      } else if (parsed.type === 'event') {
         const set = this.subscriptions.get(parsed.topic as Topic);
         if (!set) return;
         for (const handler of set) {
