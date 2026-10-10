@@ -22,7 +22,7 @@
   "dependencies": {
     "@lobbyforge/core": "workspace:*",
     "@lobbyforge/db": "workspace:*",
-    "ioredis": "^5.4.1",
+    "ioredis": "^6.0.0",
     "ws": "^8.22.0",
     "zod": "^3.23.8"
   },
