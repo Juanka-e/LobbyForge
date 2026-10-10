@@ -296,7 +296,7 @@ describe('the community settings page guard (/servers/{id})', () => {
       userId: VIEWER,
       server: { id: SERVER_ID, name: 'Community', ownerUserId: OWNER },
       isOwner: false,
-      can: { manageChannels: false, kickMembers: false, createInvite: true, viewAuditLog: false },
+      can: { manageChannels: false, kickMembers: false, createInvite: true, viewAuditLog: false, manageRoles: false },
     });
   });
 
@@ -304,7 +304,7 @@ describe('the community settings page guard (/servers/{id})', () => {
     signedIn([CorePermission.ADMINISTRATOR], { uid: OWNER });
     const access = await requireServerSettings(SERVER_ID);
     expect(access.isOwner).toBe(true);
-    expect(access.can).toEqual({ manageChannels: true, kickMembers: true, createInvite: true, viewAuditLog: true });
+    expect(access.can).toEqual({ manageChannels: true, kickMembers: true, createInvite: true, viewAuditLog: true, manageRoles: true });
   });
 
   it.each<[string, () => void]>([

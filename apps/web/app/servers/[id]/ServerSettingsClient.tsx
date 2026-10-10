@@ -30,6 +30,7 @@ import type { Translator } from '@/lib/i18n/core';
 import SettingsModalFrame from '../../SettingsModalFrame';
 import { rich } from '@/lib/i18n/rich';
 import { pluginSummary } from '@/lib/plugin-catalog-text';
+import { PollRolesPicker } from './PollRolesPicker';
 import { RESTRICTED_ACTION_KEYS } from '@/components/email-verification/email-status';
 import { handleEmailUnverified } from '@/components/email-verification/email-status-store';
 
@@ -147,6 +148,7 @@ export interface ServerSettingsViewer {
     kickMembers: boolean;
     createInvite: boolean;
     viewAuditLog: boolean;
+    manageRoles: boolean;
   };
 }
 
@@ -366,7 +368,13 @@ export default function ServerSettingsClient({
           onChanged={reload}
         />
       ) : tab === 'apps' ? (
-        <AppsPanel apps={apps} serverId={serverId} onChanged={reload} />
+        <AppsPanel
+          apps={apps}
+          serverId={serverId}
+          roles={sortedRoles}
+          canManageRoles={viewer.isOwner || viewer.can.manageRoles}
+          onChanged={reload}
+        />
       ) : tab === 'access' ? (
         <AccessPanel
           policy={accessPolicy}
@@ -593,10 +601,14 @@ function Overview({
 function AppsPanel({
   apps,
   serverId,
+  roles,
+  canManageRoles,
   onChanged,
 }: {
   apps: ServerApp[];
   serverId: string;
+  roles: Role[];
+  canManageRoles: boolean;
   onChanged: () => Promise<void>;
 }) {
   const t = useT();
@@ -744,6 +756,10 @@ function AppsPanel({
                   </button>
                 )}
               </div>
+              {/* Chat polls don't need the Poll app installed; who may create them lives on its card. */}
+              {app.id === 'poll' ? (
+                <PollRolesPicker serverId={serverId} roles={roles} canManageRoles={canManageRoles} onChanged={onChanged} />
+              ) : null}
             </section>
           );
         })}

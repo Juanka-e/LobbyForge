@@ -2,6 +2,11 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Choose who can create polls from the Poll app's card - 2026-10-10
+
+- **Poll app card:** Community settings → Apps → Poll now has "Who can create polls in text channels": a box per role, highest first. Each box is the role's `create_polls` permission, saved through the role API, so the role editors show the same thing and the role API's checks (Manage Roles, hierarchy, no granting what you lack) apply. Administrator roles show ticked and locked; without Manage Roles the card is read-only and says why. A refusal is explained inline.
+- **Settings access:** the community settings guard now also reports `manageRoles`.
+
 ## [Unreleased] - Polls in text channels - 2026-10-10
 
 - **Polls:** members with the new **Create polls** permission can post a poll in a text or announcement channel from the composer's `+` menu: a question, 2–10 answers, optional multiple answers, and a duration from 1 hour to 7 days. Anyone who can read the channel can vote, change or remove their vote until the poll closes. Counts show after you vote, and to everyone once the poll closes; before that you see how many people voted. The creator or anyone with Manage Messages can close a poll early. Closed polls stay in the channel with their final results. The voice-room Poll activity is unchanged. See `docs/CHAT_POLLS.md`.

@@ -230,6 +230,8 @@ export interface ServerSettingsAccess {
     kickMembers: boolean;
     createInvite: boolean;
     viewAuditLog: boolean;
+    /** Edit roles' permissions — e.g. who may create polls, from the Poll app's card. */
+    manageRoles: boolean;
   };
 }
 
@@ -263,6 +265,7 @@ export const requireServerSettings = cache(async (serverId: string): Promise<Ser
             kickMembers: hasPermission(permissions, CorePermission.KICK_MEMBERS),
             createInvite: hasPermission(permissions, CorePermission.CREATE_INVITE),
             viewAuditLog: hasPermission(permissions, CorePermission.VIEW_AUDIT_LOG),
+            manageRoles: hasPermission(permissions, CorePermission.MANAGE_ROLES),
           },
         };
       }
