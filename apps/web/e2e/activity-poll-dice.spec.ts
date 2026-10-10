@@ -286,9 +286,9 @@ test.describe('Poll and Dice Bot with two players, through the lobby', () => {
     // ── Both roll: the host picks a 20-sided die, the guest keeps the default 6-sided one.
     await ownerDice.getByRole('group', { name: 'Die (number of sides)' }).getByRole('button', { name: '20-sided', exact: true }).click();
     await ownerDice.getByRole('button', { name: /^Roll a 20-sided die/ }).click();
-    await expect(ownerDice.getByRole('status')).toHaveText(/^You rolled a 20-sided die · \d+$/, { timeout: 15_000 });
+    await expect(ownerDice.getByRole('status')).toHaveText(/^You rolled a 20-sided die\s· \d+$/, { timeout: 15_000 });
     await guestDice.getByRole('button', { name: /^Roll a 6-sided die/ }).click();
-    await expect(guestDice.getByRole('status')).toHaveText(/^You rolled a 6-sided die · \d+$/, { timeout: 15_000 });
+    await expect(guestDice.getByRole('status')).toHaveText(/^You rolled a 6-sided die\s· \d+$/, { timeout: 15_000 });
 
     // Each screen marks the viewer's own row "You" (a badge after their name,
     // or the name itself when the host does not know it); the other row is
