@@ -471,9 +471,9 @@ change email and delete the account. They cannot:
 
   | Action | Routes |
   |---|---|
-  | `message` | `POST /api/servers/{id}/channels/{channelId}/messages`; `PATCH …/messages/{messageId}` when it changes the text (pinning is not gated); `POST …/commands/{commandId}/invoke` (it posts into the channel) |
+  | `message` | `POST /api/servers/{id}/channels/{channelId}/messages`; `PATCH …/messages/{messageId}` when it changes the text (pinning is not gated); `POST …/commands/{commandId}/invoke` (it posts into the channel); `POST …/polls` (a poll is a message, docs/CHAT_POLLS.md) |
   | `dm` | `POST /api/dm`, `POST /api/dm/{channelId}/messages` |
-  | `reaction` | no HTTP route adds reactions — they travel over the LiveKit data channel, which needs a voice token, so the `voice` gate covers them |
+  | `reaction` | `PUT` / `DELETE …/polls/{pollId}/vote` (a poll vote is reaction-sized). Emoji reactions have no HTTP route — they travel over the LiveKit data channel, which needs a voice token, so the `voice` gate covers them |
   | `voice` | `POST /api/livekit/token` |
   | `server_create` | `POST /api/servers` (the hub) |
   | `channel_create` | `POST /api/servers/{id}/channels` |

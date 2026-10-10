@@ -128,6 +128,15 @@ This is the current rule, not a constraint in the schema. The schema's self-FK i
 
 M12 just stores and returns the blob; the readers are not yet implemented.
 
+**Reserved keys.** A member's `POST` may not set server-only keys: `system`,
+`plugin`, `bot`, `app`, `trust`, `signature`, `moderation`, `interaction`,
+`webhook`, `poll`, or any key starting with `$` or `_` (400 with the `key`).
+`poll` belongs to polls in text channels (docs/CHAT_POLLS.md): a poll
+message stores `metadata.poll = { id }`, written by the poll route in the
+same transaction as the poll. `GET …/messages` adds a `poll` field
+(projected for the caller) to those messages only, and a poll message's
+`content` cannot be edited (403 `poll_message_readonly`).
+
 ## DB schema (no delta from M3)
 
 The `messages` table was in the M3 schema; M12 just exercises it. The relevant indexes (already in the M3 migration):

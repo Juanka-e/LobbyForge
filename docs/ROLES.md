@@ -33,6 +33,7 @@ export const CorePermission = {
   MUTE_MEMBERS: 'mute_members',
   DEAFEN_MEMBERS: 'deafen_members',
   START_ACTIVITY: 'start_activity',
+  CREATE_POLLS: 'create_polls', // polls in text channels (docs/CHAT_POLLS.md)
 } as const;
 ```
 
@@ -45,7 +46,9 @@ export const CorePermission = {
 | Name | Position | Default permissions | Assigned to |
 |---|---|---|---|
 | `@everyone` | 0 | `send_messages`, `connect_voice`, `speak`, `add_reactions`, `create_invite` | Every future member (the seed only assigns the owner; M14's invite-redeem will assign it to new joiners) |
-| `Owner` | 100 | `administrator`, `manage_server`, `manage_channels`, `manage_roles`, `manage_messages`, `kick_members`, `ban_members`, `mute_members`, `deafen_members`, `start_activity` | The owner, on create |
+| `Owner` | 100 | `administrator`, `manage_server`, `manage_channels`, `manage_roles`, `manage_messages`, `kick_members`, `ban_members`, `mute_members`, `deafen_members`, `start_activity`, `create_polls` | The owner, on create |
+
+`create_polls` (0047) is not an `@everyone` default. Migration 0047 added it to the existing roles that hold `administrator` or `manage_messages`; owners grant it to other roles in the role editor. Posting a poll also needs `send_messages`.
 
 `Administrator` is a permission, not a reserved display name. The initial owner receives the ordinary `Owner` role carrying that permission. `@everyone` remains the structural base permission layer and is not rendered as a profile badge.
 
