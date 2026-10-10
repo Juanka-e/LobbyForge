@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useT } from '@/lib/i18n/client';
 import { moderationBlockedMessageKey } from '@/lib/bots/catalog';
 import { commandsInDisplayOrder, filterCommands, type ChannelCommand } from '@/lib/bots/command-options';
@@ -10,6 +10,7 @@ import { MentionInput, type MentionUser } from './MentionInput';
 import { SlashCommandPicker, commandOptionId } from './slash/SlashCommandPicker';
 import { SlashCommandForm, type ComposerChannel } from './slash/SlashCommandForm';
 import { useChannelCommands } from './slash/useChannelCommands';
+import { CreatePollDialog, type CreatedPoll } from './CreatePollDialog';
 import EmailUnverifiedNotice, {
   handleEmailUnverified,
   useEmailRestriction,
@@ -33,6 +34,7 @@ export function LobbyComposer({
   live,
   members,
   channels = [],
+  canCreatePolls = false,
 }: {
   channelName: string;
   serverId: string | null;
@@ -41,6 +43,12 @@ export function LobbyComposer({
   members: MentionUser[];
   /** Channels the member can see — the `channel` option's choices. */
   channels?: ComposerChannel[];
+  /**
+   * CREATE_POLLS (+ SEND_MESSAGES) in a text or announcement channel: the
+   * `+` button opens a menu with "Create poll" (docs/CHAT_POLLS.md). The
+   * route enforces the same rules.
+   */
+  canCreatePolls?: boolean;
 }) {
   const t = useT();
   const listboxId = useId();
@@ -58,6 +66,34 @@ export function LobbyComposer({
   if (picked && picked.channelId !== channelId) setPicked(null);
   const lastTypingRef = useRef<number>(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const menuId = useId();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [pollDialogOpen, setPollDialogOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const pollsHere = canCreatePolls && live && Boolean(serverId && channelId);
+
+  // The menu: focus its first item when it opens; Escape or a click outside closes it.
+  useEffect(() => {
+    if (!menuOpen) return;
+    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    function onPointer(event: MouseEvent) {
+      const target = event.target as Node | null;
+      if (menuRef.current?.contains(target) || menuButtonRef.current?.contains(target)) return;
+      setMenuOpen(false);
+    }
+    document.addEventListener('mousedown', onPointer);
+    return () => document.removeEventListener('mousedown', onPointer);
+  }, [menuOpen]);
+
+  function onPollCreated(created: CreatedPoll) {
+    window.dispatchEvent(
+      new CustomEvent('lf-message-sent', {
+        detail: { channelId, message: created.message, poll: created.poll },
+      })
+    );
+    setStatus(t('lobbyMain.poll.posted'));
+  }
   // EMAIL.md §4.2: a restricted account reads but does not post. Only a
   // live channel asks (the demo lobby has no account behind it).
   const emailLock = useEmailRestriction({ enabled: live });
@@ -221,6 +257,7 @@ export function LobbyComposer({
   }
 
   return (
+    <>
     <form onSubmit={submit} className="px-4 pb-6 pt-2 bg-background z-10 sm:px-6">
       <div
         className="relative bg-surface-container-low border border-border-subtle rounded-lg flex items-center px-4 py-2 focus-within:ring-1 focus-within:ring-primary focus-within:border-primary transition-all shadow-sm"
@@ -241,9 +278,57 @@ export function LobbyComposer({
             onRetry={commandsState.reload}
           />
         ) : null}
-        <button type="button" disabled title={t('lobbyMain.composer.attachments')} className="w-8 h-8 rounded-full flex items-center justify-center mr-2 text-text-muted opacity-50">
-          <span className="material-symbols-outlined text-[20px]">add_circle</span>
-        </button>
+        {pollsHere ? (
+          <div className="relative mr-2">
+            <button
+              ref={menuButtonRef}
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              aria-controls={menuOpen ? menuId : undefined}
+              aria-label={t('lobbyMain.composer.moreActions')}
+              title={t('lobbyMain.composer.moreActions')}
+              data-composer-menu-button
+              onClick={() => setMenuOpen((open) => !open)}
+              className="w-8 h-8 rounded-full flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-surface-container transition-colors"
+            >
+              <span className="material-symbols-outlined text-[20px]" aria-hidden>add_circle</span>
+            </button>
+            {menuOpen ? (
+              <div
+                ref={menuRef}
+                id={menuId}
+                role="menu"
+                aria-label={t('lobbyMain.composer.moreActions')}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape' || event.key === 'Tab') {
+                    if (event.key === 'Escape') event.preventDefault();
+                    setMenuOpen(false);
+                    menuButtonRef.current?.focus();
+                  }
+                }}
+                className="absolute bottom-full left-0 z-20 mb-2 min-w-48 rounded-lg border border-border-subtle bg-surface-raised p-1 shadow-lg"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setPollDialogOpen(true);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-text-primary hover:bg-surface-container focus:bg-surface-container focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  <span className="material-symbols-outlined text-[18px] text-text-secondary" aria-hidden>ballot</span>
+                  {t('lobbyMain.composer.createPoll')}
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <button type="button" disabled title={t('lobbyMain.composer.attachments')} className="w-8 h-8 rounded-full flex items-center justify-center mr-2 text-text-muted opacity-50">
+            <span className="material-symbols-outlined text-[20px]">add_circle</span>
+          </button>
+        )}
         {canRunCommands ? (
           <span id={hintId} className="sr-only">
             {t('interactions.composer.hint')}
@@ -293,5 +378,22 @@ export function LobbyComposer({
         <p className="mt-1 text-xs text-text-muted px-2" aria-live="polite">{status}</p>
       ) : null}
     </form>
+    {/* Outside the composer's <form>: React events bubble out of a portal
+        through the component tree, and the dialog's submit must never
+        reach the composer's. */}
+    {pollsHere && serverId && channelId ? (
+      <CreatePollDialog
+        open={pollDialogOpen}
+        onClose={() => {
+          setPollDialogOpen(false);
+          focusInput();
+        }}
+        serverId={serverId}
+        channelId={channelId}
+        channelName={channelName}
+        onCreated={onPollCreated}
+      />
+    ) : null}
+    </>
   );
 }

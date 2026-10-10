@@ -56,6 +56,8 @@
   "admin.audit.action.message.pin": "bir mesajı sabitledi",
   "admin.audit.action.message.unpin": "bir mesajın sabitlemesini kaldırdı",
   "admin.audit.action.message.update": "bir mesajı düzenledi",
+  "admin.audit.action.poll.close": "bir anketi kapattı",
+  "admin.audit.action.poll.create": "bir anket oluşturdu",
   "admin.audit.action.role.create": "bir rol oluşturdu",
   "admin.audit.action.role.delete": "bir rolü sildi",
   "admin.audit.action.role.update": "bir rolü düzenledi",

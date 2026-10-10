@@ -551,6 +551,7 @@
   "adminSettings.roles.perm.banMembers": "Üyeleri yasakla",
   "adminSettings.roles.perm.connectVoice": "Sesli odalara katıl",
   "adminSettings.roles.perm.createInvite": "Kişileri davet et",
+  "adminSettings.roles.perm.createPolls": "Anket oluştur",
   "adminSettings.roles.perm.kickMembers": "Üyeleri sunucudan at",
   "adminSettings.roles.perm.manageChannels": "Kanalları yönet",
   "adminSettings.roles.perm.manageMessages": "Mesajları yönet",

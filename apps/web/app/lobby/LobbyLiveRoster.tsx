@@ -11,6 +11,8 @@ import { interactionStore, useInteractionState } from '@/lib/bots/interaction-st
 import { BotAvatar, BotBadge } from './BotIdentity';
 import { WebhookAvatar, WebhookBadge } from './WebhookIdentity';
 import { EphemeralAnswerRow, InteractionHeader, PendingInteractionRow } from './slash/InteractionRows';
+import { ChatPollCard } from './ChatPollCard';
+import { applyChatPollUpdate, asChatPollUpdate, asChatPollView, type ChatPollView } from '@/lib/chat-polls';
 import {
   formatDaySeparator,
   formatFullTimestamp,
@@ -51,6 +53,8 @@ interface ChatMessage {
   interaction?: MessageInteractionInfo | null;
   /** Posted by an incoming channel webhook — rendered with the WEBHOOK badge. */
   webhook?: MessageWebhookInfo | null;
+  /** A poll message (docs/CHAT_POLLS.md): the poll as this viewer sees it. */
+  poll?: ChatPollView | null;
 }
 
 interface MessageBot {
@@ -59,7 +63,7 @@ interface MessageBot {
   type: string;
 }
 
-interface WsChatEnvelope {
+interface WsChatMessageEnvelope {
   type: 'message';
   message: {
     id: string;
@@ -71,8 +75,34 @@ interface WsChatEnvelope {
     content: string;
     metadata?: Record<string, unknown> | null;
     createdAt: string;
+    /** A poll message carries its poll (no votes yet). */
+    poll?: unknown;
   };
   at: string;
+}
+
+/**
+ * Everything the chat topic carries. Edits and deletes carry ids only: an
+ * edited message is refetched through the REST route (which re-checks
+ * access), a deleted one is dropped. A poll update carries public counts.
+ */
+type WsChatEnvelope =
+  | WsChatMessageEnvelope
+  | { type: 'message_update'; message?: { id?: unknown }; at?: string }
+  | { type: 'message_delete'; id?: unknown; message?: { id?: unknown }; at?: string }
+  | { type: 'poll_update'; poll?: unknown; at?: string };
+
+/** The fields of a REST message payload the roster reads. */
+interface ApiMessage {
+  id: string;
+  userId: string | null;
+  botId?: string | null;
+  content: string;
+  createdAt: string;
+  metadata?: Record<string, unknown>;
+  blocked?: boolean;
+  bot?: unknown;
+  poll?: unknown;
 }
 
 /**
@@ -237,7 +267,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
           cache: 'no-store',
         });
         if (!res.ok) return;
-        const body = (await res.json()) as { messages?: Array<{ id: string; userId: string | null; botId?: string | null; content: string; createdAt: string; metadata?: Record<string, unknown>; blocked?: boolean; bot?: unknown }> };
+        const body = (await res.json()) as { messages?: ApiMessage[] };
         if (cancelled || !body.messages) return;
         const history: ChatMessage[] = body.messages.map((message) => {
           const who = describeAuthor(message, nameCacheRef.current, t, t('lobbyMain.chat.unknownUser'));
@@ -254,6 +284,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
             body: message.content,
             blocked: message.blocked,
             pinned: typeof message.metadata?.$pinnedAt === 'string',
+            poll: message.blocked ? null : asChatPollView(message.poll),
           };
         });
         // A message that arrived live while the history was loading (a
@@ -271,12 +302,65 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
     return () => { cancelled = true; };
   }, [data.channelId, data.currentUserId, data.serverId, t]);
 
+  // An edit (or anything else that changed a message) arrived as an id:
+  // reload that one message through the REST route — it re-checks access
+  // and projects a poll for this viewer. Gone (404) means drop it.
+  const refreshMessage = useCallback(async (messageId: string) => {
+    try {
+      const res = await fetch(
+        `/api/servers/${encodeURIComponent(data.serverId)}/channels/${encodeURIComponent(data.channelId)}/messages/${encodeURIComponent(messageId)}`,
+        { credentials: 'same-origin', cache: 'no-store' }
+      );
+      if (res.status === 404) {
+        setMessages((prev) => prev.filter((x) => x.id !== messageId));
+        return;
+      }
+      if (!res.ok) return;
+      const body = (await res.json()) as { message?: ApiMessage };
+      const message = body.message;
+      if (!message) return;
+      setMessages((prev) =>
+        prev.map((x) =>
+          x.id === messageId
+            ? {
+                ...x,
+                body: x.blocked ? x.body : message.content,
+                pinned: typeof message.metadata?.$pinnedAt === 'string',
+                ...(message.poll !== undefined && !x.blocked ? { poll: asChatPollView(message.poll) } : {}),
+              }
+            : x
+        )
+      );
+    } catch {
+      // The next history load corrects it.
+    }
+  }, [data.serverId, data.channelId]);
+
   // ---- Chat WS subscribe ----
   useEffect(() => {
     const topic = `chat:${data.serverId}:${data.channelId}` as const;
     const rc = getRealtimeClient();
     const unsubscribe = rc.subscribe<WsChatEnvelope>(topic, (env) => {
-      if (!env || env.type !== 'message' || !env.message) return;
+      if (!env || typeof env !== 'object') return;
+      if (env.type === 'message_update') {
+        const id = env.message?.id;
+        if (typeof id === 'string') void refreshMessage(id);
+        return;
+      }
+      if (env.type === 'message_delete') {
+        const id = typeof env.id === 'string' ? env.id : env.message?.id;
+        if (typeof id === 'string') setMessages((prev) => prev.filter((x) => x.id !== id));
+        return;
+      }
+      if (env.type === 'poll_update') {
+        const update = asChatPollUpdate(env.poll);
+        if (!update) return;
+        setMessages((prev) =>
+          prev.map((x) => (x.id === update.messageId && x.poll ? { ...x, poll: applyChatPollUpdate(x.poll, update) } : x))
+        );
+        return;
+      }
+      if (env.type !== 'message' || !env.message) return;
       const m = env.message;
       const who = describeAuthor(m, nameCacheRef.current, t, t('lobbyMain.chat.unknownUser'));
       const author = who.author;
@@ -293,6 +377,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
           timestamp: formatMessageTimestamp(m.createdAt, t),
           createdAt: m.createdAt,
           body: m.content,
+          poll: asChatPollView(m.poll),
         };
         // Newest first; UI uses flex-col-reverse so newest appears at bottom.
         return [next, ...prev];
@@ -329,7 +414,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
     return () => {
       unsubscribe();
     };
-  }, [data.serverId, data.channelId, data.channelName, data.currentUserId, t]);
+  }, [data.serverId, data.channelId, data.channelName, data.currentUserId, refreshMessage, t]);
 
   // ---- Local message echo — listens for 'lf-message-sent' custom events
   // dispatched by the Composer after a successful POST. This provides
@@ -339,6 +424,8 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
       const detail = (e as CustomEvent).detail as {
         channelId: string;
         message: { id: string; content: string; userId: string | null; createdAt: string };
+        /** Set when the composer posted a poll. */
+        poll?: unknown;
       };
       if (!detail || detail.channelId !== data.channelId) return;
       const m = detail.message;
@@ -356,6 +443,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
           timestamp: formatMessageTimestamp(m.createdAt, t),
           createdAt: m.createdAt,
           body: m.content,
+          poll: asChatPollView(detail.poll),
         };
         return [next, ...prev];
       });
@@ -456,6 +544,9 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
           channelId={data.channelId}
           canManageMessages={data.canManageMessages}
           onPinnedChange={(pinned) => setMessages((current) => current.map((item) => item.id === m.id ? { ...item, pinned } : item))}
+          onEdited={(body) => setMessages((current) => current.map((item) => item.id === m.id ? { ...item, body } : item))}
+          onDeleted={() => setMessages((current) => current.filter((item) => item.id !== m.id))}
+          onPollChange={(poll) => setMessages((current) => current.map((item) => item.id === m.id ? { ...item, poll } : item))}
         />
       ),
     })),
@@ -508,7 +599,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
   );
 }
 
-function LiveMessage({ message, invokedByName, currentUserId, serverId, channelId, canManageMessages, onPinnedChange }: { message: ChatMessage; invokedByName: string | null; currentUserId: string | null; serverId: string; channelId: string; canManageMessages: boolean; onPinnedChange: (pinned: boolean) => void }) {
+function LiveMessage({ message, invokedByName, currentUserId, serverId, channelId, canManageMessages, onPinnedChange, onEdited, onDeleted, onPollChange }: { message: ChatMessage; invokedByName: string | null; currentUserId: string | null; serverId: string; channelId: string; canManageMessages: boolean; onPinnedChange: (pinned: boolean) => void; onEdited: (body: string) => void; onDeleted: () => void; onPollChange: (poll: ChatPollView) => void }) {
   const t = useT();
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(message.body);
@@ -531,6 +622,8 @@ function LiveMessage({ message, invokedByName, currentUserId, serverId, channelI
         return;
       }
       if (!res.ok) throw new Error(`edit failed: ${res.status}`);
+      // Shown at once; the realtime `message_update` brings it to everyone else.
+      onEdited(trimmed);
     } catch { /* non-fatal */ }
     setEditing(false);
   }
@@ -543,6 +636,7 @@ function LiveMessage({ message, invokedByName, currentUserId, serverId, channelI
         credentials: 'same-origin',
       });
       if (!res.ok) throw new Error(`delete failed: ${res.status}`);
+      onDeleted();
     } catch { /* non-fatal */ }
   }
 
@@ -615,6 +709,14 @@ function LiveMessage({ message, invokedByName, currentUserId, serverId, channelI
             <button onClick={saveEdit} className="text-xs px-2 py-1 bg-primary-container text-on-primary-container rounded font-medium">{t('lobbyMain.chat.save')}</button>
             <button onClick={() => setEditing(false)} className="text-xs px-2 py-1 text-text-secondary hover:text-text-primary">{t('lobbyMain.chat.cancel')}</button>
           </div>
+        ) : message.poll ? (
+          <ChatPollCard
+            poll={message.poll}
+            serverId={serverId}
+            channelId={channelId}
+            canClose={isOwn || canManageMessages}
+            onChange={onPollChange}
+          />
         ) : (
           <p className="font-body-md text-text-secondary mt-1 whitespace-pre-wrap break-words">{message.body}</p>
         )}
@@ -630,7 +732,7 @@ function LiveMessage({ message, invokedByName, currentUserId, serverId, channelI
           >
             <span className="material-symbols-outlined text-[16px]">push_pin</span>
           </button> : null}
-          {isOwn ? <button
+          {isOwn && !message.poll ? <button
             type="button"
             onClick={() => { setEditing(true); setEditValue(message.body); }}
             title={t('lobbyMain.chat.edit')}

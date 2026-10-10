@@ -71,6 +71,8 @@ import { notifyMemberJoined } from '@/lib/bots/welcome';
 import { resolveAutoJoinServerId } from '@/lib/lobby-auto-join';
 import { readMessageBot } from '@/lib/bots/message-meta';
 import { readMessageInteraction, readMessageWebhook } from '@/lib/bots/interaction-meta';
+import { isPollChannelType, type ChatPollView } from '@/lib/chat-polls';
+import { loadPollViewsForMessages } from '@/lib/chat-polls-server';
 import { botTrustLevel, isBuiltInType } from '@/lib/bots/catalog';
 import { adminSectionsForServer, getAdminAccess, type AdminAccess } from '@/lib/admin-access';
 import { buildLobbyAdminLinks, NO_LOBBY_ADMIN_LINKS, type LobbyAdminLinks } from '@/lib/admin-sections';
@@ -93,6 +95,8 @@ interface Channel {
   id: string;
   name: string;
   category: ChannelCategory;
+  /** A text or announcement channel: polls can be posted here (docs/CHAT_POLLS.md). */
+  pollable?: boolean;
 }
 interface VoiceUser {
   id: string;
@@ -138,6 +142,8 @@ interface ChatMessage {
   interaction?: { id: string; commandName: string; invokedBy: { id: string | null; name: string | null } } | null;
   /** Bot API v2: a post from an incoming channel webhook (WEBHOOK badge). */
   webhook?: { id: string | null; name: string; displayName: string } | null;
+  /** A poll message: the poll as this viewer sees it (docs/CHAT_POLLS.md). */
+  poll?: ChatPollView | null;
 }
 interface LobbyData {
   serverName: string;
@@ -177,6 +183,8 @@ interface LobbyData {
   adminLinks: LobbyAdminLinks;
   /** START_ACTIVITY: may end any activity (the end route's rule), not only one they host. */
   canStartActivities?: boolean;
+  /** CREATE_POLLS + SEND_MESSAGES: the composer offers "Create poll" in pollable channels. */
+  canCreatePolls?: boolean;
   /**
    * Apps installed AND enabled for this server. Every member sees them —
    * an activity is something members start together, so hiding the list
@@ -351,7 +359,8 @@ function buildMessages(
   authors: Map<string, { displayName: string }>,
   currentUserId: string | null,
   blockedIds: Set<string>,
-  t: Translator
+  t: Translator,
+  polls: Map<string, ChatPollView> = new Map()
 ): ChatMessage[] {
   // listMessagesForChannel returns newest first; UI uses flex-col-reverse
   // so the visual order is correct. We preserve insertion order here.
@@ -414,6 +423,8 @@ function buildMessages(
       createdAt: m.createdAt.toISOString(),
       body: m.content,
       pinned: typeof m.metadata.$pinnedAt === 'string',
+      // The same per-viewer projection GET .../messages attaches.
+      poll: polls.get(m.id) ?? null,
     } satisfies ChatMessage;
   });
 }
@@ -488,7 +499,7 @@ async function loadLiveData(
   const voiceChannels: Channel[] = [];
   for (const c of allChannels) {
     const cat = toCategory(c.type);
-    const row: Channel = { id: c.id, name: c.name, category: cat };
+    const row: Channel = { id: c.id, name: c.name, category: cat, pollable: isPollChannelType(c.type) };
     if (cat === 'text') textChannels.push(row);
     else voiceChannels.push(row);
   }
@@ -590,8 +601,13 @@ async function loadLiveData(
   // The SAME stamps and author labels the client renders, in the same
   // language — otherwise the first paint is English and flips on
   // hydration when the roster re-renders them.
-  const messages = buildMessages(messageRows, authorMap, currentUserId, blockedIds, t);
+  // Polls on the first paint: ONE query for the window, projected for this viewer.
+  const pollViews = await loadPollViewsForMessages(messageRows, currentUserId).catch(() => new Map<string, ChatPollView>());
+  const messages = buildMessages(messageRows, authorMap, currentUserId, blockedIds, t, pollViews);
   const canManageMessages = hasPermission(view.permissions, CorePermission.MANAGE_MESSAGES);
+  const canCreatePolls =
+    hasPermission(view.permissions, CorePermission.CREATE_POLLS) &&
+    hasPermission(view.permissions, CorePermission.SEND_MESSAGES);
   const canMuteMembers = hasPermission(view.permissions, CorePermission.MUTE_MEMBERS);
   // The roster's "Disconnect from voice" follows the route's hierarchy:
   // only members this viewer outranks (never themselves or the owner).
@@ -669,6 +685,7 @@ async function loadLiveData(
     voiceModerationTargetIds,
     adminLinks,
     canStartActivities,
+    canCreatePolls,
     installedApps,
     bots: botRows.filter((bot) => bot.enabled).map(toLobbyBot),
   };

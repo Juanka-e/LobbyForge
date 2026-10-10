@@ -23,6 +23,8 @@ import { moderateMessage, moderationBlockedBody } from '@/lib/bots/moderation';
 import { readMessageBot } from '@/lib/bots/message-meta';
 import { emitMessageEvent } from '@/lib/bots/events';
 import { requireVerifiedEmail } from '@/lib/mail/verification';
+import { readMessagePollId } from '@/lib/chat-polls';
+import { loadPollViewsForMessages } from '@/lib/chat-polls-server';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -45,6 +47,9 @@ const RESERVED_METADATA_KEYS = new Set([
   // incoming webhook's post. A member must not be able to forge either.
   'interaction',
   'webhook',
+  // Polls in text channels: `poll.id` is written only by the poll route, in
+  // the same transaction as the poll — a member must not attach one by hand.
+  'poll',
 ]);
 
 function validateUserMetadata(metadata: Record<string, unknown> | undefined): NextResponse | null {
@@ -154,17 +159,23 @@ async function handleGet(
     // reach the client. The message row stays so the conversation
     // flow makes sense.
     const blockedIds = await getBlockedUserIds(getDb(), session.uid);
+    // Polls (docs/CHAT_POLLS.md): ONE query for the page, projected for
+    // this viewer — counts only once visible to them, never a voter.
+    const polls = await loadPollViewsForMessages(rows, session.uid);
     const messages = rows.map((m) => {
       const json = toJson(m);
+      // `poll` is present on poll messages only (null when it is gone or hidden).
+      const isPoll = readMessagePollId(m.metadata) !== null;
       if (m.userId && blockedIds.has(m.userId)) {
         return {
           ...json,
           blocked: true,
           content: '🚫 Blocked user — message hidden.',
           userId: null,
+          ...(isPoll ? { poll: null } : {}),
         };
       }
-      return { ...json, blocked: false };
+      return { ...json, blocked: false, ...(isPoll ? { poll: polls.get(m.id) ?? null } : {}) };
     });
 
     return NextResponse.json(

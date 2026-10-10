@@ -281,6 +281,7 @@
   "hub.servers.permission.ban_members": "Ban members",
   "hub.servers.permission.connect_voice": "Connect voice",
   "hub.servers.permission.create_invite": "Create invites",
+  "hub.servers.permission.create_polls": "Create polls",
   "hub.servers.permission.deafen_members": "Deafen members",
   "hub.servers.permission.kick_members": "Kick members",
   "hub.servers.permission.manage_channels": "Manage channels",

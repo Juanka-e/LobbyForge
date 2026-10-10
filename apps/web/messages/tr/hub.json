@@ -281,6 +281,7 @@
   "hub.servers.permission.ban_members": "Üyeleri yasakla",
   "hub.servers.permission.connect_voice": "Sese bağlan",
   "hub.servers.permission.create_invite": "Davet oluştur",
+  "hub.servers.permission.create_polls": "Anket oluştur",
   "hub.servers.permission.deafen_members": "Üyeleri sağırlaştır",
   "hub.servers.permission.kick_members": "Üyeleri sunucudan at",
   "hub.servers.permission.manage_channels": "Kanalları yönet",

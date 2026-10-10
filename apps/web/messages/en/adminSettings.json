@@ -551,6 +551,7 @@
   "adminSettings.roles.perm.banMembers": "Ban Members",
   "adminSettings.roles.perm.connectVoice": "Join Voice Rooms",
   "adminSettings.roles.perm.createInvite": "Invite People",
+  "adminSettings.roles.perm.createPolls": "Create polls",
   "adminSettings.roles.perm.kickMembers": "Kick Members",
   "adminSettings.roles.perm.manageChannels": "Manage Channels",
   "adminSettings.roles.perm.manageMessages": "Manage Messages",
