@@ -2,6 +2,20 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Dependency cleanup, fourth batch - 2026-10-10
+
+- **Email:** nodemailer 10.0.14 (exact pin). It carries the fixes for GHSA-4ffr-jq9g-5ffx (SMTP AUTH regex DoS, high) and GHSA-g73g-hqqh-jr95 (malformed envelope recipient), both fixed in 10.0.13. It also includes 10.0.12's fixes: a bare CR in the message becomes CRLF, which blocks SMTP smuggling, and a send on a dead pool connection now settles instead of hanging. 10.0.14 is the newest release at least a week old.
+- **Voice:** livekit-server-sdk 2.19.1.
+  - Webhook verification now requires an `exp` claim. LiveKit always sets one.
+  - The SDK hashes with Web Crypto only.
+  - API calls carry an `X-Livekit-Request-Id`.
+  - Region failover applies only to `*.livekit.cloud` hosts, so self-hosted LiveKit is unaffected.
+  - The token, webhook, moderation and voice-presence paths use the same calls as before.
+- **Realtime:** ws 8.22.0 in the gateway (adds a `protocols` option, and a `close()` call with invalid arguments no longer moves the socket to `CLOSING`), with @types/ws 8.18.2.
+- **Dev:** Vite 8.3.4, the test runner's engine. It uses Rolldown and Oxc, and fixes three dev-server advisories (GHSA-rq7h-c2jc-7f22, GHSA-vfpm-58rq-9qcg, GHSA-9jrq-w75r-8gcw). The web test config moves from `esbuild.jsx` to `oxc.jsx`.
+- **CI:** pnpm/action-setup v6.1.0, still SHA-pinned. It bootstraps with pnpm 11 and then switches to the pinned 10.12.1, which matches `packageManager`.
+- **Held back, with a Dependabot ignore rule:** Tailwind CSS 4. It's a new engine with a CSS-first config, so it moves with tailwind-merge 3 in one migration. `docs/TAILWIND4_MIGRATION.md` has the assessment and an estimate.
+
 ## [0.2.0-rc.8] - 2026-10-09
 
 The first release candidate since rc.7. It collects everything below, down to and including "official hub, plugin UI kit, finished games and bots".

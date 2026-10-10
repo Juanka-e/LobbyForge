@@ -45,7 +45,7 @@ interface MailTransport {
 }
 ```
 
-- The only implementation in v1 is SMTP, through nodemailer `10.0.11`
+- The only implementation in v1 is SMTP, through nodemailer `10.0.14`
   (exact pin, already in `apps/web/package.json`).
 - One pooled transport per configuration, cached on `globalThis` and keyed
   by a hash of the settings. It is rebuilt when the settings change.
@@ -69,10 +69,12 @@ interface MailTransport {
 - `MailTransport` also has `close()`. `send` answers
   `{ ok: true, messageId }` or `{ ok: false, result, detail?, permanent }`
   (the §5 codes; `permanent` = a 5xx reply).
-- nodemailer is pinned at `10.0.11` in `apps/web/package.json`. Every
-  GitHub advisory against nodemailer is fixed at or below 10.0.9 (the latest,
-  GHSA-g57g-f23g-4646, in 10.0.9), so 10.0.11 carries them all. It was the
-  newest release at least a week old when added, a supply-chain margin.
+- nodemailer is pinned at `10.0.14` in `apps/web/package.json`. Every
+  GitHub advisory against nodemailer is fixed at or below 10.0.13 (the
+  latest, GHSA-4ffr-jq9g-5ffx and GHSA-g73g-hqqh-jr95, in 10.0.13), so
+  10.0.14 carries them all. It was the newest release at least a week old
+  when chosen (2026-10-10), a supply-chain margin; 10.0.15 and 10.0.16 were
+  newer, and change only error typings and the address/cookie parsers.
   Dependabot proposes later versions.
 
 ### 2.2 Provider registry (pure data, importable from client code, no secrets)

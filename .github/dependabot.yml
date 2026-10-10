@@ -34,6 +34,15 @@ updates:
       # the Tailwind 4 migration, and delete this rule there.
       - dependency-name: "tailwind-merge"
         update-types: ["version-update:semver-major"]
+      # Tailwind CSS 4 is a new engine, not a bump: CSS-first config in place
+      # of tailwind.config.ts, a separate PostCSS plugin (@tailwindcss/postcss),
+      # renamed utilities (shadow-sm, rounded, outline-none, ...) in ~95
+      # files, and a Safari 16.4 / Chrome 111 / Firefox 128 floor. Bumping the
+      # package alone breaks the CSS build. It moves together with
+      # tailwind-merge 3 in one migration PR; docs/TAILWIND4_MIGRATION.md has
+      # the assessment. 3.4.x updates still arrive. Delete this rule in that PR.
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
       # @types/node has to match the Node we run: 22 LTS in the Dockerfile,
       # in CI's setup-node and in `engines`. Newer types would let code
       # type-check against APIs Node 22 doesn't have. 22.x updates still
