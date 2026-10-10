@@ -13,36 +13,16 @@ import {
   type MessageRow,
 } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
-import { readGuestSession } from '@/lib/guest-session';
+import { requireMaterializedSession } from '@/lib/api-auth';
 import { readMessageBot } from '@/lib/bots/message-meta';
 import { projectChatPoll, readMessagePollId, toChatPollUpdate, type ChatPollUpdate, type ChatPollView } from '@/lib/chat-polls';
 
-function getSessionSecret(): string {
-  const secret = process.env.LOBBYFORGE_SESSION_SECRET;
-  if (!secret || secret.length < 32) {
-    throw new Error('LOBBYFORGE_SESSION_SECRET must be set to at least 32 characters');
-  }
-  return secret;
-}
-
-/** The signed-in member behind a request, or the 401/503 the messages routes answer. */
+/** The signed-in member behind a request, or the 401/503 every member route answers. */
 export function resolvePollSession(req: Request):
   | { ok: true; uid: string }
   | { ok: false; response: NextResponse } {
-  const session = readGuestSession(req.headers.get('cookie'), getSessionSecret());
-  if (!session) {
-    return { ok: false, response: NextResponse.json({ error: 'Authentication required' }, { status: 401 }) };
-  }
-  if (!session.uid) {
-    return {
-      ok: false,
-      response: NextResponse.json(
-        { error: 'Guest user has no materialized user record', howToFix: 'Re-issue POST /api/auth/guest' },
-        { status: 503 }
-      ),
-    };
-  }
-  return { ok: true, uid: session.uid };
+  const session = requireMaterializedSession(req);
+  return session.ok ? { ok: true, uid: session.session.uid } : session;
 }
 
 /** The poll, when it exists, its message is not deleted, and it lives in this channel; else a 404. */
