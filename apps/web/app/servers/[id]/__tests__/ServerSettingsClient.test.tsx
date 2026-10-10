@@ -22,6 +22,7 @@ const NOTHING_ELSE: ServerSettingsViewer['can'] = {
   kickMembers: false,
   createInvite: false,
   viewAuditLog: false,
+  manageRoles: false,
 };
 
 const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -118,6 +119,13 @@ describe('controls', () => {
     await screen.findByText('Ada');
     expect(screen.getAllByRole('button', { name: 'Kick' })).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'Add channel' })).toBeInTheDocument();
+  });
+
+  it('puts "who can create polls" on the Poll card, read-only without Manage Roles', async () => {
+    renderAs({}, 'apps');
+    const group = await screen.findByRole('group', { name: 'Who can create polls in text channels' });
+    expect(group).toHaveTextContent('Changing this needs Manage Roles.');
+    expect(group).toHaveTextContent('This community has no roles yet.');
   });
 
   it('lets a non-owner manager install apps and save the access policy', async () => {

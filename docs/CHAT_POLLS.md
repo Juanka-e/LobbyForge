@@ -36,6 +36,17 @@ activity (`plugins/poll`) is separate and unchanged.
 `create_polls` ("Create polls" / "Anket oluştur"), in the role editors next
 to the text permissions.
 
+**Where owners set it:** Community settings → Apps → the **Poll** card →
+"Who can create polls in text channels". It lists the roles, highest first,
+with a box each. This is not a second setting: each box *is* that role's
+`create_polls` permission, saved through `PATCH
+/api/servers/{id}/roles/{roleId}`, so the card and the role editors always
+agree and the role API's checks apply unchanged (Manage Roles, only roles
+below your highest one, never granting a permission you don't hold). Roles
+with `administrator` show ticked and locked. Without Manage Roles the card
+is read-only and says so. The card shows whether or not the Poll app is
+installed: chat polls don't depend on it.
+
 - New servers: the `Owner` role carries it. `@everyone` does not.
 - Existing servers: migration 0047 adds it to every role that already has
   `administrator` or `manage_messages` (owner and moderator-style roles),
