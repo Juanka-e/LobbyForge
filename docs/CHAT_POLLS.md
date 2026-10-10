@@ -92,6 +92,7 @@ The `poll` object is the only shape a poll leaves the server in:
   totalVoters,      // always shown
   myChoices: number[], // yours only
   resultsVisible,
+  version,          // bumped by every vote, removal and close
 }
 ```
 
@@ -108,13 +109,21 @@ does the same. `PATCH` with `content` on a poll message answers
 - a new poll is a normal `message` event whose `message.poll` is the poll
   as everyone sees it at creation (no votes yet);
 - after a vote, a vote removal or a close:
-  `{ type: 'poll_update', poll: { id, messageId, counts, totalVoters, closesAt, closedAt, closed } }`.
+  `{ type: 'poll_update', poll: { id, messageId, counts, totalVoters, closesAt, closedAt, closed, version } }`.
   It carries ids and counts, never a voter. The lobby shows the counts to
   members who have voted (and to everyone once closed); a member who has
   not voted only sees the voter total move.
+- Each write reads its tally after it commits, so updates can arrive out
+  of order. The lobby drops an update older than the `version` it shows, a
+  closed poll never reopens, and a REST answer older than the newest update
+  seen is brought up to it (keeping the answer's own choices).
 
 The lobby also handles `message_update` (refetches that one message) and
 `message_delete` (drops it), so edits and deletes appear without a reload.
+The realtime client re-sends its subscriptions when the gateway says
+`hello`: the gateway drops a subscribe that arrives before it has
+authenticated the socket, which used to leave a lobby without live
+updates until a reload when sign-in checks were slow.
 
 **Bots** see a poll as a plain `message_create` whose `content` is the
 question. There is no poll data or poll API for bots in this version, and
@@ -128,20 +137,23 @@ they never receive `poll_update`.
   CASCADE), `channel_id` (FK → `channels` ON DELETE CASCADE),
   `creator_user_id` (SET NULL), `question`, `options` (JSON array of 2–10
   strings), `allow_multiple`, `closes_at`, `closed_at` (early close),
-  `closed_by_user_id`, `created_at`.
+  `closed_by_user_id`, `version` (bumped by every vote, removal and
+  close), `created_at`.
 - `message_poll_votes`: primary key `(poll_id, user_id, option_index)`,
   FK → `message_polls` and `users`, both ON DELETE CASCADE. A single-choice
   vote is one row; a multiple-choice vote is one row per chosen answer.
 
 The message and its poll are written in one transaction. Closing is lazy:
 a poll is closed once `closes_at` has passed or `closed_at` is set; nothing
-runs at expiry. A vote takes a per-voter advisory lock and a share lock on
-the poll row, so two devices voting at once cannot leave a single-choice
-poll with two rows, and a vote cannot slip in after a close.
+runs at expiry. Every write to a poll (vote, removal, close) locks the poll
+row and bumps `version` in the same transaction, so writes run one after
+another: two devices voting at once cannot leave a single-choice poll with
+two rows, a vote cannot slip in after a close, and versions are ordered.
 
 Messages are soft-deleted (`deleted_at`), which the FK cascade never sees,
-so the delete route also deletes the poll (and with it the ballots). A
-hard delete (a channel removed) cascades.
+so the delete route soft-deletes a poll message and deletes its poll (and
+with it the ballots) in one transaction; if that fails, nothing is
+deleted. A hard delete (a channel removed) cascades.
 
 ## 5. Anonymity
 

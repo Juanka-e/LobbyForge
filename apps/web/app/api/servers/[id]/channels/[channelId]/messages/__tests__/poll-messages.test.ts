@@ -25,7 +25,7 @@ const updateMessage = vi.fn();
 const softDeleteMessage = vi.fn();
 const logAction = vi.fn();
 const listMessagePollsForMessages = vi.fn();
-const deleteMessagePollForMessage = vi.fn();
+const softDeletePollMessage = vi.fn();
 
 vi.mock('@lobbyforge/db', () => ({
   getServerById,
@@ -42,7 +42,7 @@ vi.mock('@lobbyforge/db', () => ({
   softDeleteMessage,
   logAction,
   listMessagePollsForMessages,
-  deleteMessagePollForMessage,
+  softDeletePollMessage,
   getBuiltInBotForServer: vi.fn().mockResolvedValue(null),
   isChannelOpenToBots: vi.fn().mockResolvedValue(true),
   listUserDisplayNames: vi.fn().mockResolvedValue(new Map()),
@@ -102,6 +102,7 @@ function pollTally(messageId: string, pollId: string, viewerChoices: number[]) {
     closesAt: new Date(Date.now() + HOUR),
     closedAt: null,
     closedByUserId: null,
+    version: 4,
     createdAt: new Date(),
     counts: [3, 1],
     totalVoters: 4,
@@ -123,7 +124,7 @@ function req(uid: string, method = 'GET', body?: unknown): Request {
 beforeEach(() => {
   vi.resetModules();
   process.env.LOBBYFORGE_SESSION_SECRET = SECRET;
-  for (const fn of [getServerById, isServerMember, getChannelById, getUserPermissions, canMemberAccessChannel, getActiveMemberTimeout, createMessage, listMessagesForChannel, getBlockedUserIds, getMessageById, updateMessage, softDeleteMessage, logAction, listMessagePollsForMessages, deleteMessagePollForMessage]) {
+  for (const fn of [getServerById, isServerMember, getChannelById, getUserPermissions, canMemberAccessChannel, getActiveMemberTimeout, createMessage, listMessagesForChannel, getBlockedUserIds, getMessageById, updateMessage, softDeleteMessage, logAction, listMessagePollsForMessages, softDeletePollMessage]) {
     fn.mockReset();
   }
   getServerById.mockResolvedValue({ id: SERVER, name: 'Lobby', ownerUserId: OWNER });
@@ -137,7 +138,7 @@ beforeEach(() => {
   getBlockedUserIds.mockResolvedValue(new Set());
   logAction.mockResolvedValue(undefined);
   softDeleteMessage.mockResolvedValue(undefined);
-  deleteMessagePollForMessage.mockResolvedValue(true);
+  softDeletePollMessage.mockResolvedValue(undefined);
   createMessage.mockImplementation(async (_db: unknown, row: Record<string, unknown>) => messageRow({ id: 'msg-new', ...row }));
 });
 
@@ -211,19 +212,27 @@ describe('a poll message in the single-message route', () => {
     expect(updateMessage).toHaveBeenCalledTimes(1);
   });
 
-  it('deleting it deletes the poll and its ballots', async () => {
+  it('deleting it deletes the message and the poll (with its ballots) together', async () => {
     getMessageById.mockResolvedValue(pollMessage());
     const { DELETE } = await import('../[messageId]/route.js');
     expect((await DELETE(req(AUTHOR, 'DELETE'), itemCtx)).status).toBe(200);
-    expect(softDeleteMessage).toHaveBeenCalledWith(expect.anything(), 'poll-msg');
-    expect(deleteMessagePollForMessage).toHaveBeenCalledWith(expect.anything(), 'poll-msg');
+    expect(softDeletePollMessage).toHaveBeenCalledWith(expect.anything(), 'poll-msg');
+    expect(softDeleteMessage).not.toHaveBeenCalled();
+  });
+
+  it('if that transaction fails, the delete fails — no message is gone while its ballots stay', async () => {
+    getMessageById.mockResolvedValue(pollMessage());
+    softDeletePollMessage.mockRejectedValue(new Error('db down'));
+    const { DELETE } = await import('../[messageId]/route.js');
+    expect((await DELETE(req(AUTHOR, 'DELETE'), itemCtx)).status).toBe(500);
   });
 
   it('deleting a plain message touches no poll', async () => {
     getMessageById.mockResolvedValue(messageRow({ id: 'poll-msg' }));
     const { DELETE } = await import('../[messageId]/route.js');
     expect((await DELETE(req(AUTHOR, 'DELETE'), itemCtx)).status).toBe(200);
-    expect(deleteMessagePollForMessage).not.toHaveBeenCalled();
+    expect(softDeleteMessage).toHaveBeenCalledWith(expect.anything(), 'poll-msg');
+    expect(softDeletePollMessage).not.toHaveBeenCalled();
   });
 
   it('GET carries the poll as this viewer sees it', async () => {

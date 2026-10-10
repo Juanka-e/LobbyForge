@@ -52,6 +52,7 @@ function pollView(overrides: Partial<ChatPollView> = {}): ChatPollView {
     totalVoters: 1,
     myChoices: [],
     resultsVisible: false,
+    version: 1,
     ...overrides,
   };
 }
@@ -191,7 +192,7 @@ describe('poll messages in the roster', () => {
     history = [apiMessage('msg-poll', 'Pizza?', { metadata: { poll: { id: 'poll-1' } }, poll: pollView() })];
     await renderRoster();
     await screen.findByText('1 person voted');
-    emit({ type: 'poll_update', poll: { id: 'poll-1', messageId: 'msg-poll', counts: [2, 1], totalVoters: 3, closesAt: pollView().closesAt, closedAt: null, closed: false } });
+    emit({ type: 'poll_update', poll: { id: 'poll-1', messageId: 'msg-poll', counts: [2, 1], totalVoters: 3, closesAt: pollView().closesAt, closedAt: null, closed: false, version: 2 } });
     expect(await screen.findByText('3 people voted')).toBeInTheDocument();
     expect(screen.queryByText(/%/)).toBeNull();
     expect(screen.getAllByRole('radio')).toHaveLength(2);
@@ -206,9 +207,13 @@ describe('poll messages in the roster', () => {
     ];
     await renderRoster();
     await screen.findByText('100%');
-    emit({ type: 'poll_update', poll: { id: 'poll-1', messageId: 'msg-poll', counts: [1, 3], totalVoters: 4, closesAt: pollView().closesAt, closedAt: null, closed: false } });
+    emit({ type: 'poll_update', poll: { id: 'poll-1', messageId: 'msg-poll', counts: [1, 3], totalVoters: 4, closesAt: pollView().closesAt, closedAt: null, closed: false, version: 3 } });
     expect(await screen.findByText('75%')).toBeInTheDocument();
-    emit({ type: 'poll_update', poll: { id: 'poll-1', messageId: 'msg-poll', counts: [1, 3], totalVoters: 4, closesAt: pollView().closesAt, closedAt: new Date().toISOString(), closed: true } });
+    // A late update (older version) changes nothing.
+    emit({ type: 'poll_update', poll: { id: 'poll-1', messageId: 'msg-poll', counts: [1, 1], totalVoters: 2, closesAt: pollView().closesAt, closedAt: null, closed: false, version: 2 } });
+    expect(screen.getByText('75%')).toBeInTheDocument();
+    expect(screen.getByText('4 people voted')).toBeInTheDocument();
+    emit({ type: 'poll_update', poll: { id: 'poll-1', messageId: 'msg-poll', counts: [1, 3], totalVoters: 4, closesAt: pollView().closesAt, closedAt: new Date().toISOString(), closed: true, version: 4 } });
     expect(await screen.findByText('Closed')).toBeInTheDocument();
   });
 });

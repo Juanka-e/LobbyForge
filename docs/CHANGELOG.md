@@ -10,6 +10,7 @@ All notable changes to the LobbyForge monorepo skeleton.
 - **Permission:** `create_polls` is in both role editors. New servers give it to the Owner role; migration 0047 adds it to existing roles that have `administrator` or `manage_messages`, never to @everyone.
 - **API:** `POST …/channels/{channelId}/polls`, `GET …/polls/{pollId}`, `PUT`/`DELETE …/polls/{pollId}/vote`, `POST …/polls/{pollId}/close`. Message lists attach each poll for the viewer in one batched query. `poll` is a reserved message metadata key. Bots see a poll as a plain message (its question).
 - **Lobby:** edits and deletes now show up live. The chat feed used to drop `message_update` and `message_delete`, so both only appeared after a reload.
+- **Realtime:** the browser client re-sends its subscriptions when the gateway says `hello`. The gateway drops a subscribe that arrives before it has authenticated the socket, so on a slow sign-in check a lobby could get no live updates at all until a reload.
 - **Upgrade notes:** migration 0047 is expand-only: two new tables (`message_polls`, `message_poll_votes`) and the permission backfill.
 
 ## [Unreleased] - Activity and lobby polish - 2026-10-10

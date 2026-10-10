@@ -2,13 +2,13 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { CorePermission, hasPermission, MessageContentSchema } from '@lobbyforge/core';
 import {
-  deleteMessagePollForMessage,
   getActiveMemberTimeout,
   getBlockedUserIds,
   getMessageById,
   getUserPermissions,
   logAction,
   softDeleteMessage,
+  softDeletePollMessage,
   updateMessage,
   type MessageRow,
 } from '@lobbyforge/db';
@@ -347,14 +347,10 @@ async function handleDelete(req: Request, ctx: RouteContext): Promise<NextRespon
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    await softDeleteMessage(getDb(), messageId);
-    // A deleted poll message takes its poll and every ballot with it — the
-    // soft delete never reaches the FK cascade.
-    if (readMessagePollId(access.message.metadata)) {
-      await deleteMessagePollForMessage(getDb(), messageId).catch((err) =>
-        console.error('[polls] poll delete failed:', (err as Error).message)
-      );
-    }
+    // A deleted poll message takes its poll and every ballot with it, in the
+    // same transaction (the soft delete never reaches the FK cascade).
+    if (readMessagePollId(access.message.metadata)) await softDeletePollMessage(getDb(), messageId);
+    else await softDeleteMessage(getDb(), messageId);
     publishChatMessageDelete({ serverId, channelId, messageId, botId: access.message.botId });
     emitMessageEvent({
       serverId,

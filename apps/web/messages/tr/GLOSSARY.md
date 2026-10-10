@@ -78,6 +78,9 @@ dil. "Kanalına katıl", "Ayarlarını kaydet".
 | Doctor (tanılama aracı) | Tanılama | |
 | Token | token | Çevrilmez; ek alır: "token'ı" |
 | Slash command | Eğik çizgi komutu | Türkçe Discord'daki gibi. Kısa yerde: "komut" |
+| Poll | Anket | "Anket oluştur", "Anketi kapat" |
+| Vote (isim / fiil) | Oy / oy ver | Düğmede belirsiz kalmasın diye "Oyumu değiştir", "Oyumu geri çek" ("oyunu" = "oyun" ile karışır) |
+| Answer / option (anket) | Seçenek | "Seçenek ekle" |
 | Webhook (incoming) | webhook / Gelen webhook | Çevrilmez; ek alır: "webhook'u", "webhook'lar" |
 | Event (Bot API) | Olay | "Olayları al", "Olay uç noktası" |
 | Endpoint | Uç nokta | |

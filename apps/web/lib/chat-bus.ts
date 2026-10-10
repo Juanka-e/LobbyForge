@@ -154,6 +154,7 @@ export function publishChatPollUpdate(input: { serverId: string; channelId: stri
       closesAt: input.poll.closesAt,
       closedAt: input.poll.closedAt,
       closed: input.poll.closed,
+      version: input.poll.version,
     },
     at: new Date().toISOString(),
   };

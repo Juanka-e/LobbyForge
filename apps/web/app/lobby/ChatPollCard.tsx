@@ -22,6 +22,11 @@ import {
  */
 
 const TICK_MS = 30_000;
+/** A poll this browser's clock thinks has closed may still be open on the server: ask again. */
+const FINAL_RESULTS_RETRY_MS = 5_000;
+const FINAL_RESULTS_MAX_TRIES = 6;
+
+type FocusTarget = 'results' | 'form' | 'confirm' | 'closeTrigger' | null;
 
 function timeLeftText(t: Translator, closesAt: string, closed: boolean, now: Date): string {
   const left = pollTimeLeft(closesAt, closed, now);
@@ -59,11 +64,20 @@ export function ChatPollCard({ poll, serverId, channelId, canClose, onChange }: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmClose, setConfirmClose] = useState(false);
-  const refetchedRef = useRef(false);
+  const [finalTry, setFinalTry] = useState(0);
+  const pendingFocus = useRef<FocusTarget>(null);
+  const resultsRef = useRef<HTMLUListElement | null>(null);
+  const formRef = useRef<HTMLFormElement | null>(null);
+  const confirmRef = useRef<HTMLButtonElement | null>(null);
+  const closeTriggerRef = useRef<HTMLButtonElement | null>(null);
+  // The parent passes a new callback on every render; the refetch timer must not restart with it.
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   const closed = poll.closed || isChatPollClosed(poll, now);
   const hasVoted = poll.myChoices.length > 0;
   const showResults = closed || (hasVoted && !changing);
+  const countsMissing = poll.options.some((option) => option.votes === null);
   const base = `/api/servers/${encodeURIComponent(serverId)}/channels/${encodeURIComponent(channelId)}/polls/${encodeURIComponent(poll.id)}`;
 
   // The clock only moves the "Closes in …" text; nothing is announced.
@@ -73,19 +87,47 @@ export function ChatPollCard({ poll, serverId, channelId, canClose, onChange }: 
     return () => window.clearInterval(id);
   }, [closed]);
 
-  // Closed while this viewer had not voted: they never received counts —
-  // fetch the final results once.
-  const countsMissing = poll.options.some((option) => option.votes === null);
+  // Closed (by this browser's clock, or by a refusal) while this viewer had
+  // never received counts: fetch the final results. The server's clock
+  // decides — if it still calls the poll open, ask again a little later.
   useEffect(() => {
-    if (!closed || !countsMissing || refetchedRef.current) return;
-    refetchedRef.current = true;
-    void fetch(base, { credentials: 'same-origin', cache: 'no-store' })
-      .then(async (res) => (res.ok ? asChatPollView(((await res.json()) as { poll?: unknown }).poll) : null))
-      .then((next) => {
-        if (next) onChange(next);
-      })
-      .catch(() => undefined);
-  }, [base, closed, countsMissing, onChange]);
+    if (!closed || !countsMissing || finalTry >= FINAL_RESULTS_MAX_TRIES) return;
+    let cancelled = false;
+    const timer = window.setTimeout(
+      () => {
+        void fetch(base, { credentials: 'same-origin', cache: 'no-store' })
+          .then(async (res) => (res.ok ? asChatPollView(((await res.json()) as { poll?: unknown }).poll) : null))
+          .then((next) => {
+            if (cancelled) return;
+            if (next?.resultsVisible) onChangeRef.current(next);
+            else setFinalTry((n) => n + 1);
+          })
+          .catch(() => {
+            if (!cancelled) setFinalTry((n) => n + 1);
+          });
+      },
+      finalTry === 0 ? 0 : FINAL_RESULTS_RETRY_MS
+    );
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [base, closed, countsMissing, finalTry]);
+
+  // Keyboard focus follows the action that replaced the control it was on.
+  useEffect(() => {
+    const target = pendingFocus.current;
+    if (!target) return;
+    pendingFocus.current = null;
+    if (target === 'results') resultsRef.current?.focus();
+    else if (target === 'confirm') confirmRef.current?.focus();
+    else if (target === 'closeTrigger') closeTriggerRef.current?.focus();
+    else if (target === 'form') {
+      const inputs = formRef.current?.querySelectorAll<HTMLInputElement>('input');
+      const checked = Array.from(inputs ?? []).find((input) => input.checked);
+      (checked ?? inputs?.[0])?.focus();
+    }
+  });
 
   async function send(path: string, method: 'PUT' | 'DELETE' | 'POST', body?: unknown): Promise<void> {
     setBusy(true);
@@ -104,11 +146,17 @@ export function ChatPollCard({ poll, serverId, channelId, canClose, onChange }: 
       }
       if (!res.ok) {
         setError(payload?.code === 'poll_closed' ? t('lobbyMain.poll.error.closed') : t('lobbyMain.poll.error.generic'));
-        if (payload?.code === 'poll_closed') onChange({ ...poll, closed: true });
+        if (payload?.code === 'poll_closed') {
+          pendingFocus.current = 'results';
+          onChange({ ...poll, closed: true });
+        }
         return;
       }
       const next = asChatPollView(payload?.poll);
       if (next) {
+        // After a vote or a close the results replace the control; after a
+        // removal the choices come back.
+        pendingFocus.current = next.myChoices.length > 0 || next.closed ? 'results' : 'form';
         onChange(next);
         setSelection(next.myChoices);
         setChanging(false);
@@ -167,9 +215,17 @@ export function ChatPollCard({ poll, serverId, channelId, canClose, onChange }: 
       </p>
 
       {showResults ? (
-        <ul className="mt-3 space-y-2" aria-label={t('lobbyMain.poll.resultsLabel')}>
+        <ul
+          ref={resultsRef}
+          tabIndex={-1}
+          className="mt-3 space-y-2 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          aria-label={t('lobbyMain.poll.resultsLabel')}
+          aria-busy={countsMissing ? true : undefined}
+        >
           {poll.options.map((option, index) => {
             const mine = poll.myChoices.includes(index);
+            // Never a fake 0 %: until the final counts arrive, the answer stands alone.
+            const known = option.votes !== null;
             const votes = option.votes ?? 0;
             const percent = pollSharePercent(votes, totalVotes);
             return (
@@ -179,11 +235,13 @@ export function ChatPollCard({ poll, serverId, channelId, canClose, onChange }: 
                 data-poll-mine={mine ? 'true' : undefined}
                 className={`relative overflow-hidden rounded-lg border px-3 py-2 ${mine ? 'border-primary' : 'border-border-subtle'}`}
               >
-                <span
-                  aria-hidden
-                  className={`absolute inset-y-0 left-0 ${mine ? 'bg-primary/25' : 'bg-primary/10'}`}
-                  style={{ width: `${percent}%` }}
-                />
+                {known ? (
+                  <span
+                    aria-hidden
+                    className={`absolute inset-y-0 left-0 ${mine ? 'bg-primary/25' : 'bg-primary/10'}`}
+                    style={{ width: `${percent}%` }}
+                  />
+                ) : null}
                 <span className="relative flex items-start justify-between gap-3">
                   <span className="min-w-0 break-words text-sm text-text-primary">
                     {mine ? (
@@ -194,17 +252,19 @@ export function ChatPollCard({ poll, serverId, channelId, canClose, onChange }: 
                     {option.text}
                     {mine ? <span className="ml-2 text-[11px] font-medium text-primary">{t('lobbyMain.poll.yourVote')}</span> : null}
                   </span>
-                  <span className="shrink-0 text-right text-xs tabular-nums text-text-secondary">
-                    <span className="font-semibold text-text-primary">{t('lobbyMain.poll.share', { percent })}</span>
-                    <span className="block">{t('lobbyMain.poll.optionVotes', { count: votes })}</span>
-                  </span>
+                  {known ? (
+                    <span className="shrink-0 text-right text-xs tabular-nums text-text-secondary">
+                      <span className="font-semibold text-text-primary">{t('lobbyMain.poll.share', { percent })}</span>
+                      <span className="block">{t('lobbyMain.poll.optionVotes', { count: votes })}</span>
+                    </span>
+                  ) : null}
                 </span>
               </li>
             );
           })}
         </ul>
       ) : (
-        <form onSubmit={submitVote} className="mt-3">
+        <form ref={formRef} onSubmit={submitVote} className="mt-3">
           <fieldset aria-labelledby={questionId} aria-describedby={hintId} disabled={busy}>
             <p id={hintId} className="mb-2 text-xs text-text-muted">
               {poll.allowMultiple ? t('lobbyMain.poll.pickMany') : t('lobbyMain.poll.pickOne')}
@@ -248,6 +308,7 @@ export function ChatPollCard({ poll, serverId, channelId, canClose, onChange }: 
               <button
                 type="button"
                 onClick={() => {
+                  pendingFocus.current = 'results';
                   setChanging(false);
                   setSelection(poll.myChoices);
                 }}
@@ -259,6 +320,12 @@ export function ChatPollCard({ poll, serverId, channelId, canClose, onChange }: 
           </div>
         </form>
       )}
+
+      {showResults && countsMissing ? (
+        <p className="mt-2 text-xs text-text-muted" role="status">
+          {t('lobbyMain.poll.loadingResults')}
+        </p>
+      ) : null}
 
       <footer className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-text-muted">
         <span>
@@ -276,6 +343,7 @@ export function ChatPollCard({ poll, serverId, channelId, canClose, onChange }: 
                   type="button"
                   disabled={busy}
                   onClick={() => {
+                    pendingFocus.current = 'form';
                     setSelection(poll.myChoices);
                     setChanging(true);
                   }}
@@ -295,9 +363,13 @@ export function ChatPollCard({ poll, serverId, channelId, canClose, onChange }: 
             ) : null}
             {canClose && !confirmClose ? (
               <button
+                ref={closeTriggerRef}
                 type="button"
                 disabled={busy}
-                onClick={() => setConfirmClose(true)}
+                onClick={() => {
+                  pendingFocus.current = 'confirm';
+                  setConfirmClose(true);
+                }}
                 className="rounded px-2 py-1 font-medium text-text-secondary hover:bg-surface-container hover:text-danger disabled:opacity-40"
               >
                 {t('lobbyMain.poll.close')}
@@ -311,6 +383,7 @@ export function ChatPollCard({ poll, serverId, channelId, canClose, onChange }: 
         <div role="group" aria-label={t('lobbyMain.poll.close')} className="mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-surface-container px-3 py-2 text-xs text-text-secondary">
           <span className="min-w-0 flex-1">{t('lobbyMain.poll.closeConfirm')}</span>
           <button
+            ref={confirmRef}
             type="button"
             disabled={busy}
             onClick={() => void send(`${base}/close`, 'POST')}
@@ -320,7 +393,10 @@ export function ChatPollCard({ poll, serverId, channelId, canClose, onChange }: 
           </button>
           <button
             type="button"
-            onClick={() => setConfirmClose(false)}
+            onClick={() => {
+              pendingFocus.current = 'closeTrigger';
+              setConfirmClose(false);
+            }}
             className="rounded-md px-2.5 py-1 text-text-secondary hover:text-text-primary"
           >
             {t('lobbyMain.chat.cancel')}

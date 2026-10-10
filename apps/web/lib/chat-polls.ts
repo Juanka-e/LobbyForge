@@ -150,6 +150,8 @@ export interface ChatPollView {
   myChoices: number[];
   /** Counts show once the viewer has voted, and to everyone once the poll has closed. */
   resultsVisible: boolean;
+  /** Bumped by every vote, removal and close: a realtime update older than this is dropped. */
+  version: number;
 }
 
 /** What the server knows about a poll — structurally the db row with its tally. */
@@ -164,6 +166,7 @@ export interface ChatPollSource {
   counts: readonly number[];
   totalVoters: number;
   viewerChoices: readonly number[];
+  version: number;
 }
 
 export function isChatPollClosed(poll: { closesAt: Date | string; closedAt: Date | string | null }, now: Date = new Date()): boolean {
@@ -192,6 +195,7 @@ export function projectChatPoll(poll: ChatPollSource, now: Date = new Date()): C
     totalVoters: poll.totalVoters,
     myChoices,
     resultsVisible,
+    version: poll.version,
   };
 }
 
@@ -204,6 +208,8 @@ export interface ChatPollUpdate {
   closesAt: string;
   closedAt: string | null;
   closed: boolean;
+  /** The poll's version when these counts were read. */
+  version: number;
 }
 
 export function toChatPollUpdate(poll: ChatPollSource, now: Date = new Date()): ChatPollUpdate {
@@ -215,6 +221,7 @@ export function toChatPollUpdate(poll: ChatPollSource, now: Date = new Date()): 
     closesAt: poll.closesAt.toISOString(),
     closedAt: poll.closedAt?.toISOString() ?? null,
     closed: isChatPollClosed(poll, now),
+    version: poll.version,
   };
 }
 
@@ -222,20 +229,35 @@ export function toChatPollUpdate(poll: ChatPollSource, now: Date = new Date()): 
  * Apply a realtime update to what this viewer sees. A viewer who has not
  * voted on an open poll keeps the counts hidden (only the voter total
  * moves); once the poll closes everyone sees them.
+ *
+ * Updates can arrive out of order (each write reads its tally after it
+ * commits): one older than the view is dropped, and a closed poll never
+ * reopens.
  */
 export function applyChatPollUpdate(view: ChatPollView, update: ChatPollUpdate, now: Date = new Date()): ChatPollView {
-  if (update.id !== view.id) return view;
-  const closed = update.closed || isChatPollClosed(update, now);
+  if (update.id !== view.id || update.version < view.version) return view;
+  const closed = view.closed || update.closed || isChatPollClosed(update, now);
   const resultsVisible = closed || view.myChoices.length > 0;
   return {
     ...view,
     options: view.options.map((option, index) => ({ ...option, votes: resultsVisible ? (update.counts[index] ?? 0) : null })),
     closesAt: update.closesAt,
-    closedAt: update.closedAt,
+    closedAt: update.closedAt ?? view.closedAt,
     closed,
     totalVoters: update.totalVoters,
     resultsVisible,
+    version: update.version,
   };
+}
+
+/**
+ * Bring a view from a REST answer up to the newest realtime update already
+ * seen for that poll. Updates can land before the answer that caused them
+ * (or a history page can be older than the live card); re-applying the
+ * newest one keeps the counts current while the answer's own choices win.
+ */
+export function catchUpChatPoll(view: ChatPollView, latest: ChatPollUpdate | undefined, now: Date = new Date()): ChatPollView {
+  return latest && latest.id === view.id && latest.version > view.version ? applyChatPollUpdate(view, latest, now) : view;
 }
 
 /** Read a poll view from an API or realtime payload; anything malformed is not a poll. */
@@ -263,6 +285,7 @@ export function asChatPollView(value: unknown): ChatPollView | null {
     totalVoters: typeof raw.totalVoters === 'number' ? raw.totalVoters : 0,
     myChoices,
     resultsVisible: raw.resultsVisible === true,
+    version: typeof raw.version === 'number' ? raw.version : 0,
   };
 }
 
@@ -280,6 +303,7 @@ export function asChatPollUpdate(value: unknown): ChatPollUpdate | null {
     closesAt: raw.closesAt,
     closedAt: typeof raw.closedAt === 'string' ? raw.closedAt : null,
     closed: raw.closed === true,
+    version: typeof raw.version === 'number' ? raw.version : 0,
   };
 }
 

@@ -125,11 +125,11 @@ test.describe('Polls in a text channel, two members, live', () => {
     // An empty draft is refused with a reason, not sent.
     await dialog.getByRole('button', { name: 'Post poll' }).click();
     await expect(dialog.getByText('Write a question first.')).toBeVisible();
-    await dialog.getByLabel('Question').fill(QUESTION);
-    await dialog.getByLabel('Answer 1').fill('Pizza');
-    await dialog.getByLabel('Answer 2').fill('Tacos');
+    await dialog.getByRole('textbox', { name: 'Question', exact: true }).fill(QUESTION);
+    await dialog.getByRole('textbox', { name: 'Answer 1', exact: true }).fill('Pizza');
+    await dialog.getByRole('textbox', { name: 'Answer 2', exact: true }).fill('Tacos');
     await dialog.getByRole('button', { name: 'Add answer' }).click();
-    await dialog.getByLabel('Answer 3').fill('Both');
+    await dialog.getByRole('textbox', { name: 'Answer 3', exact: true }).fill('Both');
     await expect(dialog.getByRole('combobox', { name: 'Duration' })).toHaveValue('24');
     await dialog.getByRole('button', { name: 'Post poll' }).click();
     await expect(dialog).toHaveCount(0);

@@ -31,6 +31,8 @@ export interface MessagePollRow {
   closesAt: Date;
   closedAt: Date | null;
   closedByUserId: string | null;
+  /** Bumped by every vote, vote removal and close. */
+  version: number;
   createdAt: Date;
 }
 
@@ -69,6 +71,7 @@ const pollColumns = {
   closesAt: messagePolls.closesAt,
   closedAt: messagePolls.closedAt,
   closedByUserId: messagePolls.closedByUserId,
+  version: messagePolls.version,
   createdAt: messagePolls.createdAt,
 };
 
@@ -85,6 +88,7 @@ function toPollRow(row: Record<string, unknown>): MessagePollRow {
     closesAt: row.closesAt as Date,
     closedAt: (row.closedAt as Date | null) ?? null,
     closedByUserId: (row.closedByUserId as string | null) ?? null,
+    version: Number(row.version) || 0,
     createdAt: row.createdAt as Date,
   };
 }
@@ -243,29 +247,34 @@ async function loadWithTally(
 
 export type MessagePollWriteResult = { ok: true } | { ok: false; reason: 'not_found' | 'closed' };
 
+type Tx = Parameters<Parameters<DbClient['transaction']>[0]>[0];
+
 /**
- * Lock the poll for this voter's write and check it is still open. The
- * advisory lock serializes one member's writes to one poll (two devices
- * voting at once cannot leave a single-choice poll with two rows); the
- * FOR SHARE row lock waits out a concurrent close.
+ * Lock the poll row for this write and check it is still open. Every
+ * write to one poll (votes, removals, the close) takes this row lock, so
+ * they run one after another: two devices voting at once cannot leave a
+ * single-choice poll with two rows, a vote cannot slip in after a close,
+ * and each write's `version` bump is ordered.
  */
-async function lockOpenPoll(
-  tx: Parameters<Parameters<DbClient['transaction']>[0]>[0],
-  pollId: string,
-  userId: string,
-  now: Date
-): Promise<MessagePollWriteResult> {
-  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`lobbyforge:poll-vote:${pollId}:${userId}`}))`);
+async function lockOpenPoll(tx: Tx, pollId: string, now: Date): Promise<MessagePollWriteResult> {
   const [poll] = await tx
     .select({ closesAt: messagePolls.closesAt, closedAt: messagePolls.closedAt })
     .from(messagePolls)
     .innerJoin(messages, eq(messages.id, messagePolls.messageId))
     .where(and(eq(messagePolls.id, pollId), isNull(messages.deletedAt)))
-    .for('share', { of: messagePolls })
+    .for('update', { of: messagePolls })
     .limit(1);
   if (!poll) return { ok: false, reason: 'not_found' };
   if (isMessagePollClosed(poll, now)) return { ok: false, reason: 'closed' };
   return { ok: true };
+}
+
+/** Bump the poll's version — inside the write's transaction, after the row lock. */
+async function bumpVersion(tx: Tx, pollId: string): Promise<void> {
+  await tx
+    .update(messagePolls)
+    .set({ version: sql`${messagePolls.version} + 1` })
+    .where(eq(messagePolls.id, pollId));
 }
 
 /**
@@ -279,7 +288,7 @@ export async function setMessagePollVote(
 ): Promise<MessagePollWriteResult> {
   const now = input.now ?? new Date();
   return db.transaction(async (tx) => {
-    const open = await lockOpenPoll(tx, input.pollId, input.userId, now);
+    const open = await lockOpenPoll(tx, input.pollId, now);
     if (!open.ok) return open;
     await tx
       .delete(messagePollVotes)
@@ -291,6 +300,7 @@ export async function setMessagePollVote(
         .values(unique.map((optionIndex) => ({ pollId: input.pollId, userId: input.userId, optionIndex })))
         .onConflictDoNothing();
     }
+    await bumpVersion(tx, input.pollId);
     return { ok: true } as const;
   });
 }
@@ -302,11 +312,12 @@ export async function clearMessagePollVote(
 ): Promise<MessagePollWriteResult> {
   const now = input.now ?? new Date();
   return db.transaction(async (tx) => {
-    const open = await lockOpenPoll(tx, input.pollId, input.userId, now);
+    const open = await lockOpenPoll(tx, input.pollId, now);
     if (!open.ok) return open;
     await tx
       .delete(messagePollVotes)
       .where(and(eq(messagePollVotes.pollId, input.pollId), eq(messagePollVotes.userId, input.userId)));
+    await bumpVersion(tx, input.pollId);
     return { ok: true } as const;
   });
 }
@@ -323,7 +334,7 @@ export async function closeMessagePoll(
   const now = input.now ?? new Date();
   const updated = await db
     .update(messagePolls)
-    .set({ closedAt: now, closedByUserId: input.userId })
+    .set({ closedAt: now, closedByUserId: input.userId, version: sql`${messagePolls.version} + 1` })
     .where(and(eq(messagePolls.id, input.pollId), isNull(messagePolls.closedAt), gt(messagePolls.closesAt, now)))
     .returning();
   if (updated[0]) return { ok: true, poll: toPollRow(updated[0]) };
@@ -332,10 +343,8 @@ export async function closeMessagePoll(
 }
 
 /**
- * Delete the poll of a message (its votes cascade). The messages DELETE
- * route soft-deletes the message row, which the FK cascade never sees —
- * so it calls this too: a deleted poll message leaves no ballots behind.
- * Returns true when a poll was removed.
+ * Delete the poll of a message (its votes cascade). Returns true when a
+ * poll was removed.
  */
 export async function deleteMessagePollForMessage(db: DbClient, messageId: string): Promise<boolean> {
   const removed = await db
@@ -343,4 +352,25 @@ export async function deleteMessagePollForMessage(db: DbClient, messageId: strin
     .where(eq(messagePolls.messageId, messageId))
     .returning({ id: messagePolls.id });
   return removed.length > 0;
+}
+
+/**
+ * Delete a poll message: soft-delete the message row and delete its poll
+ * (the ballots cascade) in ONE transaction. The soft delete never reaches
+ * the FK cascade, and a deleted poll message must leave no record of who
+ * chose what behind. Throws, writing nothing, when the message is unknown
+ * or already deleted.
+ */
+export async function softDeletePollMessage(db: DbClient, messageId: string, now: Date = new Date()): Promise<void> {
+  await db.transaction(async (tx) => {
+    const deleted = await tx
+      .update(messages)
+      .set({ deletedAt: now })
+      .where(and(eq(messages.id, messageId), isNull(messages.deletedAt)))
+      .returning({ id: messages.id });
+    if (deleted.length === 0) {
+      throw new Error(`softDeletePollMessage: message ${messageId} not found or already deleted`);
+    }
+    await tx.delete(messagePolls).where(eq(messagePolls.messageId, messageId));
+  });
 }

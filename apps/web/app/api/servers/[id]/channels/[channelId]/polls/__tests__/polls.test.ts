@@ -113,6 +113,7 @@ function pollRow(overrides: Record<string, unknown> = {}) {
     closesAt: new Date(Date.now() + 24 * HOUR),
     closedAt: null,
     closedByUserId: null,
+    version: 7,
     createdAt: new Date(Date.now() - HOUR),
     ...overrides,
   };
@@ -385,13 +386,13 @@ describe('the projection never names a voter', () => {
     expect(text).not.toContain(POLLER); // not even the creator
     const { poll } = JSON.parse(text) as { poll: Record<string, unknown> };
     expect(Object.keys(poll).sort()).toEqual(
-      ['allowMultiple', 'closedAt', 'closed', 'closesAt', 'id', 'messageId', 'myChoices', 'options', 'question', 'resultsVisible', 'totalVoters'].sort()
+      ['allowMultiple', 'closedAt', 'closed', 'closesAt', 'id', 'messageId', 'myChoices', 'options', 'question', 'resultsVisible', 'totalVoters', 'version'].sort()
     );
     expect(publishChatPollUpdate).toHaveBeenCalledTimes(1);
     const update = publishChatPollUpdate.mock.calls[0]![0] as { poll: Record<string, unknown> };
-    expect(Object.keys(update.poll).sort()).toEqual(['closed', 'closedAt', 'closesAt', 'counts', 'id', 'messageId', 'totalVoters']);
+    expect(Object.keys(update.poll).sort()).toEqual(['closed', 'closedAt', 'closesAt', 'counts', 'id', 'messageId', 'totalVoters', 'version']);
     expect(JSON.stringify(update)).not.toMatch(new RegExp(`${MOD}|${OWNER}|${MEMBER}|${POLLER}`));
-    expect(update.poll).toMatchObject({ counts: [2, 0, 1], totalVoters: 3 });
+    expect(update.poll).toMatchObject({ counts: [2, 0, 1], totalVoters: 3, version: 7 });
   });
 });
 

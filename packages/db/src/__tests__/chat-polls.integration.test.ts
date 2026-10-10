@@ -25,6 +25,7 @@ import {
   closeMessagePoll,
   createMessagePoll,
   deleteMessagePollForMessage,
+  softDeletePollMessage,
   getMessagePollById,
   getMessagePollWithTally,
   listMessagePollsForMessages,
@@ -126,6 +127,31 @@ describe.skipIf(!DB_URL)('chat polls (integration)', () => {
     expect(anon?.counts).toEqual([1, 0, 2]);
   });
 
+  it('bumps the version on every vote, removal and close — never on a refused write', async () => {
+    const { poll } = await newPoll();
+    expect(poll.version).toBe(0);
+    const version = async () => (await getMessagePollWithTally(db, poll.id, ada))!.version;
+    await setMessagePollVote(db, { pollId: poll.id, userId: ada, optionIndexes: [0] });
+    expect(await version()).toBe(1);
+    await setMessagePollVote(db, { pollId: poll.id, userId: bora, optionIndexes: [1] });
+    expect(await version()).toBe(2);
+    await clearMessagePollVote(db, { pollId: poll.id, userId: ada });
+    expect(await version()).toBe(3);
+    const closed = await closeMessagePoll(db, { pollId: poll.id, userId: owner });
+    expect(closed.ok && closed.poll.version).toBe(4);
+    await setMessagePollVote(db, { pollId: poll.id, userId: ada, optionIndexes: [0] });
+    expect(await version()).toBe(4);
+  });
+
+  it('serializes concurrent votes by different members: each counted, versions strictly ordered', async () => {
+    const { poll } = await newPoll();
+    await Promise.all([ada, bora, cem].map((userId, i) => setMessagePollVote(db, { pollId: poll.id, userId, optionIndexes: [i] })));
+    const tally = await getMessagePollWithTally(db, poll.id, null);
+    expect(tally?.counts).toEqual([1, 1, 1]);
+    expect(tally?.totalVoters).toBe(3);
+    expect(tally?.version).toBe(3);
+  });
+
   it('replaces a vote, removes it, and refuses both once the poll has closed', async () => {
     const { poll } = await newPoll();
     await setMessagePollVote(db, { pollId: poll.id, userId: ada, optionIndexes: [0] });
@@ -174,15 +200,24 @@ describe.skipIf(!DB_URL)('chat polls (integration)', () => {
   });
 
   it('a deleted message takes its poll and every ballot with it', async () => {
-    // Soft delete (the messages DELETE route): hidden at once, then removed.
+    // The messages DELETE route: message soft-deleted and poll removed in one transaction.
     const soft = await newPoll();
     await setMessagePollVote(db, { pollId: soft.poll.id, userId: ada, optionIndexes: [1] });
-    await softDeleteMessage(db, soft.message.id);
+    await softDeletePollMessage(db, soft.message.id);
+    const [{ deleted_at }] = await sql<{ deleted_at: Date | null }[]>`SELECT deleted_at FROM messages WHERE id = ${soft.message.id}`;
+    expect(deleted_at).toBeInstanceOf(Date);
     expect(await getMessagePollById(db, soft.poll.id)).toBeNull();
-    expect((await listMessagePollsForMessages(db, [soft.message.id], ada)).size).toBe(0);
     expect(await setMessagePollVote(db, { pollId: soft.poll.id, userId: bora, optionIndexes: [0] })).toEqual({ ok: false, reason: 'not_found' });
-    expect(await deleteMessagePollForMessage(db, soft.message.id)).toBe(true);
-    expect(await deleteMessagePollForMessage(db, soft.message.id)).toBe(false);
+    // Deleting it again writes nothing.
+    await expect(softDeletePollMessage(db, soft.message.id)).rejects.toThrow(/not found or already deleted/);
+
+    // A message soft-deleted some other way hides its poll at once.
+    const hidden = await newPoll();
+    await softDeleteMessage(db, hidden.message.id);
+    expect(await getMessagePollById(db, hidden.poll.id)).toBeNull();
+    expect((await listMessagePollsForMessages(db, [hidden.message.id], ada)).size).toBe(0);
+    expect(await deleteMessagePollForMessage(db, hidden.message.id)).toBe(true);
+    expect(await deleteMessagePollForMessage(db, hidden.message.id)).toBe(false);
 
     // Hard delete (channel removal, retention): the FK cascade.
     const hard = await newPoll();

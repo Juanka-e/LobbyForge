@@ -5,6 +5,7 @@ import {
   applyChatPollUpdate,
   asChatPollUpdate,
   asChatPollView,
+  catchUpChatPoll,
   checkChatPollDraft,
   checkVoteChoices,
   isPollChannelType,
@@ -34,6 +35,7 @@ function source(overrides: Partial<ChatPollSource> = {}): ChatPollSource {
     counts: [3, 1, 0],
     totalVoters: 4,
     viewerChoices: [],
+    version: 3,
     ...overrides,
   };
 }
@@ -144,6 +146,7 @@ describe('projectChatPoll — what a viewer may see', () => {
       closesAt: new Date(NOW.getTime() + HOUR).toISOString(),
       closedAt: null,
       closed: false,
+      version: 3,
     });
   });
 });
@@ -170,6 +173,36 @@ describe('applyChatPollUpdate — a realtime update', () => {
   it('ignores an update for another poll', () => {
     const view = projectChatPoll(source(), NOW);
     expect(applyChatPollUpdate(view, update({ id: 'poll-2' }), NOW)).toBe(view);
+  });
+
+  it('drops an update older than what is shown (they can arrive out of order)', () => {
+    const view = projectChatPoll(source({ viewerChoices: [0], counts: [5, 2, 1], version: 9 }), NOW);
+    const stale = update({ counts: [1, 0, 0], totalVoters: 1, version: 8 });
+    expect(applyChatPollUpdate(view, stale, NOW)).toBe(view);
+    const next = applyChatPollUpdate(view, update({ counts: [6, 2, 1], totalVoters: 9, version: 10 }), NOW);
+    expect(next.version).toBe(10);
+    expect(next.options.map((o) => o.votes)).toEqual([6, 2, 1]);
+  });
+
+  it('never reopens a closed poll, whatever arrives after the close', () => {
+    const closedView = applyChatPollUpdate(
+      projectChatPoll(source(), NOW),
+      update({ closed: true, closedAt: NOW.toISOString(), version: 5 }),
+      NOW
+    );
+    expect(closedView.closed).toBe(true);
+    // Same version (the same snapshot again) without the close: still closed.
+    const replay = applyChatPollUpdate(closedView, update({ closed: false, closedAt: null, version: 5 }), NOW);
+    expect(replay).toMatchObject({ closed: true, closedAt: NOW.toISOString(), resultsVisible: true });
+  });
+
+  it('catchUpChatPoll brings an older REST view up to the newest update, keeping the answer’s own choices', () => {
+    const fromRest = projectChatPoll(source({ viewerChoices: [1], counts: [3, 1, 0], version: 4 }), NOW);
+    const caughtUp = catchUpChatPoll(fromRest, update({ counts: [3, 2, 1], totalVoters: 6, version: 6 }), NOW);
+    expect(caughtUp).toMatchObject({ version: 6, totalVoters: 6, myChoices: [1] });
+    expect(caughtUp.options.map((o) => o.votes)).toEqual([3, 2, 1]);
+    expect(catchUpChatPoll(fromRest, update({ version: 4 }), NOW)).toBe(fromRest);
+    expect(catchUpChatPoll(fromRest, undefined, NOW)).toBe(fromRest);
   });
 });
 

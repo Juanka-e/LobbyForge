@@ -42,6 +42,7 @@ function view(overrides: Partial<ChatPollView> = {}): ChatPollView {
     totalVoters: 4,
     myChoices: [],
     resultsVisible: false,
+    version: 1,
     ...overrides,
   };
 }
@@ -118,6 +119,8 @@ describe('ChatPollCard — before voting', () => {
     expect(rows[0]).toHaveTextContent('1 vote');
     expect(rows[1]).toHaveAttribute('data-poll-mine', 'true');
     expect(screen.getByText('5 people voted')).toHaveAttribute('aria-live', 'polite');
+    // Keyboard focus moves to the results that replaced the form.
+    expect(results).toHaveFocus();
   });
 });
 
@@ -132,6 +135,7 @@ describe('ChatPollCard — after voting', () => {
     render(<Harness initial={counted([1, 3, 0], { myChoices: [1] })} />);
     await user.click(screen.getByRole('button', { name: 'Change vote' }));
     expect(screen.getAllByRole('radio')[1]).toBeChecked();
+    expect(screen.getAllByRole('radio')[1]).toHaveFocus();
     await user.click(screen.getByRole('radio', { name: 'Hushle' }));
     await user.click(screen.getByRole('button', { name: 'Vote' }));
     await waitFor(() => expect(screen.getAllByRole('listitem')[0]).toHaveAttribute('data-poll-mine', 'true'));
@@ -140,6 +144,7 @@ describe('ChatPollCard — after voting', () => {
     expect(calls.at(-1)).toMatchObject({ url: `${BASE}/vote`, method: 'DELETE' });
     await screen.findByRole('button', { name: 'Vote' });
     expect(screen.getByText('3 people voted')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByRole('radio')[0]).toHaveFocus());
   });
 
   it('says so when the poll closed in the meantime', async () => {
@@ -177,10 +182,40 @@ describe('ChatPollCard — closed', () => {
     render(<Harness initial={view()} canClose />);
     await user.click(screen.getByRole('button', { name: 'Close poll' }));
     expect(screen.getByText('Close the poll now? Nobody can vote after that.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Close now' })).toHaveFocus();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByRole('button', { name: 'Close poll' })).toHaveFocus();
+    await user.click(screen.getByRole('button', { name: 'Close poll' }));
     await user.click(screen.getByRole('button', { name: 'Close now' }));
     expect(calls.find((c) => c.method === 'POST')).toMatchObject({ url: `${BASE}/close` });
     expect(await screen.findByText('Closed')).toBeInTheDocument();
     expect(screen.getAllByRole('listitem')).toHaveLength(3);
+  });
+
+  it('this browser’s clock says closed but the server does not yet: no fake zeros, it asks again', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let gets = 0;
+      respond = (call) => {
+        if (call.method !== 'GET') return Response.json({});
+        gets += 1;
+        return gets === 1
+          ? Response.json({ poll: view({ closesAt: new Date(Date.now() + 30_000).toISOString() }) })
+          : Response.json({ poll: counted([2, 1, 1], { closed: true, closedAt: new Date().toISOString() }) });
+      };
+      render(<Harness initial={view({ closesAt: new Date(Date.now() - 1000).toISOString() })} />);
+      expect(screen.getByText('Closed')).toBeInTheDocument();
+      expect(screen.getByRole('status')).toHaveTextContent('Loading the final results…');
+      expect(screen.queryByText(/%/)).toBeNull();
+      expect(screen.queryByText(/0 votes/)).toBeNull();
+      await waitFor(() => expect(gets).toBe(1));
+      await vi.advanceTimersByTimeAsync(5_000);
+      await waitFor(() => expect(gets).toBe(2));
+      expect(await screen.findByText('50%')).toBeInTheDocument();
+      expect(screen.queryByRole('status')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('no close control for other members', () => {
@@ -195,7 +230,7 @@ describe('ChatPollCard — Turkish', () => {
     expect(screen.getByText('1 kişi oy verdi')).toBeInTheDocument();
     expect(screen.getByText('Senin seçimin')).toBeInTheDocument();
     expect(screen.getByText('3 saat sonra kapanıyor')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Oyunu geri çek' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Oyumu geri çek' })).toBeInTheDocument();
   });
 });
 

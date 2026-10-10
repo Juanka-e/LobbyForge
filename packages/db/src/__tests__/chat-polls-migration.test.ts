@@ -40,6 +40,10 @@ describe('0047_chat_polls', () => {
     expect(sql).toContain('FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE cascade');
   });
 
+  it('versions every write so a late realtime update can be dropped', () => {
+    expect(sql).toContain('"version" integer DEFAULT 0 NOT NULL');
+  });
+
   it('backstops the route limits in SQL', () => {
     expect(sql).toContain('CHECK (char_length("question") BETWEEN 1 AND 300)');
     expect(sql).toContain(`CHECK (jsonb_typeof("options") = 'array' AND jsonb_array_length("options") BETWEEN 2 AND 10)`);
@@ -68,6 +72,8 @@ describe('0047_chat_polls', () => {
     expect(messagePolls.closedAt.notNull).toBe(false);
     expect(messagePolls.creatorUserId.notNull).toBe(false);
     expect(messagePolls.options.getSQLType()).toBe('jsonb');
+    expect(messagePolls.version.default).toBe(0);
+    expect(messagePolls.version.notNull).toBe(true);
     expect(messagePollVotes.optionIndex.getSQLType()).toBe('smallint');
   });
 
@@ -112,8 +118,10 @@ describe('0047_chat_polls', () => {
       'closes_at',
       'closed_at',
       'closed_by_user_id',
+      'version',
       'created_at',
     ]);
+    expect(polls.columns.version).toMatchObject({ type: 'integer', notNull: true, default: 0 });
     expect(polls.indexes.message_polls_message_id_unique).toMatchObject({ isUnique: true });
     expect(polls.foreignKeys.message_polls_message_id_messages_id_fk).toMatchObject({ onDelete: 'cascade' });
     const votes = snapshot.tables['public.message_poll_votes']!;

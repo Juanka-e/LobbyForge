@@ -128,6 +128,7 @@
   "lobbyMain.poll.forbidden": "You can't post polls in this channel.",
   "lobbyMain.poll.hiddenUntilVote": "Results show after you vote",
   "lobbyMain.poll.label": "Poll",
+  "lobbyMain.poll.loadingResults": "Loading the final results…",
   "lobbyMain.poll.optionDuplicate": "This answer repeats an earlier one.",
   "lobbyMain.poll.optionLabel": "Answer {index}",
   "lobbyMain.poll.optionLimit": "Between {min} and {max} answers.",

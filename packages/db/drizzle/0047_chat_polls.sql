@@ -14,6 +14,8 @@
 --
 -- Closing is lazy: a poll is closed once "closes_at" has passed or
 -- "closed_at" is set (an early close). No job writes anything at expiry.
+-- "version" is bumped by every vote, vote removal and close; realtime
+-- updates carry it so a late one never overwrites a newer tally.
 --
 -- Anonymity: "message_poll_votes" stores WHO chose WHAT, because a vote can
 -- be changed or removed and "your vote" shows on every device. No API reads
@@ -33,6 +35,7 @@ CREATE TABLE IF NOT EXISTS "message_polls" (
   "closes_at" timestamp with time zone NOT NULL,
   "closed_at" timestamp with time zone,
   "closed_by_user_id" uuid,
+  "version" integer DEFAULT 0 NOT NULL,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL,
   CONSTRAINT "message_polls_message_id_messages_id_fk"
     FOREIGN KEY ("message_id") REFERENCES "messages"("id") ON DELETE cascade ON UPDATE no action,

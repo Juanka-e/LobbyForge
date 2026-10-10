@@ -12,7 +12,14 @@ import { BotAvatar, BotBadge } from './BotIdentity';
 import { WebhookAvatar, WebhookBadge } from './WebhookIdentity';
 import { EphemeralAnswerRow, InteractionHeader, PendingInteractionRow } from './slash/InteractionRows';
 import { ChatPollCard } from './ChatPollCard';
-import { applyChatPollUpdate, asChatPollUpdate, asChatPollView, type ChatPollView } from '@/lib/chat-polls';
+import {
+  applyChatPollUpdate,
+  asChatPollUpdate,
+  asChatPollView,
+  catchUpChatPoll,
+  type ChatPollUpdate,
+  type ChatPollView,
+} from '@/lib/chat-polls';
 import {
   formatDaySeparator,
   formatFullTimestamp,
@@ -218,6 +225,17 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
   const localRows = useInteractionState();
   /** Ids that came in through the realtime feed or the local echo. */
   const liveIdsRef = useRef<Set<string>>(new Set());
+  /** Messages deleted while this view was open — a late history page must not bring them back. */
+  const deletedIdsRef = useRef<Set<string>>(new Set());
+  /**
+   * The newest `poll_update` seen per poll. A REST answer or a history page
+   * can be older than the card on screen; it is brought up to this one.
+   */
+  const pollUpdatesRef = useRef<Map<string, ChatPollUpdate>>(new Map());
+  const catchUp = useCallback(
+    (poll: ChatPollView | null): ChatPollView | null => (poll ? catchUpChatPoll(poll, pollUpdatesRef.current.get(poll.id)) : null),
+    []
+  );
 
   // Sync name cache when knownNames prop changes (parent re-render with new data).
   useEffect(() => {
@@ -284,15 +302,24 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
             body: message.content,
             blocked: message.blocked,
             pinned: typeof message.metadata?.$pinnedAt === 'string',
-            poll: message.blocked ? null : asChatPollView(message.poll),
+            poll: message.blocked ? null : catchUp(asChatPollView(message.poll)),
           };
         });
         // A message that arrived live while the history was loading (a
-        // bot's answer can come back within milliseconds) must survive it.
+        // bot's answer can come back within milliseconds) must survive it,
+        // and so must what happened live meanwhile: a delete stays deleted,
+        // and a poll the viewer voted on keeps their choice.
         setMessages((current) => {
           const known = new Set(history.map((m) => m.id));
+          const byId = new Map(current.map((m) => [m.id, m]));
           const live = current.filter((m) => liveIdsRef.current.has(m.id) && !known.has(m.id));
-          return [...live, ...history];
+          const merged = history
+            .filter((m) => !deletedIdsRef.current.has(m.id))
+            .map((m) => {
+              const shown = byId.get(m.id)?.poll;
+              return shown && m.poll && shown.id === m.poll.id && shown.version > m.poll.version ? { ...m, poll: shown } : m;
+            });
+          return [...live, ...merged];
         });
       } catch {
         // Realtime/local echo can continue from the current snapshot.
@@ -300,7 +327,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
     }
     void loadMessages();
     return () => { cancelled = true; };
-  }, [data.channelId, data.currentUserId, data.serverId, t]);
+  }, [catchUp, data.channelId, data.currentUserId, data.serverId, t]);
 
   // An edit (or anything else that changed a message) arrived as an id:
   // reload that one message through the REST route — it re-checks access
@@ -326,7 +353,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
                 ...x,
                 body: x.blocked ? x.body : message.content,
                 pinned: typeof message.metadata?.$pinnedAt === 'string',
-                ...(message.poll !== undefined && !x.blocked ? { poll: asChatPollView(message.poll) } : {}),
+                ...(message.poll !== undefined && !x.blocked ? { poll: catchUp(asChatPollView(message.poll)) } : {}),
               }
             : x
         )
@@ -334,7 +361,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
     } catch {
       // The next history load corrects it.
     }
-  }, [data.serverId, data.channelId]);
+  }, [catchUp, data.serverId, data.channelId]);
 
   // ---- Chat WS subscribe ----
   useEffect(() => {
@@ -349,12 +376,16 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
       }
       if (env.type === 'message_delete') {
         const id = typeof env.id === 'string' ? env.id : env.message?.id;
-        if (typeof id === 'string') setMessages((prev) => prev.filter((x) => x.id !== id));
+        if (typeof id !== 'string') return;
+        deletedIdsRef.current.add(id);
+        setMessages((prev) => prev.filter((x) => x.id !== id));
         return;
       }
       if (env.type === 'poll_update') {
         const update = asChatPollUpdate(env.poll);
         if (!update) return;
+        const seen = pollUpdatesRef.current.get(update.id);
+        if (!seen || seen.version <= update.version) pollUpdatesRef.current.set(update.id, update);
         setMessages((prev) =>
           prev.map((x) => (x.id === update.messageId && x.poll ? { ...x, poll: applyChatPollUpdate(x.poll, update) } : x))
         );
@@ -545,8 +576,11 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
           canManageMessages={data.canManageMessages}
           onPinnedChange={(pinned) => setMessages((current) => current.map((item) => item.id === m.id ? { ...item, pinned } : item))}
           onEdited={(body) => setMessages((current) => current.map((item) => item.id === m.id ? { ...item, body } : item))}
-          onDeleted={() => setMessages((current) => current.filter((item) => item.id !== m.id))}
-          onPollChange={(poll) => setMessages((current) => current.map((item) => item.id === m.id ? { ...item, poll } : item))}
+          onDeleted={() => {
+            deletedIdsRef.current.add(m.id);
+            setMessages((current) => current.filter((item) => item.id !== m.id));
+          }}
+          onPollChange={(poll) => setMessages((current) => current.map((item) => item.id === m.id ? { ...item, poll: catchUp(poll) } : item))}
         />
       ),
     })),

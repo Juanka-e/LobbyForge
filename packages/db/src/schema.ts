@@ -298,6 +298,11 @@ export const messagePolls = pgTable('message_polls', {
   closesAt: timestamp('closes_at', { withTimezone: true }).notNull(),
   closedAt: timestamp('closed_at', { withTimezone: true }),
   closedByUserId: uuid('closed_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+  /**
+   * Bumped by every vote, vote removal and close, in the same transaction.
+   * Realtime updates carry it so a client drops one that arrives late.
+   */
+  version: integer('version').default(0).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
   messageUnique: uniqueIndex('message_polls_message_id_unique').on(table.messageId),
