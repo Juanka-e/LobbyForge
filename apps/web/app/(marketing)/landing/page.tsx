@@ -7,6 +7,7 @@ import { LOBBYFORGE_REPO } from '@/lib/github-repo';
 import { playerRange } from '@/lib/hub-format';
 import type { LocaleInfo, Translator } from '@/lib/i18n/core';
 import { getRequestI18n, getTranslator } from '@/lib/i18n/server';
+import { pluginName } from '@/lib/plugin-catalog-text';
 import { getPlugin } from '@/lib/plugin-registry';
 import ActivityMark from '../_components/ActivityMark';
 import tones from '../_components/hub-tones.module.css';
@@ -24,7 +25,11 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-/** The official activities, in the design's order. Names are brand words. */
+/**
+ * The official activities, in the design's order. `name` is the fallback;
+ * each card shows the plugin's own `catalog.name` in the reader's language
+ * ("Poll" is "Anket"), the same name the lobby shows.
+ */
 const SHOWCASE = [
   { id: 'hushle', name: 'Hushle', copy: 'hub.landing.activities.hushle' },
   { id: 'quiz', name: 'Quiz', copy: 'hub.landing.activities.quiz' },
@@ -162,6 +167,7 @@ function Activities({ t }: { t: Translator }) {
       <ul className="mt-5 grid grid-cols-2 gap-3 sm:mt-8 lg:mt-10 lg:grid-cols-3 lg:gap-5">
         {SHOWCASE.map((activity) => {
           const players = playersLabel(t, activity.id);
+          const name = pluginName(activity.id, t.locale, activity.name);
           const id = `hub-activity-${activity.id}`;
           // Named by the activity, described by its players and blurb — the
           // player pill comes first on screen but should not be heard first.
@@ -176,7 +182,7 @@ function Activities({ t }: { t: Translator }) {
                 <span className="flex items-center justify-between gap-3">
                   <ActivityMark
                     pluginId={activity.id}
-                    name={activity.name}
+                    name={name}
                     className="sm:size-12 sm:rounded-[14px] sm:text-[22px]"
                   />
                   {players ? (
@@ -190,7 +196,7 @@ function Activities({ t }: { t: Translator }) {
                 </span>
                 <span className="flex flex-col gap-1 sm:gap-1.5">
                   <span id={`${id}-name`} className="text-[15px] font-semibold text-text-primary sm:text-[19px]">
-                    {activity.name}
+                    {name}
                   </span>
                   {players ? (
                     <span aria-hidden className="text-xs text-text-muted sm:hidden">

@@ -99,6 +99,7 @@
   "hushle.playing.endGame": "Oyunu bitir",
   "hushle.playing.endTurn": "Turu bitir",
   "hushle.playing.explainerHint": "Kelimeyi yasaklı kelimelerin hiçbirini söylemeden anlat. Her kartı host puanlar.",
+  "hushle.playing.explainingTeam": "Anlatan: {team}",
   "hushle.playing.forbiddenWords": "Yasaklı kelimeler",
   "hushle.playing.nextCard": "Sonraki kart",
   "hushle.playing.noCard": "Henüz kart çekilmedi",

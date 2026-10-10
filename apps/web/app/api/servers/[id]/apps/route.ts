@@ -9,6 +9,8 @@ import {
 } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { getPluginServer, listPluginSummariesServer } from '@/lib/plugin-server-registry';
+import { pluginName } from '@/lib/plugin-catalog-text';
+import { localeFromRequest } from '@/lib/i18n/server';
 import {
   CorePermission,
   requireMaterializedSession,
@@ -40,9 +42,12 @@ const DeleteAppSchema = z.object({
 function appSummary(input: {
   plugin: ReturnType<typeof listPluginSummariesServer>[number];
   install: Awaited<ReturnType<typeof getPluginInstall>>;
+  locale: string;
 }) {
   return {
     ...input.plugin,
+    // The plugin's own catalog.name in the viewer's language ("Poll" → "Anket").
+    name: pluginName(input.plugin.id, input.locale, input.plugin.name),
     installed: Boolean(input.install),
     enabled: input.install?.enabled ?? false,
     settings: input.install?.settings ?? {},
@@ -63,8 +68,9 @@ async function handleGet(
 
   const installs = await listPluginInstallsForServer(getDb(), serverId);
   const installByPlugin = new Map(installs.map((install) => [install.pluginId, install]));
+  const locale = localeFromRequest(req);
   const apps = listPluginSummariesServer().map((plugin) =>
-    appSummary({ plugin, install: installByPlugin.get(plugin.id) ?? null })
+    appSummary({ plugin, install: installByPlugin.get(plugin.id) ?? null, locale })
   );
 
   return NextResponse.json(
@@ -117,7 +123,13 @@ async function handlePost(
   }).catch((err) => console.error('[audit] app.upsert failed:', (err as Error).message));
 
   return NextResponse.json(
-    { app: appSummary({ plugin: listPluginSummariesServer().find((p) => p.id === plugin.manifest.id)!, install }) },
+    {
+      app: appSummary({
+        plugin: listPluginSummariesServer().find((p) => p.id === plugin.manifest.id)!,
+        install,
+        locale: localeFromRequest(req),
+      }),
+    },
     { status: 200, headers: { 'Cache-Control': 'no-store' } }
   );
 }

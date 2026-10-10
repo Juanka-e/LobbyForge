@@ -47,6 +47,7 @@
   "interactions.picker.loading": "Loading commands…",
   "interactions.picker.noMatch": "No command matches /{query}.",
   "interactions.picker.none": "No bot commands in this channel.",
+  "interactions.picker.offline": "Offline",
   "interactions.picker.retry": "Try again",
   "interactions.picker.title": "Commands",
   "interactions.private.dismiss": "Dismiss",

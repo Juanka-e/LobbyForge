@@ -15,9 +15,13 @@ const db = {
   listServerCommands: vi.fn(),
   listBotChannelAccessForServer: vi.fn(),
   isChannelOpenToBots: vi.fn(),
+  listBotEventEndpoints: vi.fn(),
 };
 vi.mock('@lobbyforge/db', () => db);
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
+// PUBSUB NUMSUB: live event-stream connections per bot channel.
+const pubsub = vi.fn();
+vi.mock('@/lib/redis', () => ({ redis: { pubsub } }));
 vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));
 
 const SECRET = 'x'.repeat(32);
@@ -50,7 +54,15 @@ function row(name: string, overrides: Record<string, unknown> = {}, botOverrides
     enabled: true,
     createdAt: new Date(),
     updatedAt: new Date(),
-    bot: { id: botId, name: 'Dice', type: 'custom', enabled: true, permissions: ['slash_commands'], channelAccessMode: 'all', ...botOverrides },
+    bot: {
+      id: botId,
+      name: 'Dice',
+      type: 'custom',
+      enabled: true,
+      permissions: ['slash_commands', 'receive_events'],
+      channelAccessMode: 'all',
+      ...botOverrides,
+    },
     ...overrides,
   };
 }
@@ -68,6 +80,11 @@ beforeEach(() => {
   vi.resetModules();
   process.env.LOBBYFORGE_SESSION_SECRET = SECRET;
   for (const fn of Object.values(db)) fn.mockReset();
+  pubsub.mockReset();
+  pubsub.mockImplementation(async (_sub: string, ...channels: string[]) =>
+    channels.flatMap((channel) => [channel, channel.endsWith(':bot-asleep') ? 0 : 1])
+  );
+  db.listBotEventEndpoints.mockResolvedValue(new Map());
   perms = { [OWNER]: ['administrator'], [MEMBER]: ['send_messages', 'read_message_history'] };
   db.getServerById.mockResolvedValue({ id: SERVER, name: 'Lobby', ownerUserId: OWNER });
   db.isServerMember.mockImplementation(async (_db: unknown, uid: string) => uid in perms);
@@ -100,7 +117,7 @@ describe('GET /api/servers/{id}/commands?channelId=', () => {
           name: 'roll',
           description: 'Run roll',
           options: [{ name: 'sides', description: '', type: 'integer', required: false }],
-          bot: { id: 'bot-a', name: 'Dice' },
+          bot: { id: 'bot-a', name: 'Dice', online: true },
         },
       ],
     });
@@ -145,6 +162,37 @@ describe('GET /api/servers/{id}/commands?channelId=', () => {
     expect((await (await list(OWNER)).json()).commands.map((c: { name: string }) => c.name)).toEqual(['kick', 'roll']);
   });
 
+  it('says which bots are offline: no live stream and no endpoint taking interactions', async () => {
+    db.listServerCommands.mockResolvedValue([
+      row('roll'),
+      row('nap', {}, { id: 'bot-asleep' }),
+      row('hook', {}, { id: 'bot-http' }),
+      row('deaf', {}, { id: 'bot-deaf', permissions: ['slash_commands'] }),
+    ]);
+    db.listBotEventEndpoints.mockResolvedValue(
+      new Map([['bot-http', { botId: 'bot-http', enabled: true, events: ['interaction_create'] }]])
+    );
+    const commands = (await (await list(MEMBER)).json()).commands as Array<{ name: string; bot: { online: boolean } }>;
+    expect(Object.fromEntries(commands.map((c) => [c.name, c.bot.online]))).toEqual({
+      roll: true,
+      nap: false,
+      hook: true,
+      deaf: false,
+    });
+    // The endpoint bot needs no Redis answer; the one without receive_events is never asked about.
+    expect(pubsub).toHaveBeenCalledTimes(1);
+    const asked = pubsub.mock.calls[0]!.slice(1) as string[];
+    expect(asked.map((ch) => ch.split(':').pop())).toEqual(['bot-a', 'bot-asleep']);
+  });
+
+  it('fails open when Redis cannot say', async () => {
+    db.listServerCommands.mockResolvedValue([row('nap', {}, { id: 'bot-asleep' })]);
+    pubsub.mockRejectedValue(new Error('Redis unavailable'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect((await (await list(MEMBER)).json()).commands[0].bot.online).toBe(true);
+    warn.mockRestore();
+  });
+
   it('a voice channel has no commands; the work is a fixed number of queries', async () => {
     db.listServerCommands.mockResolvedValue([row('roll')]);
     perms[MEMBER] = ['send_messages'];
@@ -154,5 +202,7 @@ describe('GET /api/servers/{id}/commands?channelId=', () => {
     await list(MEMBER);
     expect(db.listBotChannelAccessForServer).toHaveBeenCalledTimes(1);
     expect(db.isChannelOpenToBots).toHaveBeenCalledTimes(1);
+    expect(db.listBotEventEndpoints).toHaveBeenCalledTimes(1);
+    expect(pubsub).toHaveBeenCalledTimes(1);
   });
 });

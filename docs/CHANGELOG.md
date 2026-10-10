@@ -2,6 +2,14 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Activity and lobby polish - 2026-10-10
+
+- **Vampire Village:** on the end screen, losers' role and status columns line up with the winners' (every row keeps the badge's width). The dawn light now sweeps inside the stage instead of sliding over the header.
+- **Hushle:** the team name above the card says what it is: "Explaining: Eagles" / "Anlatan: Kartallar". An opponent no longer reads it as their own team.
+- **Dice:** buttons say "Roll a 6-sided die" / "6 yüzlü zar at" instead of "d6", and the last-roll line keeps "· 5" on the same line on a phone.
+- **Slash commands:** an offline bot's commands stay in the `/` list but greyed out, after the online bots, under "Offline". The keys and clicks skip them, and Enter no longer posts `/roll` as text when every match is offline. `GET /api/servers/{id}/commands` adds `bot.online`.
+- **App names:** every screen that names an activity uses the plugin's own `catalog.name` in the viewer's language: the community app list (server settings and the old room picker), the admin app list, and the hub's landing, home and marketplace pages. In Turkish, Dice Bot is now "Zar"; established names (Quiz, Watch Party, Hushle) stay.
+
 ## [Unreleased] - Dependency cleanup, fourth batch - 2026-10-10
 
 - **Email:** nodemailer 10.0.14 (exact pin). It carries the fixes for GHSA-4ffr-jq9g-5ffx (SMTP AUTH regex DoS, high) and GHSA-g73g-hqqh-jr95 (malformed envelope recipient), both fixed in 10.0.13. It also includes 10.0.12's fixes: a bare CR in the message becomes CRLF, which blocks SMTP smuggling, and a send on a dead pool connection now settles instead of hanging. 10.0.14 is the newest release at least a week old.

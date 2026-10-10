@@ -14,6 +14,7 @@ import { authorizeChannelMessageAccess } from '@/lib/message-authorization';
 import { jsonErrors } from '@/lib/bots/admin';
 import { botReachesChannel, isAllChannelsMode } from '@/lib/bots/access';
 import { commandAllowedInChannel, readCommandOptions } from '@/lib/bots/commands';
+import { botsReceivingInteractions } from '@/lib/bots/reachability';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -26,7 +27,9 @@ const BOT_CHANNEL_TYPES = new Set(['text', 'announcement']);
  * GET /api/servers/{id}/commands?channelId= — the slash commands this
  * member may run in that channel, for the composer's `/` picker
  * (docs/BOT_API_V2.md §3.3): `{ commands: [{ id, name, description,
- * options, bot: { id, name } }] }`, grouped by bot.
+ * options, bot: { id, name, online } }] }`, grouped by bot. `online` is
+ * false when invoking would answer `bot_offline` right now; the picker
+ * greys those commands out.
  *
  * A command is listed only when every invoke-time check would pass on the
  * command's side: enabled; allowed in this channel by the bot and by the
@@ -69,7 +72,7 @@ async function handleGet(req: Request, ctx: RouteContext): Promise<NextResponse>
     ? await getUserPermissions(getDb(), uid, serverId)
     : [];
 
-  const commands = candidates
+  const runnable = candidates
     .filter((row) =>
       botReachesChannel({ mode: row.bot.channelAccessMode, granted: grants.get(row.botId) ?? [], channelId, openToBots })
     )
@@ -79,14 +82,16 @@ async function handleGet(req: Request, ctx: RouteContext): Promise<NextResponse>
         isOwner ||
         ((Object.values(CorePermission) as string[]).includes(row.requiredPermission) &&
           hasPermission(permissions, row.requiredPermission as CorePermissionT))
-    )
-    .map((row) => ({
-      id: row.id,
-      name: row.name,
-      description: row.description,
-      options: readCommandOptions(row.options),
-      bot: { id: row.bot.id, name: row.bot.name },
-    }));
+    );
+  const bots = new Map(runnable.map((row) => [row.bot.id, row.bot]));
+  const online = await botsReceivingInteractions([...bots.values()]);
+  const commands = runnable.map((row) => ({
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    options: readCommandOptions(row.options),
+    bot: { id: row.bot.id, name: row.bot.name, online: online.has(row.bot.id) },
+  }));
   return NextResponse.json({ commands }, noStore);
 }
 

@@ -10,7 +10,7 @@ import MarketplaceGrid from './MarketplaceGrid';
 import ActivityMark from '@/app/(marketing)/_components/ActivityMark';
 import { playerRange } from '@/lib/hub-format';
 import { listPluginSummaries } from '@/lib/plugin-registry';
-import { pluginSummary } from '@/lib/plugin-catalog-text';
+import { pluginName, pluginSummary } from '@/lib/plugin-catalog-text';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -180,6 +180,7 @@ function BuiltInActivities({ t }: { t: Translator }) {
       </div>
       <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {plugins.map((plugin) => {
+          const name = pluginName(plugin.id, t.locale, plugin.name);
           const range = playerRange(plugin.catalog?.playerConfig);
           const players = range
             ? range.kind === 'range'
@@ -193,12 +194,12 @@ function BuiltInActivities({ t }: { t: Translator }) {
               className="flex scroll-mt-28 flex-col gap-3 rounded-[22px] border border-border-subtle/70 bg-surface p-5 target:border-primary target:ring-2 target:ring-primary/40"
             >
               <div className="flex items-center justify-between gap-3">
-                <ActivityMark pluginId={plugin.id} name={plugin.name} />
+                <ActivityMark pluginId={plugin.id} name={name} />
                 <span className="rounded-full bg-surface-raised px-2.5 py-1 text-xs font-medium text-text-secondary">
                   {t('hub.marketplace.builtIn.badge')}
                 </span>
               </div>
-              <h3 className="text-lg font-semibold text-text-primary">{plugin.name}</h3>
+              <h3 className="text-lg font-semibold text-text-primary">{name}</h3>
               <p className="text-[15px] leading-[1.55] text-text-secondary">
                 {pluginSummary(plugin.id, t.locale, plugin.catalog?.summary ?? null)}
               </p>

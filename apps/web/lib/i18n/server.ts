@@ -76,6 +76,19 @@ export const getRequestI18n = cache(async (): Promise<RequestI18n> => {
   };
 });
 
+/**
+ * The same choice for a route handler that holds the Request (and runs in
+ * tests without Next's request scope): `lf_locale` → Accept-Language →
+ * the instance default.
+ */
+export function localeFromRequest(req: Request): string {
+  const codes = getDiscovery().locales.map((l) => l.code);
+  return (
+    readLocaleCookie(req.headers.get('cookie'), codes) ??
+    negotiateLocale(req.headers.get('accept-language'), codes, instanceDefaultLocale(codes))
+  );
+}
+
 /** The language for this request. */
 export async function getRequestLocale(): Promise<string> {
   return (await getRequestI18n()).locale;

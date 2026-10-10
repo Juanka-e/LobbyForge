@@ -6,7 +6,7 @@ import { getTranslator } from '@/lib/i18n/server';
 import { listPluginSummaries } from '@/lib/plugin-registry';
 import SettingsShell from '@/app/SettingsShell';
 import AppsClient, { type AppView } from './AppsClient';
-import { pluginSummary } from '@/lib/plugin-catalog-text';
+import { pluginName, pluginSummary } from '@/lib/plugin-catalog-text';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -44,7 +44,7 @@ export default async function AppsSettingsPage() {
           const install = installById.get(plugin.id);
           return {
             id: plugin.id,
-            name: plugin.name,
+            name: pluginName(plugin.id, t.locale, plugin.name),
             version: plugin.version,
             type: plugin.type,
             summary: pluginSummary(plugin.id, t.locale, plugin.catalog?.summary ?? null),

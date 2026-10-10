@@ -17,7 +17,7 @@
  * a "thinking…" row that times out 15 minutes later. When Redis cannot be
  * asked, the answer is "reachable" (fail open: the old behaviour).
  */
-import { getBotEventEndpoint, type BotRow } from '@lobbyforge/db';
+import { getBotEventEndpoint, listBotEventEndpoints, type BotRow } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { botEventsChannel } from './events';
 import { botHasPermission } from './permissions';
@@ -45,4 +45,38 @@ export async function botCanReceiveInteractions(bot: Pick<BotRow, 'id' | 'permis
   if (endpoint?.enabled && endpoint.events.includes('interaction_create')) return true;
   const streams = await liveBotStreamCount(bot.id);
   return streams === null || streams > 0;
+}
+
+/**
+ * The same answer for several bots, for the composer's `/` picker (which
+ * greys out the commands of a bot that would answer `bot_offline`): one
+ * endpoint query and one NUMSUB, whatever the number of bots. Fails open
+ * like the single check.
+ */
+export async function botsReceivingInteractions(list: Array<Pick<BotRow, 'id' | 'permissions'>>): Promise<Set<string>> {
+  const listening = list.filter((bot) => botHasPermission(bot, 'receive_events'));
+  const reachable = new Set<string>();
+  if (listening.length === 0) return reachable;
+  const endpoints = await listBotEventEndpoints(getDb(), listening.map((bot) => bot.id));
+  const viaStream: string[] = [];
+  for (const bot of listening) {
+    const endpoint = endpoints.get(bot.id);
+    if (endpoint?.enabled && endpoint.events.includes('interaction_create')) reachable.add(bot.id);
+    else viaStream.push(bot.id);
+  }
+  if (viaStream.length === 0) return reachable;
+  try {
+    redisModule ??= import('@/lib/redis');
+    const { redis } = await redisModule;
+    // NUMSUB answers [channel, count, channel, count, …] in request order.
+    const reply = (await redis.pubsub('NUMSUB', ...viaStream.map(botEventsChannel))) as unknown[];
+    viaStream.forEach((botId, i) => {
+      const count = Number(reply?.[i * 2 + 1]);
+      if (!Number.isFinite(count) || count > 0) reachable.add(botId);
+    });
+  } catch (err) {
+    console.warn('[bots] stream presence unavailable:', (err as Error).message);
+    for (const botId of viaStream) reachable.add(botId);
+  }
+  return reachable;
 }

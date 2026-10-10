@@ -20,7 +20,10 @@ describe('bot tokens', () => {
     expect(token).toHaveLength(4 + 32 + 1 + 43);
     expect(parseBotToken(token)).toEqual({ botId: BOT_ID });
     expect(hash.startsWith('sha256$')).toBe(true);
-    expect(hash).not.toContain(token.split('_')[2]!);
+    // The secret is base64url, so it may itself contain "_": read it by position, not by split.
+    const secret = token.slice('lfb_'.length + 32 + 1);
+    expect(secret).toHaveLength(43);
+    expect(hash).not.toContain(secret);
   });
 
   it('never mints the same token twice', () => {

@@ -173,7 +173,9 @@ function TurnColumn({
     <Panel padding={22} radius={24} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <Row justify="space-between" gap={12} wrap style={{ fontSize: 13, color: lf.text2 }}>
         <span>{roleLine(role, isHost, t)}</span>
-        {currentTeam ? <span style={{ overflowWrap: 'anywhere' }}>{currentTeam.name}</span> : null}
+        {currentTeam ? (
+          <span style={{ overflowWrap: 'anywhere' }}>{t('hushle.playing.explainingTeam', { team: currentTeam.name })}</span>
+        ) : null}
       </Row>
 
       {card ? (

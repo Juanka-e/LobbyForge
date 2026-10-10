@@ -47,6 +47,7 @@
   "interactions.picker.loading": "Komutlar yükleniyor…",
   "interactions.picker.noMatch": "/{query} ile eşleşen komut yok.",
   "interactions.picker.none": "Bu kanalda bot komutu yok.",
+  "interactions.picker.offline": "Çevrimdışı",
   "interactions.picker.retry": "Tekrar dene",
   "interactions.picker.title": "Komutlar",
   "interactions.private.dismiss": "Kapat",
