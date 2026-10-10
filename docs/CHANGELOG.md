@@ -2,6 +2,17 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Polls in text channels - 2026-10-10
+
+- **Polls:** members with the new **Create polls** permission can post a poll in a text or announcement channel from the composer's `+` menu: a question, 2–10 answers, optional multiple answers, and a duration from 1 hour to 7 days. Anyone who can read the channel can vote, change or remove their vote until the poll closes. Counts show after you vote, and to everyone once the poll closes; before that you see how many people voted. The creator or anyone with Manage Messages can close a poll early. Closed polls stay in the channel with their final results. The voice-room Poll activity is unchanged. See `docs/CHAT_POLLS.md`.
+- **Anonymous results:** no API answer or realtime event ever says who chose what — not to the creator, moderators or the owner. The database stores each voter's choice (so a vote can be changed and shows on every device); votes are never written to the audit log.
+- **Same rules as a message:** posting a poll goes through email verification, member timeouts, Mention Everyone, the Moderation Bot (question and answers together) and the message rate limit. Voting is gated like a reaction. A poll's question can't be edited, and deleting the message deletes the poll and its ballots.
+- **Permission:** `create_polls` is in both role editors. New servers give it to the Owner role; migration 0047 adds it to existing roles that have `administrator` or `manage_messages`, never to @everyone.
+- **API:** `POST …/channels/{channelId}/polls`, `GET …/polls/{pollId}`, `PUT`/`DELETE …/polls/{pollId}/vote`, `POST …/polls/{pollId}/close`. Message lists attach each poll for the viewer in one batched query. `poll` is a reserved message metadata key. Bots see a poll as a plain message (its question).
+- **Lobby:** edits and deletes now show up live. The chat feed used to drop `message_update` and `message_delete`, so both only appeared after a reload.
+- **Realtime:** the browser client re-sends its subscriptions when the gateway says `hello`. The gateway drops a subscribe that arrives before it has authenticated the socket, so on a slow sign-in check a lobby could get no live updates at all until a reload.
+- **Upgrade notes:** migration 0047 is expand-only: two new tables (`message_polls`, `message_poll_votes`) and the permission backfill.
+
 ## [Unreleased] - Activity and lobby polish - 2026-10-10
 
 - **Vampire Village:** on the end screen, losers' role and status columns line up with the winners' (every row keeps the badge's width). The dawn light now sweeps inside the stage instead of sliding over the header.

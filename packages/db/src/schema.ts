@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, integer, boolean, jsonb, varchar, customType, index, bigint, unique, uniqueIndex, primaryKey, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, integer, smallint, boolean, jsonb, varchar, customType, index, bigint, unique, uniqueIndex, primaryKey, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
 // Custom INET type wrapper
@@ -277,6 +277,48 @@ export const messages = pgTable('messages', {
   channelCreatedIdx: index('idx_messages_channel_created').on(table.channelId, table.createdAt),
   replyIdx: index('idx_messages_reply').on(table.replyToId).where(sql`reply_to_id IS NOT NULL`),
   botIdx: index('idx_messages_bot').on(table.botId).where(sql`bot_id IS NOT NULL`),
+}));
+
+// MESSAGE POLLS (0047, docs/CHAT_POLLS.md) — a poll posted in a text or
+// announcement channel. It rides on a message row (the question is the
+// message's `content`, `metadata.poll.id` points here); deleting that row
+// deletes the poll. Closing is lazy: a poll is closed once `closes_at` has
+// passed or `closed_at` is set (early close) — no scheduler writes it.
+// The length and option-count CHECKs are SQL-only backstops (the route
+// validates first): see 0047_chat_polls.sql.
+export const messagePolls = pgTable('message_polls', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  messageId: uuid('message_id').notNull().references(() => messages.id, { onDelete: 'cascade' }),
+  channelId: uuid('channel_id').notNull().references(() => channels.id, { onDelete: 'cascade' }),
+  creatorUserId: uuid('creator_user_id').references(() => users.id, { onDelete: 'set null' }),
+  question: text('question').notNull(),
+  /** The option texts, in order — a JSON array of 2–10 strings. A vote names an option by its index. */
+  options: jsonb('options').$type<string[]>().notNull(),
+  allowMultiple: boolean('allow_multiple').default(false).notNull(),
+  closesAt: timestamp('closes_at', { withTimezone: true }).notNull(),
+  closedAt: timestamp('closed_at', { withTimezone: true }),
+  closedByUserId: uuid('closed_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+  /**
+   * Bumped by every vote, vote removal and close, in the same transaction.
+   * Realtime updates carry it so a client drops one that arrives late.
+   */
+  version: integer('version').default(0).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  messageUnique: uniqueIndex('message_polls_message_id_unique').on(table.messageId),
+}));
+
+// MESSAGE POLL VOTES (0047). One row per (poll, voter, chosen option). The
+// voter is stored so a vote can be changed or removed and "your vote" shows
+// on every device — but no API ever returns who chose what: reads go
+// through counts and the caller's own rows only (docs/CHAT_POLLS.md §5).
+export const messagePollVotes = pgTable('message_poll_votes', {
+  pollId: uuid('poll_id').notNull().references(() => messagePolls.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  optionIndex: smallint('option_index').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  pk: primaryKey({ name: 'message_poll_votes_poll_id_user_id_option_index_pk', columns: [table.pollId, table.userId, table.optionIndex] }),
 }));
 
 // PLUGINS ENABLED TABLE

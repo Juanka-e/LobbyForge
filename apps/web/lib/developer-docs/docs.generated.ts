@@ -1945,6 +1945,10 @@ succeeds.
 | \`interaction_create\` | \`slash_commands\` + channel access | \`{ interaction: {id, commandName, options, channelId, user:{id,displayName}, expiresAt} }\` — forwarded only while the bot still reaches \`channelId\` (its live channel set; beyond a capped set, one database check) |
 | \`channel_access_changed\` | — | \`{ channels }\` — sent after every \`bot-access\` invalidation for the bot, and whenever a policy change or the periodic recheck changes its set |
 
+A poll posted in a text channel (docs/CHAT_POLLS.md) reaches bots as a
+plain \`message_create\` whose \`content\` is the question. Bots get no poll
+data, no vote counts and no \`poll_update\` events.
+
 Message \`author\`: a member → \`{ id, displayName }\`; a bot →
 \`{ id, displayName, bot: true }\`; an incoming webhook →
 \`{ id: <webhook id>, displayName: <username or webhook name>, webhook: true }\`;

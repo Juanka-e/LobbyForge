@@ -3,10 +3,12 @@ import { z } from 'zod';
 import { CorePermission, hasPermission, MessageContentSchema } from '@lobbyforge/core';
 import {
   getActiveMemberTimeout,
+  getBlockedUserIds,
   getMessageById,
   getUserPermissions,
   logAction,
   softDeleteMessage,
+  softDeletePollMessage,
   updateMessage,
   type MessageRow,
 } from '@lobbyforge/db';
@@ -20,6 +22,8 @@ import { readMessageBot } from '@/lib/bots/message-meta';
 import { emitMessageEvent } from '@/lib/bots/events';
 import { publishChatMessageDelete, publishChatMessageUpdate } from '@/lib/chat-bus';
 import { requireVerifiedEmail } from '@/lib/mail/verification';
+import { readMessagePollId } from '@/lib/chat-polls';
+import { loadPollViewsForMessages } from '@/lib/chat-polls-server';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -152,8 +156,20 @@ async function handleGet(req: Request, ctx: RouteContext): Promise<NextResponse>
   try {
     const access = await loadAndAuthorize(serverId, channelId, messageId, session.uid, 'read');
     if (!access.ok) return access.response;
+    // A poll message carries its poll as this viewer sees it (the lobby
+    // refetches an edited message through here). A blocked author's poll
+    // stays out, like their words in the list.
+    const json = toJson(access.message);
+    if (readMessagePollId(access.message.metadata)) {
+      const blocked = access.message.userId
+        ? (await getBlockedUserIds(getDb(), session.uid)).has(access.message.userId)
+        : false;
+      json.poll = blocked
+        ? null
+        : ((await loadPollViewsForMessages([access.message], session.uid)).get(access.message.id) ?? null);
+    }
     return NextResponse.json(
-      { message: toJson(access.message) },
+      { message: json },
       { headers: { 'Cache-Control': 'no-store' } }
     );
   } catch {
@@ -215,6 +231,11 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
     // level. Moderators may delete or pin it, never change its text.
     if (body.content !== undefined && (access.message.botId || !access.message.userId)) {
       return NextResponse.json({ error: 'Bot messages cannot be edited', code: 'bot_message_readonly' }, { status: 403 });
+    }
+    // Polls (docs/CHAT_POLLS.md): the question is the message's content and
+    // people have voted on it — it does not change afterwards. Pinning stays.
+    if (body.content !== undefined && readMessagePollId(access.message.metadata)) {
+      return NextResponse.json({ error: 'Poll messages cannot be edited', code: 'poll_message_readonly' }, { status: 403 });
     }
     if (body.content !== undefined) {
       // security-review AUTHZ-003: only the AUTHOR may change a message's
@@ -326,7 +347,10 @@ async function handleDelete(req: Request, ctx: RouteContext): Promise<NextRespon
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    await softDeleteMessage(getDb(), messageId);
+    // A deleted poll message takes its poll and every ballot with it, in the
+    // same transaction (the soft delete never reaches the FK cascade).
+    if (readMessagePollId(access.message.metadata)) await softDeletePollMessage(getDb(), messageId);
+    else await softDeleteMessage(getDb(), messageId);
     publishChatMessageDelete({ serverId, channelId, messageId, botId: access.message.botId });
     emitMessageEvent({
       serverId,

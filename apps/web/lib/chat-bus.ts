@@ -18,6 +18,7 @@
  */
 import Redis from 'ioredis';
 import { redis as sharedRedis } from './redis';
+import type { ChatPollUpdate, ChatPollView } from './chat-polls';
 
 function envPrefix(): string {
   return process.env.NODE_ENV || 'dev';
@@ -48,6 +49,12 @@ export interface ChatMessagePayload {
   metadata: Record<string, unknown> | null;
   replyToId: string | null;
   createdAt: string;
+  /**
+   * A poll message (docs/CHAT_POLLS.md) carries its poll as every viewer
+   * sees it at creation: no votes yet, so nothing is hidden. Bots never get
+   * it — the gateway reloads a message for bots from the database.
+   */
+  poll?: ChatPollView | null;
 }
 
 interface ChatMessageEnvelope {
@@ -85,8 +92,9 @@ export function publishChatMessage(input: {
  * envelopes carry only ids — the gateway reloads an edited message itself
  * (and checks the bot's access) instead of trusting a payload, and a
  * deleted message has nothing left to send. `botId` is the AUTHOR bot, so
- * a bot never hears about its own messages. Browser consumers only act on
- * `type: 'message'` and ignore these.
+ * a bot never hears about its own messages. The lobby refetches an edited
+ * message through the REST route (which re-checks access) and drops a
+ * deleted one.
  */
 interface ChatMessageUpdateEnvelope {
   type: 'message_update';
@@ -117,6 +125,37 @@ export function publishChatMessageUpdate(input: {
   const payload: ChatMessageUpdateEnvelope = {
     type: 'message_update',
     message: { id: input.messageId, ...(input.botId ? { botId: input.botId } : {}) },
+    at: new Date().toISOString(),
+  };
+  publishEnvelope(input.serverId, input.channelId, payload);
+}
+
+/**
+ * Polls in text channels: a vote or a close changed a poll's public tally.
+ * The envelope carries ids and counts only — never a voter, never a
+ * choice. The lobby shows the counts to members who have voted (and to
+ * everyone once the poll is closed); bots ignore this type.
+ */
+interface ChatPollUpdateEnvelope {
+  type: 'poll_update';
+  poll: ChatPollUpdate;
+  at: string;
+}
+
+/** A poll's tally or state changed. Fire-and-forget. */
+export function publishChatPollUpdate(input: { serverId: string; channelId: string; poll: ChatPollUpdate }): void {
+  const payload: ChatPollUpdateEnvelope = {
+    type: 'poll_update',
+    poll: {
+      id: input.poll.id,
+      messageId: input.poll.messageId,
+      counts: input.poll.counts,
+      totalVoters: input.poll.totalVoters,
+      closesAt: input.poll.closesAt,
+      closedAt: input.poll.closedAt,
+      closed: input.poll.closed,
+      version: input.poll.version,
+    },
     at: new Date().toISOString(),
   };
   publishEnvelope(input.serverId, input.channelId, payload);

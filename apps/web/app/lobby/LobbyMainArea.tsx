@@ -14,6 +14,7 @@ import { WebhookAvatar, WebhookBadge } from './WebhookIdentity';
 import { InteractionAnnouncer, InteractionHeader } from './slash/InteractionRows';
 import { useUserInteractionFeed } from './slash/useUserInteractionFeed';
 import { useEffect, useMemo, useState } from 'react';
+import type { ChatPollView } from '@/lib/chat-polls';
 
 /**
  * LobbyMainArea — entry point. Splits into Live or Demo based on canVoice
@@ -37,12 +38,16 @@ interface ChatMessage {
   interaction?: { id: string; commandName: string; invokedBy: { id: string | null; name: string | null } } | null;
   /** Posted by an incoming channel webhook — rendered with the WEBHOOK badge. */
   webhook?: { id: string | null; name: string; displayName: string } | null;
+  /** A poll message: the poll as this viewer sees it. */
+  poll?: ChatPollView | null;
 }
 
 interface Channel {
   id: string;
   name: string;
   category: 'text' | 'voice';
+  /** Text or announcement: polls can be posted here. */
+  pollable?: boolean;
 }
 
 interface LobbyData {
@@ -60,6 +65,8 @@ interface LobbyData {
   /** Settings links resolved for this viewer (null: draw no control). */
   adminLinks: Pick<LobbyAdminLinks, 'appSettings'>;
   canStartActivities?: boolean;
+  /** CREATE_POLLS + SEND_MESSAGES (the composer's "Create poll"). */
+  canCreatePolls?: boolean;
   installedApps: Array<{
     id: string;
     name: string;
@@ -203,6 +210,7 @@ function LobbyMainAreaLive({ data }: { data: LobbyData }) {
         live={data.isLive}
         members={memberMentions}
         channels={composerChannels}
+        canCreatePolls={Boolean(data.canCreatePolls && activeTextChannel?.pollable)}
       />
       <InteractionAnnouncer />
     </main>

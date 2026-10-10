@@ -178,6 +178,7 @@ const KNOWN_PERMISSIONS = new Set([
   'deafen_members',
   'view_audit_log',
   'start_activity',
+  'create_polls',
 ]);
 
 function permissionLabel(t: Translator, code: string): string {

@@ -139,6 +139,26 @@ describe('every protected action is gated (docs/EMAIL.md §4.2)', { timeout: 30_
     await expectRefused(res, 'message');
   });
 
+  it('message: posting a poll in a channel', async () => {
+    const res = await call(
+      () => import('@/app/api/servers/[id]/channels/[channelId]/polls/route'),
+      'POST',
+      `/api/servers/${SERVER}/channels/${CHANNEL}/polls`,
+      { question: 'Pizza?', options: ['Yes', 'No'] },
+      { id: SERVER, channelId: CHANNEL }
+    );
+    await expectRefused(res, 'message');
+  });
+
+  it('reaction: voting in a poll, and taking the vote back', async () => {
+    const load = () => import('@/app/api/servers/[id]/channels/[channelId]/polls/[pollId]/vote/route');
+    const params = { id: SERVER, channelId: CHANNEL, pollId: OTHER };
+    const path = `/api/servers/${SERVER}/channels/${CHANNEL}/polls/${OTHER}/vote`;
+    await expectRefused(await call(load, 'PUT', path, { choices: [0] }, params), 'reaction');
+    h.requireVerifiedEmail.mockClear();
+    await expectRefused(await call(load, 'DELETE', path, undefined, params), 'reaction');
+  });
+
   it('dm: opening a conversation and sending a direct message', async () => {
     await expectRefused(await call(() => import('@/app/api/dm/route'), 'POST', '/api/dm', { recipientUserId: OTHER }), 'dm');
     h.requireVerifiedEmail.mockClear();
@@ -246,6 +266,8 @@ describe('the gate stays in place (static)', () => {
     ['servers/[id]/channels/[channelId]/messages/route.ts', 'message'],
     ['servers/[id]/channels/[channelId]/messages/[messageId]/route.ts', 'message'],
     ['servers/[id]/channels/[channelId]/commands/[commandId]/invoke/route.ts', 'message'],
+    ['servers/[id]/channels/[channelId]/polls/route.ts', 'message'],
+    ['servers/[id]/channels/[channelId]/polls/[pollId]/vote/route.ts', 'reaction'],
     ['dm/route.ts', 'dm'],
     ['dm/[channelId]/messages/route.ts', 'dm'],
     ['livekit/token/route.ts', 'voice'],

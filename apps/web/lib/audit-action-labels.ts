@@ -41,6 +41,8 @@ const ACTION_LABEL_KEYS: Record<string, string> = {
   'message.pin': 'admin.audit.action.message.pin',
   'message.unpin': 'admin.audit.action.message.unpin',
   'message.update': 'admin.audit.action.message.update',
+  'poll.close': 'admin.audit.action.poll.close',
+  'poll.create': 'admin.audit.action.poll.create',
   'role.create': 'admin.audit.action.role.create',
   'role.delete': 'admin.audit.action.role.delete',
   'role.update': 'admin.audit.action.role.update',

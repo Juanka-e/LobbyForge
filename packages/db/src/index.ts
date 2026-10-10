@@ -9,6 +9,8 @@ export * from './queries/servers.js';
 export * from './queries/memberships.js';
 export * from './queries/channels.js';
 export * from './queries/messages.js';
+// Polls in text channels (0047).
+export * from './queries/messagePolls.js';
 export * from './queries/roles.js';
 export * from './queries/invites.js';
 export * from './queries/bans.js';

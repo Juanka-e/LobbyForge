@@ -63,6 +63,8 @@ const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: 'read_message_history', labelKey: 'adminSettings.roles.perm.readMessageHistory' },
       { key: 'mention_everyone', labelKey: 'adminSettings.roles.perm.mentionEveryone' },
       { key: 'manage_messages', labelKey: 'adminSettings.roles.perm.manageMessages' },
+      // Polls in text channels (docs/CHAT_POLLS.md); needs Send Messages too.
+      { key: 'create_polls', labelKey: 'adminSettings.roles.perm.createPolls' },
       // NOTE: 'add_reactions' intentionally hidden — the reactions
       // feature has no API yet; a visible no-op toggle misleads admins.
     ],

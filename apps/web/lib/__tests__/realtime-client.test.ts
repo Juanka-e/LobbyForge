@@ -164,6 +164,24 @@ describe('RealtimeClient', () => {
     expect(sock.sent).toContain(JSON.stringify({ type: 'subscribe', topic: 'chat:srv:abc' }));
   });
 
+  it('re-sends every subscription once the gateway says hello (it drops what arrives before authenticating)', () => {
+    const received: unknown[] = [];
+    const client = new RealtimeClient({ url: 'ws://test' });
+    client.connect();
+    const sock = MockWebSocket.instances[0];
+    client.subscribe('chat:srv:abc', (data) => received.push(data));
+    sock.open();
+    // Subscribed after open but before hello: also lost on a slow authentication.
+    client.subscribe('user:u1', () => undefined);
+    const subscribe = (topic: string) => JSON.stringify({ type: 'subscribe', topic });
+    expect(sock.sent.filter((m) => m === subscribe('chat:srv:abc'))).toHaveLength(1);
+    sock.receive({ type: 'hello', ok: true, uid: 'u1', at: 'now' });
+    expect(sock.sent.filter((m) => m === subscribe('chat:srv:abc'))).toHaveLength(2);
+    expect(sock.sent.filter((m) => m === subscribe('user:u1'))).toHaveLength(2);
+    sock.receive({ type: 'event', topic: 'chat:srv:abc', data: { type: 'poll_update' }, at: 'now' });
+    expect(received).toEqual([{ type: 'poll_update' }]);
+  });
+
   it('replays subscriptions after reconnect', async () => {
     vi.useFakeTimers();
     const client = new RealtimeClient({ url: 'ws://test' });

@@ -29,6 +29,10 @@ export const CorePermission = {
   MODERATE_MEMBERS: 'moderate_members',
   VIEW_AUDIT_LOG: 'view_audit_log',
   START_ACTIVITY: 'start_activity',
+  /** Post a poll in a text or announcement channel (docs/CHAT_POLLS.md).
+   *  SEND_MESSAGES in that channel is required as well. Not part of the
+   *  @everyone defaults — owners grant it to the roles they choose. */
+  CREATE_POLLS: 'create_polls',
 } as const;
 
 export type CorePermission = typeof CorePermission[keyof typeof CorePermission];

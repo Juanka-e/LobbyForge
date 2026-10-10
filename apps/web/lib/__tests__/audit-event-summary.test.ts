@@ -194,6 +194,19 @@ describe('auditEventSummaryText — email', () => {
   });
 });
 
+// Polls in text channels (docs/CHAT_POLLS.md): creating and closing one are
+// audited; votes never are (the log would name who chose what).
+describe('audit labels — polls', () => {
+  it('has labels for creating and closing a poll, in English and Turkish', async () => {
+    const { auditActionLabelKey } = await import('@/lib/audit-action-labels');
+    expect(en(auditActionLabelKey('poll.create')!)).toBe('created a poll');
+    expect(en(auditActionLabelKey('poll.close')!)).toBe('closed a poll');
+    expect(tr(auditActionLabelKey('poll.create')!)).toBe('bir anket oluşturdu');
+    expect(tr(auditActionLabelKey('poll.close')!)).toBe('bir anketi kapattı');
+    expect(auditActionLabelKey('poll.vote')).toBeNull();
+  });
+});
+
 // Activity host transfer (lib/activity-host.ts): the system moved hosting
 // because the host left the activity's voice room. The two members are
 // named when the audit loader resolved them, else by a short id.
