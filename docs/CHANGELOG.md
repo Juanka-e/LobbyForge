@@ -2,6 +2,14 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Activities catch up after a dropped connection - 2026-10-12
+
+- **Missed updates come back:** the realtime gateway keeps no backlog, so a game panel used to miss whatever happened while its socket was down and show a stale state until the next move. The panel now re-reads the session when its socket reconnects, when the network comes back and when the tab is shown again after at least 5 seconds in the background (a phone may have frozen the page).
+- **A dead socket is replaced:** when the browser reports the network back, the realtime client replaces a socket that only looks open instead of waiting up to a minute for the heartbeat. Coming back online or showing the tab also lifts the client's 20-attempt circuit breaker, so a laptop that slept reconnects at once.
+- **A tap during a network blink still counts:** an action whose answer is lost, or that the server refuses with a retryable 503, is sent again with the same `actionId` for up to 8 seconds; the button stays busy meanwhile. If the first attempt had in fact gone through, the retry comes back as a duplicate and the panel re-reads instead of scoring twice. The error appears only when the server stayed unreachable for the whole window.
+- **Every player's voice drop reaches the table:** the LiveKit webhook used to nudge open panels only when the host left or returned. It now nudges for anyone on the session's roster (`publicSummary.presenceChanged`), so panels re-read the session. This is the signal the planned presence rules (away badge, seat timeout) build on.
+- **For developers:** `RealtimeClient` has `onReconnect(listener)` (not called for the first connection) and `wake('online' | 'visible')`. `postActivityAction` retries lost answers and retryable 503s (`TRANSIENT_RETRY_WINDOW_MS`, `transientRetryDelayMs`) and throws the network error only when the window is spent. Plugins need no change. Plan: docs/ACTIVITY_INTEGRITY_AND_RESILIENCE.md §4, rows 2, 3 and 5.
+
 ## [Unreleased] - Languages: saved per account, default chosen in the admin panel and at setup - 2026-10-12
 
 - **Your language follows you:** Settings → Appearance → Language now saves the choice on your account as well as in the browser, so the desktop app and your other browsers use it too. Pages pick the language in this order: your account's language → this browser's choice → the browser's Accept-Language → the instance default → English. "Match my browser" clears both. Guests save it the same way.

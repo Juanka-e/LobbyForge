@@ -2610,7 +2610,21 @@ move itself is a compare-and-swap on the old host under the session's write
 lock (two requests move it once), audited as \`activity.host_transfer\`
 (actor: none, metadata: from, to, seconds away), and announced on the
 activity bus as \`rosterChanged\` so open panels re-read the session. When
-the host leaves or comes back, the webhook sends the same nudge.
+the host or a player (anyone on the session's roster) leaves the voice room
+or comes back, the webhook sends \`presenceChanged\`, and panels re-read the
+same way.
+
+**Dropped connections.** The bus keeps no backlog: an event published while
+a panel's socket was down is gone. The lobby therefore re-reads the session
+whenever its realtime socket authenticates again, when the browser reports
+the network back (\`online\`, which also replaces a socket that only looks
+open), and when the tab is shown after at least 5 s in the background.
+Becoming visible or coming online also lifts the realtime client's
+20-attempt circuit breaker. An action whose answer is lost (no response at
+all) or refused with a retryable \`503\` is sent again with the **same**
+\`actionId\` for up to 8 s; if the first attempt had committed, the retry
+comes back as a duplicate and the panel re-reads instead of applying it
+twice. A plugin needs no code for any of this.
 
 \`GET …/activities/{sessionId}\` adds, for these plugins, \`host: { userId,
 inVoice, awaySince, transferAt, abandonAt, abandoned }\` (ISO times): a panel
