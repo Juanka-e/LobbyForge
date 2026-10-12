@@ -16,14 +16,24 @@
  *    `data-lf-theme="dark|dim|light"`, `color-scheme` and `lang`;
  *  - auto-resize: a ResizeObserver reports the content height, so the frame
  *    is as tall as what it shows (the parent clamps it to 200–1200 px);
- *  - only listens to its parent window, on the frame's own host.
+ *  - only listens to its parent window, and only to the parent's origin.
  *
- * Security model: this runs inside `<iframe sandbox="allow-scripts">` with an
- * opaque origin and a CSP whose `connect-src` is its own folder — no cookies,
- * no storage of the app, no network beyond its own files. All the frame learns is what the parent posts (the
- * state already projected for this viewer); all it can do is `dispatch`, which
- * the parent sends through the actions route as the viewer, under the plugin's
- * action policies. Do not try to fetch anything: it is blocked by design.
+ * Security model: from the plugin's own files (`ui: true`) this runs inside
+ * `<iframe sandbox="allow-scripts">` with an opaque origin and a CSP whose
+ * `connect-src` is its own folder (plus any outside origins the instance
+ * owner approved) — no cookies, no storage of the app. All the frame learns
+ * is what the parent posts (the state already projected for this viewer);
+ * all it can do is `dispatch`, which the parent sends through the actions
+ * route as the viewer, under the plugin's action policies.
+ *
+ * On the author's own site (`ui: { url }`, approved by the instance owner)
+ * the page keeps its real origin, and any instance that installed the plugin
+ * may be its parent. The client learns the parent's origin from the first
+ * `init` its parent window sends and talks only to that origin from then on
+ * (`parentOrigin`); before that it sends only `ready`, which carries nothing.
+ * Whoever frames the page is its parent: treat what it posts as display data,
+ * not as proof of who the viewer is (send `frame-ancestors` from your server
+ * to choose who may frame you).
  *
  * This file has no runtime imports, so it also works copied verbatim into a
  * plugin's `ui/` folder (examples/plugins/sandbox-buzzer/ui/lobbyforge-frame.js
@@ -85,6 +95,12 @@ export interface FrameConnection<TAction extends FrameAction = FrameAction> {
   resize(height: number): void;
   /** True once the parent's first `init` has arrived. */
   readonly connected: boolean;
+  /**
+   * The parent's origin — the LobbyForge instance showing this frame — once
+   * known; null before. On your own site (`ui: { url }`) it is learned from
+   * the first `init`.
+   */
+  readonly parentOrigin: string | null;
   /** Stop listening, observing and retrying. */
   close(): void;
 }
@@ -95,16 +111,27 @@ function isObject(value: unknown): value is Loose {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function isHttpOrigin(value: unknown): value is string {
+  return typeof value === 'string' && (value.startsWith('http://') || value.startsWith('https://'));
+}
+
 /**
- * Where messages to the parent go. The asset route only lets the app's own
- * pages frame it (`frame-ancestors 'self'`), so the parent is on the frame
- * URL's host; `location.origin` is that URL's origin even though the frame's
- * own origin is opaque.
+ * Where messages to the parent go, as far as the frame can tell before the
+ * parent has said anything:
+ *  - the plugin's own files: the frame's origin is opaque (`self.origin` is
+ *    "null") and the asset route only lets the app's own pages frame it
+ *    (`frame-ancestors 'self'`), so the parent is on the frame URL's host —
+ *    `location.origin` is that URL's origin. ('*' if it has none.)
+ *  - the author's own site: the frame has a real origin of its own, and any
+ *    instance that installed the plugin may frame it, so the parent's origin
+ *    is unknown until its first `init` (null).
  */
-function parentOrigin(win: Window): string {
+function initialParentOrigin(win: Window): string | null {
+  const own = (win as Window & { origin?: unknown }).origin;
+  if (typeof own === 'string' && own !== 'null') return null;
   try {
     const origin = win.location.origin;
-    if (origin.startsWith('http://') || origin.startsWith('https://')) return origin;
+    if (isHttpOrigin(origin)) return origin;
   } catch {
     // Fall through.
   }
@@ -176,7 +203,8 @@ export function connect<TState = unknown, TAction extends FrameAction = FrameAct
   const doc = win.document;
   const parent = win.parent;
   const embedded = Boolean(parent) && parent !== win;
-  const targetOrigin = parentOrigin(win);
+  // null on the author's own site until the parent's first init names it.
+  let targetOrigin = initialParentOrigin(win);
   const applyTheme = options.applyTheme !== false;
 
   let connected = false;
@@ -190,6 +218,13 @@ export function connect<TState = unknown, TAction extends FrameAction = FrameAct
 
   const post = (message: FrameToHostMessage): void => {
     if (!embedded || closed) return;
+    if (targetOrigin === null) {
+      // The parent's origin is not known yet: only `ready`, which carries
+      // nothing, may go to whoever frames us. Actions and heights wait for
+      // init (which measures again).
+      if (message.type === 'ready') parent.postMessage(message, '*');
+      return;
+    }
     parent.postMessage(message, targetOrigin);
   };
 
@@ -223,8 +258,15 @@ export function connect<TState = unknown, TAction extends FrameAction = FrameAct
 
   const onMessage = (event: MessageEvent): void => {
     if (closed || event.source !== parent) return;
-    if (targetOrigin !== '*' && event.origin !== targetOrigin) return;
     const data: unknown = event.data;
+    if (targetOrigin === null) {
+      // The window that frames us names its origin with its first init;
+      // from then on nothing from any other origin is heard.
+      if (!isObject(data) || data.lf !== LF || data.type !== 'init' || !isHttpOrigin(event.origin)) return;
+      targetOrigin = event.origin;
+    } else if (targetOrigin !== '*' && event.origin !== targetOrigin) {
+      return;
+    }
     if (!isObject(data) || data.lf !== LF) return;
     if (data.type === 'init') {
       const init: FrameInit<TState> = {
@@ -290,6 +332,9 @@ export function connect<TState = unknown, TAction extends FrameAction = FrameAct
     resize,
     get connected() {
       return connected;
+    },
+    get parentOrigin() {
+      return targetOrigin === null || targetOrigin === '*' ? null : targetOrigin;
     },
     close(): void {
       if (closed) return;

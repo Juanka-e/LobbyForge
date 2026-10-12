@@ -12,8 +12,13 @@ import {
 
 const ORIGIN = 'https://lobby.example';
 
-/** A frame window with a parent, just enough for the client. */
-function frameEnv(options: { embedded?: boolean; origin?: string } = {}) {
+/**
+ * A frame window with a parent, just enough for the client. `origin` is the
+ * frame URL's origin (and the parent's, by default); `ownOrigin` sets
+ * `self.origin` — "null" for a plugin's own files, the site's origin for an
+ * external UI, absent in old browsers.
+ */
+function frameEnv(options: { embedded?: boolean; origin?: string; ownOrigin?: string } = {}) {
   const origin = options.origin ?? ORIGIN;
   const listeners = new Set<(event: unknown) => void>();
   const posts: Array<{ message: Record<string, unknown>; targetOrigin: string }> = [];
@@ -59,6 +64,7 @@ function frameEnv(options: { embedded?: boolean; origin?: string } = {}) {
     getComputedStyle: () => ({ marginTop: '8px', marginBottom: '8.5px' }),
     ResizeObserver: FakeResizeObserver,
   };
+  if (options.ownOrigin !== undefined) win.origin = options.ownOrigin;
   win.parent = options.embedded === false ? win : parent;
   const send = (data: unknown, from: { source?: unknown; origin?: string } = {}) => {
     for (const fn of [...listeners]) fn({ source: from.source ?? parent, origin: from.origin ?? origin, data });
@@ -260,6 +266,76 @@ describe('frame client — resize', () => {
     lf.resize(-5);
     lf.resize(Number.POSITIVE_INFINITY);
     expect(env.posts.filter((p) => p.message.type === 'resize').map((p) => p.message.height)).toEqual([481]);
+  });
+});
+
+describe('frame client — on the author’s own site (ui: { url })', () => {
+  const SITE = 'https://game.example.com';
+  const LOBBY = 'https://chat.example.org';
+  /** The site's page: a real origin of its own, framed by an instance on another origin. */
+  const siteEnv = () => frameEnv({ origin: SITE, ownOrigin: SITE });
+
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('says only ready — to whoever frames it — until the parent names its origin', () => {
+    const env = siteEnv();
+    const lf = connect({ window: env.win });
+    lf.dispatch({ type: 'buzz' });
+    lf.resize(500);
+    vi.advanceTimersByTime(250);
+    // No height and no action left the frame; ready carries nothing.
+    expect(env.posts.map((p) => [p.message.type, p.targetOrigin])).toEqual([
+      ['ready', '*'],
+      ['ready', '*'],
+    ]);
+    expect(lf.parentOrigin).toBeNull();
+  });
+
+  it('learns the parent’s origin from its first init, then talks to that origin only', () => {
+    const env = siteEnv();
+    const onInit = vi.fn();
+    const states: unknown[] = [];
+    const lf = connect({ window: env.win, onInit, onState: (s) => states.push(s) });
+    env.send(init(), { origin: LOBBY });
+    expect(onInit).toHaveBeenCalledTimes(1);
+    expect(lf.parentOrigin).toBe(LOBBY);
+    lf.dispatch({ type: 'buzz' });
+    const after = env.posts.filter((p) => p.message.type !== 'ready');
+    // The height is measured again after init, and goes to the lobby's origin like the action.
+    expect(after.map((p) => [p.message.type, p.targetOrigin])).toEqual([
+      ['resize', LOBBY],
+      ['action', LOBBY],
+    ]);
+    // Anything from another origin is not heard any more, even from the parent window.
+    env.send({ lf: 1, type: 'state', state: { forged: true }, revision: 9 }, { origin: 'https://evil.example' });
+    env.send(init({ locale: 'xx' }), { origin: 'https://evil.example' });
+    expect(onInit).toHaveBeenCalledTimes(1);
+    env.send({ lf: 1, type: 'state', state: { phase: 'open' }, revision: 2 }, { origin: LOBBY });
+    expect(states).toEqual([{ phase: 'armed', round: 1 }, { phase: 'open' }]);
+  });
+
+  it('is named only by an init from its parent window', () => {
+    const env = siteEnv();
+    const lf = connect({ window: env.win, autoResize: false });
+    // Another window, a state before init, a non-protocol message, an opaque origin.
+    env.send(init(), { source: {}, origin: 'https://evil.example' });
+    env.send({ lf: 1, type: 'state', state: {}, revision: 1 }, { origin: 'https://evil.example' });
+    env.send({ lf: 2, type: 'init' }, { origin: 'https://evil.example' });
+    env.send(init(), { origin: 'null' });
+    expect(lf.connected).toBe(false);
+    expect(lf.parentOrigin).toBeNull();
+    env.send(init(), { origin: LOBBY });
+    expect(lf.parentOrigin).toBe(LOBBY);
+  });
+
+  it('keeps the plugin-files behaviour for an opaque origin and for browsers without self.origin', () => {
+    for (const env of [frameEnv({ ownOrigin: 'null' }), frameEnv()]) {
+      const lf = connect({ window: env.win, autoResize: false });
+      expect(env.posts[0]).toEqual({ message: { lf: 1, type: 'ready' }, targetOrigin: ORIGIN });
+      expect(lf.parentOrigin).toBe(ORIGIN);
+      lf.close();
+    }
   });
 });
 
