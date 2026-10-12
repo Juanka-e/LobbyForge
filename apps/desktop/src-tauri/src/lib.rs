@@ -22,8 +22,11 @@ const INSTANCE_URL_KEY: &str = "instanceUrl";
 /// Validate an instance URL: must be an https origin (loopback http allowed
 /// for local development), no credentials/query/fragment, root path only.
 /// Mirrors the TypeScript `normalizeDesktopInstanceUrl` contract.
+///
+/// Refusals are stable codes, not sentences: the connect screen shows them
+/// in the user's language (dist-shell/shell.js `CONNECT_ERRORS`).
 fn normalize_instance_url(input: &str) -> Result<String, String> {
-    let url = url::Url::parse(input).map_err(|_| "Instance URL is invalid".to_string())?;
+    let url = url::Url::parse(input).map_err(|_| "invalid_url".to_string())?;
     let host = url.host_str().unwrap_or("").to_lowercase();
     let is_loopback = host == "localhost" || host == "::1" || host.starts_with("127.");
     // Loopback http is only allowed in debug builds (local development).
@@ -31,20 +34,18 @@ fn normalize_instance_url(input: &str) -> Result<String, String> {
     if url.scheme() != "https"
         && !(allow_loopback_http && is_loopback && url.scheme() == "http")
     {
-        return Err("Instance URL must use HTTPS".to_string());
+        return Err("https_required".to_string());
     }
     if !url.username().is_empty()
         || url.password().is_some()
         || url.query().is_some()
         || url.fragment().is_some()
     {
-        return Err(
-            "Instance URL must not contain credentials, query, or fragment data".to_string(),
-        );
+        return Err("no_extras".to_string());
     }
     let path = url.path();
     if path != "/" && path != "" {
-        return Err("Instance URL must be an origin".to_string());
+        return Err("origin_only".to_string());
     }
     Ok(url.origin().ascii_serialization())
 }
@@ -263,10 +264,65 @@ fn emit_shortcut(window: &WebviewWindow, action: &str) {
     ));
 }
 
+const TRAY_SHOW_KEY: &str = "trayShowLabel";
+const TRAY_QUIT_KEY: &str = "trayQuitLabel";
+const TRAY_SHOW_DEFAULT: &str = "Show LobbyForge";
+const TRAY_QUIT_DEFAULT: &str = "Quit";
+
+/// The tray's menu items, kept so the labels can follow the user's language.
+struct TrayItems {
+    show: MenuItem<tauri::Wry>,
+    quit: MenuItem<tauri::Wry>,
+}
+
+/// A label from the shell, trimmed, without control characters, at most 64
+/// characters; blank → the English default.
+fn tray_label(input: &str, fallback: &str) -> String {
+    let label: String = input.trim().chars().filter(|c| !c.is_control()).take(64).collect();
+    if label.is_empty() {
+        fallback.to_string()
+    } else {
+        label
+    }
+}
+
+fn stored_tray_label(app: &tauri::AppHandle, key: &str, fallback: &str) -> String {
+    app.store(STORE_FILE)
+        .ok()
+        .and_then(|store| store.get(key))
+        .and_then(|value| value.as_str().map(|label| tray_label(label, fallback)))
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+/// The connect screen sends the tray labels in the user's language (from
+/// the generated desktop strings, dist-shell/locales.js). They apply now
+/// and are saved, so the next launch builds the tray in that language.
+#[tauri::command]
+fn set_tray_labels(app: tauri::AppHandle, show: String, quit: String) -> Result<(), String> {
+    let show = tray_label(&show, TRAY_SHOW_DEFAULT);
+    let quit = tray_label(&quit, TRAY_QUIT_DEFAULT);
+    if let Some(items) = app.try_state::<TrayItems>() {
+        let _ = items.show.set_text(&show);
+        let _ = items.quit.set_text(&quit);
+    }
+    if let Ok(store) = app.store(STORE_FILE) {
+        let _ = store.set(TRAY_SHOW_KEY, serde_json::json!(show));
+        let _ = store.set(TRAY_QUIT_KEY, serde_json::json!(quit));
+        let _ = store.save();
+    }
+    Ok(())
+}
+
 fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
-    let show_item = MenuItem::with_id(app, "show", "Show LobbyForge", true, None::<&str>)?;
-    let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let show_label = stored_tray_label(app, TRAY_SHOW_KEY, TRAY_SHOW_DEFAULT);
+    let quit_label = stored_tray_label(app, TRAY_QUIT_KEY, TRAY_QUIT_DEFAULT);
+    let show_item = MenuItem::with_id(app, "show", show_label, true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+    app.manage(TrayItems {
+        show: show_item.clone(),
+        quit: quit_item.clone(),
+    });
     TrayIconBuilder::with_id("main")
         .icon(app.default_window_icon().unwrap().clone())
         .tooltip("LobbyForge")
@@ -414,6 +470,7 @@ pub fn run() {
             connect_instance,
             disconnect_instance,
             begin_desktop_login,
+            set_tray_labels,
         ])
         .run(tauri::generate_context!())
         .expect("error while running LobbyForge desktop shell");
@@ -437,5 +494,28 @@ mod post_message_tests {
             "url": "lobbyforge://x\"});alert(1);//"
         }));
         assert!(script.contains(r#"\"});alert(1);//"#));
+    }
+}
+
+#[cfg(test)]
+mod language_tests {
+    use super::{normalize_instance_url, tray_label};
+
+    #[test]
+    fn refusals_are_codes_the_connect_screen_translates() {
+        assert_eq!(normalize_instance_url("not a url"), Err("invalid_url".to_string()));
+        assert_eq!(normalize_instance_url("ftp://chat.example.com"), Err("https_required".to_string()));
+        assert_eq!(normalize_instance_url("https://a:b@chat.example.com"), Err("no_extras".to_string()));
+        assert_eq!(normalize_instance_url("https://chat.example.com/?x=1"), Err("no_extras".to_string()));
+        assert_eq!(normalize_instance_url("https://chat.example.com/lobby"), Err("origin_only".to_string()));
+        assert_eq!(normalize_instance_url("https://chat.example.com/"), Ok("https://chat.example.com".to_string()));
+    }
+
+    #[test]
+    fn tray_labels_are_trimmed_bounded_and_never_blank() {
+        assert_eq!(tray_label("  Çık \n", "Quit"), "Çık");
+        assert_eq!(tray_label("   ", "Quit"), "Quit");
+        assert_eq!(tray_label("a\u{7}b", "Quit"), "ab");
+        assert_eq!(tray_label(&"x".repeat(100), "Quit").chars().count(), 64);
     }
 }

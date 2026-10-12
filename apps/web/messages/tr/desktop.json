@@ -1,0 +1,14 @@
+{
+  "desktop.connect.button": "Bağlan",
+  "desktop.connect.connecting": "Bağlanıyor…",
+  "desktop.connect.hint": "Henüz bir kurulumun yok mu? LobbyForge'u kendi makinende Docker ile çalıştırabilir ya da topluluğunun yöneticisinden adresi isteyebilirsin.",
+  "desktop.connect.label": "Kurulum adresi",
+  "desktop.connect.subtitle": "Sesli odalara ve canlı etkinliklere katılmak için kendi barındırdığın LobbyForge kurulumuna bağlan.",
+  "desktop.error.failed": "Bağlanılamadı. Adresi kontrol edip tekrar dene.",
+  "desktop.error.httpsRequired": "Adres https:// ile başlamalı.",
+  "desktop.error.invalidUrl": "Bu geçerli bir adres değil.",
+  "desktop.error.noExtras": "Yalnızca adresi yaz: kullanıcı adı, şifre, sorgu ya da # kısmı olmadan.",
+  "desktop.error.originOnly": "Yalnızca adresi yaz, yol olmadan (örneğin https://sohbet.ornek.com).",
+  "desktop.tray.quit": "Çık",
+  "desktop.tray.show": "LobbyForge'u göster"
+}

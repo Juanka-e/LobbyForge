@@ -126,6 +126,26 @@ This refuses while anything is still blank. Once a language is marked
 `complete`, the tests hold it to that: a developer who adds an English
 string has to translate it too before their change can merge.
 
+## The desktop app
+
+The desktop app speaks the same languages, with no extra step:
+
+- **Its own screens** (the connect screen and the tray menu) use the
+  `desktop.*` strings in `apps/web/messages/<code>/desktop.json`. Translate
+  them like any other area. `pnpm i18n:sync` (which `i18n:add` runs) bundles
+  every language into `apps/desktop/dist-shell/locales.js`; the app picks
+  the system's language and falls back to English.
+- **The Windows installer** offers every language Tauri's installer has a
+  translation for: Arabic, Bulgarian, Chinese (Simplified and
+  Traditional), Dutch, English, French, German, Italian, Japanese, Korean,
+  Norwegian, Persian, Portuguese (and Brazilian), Russian, Spanish,
+  Swedish, Turkish, Ukrainian and Vietnamese. `pnpm i18n:sync` writes the
+  list into `apps/desktop/src-tauri/tauri.conf.json` from the language
+  folders. For any other language, the app itself is translated and its
+  installer is in English.
+- `pnpm i18n:status` reports either file when it is out of date, and so do
+  the tests, so a forgotten sync can't merge.
+
 ## Guidelines
 
 - **Write for the person using the app**, not word for word. Say what a
