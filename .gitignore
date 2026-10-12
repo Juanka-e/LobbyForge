@@ -95,6 +95,9 @@ infra/update/deployment-state.json
 infra/nginx/conf.d/cf-real-ip.conf
 .rc2-manifest.json
 
+# Per-machine Claude Code settings (allowed commands, local credentials).
+.claude/settings.local.json
+
 # Written by `next dev` (Next 16 agent hints); regenerated on every dev run.
 apps/web/AGENTS.md
 apps/web/CLAUDE.md
