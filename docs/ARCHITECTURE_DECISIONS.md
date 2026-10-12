@@ -286,15 +286,25 @@ Where the implementation refines the points above:
   script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline';
   img-src 'self' data:; font-src 'self'; media-src <own> data: blob:;
   connect-src <own>; frame-ancestors 'self'; base-uri 'none'; form-action
-  'none'` plus `X-Content-Type-Options: nosniff`, where `<own>` is the
-  plugin version's own folder on the configured public origin
-  (`https://<instance>/api/plugin-ui/<id>/<version>/`; `'self'` when no
-  origin is configured). No network: `fetch()` and media reach the
-  plugin's own files and nothing else, so the frame cannot exfiltrate what
-  it is shown. WebAssembly compiles (`'wasm-unsafe-eval'`) but reaches
-  nothing a script cannot. The app's own CSP gains `frame-src 'self'`.
-  (2026-10: phase 1 of the plugin unlock — media, WebAssembly and the
-  plugin's own files; the first version had `connect-src 'none'`.)
+  'none'; webrtc 'block'` plus `X-Content-Type-Options: nosniff`, where
+  `<own>` is the plugin version's own folder on the configured public
+  origin (`https://<instance>/api/plugin-ui/<id>/<version>/`; `'self'` when
+  no origin is configured). `fetch()`, XHR, WebSocket, image and media
+  requests reach the plugin's own files and nothing else. WebAssembly
+  compiles (`'wasm-unsafe-eval'`) but reaches nothing a script cannot. The
+  app's own CSP gains `frame-src 'self'`. (2026-10: phase 1 of the plugin
+  unlock — media, WebAssembly and the plugin's own files; the first version
+  had `connect-src 'none'`.)
+- **What that CSP does not promise** (2026-10 security review): it is not
+  "no network". WebRTC is outside `connect-src`, so a frame can open an
+  `RTCPeerConnection` whose STUN/TURN traffic goes wherever the plugin
+  says; `webrtc 'block'` refuses that only in browsers that implement the
+  directive (the others ignore it). And where the frame navigates *itself*
+  is decided by the embedding page's `frame-src`, not by the frame's own
+  policy, so it can load any origin the lobby page may frame. What the
+  frame is shown (the viewer's projected state, names, language) must be
+  treated as readable by the plugin's author — which is why per-viewer
+  projection, not the frame, is what keeps hidden state hidden.
 - **Approved outside origins** (2026-10, phase 2 of the plugin unlock,
   docs/PLUGIN_UNLOCK_PLAN.md): a manifest may ask for `network` origins
   (`connect`, `img`, `media`, `frame`), which take effect only once the

@@ -7,7 +7,8 @@
  * every active plugin (`listActivePlugins`), its installed manifest, and the
  * approval on its active record — only an EFFECTIVE `uiUrl` counts (asked for
  * by the manifest AND approved by the instance owner, `effectiveApprovals`).
- * A URL on the instance's own address is left out (plugin-frame-target.ts).
+ * A URL on the instance's own address is left out (plugin-frame-target.ts),
+ * and so is any folder named like an official plugin (official-plugin-ids.ts).
  *
  * The middleware runs for every page, so the list is cached per process for
  * 30 s on `globalThis` (Next compiles this module into several chunks — the
@@ -24,6 +25,7 @@
  * from it runs in the app, and the lobby frames it only for an activity of
  * that plugin, with the sandbox and message rules of PluginFrame.
  */
+import { isOfficialPluginId } from './official-plugin-ids';
 import { effectiveApprovals } from './plugin-approvals';
 import { configuredAppOrigins, externalUiOrigin, isCspOrigin } from './plugin-frame-target';
 import { listActivePlugins, pluginInstallDir } from './plugin-install-layout';
@@ -56,6 +58,8 @@ function cache(): OriginsCache {
 export function readApprovedUiOrigins(root: string, apps: readonly string[]): string[] {
   const origins = new Set<string>();
   for (const active of listActivePlugins(root)) {
+    // A marketplace bundle can never take an official plugin's id.
+    if (isOfficialPluginId(active.pluginId)) continue;
     const manifest = readInstalledManifestOrNull(root, active.pluginId, active.version);
     if (!manifest || manifest.ui) continue;
     const uiUrl = effectiveApprovals(manifest, active.approved).uiUrl;

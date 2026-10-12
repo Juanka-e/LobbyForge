@@ -4,7 +4,18 @@
  * active version + digest, activation that keeps the previous version
  * until the worker has loaded the new one, and pruning afterwards.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  ftruncateSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -23,7 +34,7 @@ import {
   readInstalledSandboxManifest,
   writeActivePointer,
 } from '../plugin-install-layout';
-import { MAX_LOCALE_FILE_BYTES } from '../sandbox-manifest';
+import { MAX_LOCALE_FILE_BYTES, MAX_MANIFEST_BYTES } from '../sandbox-manifest';
 
 // Same tree + digest as apps/plugin-worker/src/__tests__/bundle.test.ts:
 // the worker recomputes this digest, so both implementations must agree.
@@ -79,10 +90,33 @@ describe('pluginInstallDir — one root for installer, loader and worker', () =>
   });
 });
 
+/** A file of `size` bytes without writing them (extended, not filled). */
+function sizedFile(path: string, size: number): void {
+  mkdirSync(join(path, '..'), { recursive: true });
+  const fd = openSync(path, 'w');
+  try {
+    ftruncateSync(fd, size);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 describe('computeBundleDigest', () => {
   it('matches the vector the plugin-worker pins', () => {
     writeTree(root, VECTOR_FILES);
     expect(computeBundleDigest(root)).toBe(VECTOR_DIGEST);
+  });
+
+  it('refuses a file over the bundle cap by its size, before reading it', () => {
+    writeTree(root, VECTOR_FILES);
+    sizedFile(join(root, 'huge.bin'), 64 * 1024 * 1024 + 1);
+    expect(() => computeBundleDigest(root)).toThrow('bundle is too large');
+  });
+
+  it('counts what earlier files used: the cap is for the whole bundle', () => {
+    sizedFile(join(root, 'a.bin'), 40 * 1024 * 1024);
+    sizedFile(join(root, 'b.bin'), 30 * 1024 * 1024);
+    expect(() => computeBundleDigest(root)).toThrow('bundle is too large');
   });
 });
 
@@ -379,6 +413,15 @@ describe('readInstalledSandboxManifest', () => {
     expect(() => readInstalledSandboxManifest(root, 'game', '2.0.0')).toThrow(/legacy Node bundle/);
     expect(() => readInstalledSandboxManifest(root, '../game', '1.0.0')).toThrow();
     expect(() => readInstalledSandboxManifest(root, 'game', '1.0')).toThrow();
+  });
+
+  it('refuses a manifest.json over the 64 KiB cap without reading it', () => {
+    writeTree(join(root, 'game', '1.0.0'), sandboxBundle('1.0.0'));
+    sizedFile(join(root, 'game', '1.0.0', 'manifest.json'), 512 * 1024 * 1024);
+    expect(checkSandboxBundle(join(root, 'game', '1.0.0'), 'game', '1.0.0')).toEqual({
+      ok: false,
+      error: `manifest.json: larger than ${MAX_MANIFEST_BYTES} bytes`,
+    });
   });
 });
 

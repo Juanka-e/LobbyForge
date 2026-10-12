@@ -156,4 +156,27 @@ describe('plugin-loader SEC-008 gate', () => {
     layoutMocks.readActivePointer.mockReturnValue(null);
     await expect(reloadDynamicPlugin('other')).resolves.toBe(false);
   });
+
+  it('never registers a plugin under an official plugin’s id — not at boot, reload or install', async () => {
+    process.env.LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED = 'true';
+    workerMocks.workerRuntimeConfigured.mockReturnValue(true);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    layoutMocks.listActivePlugins.mockReturnValue([
+      { pluginId: 'hushle', version: '1.0.0', digest: DIGEST_A },
+      { pluginId: 'Poll', version: '1.0.0', digest: DIGEST_A },
+      { pluginId: 'fine', version: '2.0.0', digest: DIGEST_B },
+    ]);
+    layoutMocks.readActivePointer.mockReturnValue({ pluginId: 'quiz', version: '1.0.0', digest: DIGEST_A });
+    workerMocks.describeWorkerPlugin.mockImplementation(async (ref: { pluginId: string; version: string; digest: string }) => ({
+      id: ref.pluginId, name: ref.pluginId, version: ref.version, digest: ref.digest,
+    }));
+    const { warmInstalledPlugins, reloadDynamicPlugin, registerDynamicPlugin, listDynamicPluginIds } = await import('../plugin-loader');
+    await warmInstalledPlugins();
+    await expect(reloadDynamicPlugin('quiz')).resolves.toBe(false);
+    expect(() => registerDynamicPlugin({ id: 'dice-bot', name: 'Dice', version: '1.0.0' } as never)).toThrow(/official/);
+    // The worker never even loads them.
+    expect(workerMocks.describeWorkerPlugin).toHaveBeenCalledTimes(1);
+    expect(listDynamicPluginIds()).toEqual(['fine']);
+    errors.mockRestore();
+  });
 });

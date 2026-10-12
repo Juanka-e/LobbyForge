@@ -19,7 +19,16 @@
  * apps/web/lib/plugin-install-layout.ts: both test suites pin the same vector.
  */
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import {
+  closeSync,
+  constants as fsConstants,
+  existsSync,
+  fstatSync,
+  openSync,
+  readdirSync,
+  readSync,
+  statSync,
+} from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { parseSandboxBundle, type SandboxLocaleFile, type SandboxManifest } from './manifest.js';
 
@@ -68,15 +77,41 @@ export function computeBundleDigest(dir: string, capture?: Map<string, Buffer>):
   const tree = createHash('sha256');
   let total = 0;
   for (const rel of files) {
-    const content = readFileSync(join(dir, ...rel.split('/')));
+    const content = readFileWithin(join(dir, ...rel.split('/')), MAX_DIGEST_BYTES - total);
     // The caller runs exactly these bytes (no second read between hashing
     // and use — see loadVerifiedBundle).
     capture?.set(rel, content);
     total += content.length;
-    if (total > MAX_DIGEST_BYTES) throw new Error('bundle is too large');
     tree.update(`${rel}\0${createHash('sha256').update(content).digest('hex')}\n`);
   }
   return tree.digest('hex');
+}
+
+/**
+ * One file through ONE descriptor, its size checked against what is left of
+ * the bundle cap BEFORE anything is read or allocated: one huge file is
+ * refused unread. One byte more than that size is asked for, so a file that
+ * grew while being read is refused too. Links are not followed where the
+ * platform can refuse them (O_NOFOLLOW).
+ */
+function readFileWithin(path: string, remaining: number): Buffer {
+  const fd = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+  try {
+    const info = fstatSync(fd);
+    if (!info.isFile()) throw new Error('bundle contains a non-regular entry');
+    if (info.size > remaining) throw new Error('bundle is too large');
+    const buffer = Buffer.alloc(info.size + 1);
+    let total = 0;
+    while (total < buffer.length) {
+      const read = readSync(fd, buffer, total, buffer.length - total, total);
+      if (read === 0) break;
+      total += read;
+    }
+    if (total > info.size) throw new Error('a bundle file changed while being read');
+    return buffer.subarray(0, total);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 export interface BundleRef {

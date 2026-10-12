@@ -762,7 +762,7 @@ anything you compile in the way you review your own code.
 | | A: compiled in | B: marketplace (sandbox-v1) |
 |---|---|---|
 | Language and APIs | TypeScript, React, the whole SDK | plain JavaScript in \`server.js\`, no imports, no Node APIs |
-| Your own UI | a React panel in the app | \`ui/\` in a sandboxed iframe (no network beyond its own files; sound, video and WebAssembly work), postMessage protocol v1 |
+| Your own UI | a React panel in the app | \`ui/\` in a sandboxed iframe (no fetch, XHR, WebSocket, image or media requests beyond its own files and approved origins; WebRTC is not covered by CSP; sound, video and WebAssembly work), postMessage protocol v1 |
 | \`actionPolicies\`, \`validateAction\` | yes | yes: policies from \`manifest.json\`, \`validateAction\` in the sandbox |
 | Hidden state per viewer | yes, with a core projection branch | yes, with the plugin's own \`projectState\` |
 | Name and summary in each viewer's language | \`catalog.name\` / \`catalog.summary\` in \`locales/<code>.json\` | the same keys in the bundle's \`locales/<code>.json\` ([PLUGIN_PUBLISHING.md](PLUGIN_PUBLISHING.md#locales-optional-your-name-and-description-in-every-language)) |
@@ -810,8 +810,18 @@ How it runs:
   \`POST /api/internal/activity-projection\`). Without \`projectState\` the
   state is public and the lobby says so.
 - **UI** (\`ui/\`) is served from \`/api/plugin-ui/{pluginId}/{version}/…\`
-  into \`<iframe sandbox="allow-scripts">\` with no network; see
+  into \`<iframe sandbox="allow-scripts">\`, under a CSP that allows no
+  fetch, XHR, WebSocket, image or media requests beyond its own files and
+  the origins you approved. That is not "no network": WebRTC is not
+  covered by CSP (\`webrtc 'block'\` works only where browsers implement
+  it), and the frame can navigate itself to any origin the lobby page may
+  frame — so treat what a frame is shown as readable by its author. See
   "Marketplace plugin UI (sandboxed iframe)" in [PLUGIN_SDK.md](PLUGIN_SDK.md).
+  The route is public and cheap: the validated manifest is cached per
+  installed version, files are streamed (HEAD and Range read only what
+  they need), and a generous per-address limit in memory answers 429.
+  Plugin files and refusals carry \`CDN-Cache-Control: no-store\` so a CDN
+  never caches them ([DEPLOY_CLOUDFLARE.md](DEPLOY_CLOUDFLARE.md)).
 - **The container** is the outer layer: read-only file system and plugin
   mount, no capabilities, no-new-privileges, 256 MB and 64 pids, no
   secrets except its RPC token (\`PLUGIN_WORKER_TOKEN\`), and its own
@@ -821,6 +831,15 @@ How it runs:
 
 There is no shared catalog across instances. An entry approved on another
 instance (including the official one) does not appear on yours.
+
+An official plugin's id (\`hushle\`, \`quiz\`, \`poll\`, \`dice-bot\`,
+\`watch-party\`, \`vampire-village\`, in any case) is never a marketplace
+plugin: submit and install refuse it with 409 \`reserved_plugin_id\`, and the
+loader, the asset route and the pages' \`frame-src\` ignore a folder named
+like one (\`apps/web/lib/official-plugin-ids.ts\`). Approval sends the
+version the reviewer saw; if the publisher resubmitted in between, the
+review is refused with 409 \`version_changed\` and the moderation screen
+shows the new version.
 
 Steps:
 
@@ -3247,14 +3266,28 @@ Every file carries this CSP, where \`<own>\` is your version's own folder,
 \`\`\`
 default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline';
 img-src 'self' data:; font-src 'self'; media-src <own> data: blob:; connect-src <own>;
-frame-ancestors 'self'; base-uri 'none'; form-action 'none'; sandbox allow-scripts
+frame-ancestors 'self'; base-uri 'none'; form-action 'none'; webrtc 'block'; sandbox allow-scripts
 \`\`\`
 
-So by default: **no network beyond your own files.** \`fetch()\` and XHR can
-read your own files (level data, a \`.wasm\`, sound for the Web Audio API)
-and nothing else — not the app, not another plugin, not the web; WebSockets
-and remote images are blocked. The frame cannot send what it is shown
-anywhere.
+So by default: **no fetch, XHR, WebSocket, image or media requests beyond
+your own files.** \`fetch()\` and XHR can read your own files (level data, a
+\`.wasm\`, sound for the Web Audio API) and nothing else — not the app, not
+another plugin, not the web; WebSockets and remote images are blocked.
+
+That is what CSP guarantees, and it is less than "no network":
+
+- **WebRTC is not covered by CSP.** \`connect-src\` does not govern an
+  \`RTCPeerConnection\`'s STUN/TURN traffic. The policy adds \`webrtc 'block'\`,
+  which refuses it only in browsers that implement that directive; the
+  others ignore it.
+- **The frame can navigate itself** (\`location.href = …\`) to any origin the
+  lobby page may frame: that is the embedding page's \`frame-src\`, not your
+  page's policy.
+
+So write your UI as if its author — you — could read everything the frame
+is shown, because it can: the viewer's projected state, names and language.
+Keep secrets out of what a viewer receives with \`projectState\`, not with
+the frame.
 
 **Outside origins the owner approved.** A manifest may ask for outside
 origins under \`network\` ([PLUGIN_PUBLISHING.md → Asking for more than the
@@ -3296,12 +3329,19 @@ The instance names \`<own>\` from its configured public origin
 (\`LOBBYFORGE_APP_ORIGIN\`, else \`NEXT_PUBLIC_BASE_URL\`), never from the
 request. Without either (a dev setup) it is \`'self'\`: the app's origin,
 reached without cookies, where every mutating route refuses a cross-site
-request. Navigating the
-frame elsewhere is stopped by the app's own \`frame-src\`. Assets other than
-the HTML are public and cached for a year (\`immutable\`, the version is in
-the path): ship a new version to change them. The HTML loads only as an iframe document, and the
+request. Where the frame can navigate itself is bounded by the app page's
+own \`frame-src\` — the app's origin, YouTube's privacy-enhanced player, the
+CAPTCHA provider's frames when one is configured, and the approved sites of
+plugins whose UI is their own page — not by your page's policy. Assets other than
+the HTML are public and cached for a year by browsers (\`immutable\`, the
+version is in the path): ship a new version to change them. Shared caches
+never store them (\`CDN-Cache-Control: no-store\`, see
+[DEPLOY_CLOUDFLARE.md](DEPLOY_CLOUDFLARE.md)). The HTML loads only as an iframe document, and the
 app's own pages can never load your scripts (Fetch Metadata), so do not
-link to your files from anywhere else.
+link to your files from anywhere else. Files are streamed (a \`Range\` reads
+only that range), and the route allows each address a burst of 1000
+requests, refilled at 50 per second, then answers 429 with \`Retry-After\`:
+plenty for a game's first load, but do not poll your own files in a loop.
 
 Everything the frame knows arrives in a message; everything it can do is an
 action the lobby sends **as the viewer**, through the normal actions route,
@@ -3640,11 +3680,14 @@ marketplace plugin is installed **without trusting its author**:
   the \`plugin-worker\` container: plain JavaScript, no Node APIs, no
   network, no file system, no timers, a fresh VM for every call;
 - its UI (\`ui/\`, optional) runs in \`<iframe sandbox="allow-scripts">\` with
-  an opaque origin and no network beyond its own files (it may load its own
-  sound, video, WebAssembly and data) — plus any outside origins the
-  instance owner approved at install; or, with that approval, its UI is the
-  author's own site, framed by the lobby
-  ([Asking for more than the sandbox](#asking-for-more-than-the-sandbox));
+  an opaque origin, and its CSP allows no fetch, XHR, WebSocket, image or
+  media requests beyond its own files (it may load its own sound, video,
+  WebAssembly and data) — plus any outside origins the instance owner
+  approved at install; or, with that approval, its UI is the author's own
+  site, framed by the lobby
+  ([Asking for more than the sandbox](#asking-for-more-than-the-sandbox)).
+  CSP does not cover WebRTC, so this is not "no network"
+  ([Security notes](#security-notes));
 - it gets what official plugins get from the host: action policies
   (\`host\` / \`member\` / \`player\`, \`actorFields\`, \`joinsRoster\`, \`audit\`),
   \`validateAction\`, and **per-viewer hidden state** through \`projectState\`.
@@ -4001,7 +4044,7 @@ the common mistakes before it packs.
 | \`server.js\` | 2 MiB |
 | \`manifest.json\` | 64 KiB |
 | \`locales/\` | 32 files, 128 KiB each, 1 MiB together, 1000 keys per file (the full rules are under [\`locales/\`](#locales-optional-your-name-and-description-in-every-language)) |
-| Archive | 10 MB compressed, 50 MB unpacked, 500 entries, regular files and folders only |
+| Archive | 10 MB compressed, 50 MB unpacked, 500 entries, regular files and folders only; plain ustar headers with valid checksums and octal sizes (what \`tar -czf\` and \`pack.mjs\` write; no GNU base-256 sizes, long-name or pax entries). Approval and install refuse anything else |
 
 Keep state in kilobytes: every action and every read passes it through the
 VM, and every viewer's read runs \`projectState\` once. Keep \`server.js\`
@@ -4161,9 +4204,22 @@ migrate:
   container is the outer layer: read-only file system, no capabilities,
   memory and pid caps, no secrets except its own RPC token, and a network
   only the web app joins.
+- **What the frame's CSP does and does not stop.** It stops fetch, XHR,
+  WebSocket, image and media requests beyond your own files and the
+  approved origins. It does not cover WebRTC: a page can open an
+  \`RTCPeerConnection\`, whose STUN/TURN traffic \`connect-src\` does not
+  govern. The policy carries \`webrtc 'block'\`, which refuses that only in
+  browsers that implement the directive. And the frame can navigate itself
+  to any origin the lobby page is allowed to frame. So an owner should
+  assume a plugin's author can read whatever its frame is shown — the
+  viewer's projected state, names and language — and nothing more:
+  \`projectState\` is what keeps a game's secrets from the wrong viewer.
 - **Authorization is the host's.** Who may send an action is decided by
   your manifest's \`actionPolicies\`, as read and validated by the web app;
   \`actorFields\` are filled in by the host. Your code cannot widen them.
+- **Official ids are reserved.** A bundle cannot use the id of an official
+  plugin (\`hushle\`, \`quiz\`, \`poll\`, \`dice-bot\`, \`watch-party\`,
+  \`vampire-village\`, in any case): submit and install refuse it.
 - **What review is still for.** A plugin can show misleading text inside
   its own frame, waste its own call budget (and slow other marketplace
   plugins while it does), or leak its own game's secrets through a careless

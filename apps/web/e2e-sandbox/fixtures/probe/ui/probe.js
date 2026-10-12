@@ -57,6 +57,13 @@ const results = {
   externalFetch: await settle(fetch('https://example.com/')),
   externalImage: await image('https://example.com/pixel.png'),
   ownImage: await image('dot.svg'),
+  // CSP's connect-src does not cover WebRTC; `webrtc 'block'` refuses it only
+  // where the browser implements the directive. Recorded, not relied on.
+  webrtc: attempt(() => {
+    const pc = new RTCPeerConnection();
+    pc.close();
+    return 'constructed';
+  }),
 };
 
 const lf = connect({

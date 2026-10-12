@@ -263,4 +263,17 @@ describe('scripts/render-configs.sh — LiveKit webhook (AUTHZ-006 follow-up)', 
     expect(nginx.indexOf('location ^~ /api/webhooks/')).toBeLessThan(nginx.indexOf('# Next.js app'));
     expect(nginx.match(/location [^{]*\/api\/webhooks/g)).toHaveLength(1);
   });
+
+  it('nginx serves plugin UI files without its server-wide X-Frame-Options and Referrer-Policy', () => {
+    const nginx = read('nginx');
+    const block = nginx.match(/location \^~ \/api\/plugin-ui\/ \{([^}]*)\}/);
+    expect(block).not.toBeNull();
+    const body = block![1]!;
+    // Declaring any add_header stops nginx inheriting the server-level ones.
+    const headers = body.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('add_header'));
+    expect(headers).toEqual(['add_header X-Content-Type-Options "nosniff" always;']);
+    expect(body).toContain('proxy_pass http://web:3000;');
+    expect(body).toContain('proxy_set_header X-Forwarded-For $remote_addr;');
+    expect(nginx.indexOf('location ^~ /api/plugin-ui/')).toBeLessThan(nginx.indexOf('# Next.js app'));
+  });
 });

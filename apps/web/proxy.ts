@@ -14,8 +14,8 @@ import type { NextRequest } from 'next/server';
  */
 /**
  * Marketplace plugin UI (ADR-007): `/api/plugin-ui/{pluginId}/{version}/…`
- * answers with its OWN policy — CSP `sandbox allow-scripts`, no network,
- * `frame-ancestors 'self'` — so the lobby can frame it. Next APPENDS a route
+ * answers with its OWN policy — CSP `sandbox allow-scripts`, requests limited
+ * to its own files, `frame-ancestors 'self'` — so the lobby can frame it. Next APPENDS a route
  * handler's headers to the ones set here (next/dist/server/send-response.js)
  * and a browser enforces every CSP it receives, so the app's
  * `frame-ancestors 'none'` and `X-Frame-Options: DENY` would forbid the

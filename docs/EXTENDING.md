@@ -745,7 +745,7 @@ anything you compile in the way you review your own code.
 | | A: compiled in | B: marketplace (sandbox-v1) |
 |---|---|---|
 | Language and APIs | TypeScript, React, the whole SDK | plain JavaScript in `server.js`, no imports, no Node APIs |
-| Your own UI | a React panel in the app | `ui/` in a sandboxed iframe (no network beyond its own files; sound, video and WebAssembly work), postMessage protocol v1 |
+| Your own UI | a React panel in the app | `ui/` in a sandboxed iframe (no fetch, XHR, WebSocket, image or media requests beyond its own files and approved origins; WebRTC is not covered by CSP; sound, video and WebAssembly work), postMessage protocol v1 |
 | `actionPolicies`, `validateAction` | yes | yes: policies from `manifest.json`, `validateAction` in the sandbox |
 | Hidden state per viewer | yes, with a core projection branch | yes, with the plugin's own `projectState` |
 | Name and summary in each viewer's language | `catalog.name` / `catalog.summary` in `locales/<code>.json` | the same keys in the bundle's `locales/<code>.json` ([PLUGIN_PUBLISHING.md](PLUGIN_PUBLISHING.md#locales-optional-your-name-and-description-in-every-language)) |
@@ -793,8 +793,18 @@ How it runs:
   `POST /api/internal/activity-projection`). Without `projectState` the
   state is public and the lobby says so.
 - **UI** (`ui/`) is served from `/api/plugin-ui/{pluginId}/{version}/…`
-  into `<iframe sandbox="allow-scripts">` with no network; see
+  into `<iframe sandbox="allow-scripts">`, under a CSP that allows no
+  fetch, XHR, WebSocket, image or media requests beyond its own files and
+  the origins you approved. That is not "no network": WebRTC is not
+  covered by CSP (`webrtc 'block'` works only where browsers implement
+  it), and the frame can navigate itself to any origin the lobby page may
+  frame — so treat what a frame is shown as readable by its author. See
   "Marketplace plugin UI (sandboxed iframe)" in [PLUGIN_SDK.md](PLUGIN_SDK.md).
+  The route is public and cheap: the validated manifest is cached per
+  installed version, files are streamed (HEAD and Range read only what
+  they need), and a generous per-address limit in memory answers 429.
+  Plugin files and refusals carry `CDN-Cache-Control: no-store` so a CDN
+  never caches them ([DEPLOY_CLOUDFLARE.md](DEPLOY_CLOUDFLARE.md)).
 - **The container** is the outer layer: read-only file system and plugin
   mount, no capabilities, no-new-privileges, 256 MB and 64 pids, no
   secrets except its RPC token (`PLUGIN_WORKER_TOKEN`), and its own
@@ -804,6 +814,15 @@ How it runs:
 
 There is no shared catalog across instances. An entry approved on another
 instance (including the official one) does not appear on yours.
+
+An official plugin's id (`hushle`, `quiz`, `poll`, `dice-bot`,
+`watch-party`, `vampire-village`, in any case) is never a marketplace
+plugin: submit and install refuse it with 409 `reserved_plugin_id`, and the
+loader, the asset route and the pages' `frame-src` ignore a folder named
+like one (`apps/web/lib/official-plugin-ids.ts`). Approval sends the
+version the reviewer saw; if the publisher resubmitted in between, the
+review is refused with 409 `version_changed` and the moderation screen
+shows the new version.
 
 Steps:
 

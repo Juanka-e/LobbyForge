@@ -325,8 +325,14 @@ Açıkça söylemek gerekirse aşağıdakileri kod engelleyemez:
 ### 2.4 Pazar yeri eklentileri: güven modeli
 
 - **Neler yapamaz** (ADR-007):
-  - Ağa çıkamaz: QuickJS'te ağ yok, iframe CSP'si `connect-src 'none'`. Yani
-    gördüğünü dışarı sızdıramaz.
+  - Sunucu kodu ağa çıkamaz: QuickJS'te ağ yok. Arayüzün (iframe) CSP'si
+    fetch, XHR, WebSocket, görsel ve medya isteklerini eklentinin kendi
+    dosyalarıyla ve sahibin onayladığı adreslerle sınırlar. Bu "hiç ağ yok"
+    demek değil: WebRTC CSP'nin kapsamında değil (`webrtc 'block'` yalnız
+    bu yönergeyi uygulayan tarayıcılarda işe yarar) ve çerçeve kendini lobi
+    sayfasının `frame-src`'indeki herhangi bir adrese yönlendirebilir.
+    Çerçeveye gösterilen her şey (izleyicinin projekte edilmiş durumu)
+    eklenti yazarınca okunabilir sayılmalı; gizliliği `projectState` sağlar.
   - Başka oturumu ya da başka bir eklentinin verisini okuyamaz.
   - Hangi eylemi kimin göndereceğini değiştiremez. Politikalar, web
     uygulamasının manifestten okuduğu haliyle uygulanır.

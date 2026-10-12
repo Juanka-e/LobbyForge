@@ -69,6 +69,7 @@ export default function ModerationClient() {
   const [data, setData] = useState<ModerationData>({ pendingPlugins: [], registryInstances: [], reports: [] });
   const [loading, setLoading] = useState(true);
   const [actioning, setActioning] = useState<string | null>(null);
+  const [reviewError, setReviewError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -83,15 +84,29 @@ export default function ModerationClient() {
 
   useEffect(() => { void reload(); }, [reload]);
 
-  async function reviewPlugin(pluginId: string, decision: 'approved' | 'rejected') {
-    setActioning(pluginId);
+  /**
+   * Sends the version on screen: if the publisher resubmitted since this
+   * list loaded, the server refuses (409 `version_changed`) instead of
+   * approving a version nobody looked at, and the list reloads with it.
+   */
+  async function reviewPlugin(plugin: PendingPlugin, decision: 'approved' | 'rejected') {
+    setActioning(plugin.pluginId);
+    setReviewError(null);
     try {
-      await fetch('/api/marketplace/review', {
+      const res = await fetch('/api/marketplace/review', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pluginId, decision }),
+        body: JSON.stringify({ pluginId: plugin.pluginId, decision, version: plugin.version }),
       });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string; code?: string; version?: string };
+        setReviewError(
+          data.code === 'version_changed' && data.version
+            ? t('admin.moderation.versionChanged', { name: plugin.name, version: data.version })
+            : t('admin.moderation.reviewFailed', { reason: data.error ?? String(res.status) })
+        );
+      }
       await reload();
     } finally {
       setActioning(null);
@@ -146,6 +161,11 @@ export default function ModerationClient() {
           <span className="material-symbols-outlined text-primary text-[20px]">extension</span>
           {t('admin.moderation.pluginQueue', { count: data.pendingPlugins.length })}
         </h2>
+        {reviewError ? (
+          <p role="alert" className="mb-3 rounded-lg border border-warning/40 bg-warning/10 px-4 py-2 text-sm text-text-primary">
+            {reviewError}
+          </p>
+        ) : null}
         {data.pendingPlugins.length === 0 ? (
           <div className="rounded-xl border border-border-subtle bg-surface p-6 flex items-center gap-3">
             <span className="material-symbols-outlined text-success text-[20px]">check_circle</span>
@@ -174,14 +194,14 @@ export default function ModerationClient() {
                   </div>
                   <div className="flex gap-2 flex-shrink-0">
                     <button
-                      onClick={() => reviewPlugin(p.pluginId, 'approved')}
+                      onClick={() => reviewPlugin(p, 'approved')}
                       disabled={actioning === p.pluginId}
                       className="rounded-md bg-success/20 px-3 py-1.5 text-xs font-semibold text-success hover:bg-success/30 disabled:opacity-40"
                     >
                       {t('admin.moderation.approve')}
                     </button>
                     <button
-                      onClick={() => reviewPlugin(p.pluginId, 'rejected')}
+                      onClick={() => reviewPlugin(p, 'rejected')}
                       disabled={actioning === p.pluginId}
                       className="rounded-md bg-danger/20 px-3 py-1.5 text-xs font-semibold text-danger hover:bg-danger/30 disabled:opacity-40"
                     >

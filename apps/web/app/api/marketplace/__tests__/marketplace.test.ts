@@ -165,17 +165,18 @@ describe('POST /api/marketplace/submit', () => {
 
 describe('POST /api/marketplace/review', () => {
   it('approves a plugin (admin)', async () => {
-    reviewPlugin.mockResolvedValue(undefined);
+    reviewPlugin.mockResolvedValue(true);
     // 13th-audit: approval fetches the bundle and pins its digest.
     getCatalogEntry.mockResolvedValue({
       pluginId: 'my-awesome-game',
+      version: '1.0.0',
       manifestUrl: 'https://cdn.example.com/my-game-1.0.0.tgz',
     });
     const { POST } = await import('../review/route.js');
     const res = await POST(
       new Request('https://example.test/api/marketplace/review', {
         method: 'POST',
-        body: JSON.stringify({ pluginId: 'my-awesome-game', decision: 'approved' }),
+        body: JSON.stringify({ pluginId: 'my-awesome-game', decision: 'approved', version: '1.0.0' }),
       }),
       {}
     );
@@ -187,7 +188,8 @@ describe('POST /api/marketplace/review', () => {
       'approved',
       null,
       null,
-      expect.objectContaining({ sha256: expect.any(String), sizeBytes: SANDBOX_BUNDLE.byteLength })
+      expect.objectContaining({ sha256: expect.any(String), sizeBytes: SANDBOX_BUNDLE.byteLength }),
+      { version: '1.0.0', manifestUrl: 'https://cdn.example.com/my-game-1.0.0.tgz' }
     );
   });
 
@@ -236,7 +238,7 @@ describe('POST /api/marketplace/review', () => {
 
 describe('POST /api/marketplace/submit — SEC-006 ownership', () => {
   it('maps PluginIdTakenError to 409 (ID takeover rejected as conflict)', async () => {
-    const takeover = new Error('Plugin ID "hushle" is already published by another publisher.');
+    const takeover = new Error('Plugin ID "cool-game" is already published by another publisher.');
     takeover.name = 'PluginIdTakenError';
     submitPluginForReview.mockRejectedValueOnce(takeover);
     const { POST } = await import('../submit/route.js');
@@ -245,7 +247,7 @@ describe('POST /api/marketplace/submit — SEC-006 ownership', () => {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          pluginId: 'hushle',
+          pluginId: 'cool-game',
           name: 'Evil Clone',
           version: '1.0.0',
           type: 'game',
@@ -258,4 +260,26 @@ describe('POST /api/marketplace/submit — SEC-006 ownership', () => {
     const body = (await res.json()) as { error?: string };
     expect(body.error).toContain('another publisher');
   });
+});
+
+describe('POST /api/marketplace/submit — official plugin ids', () => {
+  it.each(['hushle', 'quiz', 'watch-party', 'Hushle', 'VAMPIRE-VILLAGE'])(
+    'refuses %j with 409 before touching the catalogue, even with no row for it',
+    async (pluginId) => {
+      const { POST } = await import('../submit/route.js');
+      const res = await POST(
+        new Request('https://example.test/api/marketplace/submit', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ pluginId, name: 'Clone', version: '1.0.0', type: 'game', publisher: 'Mallory' }),
+        }),
+        {}
+      );
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { error?: string; code?: string };
+      expect(body.code).toBe('reserved_plugin_id');
+      expect(body.error).toContain('official');
+      expect(submitPluginForReview).not.toHaveBeenCalled();
+    }
+  );
 });

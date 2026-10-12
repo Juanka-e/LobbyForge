@@ -132,7 +132,7 @@
   "hub.landing.selfHost.running": "LobbyForge is running at https://your-domain",
   "hub.landing.selfHost.title": "Yours in an afternoon.",
   "hub.marketplace.approval.approve": "Approve and install",
-  "hub.marketplace.approval.description": "Marketplace plugins run sandboxed, with no network. This one asks for more. None of it is allowed unless you approve it here.",
+  "hub.marketplace.approval.description": "Marketplace plugins run sandboxed, and their screen may only load its own files. This one asks for more. None of it is allowed unless you approve it here.",
   "hub.marketplace.approval.descriptionUpgrade": "This version asks for more than the one installed now. Items marked new were not approved before.",
   "hub.marketplace.approval.footnote": "Uninstalling the plugin takes all of this back. A later version that asks for more will ask you again.",
   "hub.marketplace.approval.network.connect": "Send and receive data",
