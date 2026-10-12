@@ -82,15 +82,49 @@ The example in the repository is a complete, working plugin to copy:
 | `name` | 1–80 characters. |
 | `version` | strict semver (`1.0.0`, `2.0.0-beta.1`). Must equal the catalog `version`. |
 | `sdk` | exactly `"sandbox-v1"`. |
-| `ui` | `true` or `false`. `true` requires `ui/index.html`. |
+| `ui` | `true`, `false`, or `{ "url": "https://…" }`. `true` requires `ui/index.html`. `{ "url" }` names your own page as the UI instead (an https URL on a public host, no credentials or fragment) and needs the owner's approval — see [Asking for more than the sandbox](#asking-for-more-than-the-sandbox). |
 | `actionPolicies` | an object (may be empty), at most 64 action types of 1–64 characters (`A-Z a-z 0-9 _ . : -`). Each value: `role` (`host`, `member` or `player`), optional `actorFields` (up to 8 field names; not `type`), `joinsRoster` (boolean), `audit` (boolean), `allowOutsideVoice` (boolean). Unknown keys are refused, so a typo cannot silently fall back to host-only. |
 | `minPlayers`, `maxPlayers` | optional integers 1–500, min ≤ max. |
 | `requiresVoiceRoom` | optional `true` / `false` (default `false`). `true`: the game is played over voice — the host refuses `member` / `player` actions from anyone who is not in the activity's voice room (403, `code: "voice_required"`), except actions marked `allowOutsideVoice` (leaving). Reading the state (spectating) is never voice-checked, nor are `host` actions. It also turns on host hand-over when the host leaves the room ([PLUGIN_SDK.md → Voice, hosting and play again](PLUGIN_SDK.md#voice-hosting-and-play-again)). |
+| `network` | optional: outside origins your UI may reach, by kind — `connect`, `img`, `media`, `frame`, up to 8 each. Each is an https origin on a public host (`https://api.example.com`): no path, query, wildcard, IP address, `localhost` or local name (`.local`, `.internal`, `.lan`, `.home.arpa`). Needs the owner's approval. |
+| `permissions` | optional: host effects you use — `timers`, `storage`, `chat`, `voice.mute`. Unknown names are refused. Needs the owner's approval. |
 | `locales` | optional, 1–32 language codes (`en`, `pt-BR`); defaults to `["en"]`. With a `locales/` folder the languages come from its files, and a list here must name exactly those codes ([`locales/`](#locales-optional-your-name-and-description-in-every-language)). |
 
 Unknown top-level keys are ignored. The manifest is validated by the
 installer and again every time the plugin loads; the host enforces **the
 manifest's** policies, never anything plugin code says.
+
+### Asking for more than the sandbox
+
+By default a marketplace plugin reaches nothing outside its own files. A
+manifest may ask for more — outside origins (`network`), your own page as
+the UI (`ui: { "url" }`), host effects (`permissions`) — and **none of it
+takes effect until the instance owner approves it at install**:
+
+- The install is refused with `409` and `code: "approval_required"`,
+  naming what the bundle asks for (`requested`) and, on an upgrade, the part
+  the installed version had not approved (`added`).
+- The owner's Install button shows a dialog that says in plain words what
+  each item lets the plugin do (for example: "It can reach these sites from
+  players' browsers — what a player sees in the game can be sent to them").
+  Approving sends the request again with `approve` naming exactly the same
+  items; an approval that names less or more is refused.
+- The approval is recorded with the active version and in the audit log
+  (`plugin.install`). A later version that asks for more asks again.
+  Uninstalling takes everything back.
+- A plugin only ever gets what its manifest asks for **and** the owner
+  approved: a bundle installed before approvals existed gets nothing until
+  it is approved.
+
+Ask only for what you use; each item is one more thing the owner has to
+trust. What each request unlocks, and the rollout, is in
+[PLUGIN_UNLOCK_PLAN.md](PLUGIN_UNLOCK_PLAN.md): outside origins and your own
+page as the UI arrive with phase 2, host effects with phase 3. Until then an
+approved request is recorded but has no effect.
+
+For local development and tests only, `LOBBYFORGE_PLUGIN_ALLOW_LOCAL_ORIGINS=true`
+(ignored when `NODE_ENV=production`, set for both the web app and the
+plugin-worker) also accepts `http:` and local hosts.
 
 Action policies work exactly as for official plugins
 ([EXTENDING.md §3.2](EXTENDING.md#32-the-contract-packagesplugin-sdksrcindexts)):
@@ -380,7 +414,8 @@ With `LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED=true`, the owner clicks
 **Install** on `/marketplace` (or `POST /api/marketplace/install
 {"pluginId":"my-game"}`). The server downloads the tarball again, checks it
 against the pin, refuses anything but a valid sandbox-v1 bundle for that id
-and version, extracts it to
+and version, asks the owner to approve anything beyond the sandbox
+([above](#asking-for-more-than-the-sandbox); `approve` in the body), extracts it to
 `<LOBBYFORGE_PLUGIN_INSTALL_DIR>/<pluginId>/<version>/`, has the worker
 load that exact version and only then records it as active.
 
