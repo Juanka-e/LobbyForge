@@ -11,6 +11,7 @@ import { PluginSurface } from '../room/PluginSurface';
 import { findOpenActivity, useActivitySession } from '../room/useActivitySession';
 import { ConnectionState, useLobbyVoice } from './LobbyVoiceProvider';
 import { PluginFrameSurface } from './PluginFrame';
+import { VoiceResumeStrip } from './VoiceResumeStrip';
 import { buildPanelPlayers } from './panel-players';
 import type { InstalledApp } from './page';
 
@@ -123,7 +124,7 @@ export function LobbyActivityView({
     setResolving(false);
   }, []);
 
-  const { detail, error, busy, setError, dispatch, end } = useActivitySession({
+  const { detail, error, errorCode, busy, setError, dispatch, end } = useActivitySession({
     serverId,
     sessionId,
     onEnded: handleEnded,
@@ -262,6 +263,23 @@ export function LobbyActivityView({
     return apps.find((a) => a.id === detail.pluginId)?.name ?? detail.pluginId;
   }, [apps, detail]);
 
+  // `voice_required` must not be a dead end (docs/ACTIVITY_INTEGRITY_AND_
+  // RESILIENCE.md §3.2): in a game played over voice, a viewer outside this
+  // channel's voice room gets a standing "Join" — the same join as the
+  // channel list. Spectating needs no voice, so it only informs.
+  const runningPluginId = detail?.pluginId ?? null;
+  const requiresVoice = useMemo(() => {
+    if (!runningPluginId) return false;
+    const declared = apps.find((a) => a.id === runningPluginId)?.requiresVoice;
+    if (declared !== undefined) return declared;
+    return getPlugin(runningPluginId)?.manifest.catalog?.requiresVoiceRoom === true;
+  }, [apps, runningPluginId]);
+  const joiningVoice = voice.connecting && voice.activeChannelId === channelId;
+  const joinVoice = useCallback(() => void voice.connectToChannel(channelId), [voice, channelId]);
+  // The way back after a drop already offers this channel: one strip, not two.
+  const resumeHere = voice.voiceResume?.channelId === channelId;
+  const showJoinBar = requiresVoice && !inVoiceRoom && !resumeHere;
+
   return (
     <main className="flex-1 flex flex-col bg-background min-w-0 relative text-[14px] animate-fade-in-up">
       <header className="h-16 pl-16 pr-6 md:pl-6 flex items-center justify-between border-b border-border-subtle bg-surface-dim/80 backdrop-blur-md z-10 sticky top-0 shadow-sm">
@@ -291,6 +309,7 @@ export function LobbyActivityView({
       </header>
 
       <div className="flex-1 overflow-y-auto">
+        {resumeHere ? <VoiceResumeStrip placement="activity" /> : null}
         {resolving ? (
           <p className="px-6 py-8 text-sm text-text-muted">{t('lobbyMain.activities.resolving')}</p>
         ) : sessionId && detail ? (
@@ -345,6 +364,20 @@ export function LobbyActivityView({
               ) : null}
             </div>
 
+            {showJoinBar ? (
+              <div
+                role="status"
+                data-testid="activity-voice-join"
+                className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-primary/25 bg-primary/10 px-6 py-2.5"
+              >
+                <span className="material-symbols-outlined text-[20px] text-primary" aria-hidden>
+                  headset_mic
+                </span>
+                <p className="min-w-0 flex-1 text-sm text-text-primary">{t('room.activity.voiceJoin.prompt')}</p>
+                <JoinVoiceButton channelName={channelName} joining={joiningVoice} onJoin={joinVoice} />
+              </div>
+            ) : null}
+
             <div className="px-6 py-6">
               {pluginClient ? (
                 <PluginSurface
@@ -377,9 +410,15 @@ export function LobbyActivityView({
                 />
               )}
               {error ? (
-                <p role="alert" className="mt-4 text-xs text-danger">
-                  {error}
-                </p>
+                <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+                  <p role="alert" className="text-xs text-danger">
+                    {error}
+                  </p>
+                  {/* A refused move: the way out sits next to the reason. */}
+                  {errorCode === 'voice_required' && !inVoiceRoom ? (
+                    <JoinVoiceButton channelName={channelName} joining={joiningVoice} onJoin={joinVoice} />
+                  ) : null}
+                </div>
               ) : null}
             </div>
           </section>
@@ -512,6 +551,37 @@ export function hostNoteKey(
   if (host.transferAt) return 'lobbyMain.activities.hostAwayTransfer';
   if (host.abandonAt) return 'lobbyMain.activities.hostAwayWaiting';
   return null;
+}
+
+/**
+ * "Join" for a game played over voice: the channel list's own join, for
+ * this activity's channel (switching from another voice channel if need
+ * be). Its accessible name says which channel.
+ */
+function JoinVoiceButton({
+  channelName,
+  joining,
+  onJoin,
+}: {
+  channelName: string;
+  joining: boolean;
+  onJoin: () => void;
+}) {
+  const t = useT();
+  return (
+    <button
+      type="button"
+      onClick={onJoin}
+      disabled={joining}
+      aria-label={joining ? undefined : t('room.activity.voiceJoin.actionLabel', { channel: channelName })}
+      className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-primary-container px-3 py-1.5 text-sm font-semibold text-on-primary-container transition-all hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-wait disabled:opacity-60"
+    >
+      <span className="material-symbols-outlined text-[18px]" aria-hidden>
+        {joining ? 'progress_activity' : 'headset_mic'}
+      </span>
+      {joining ? t('room.activity.voiceJoin.joining') : t('room.activity.voiceJoin.action')}
+    </button>
+  );
 }
 
 /**

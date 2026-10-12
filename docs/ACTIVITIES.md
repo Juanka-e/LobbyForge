@@ -267,6 +267,29 @@ The start route must reject a second active session in the same voice
 channel. This keeps voice state, host controls, mute/deafen behavior,
 and LiveKit data-channel routing predictable.
 
+## Voice in the lobby's activities view
+
+In the lobby's activities view (`app/lobby/LobbyActivityView.tsx`), a
+`voice_required` refusal is no longer a dead end
+([ACTIVITY_INTEGRITY_AND_RESILIENCE.md](ACTIVITY_INTEGRITY_AND_RESILIENCE.md)
+§3.2):
+
+- **A standing Join.** Some games need voice: the installed app says
+  `requiresVoice` (from `catalog.requiresVoiceRoom`), or the compiled-in
+  manifest does. In such a game, a viewer outside that channel's voice
+  room sees a bar under the status rail: "Join the voice channel to play
+  [Join]" / "Oynamak için sesli kanala katıl [Katıl]". Join uses the
+  channel list's own join for this channel, and switches over from another
+  voice channel if needed. The bar only informs: watching never needs
+  voice, and the panel stays usable.
+- **Join next to a refusal.** A move refused with `voice_required` shows
+  the same Join next to the message. `useActivitySession` returns the
+  refusal's `errorCode` along with `error` for this.
+- **After a drop.** When the "You dropped out of voice" strip is for this
+  channel, it shows in the panel instead of the bar. A reload reopens the
+  activities view. Both are described in
+  [VOICE_ROOM.md](VOICE_ROOM.md) → "Coming back after a reload or a drop".
+
 ## The `START_ACTIVITY` permission
 
 `CorePermission.START_ACTIVITY` was added in M15.2 and lives in

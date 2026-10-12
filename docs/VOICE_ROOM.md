@@ -157,9 +157,9 @@ that contradicts the declared kind. The rule lives in one module,
   connected: while connected, LiveKit (v1.13.7) sends the client a fresh
   token every 5 minutes, valid for 10 minutes or whatever the original
   had left, whichever is longer. livekit-client keeps it (`refreshToken`
-  signal) and uses it to resume or restart, and its reconnect policy
-  gives up after about 45 seconds, well inside that window. The lobby
-  fetches a new token for every join. A 1-hour token gave a removed
+  signal) and uses it to resume or restart. The lobby's reconnect policy
+  gives up after about two minutes (below), well inside that window. The
+  lobby fetches a new token for every join. A 1-hour token gave a removed
   member a valid token for up to an hour. TURN credentials have their
   own 12 h lifetime (`lib/turn-credentials.ts`).
 - **Wiring.** LiveKit reaches the web service at
@@ -195,6 +195,72 @@ that contradicts the declared kind. The rule lives in one module,
 - The output device preference is applied to the call on Chromium.
 - TURN credentials live for 12h, because ICE restarts reuse the servers
   passed at connect time.
+
+**Coming back after a reload or a drop**
+([ACTIVITY_INTEGRITY_AND_RESILIENCE.md](ACTIVITY_INTEGRITY_AND_RESILIENCE.md)
+§3.2). A reload is always a new connection: livekit-client leaves the
+room when the page goes away. The rules live in `lib/voice-resume.ts`;
+`LobbyVoiceProvider` applies them.
+
+- **The record.** While a tab is in voice it keeps
+  `sessionStorage['lf.voice.resume.v1'] = { serverId, channelId,
+  channelName, at }`. It is written when the room reaches Connected, and
+  `at` is refreshed every 5 s, also while LiveKit is reconnecting.
+  sessionStorage belongs to the tab: it survives a reload and goes when
+  the tab closes. Every storage access is wrapped, so a private window or
+  blocked site data only means there is nothing to come back to.
+- **What clears it.** Leaving with Disconnect, joining another channel,
+  switching community, dismissing the strip, a refused join (403
+  `voice_blocked`, 401, 403, 404), and these LiveKit endings:
+  - `DUPLICATE_IDENTITY`: another tab took over. Keeping the record would
+    make two tabs take turns kicking each other out.
+  - `PARTICIPANT_REMOVED`: a moderator removed them. An automatic return
+    must not undo moderation.
+  - `ROOM_DELETED`.
+
+  Any other ending keeps it: LiveKit giving up (no reason), a server
+  restart, the page being frozen or left (`CLIENT_INITIATED`, which is
+  also what a reload sends). `voiceResumeClearsOnDisconnect` decides.
+- **One click back (the default).** With a record under 2 minutes old,
+  for this community and a voice channel the viewer can still see, the
+  lobby shows a strip across the top of the centre column: "You dropped
+  out of voice. [Back to #channel]" / "Sesten düştün. [#kanal kanalına
+  dön]" (`role="status"`, dismissable). Inside the activities view of that
+  channel the strip moves into the panel. On a phone the voice footer sits
+  in the closed drawer, so this is how a player in a game sees that they
+  dropped. The click joins through the normal join, and it is also the
+  gesture browsers want before they play audio. The same strip appears
+  when LiveKit gives up reconnecting mid-session.
+- **Automatic return.** Only when all three hold: the record is under
+  2 minutes old, the load is a reload
+  (`performance.getEntriesByType('navigation')[0].type`), and
+  `navigator.permissions.query({ name: 'microphone' })` says `granted`.
+  Safari and Firefox may throw or answer `prompt`: then it stays one
+  click. An automatic return joins with the microphone off, so nothing is
+  sent until the person unmutes. Blocked playback shows the usual
+  "click to enable" notice.
+- **Duplicated tabs.** Duplicating a tab copies its sessionStorage. The
+  tab in voice holds the Web Lock `lf-voice`. A tab returns on its own only
+  if it can take the lock (`ifAvailable`). A tab that loads while another
+  tab holds the lock drops its copy of the record and offers nothing. A
+  lock still held at load gets 1.5 s to go first, because the page that
+  was just reloaded may not have released its lock yet. Without the Locks
+  API (an old browser, a plain-HTTP page) there is no lock, as before.
+- **Network drops.** The Room uses `VoiceReconnectPolicy`, which keeps
+  livekit-client's own delays (0, 0.3, 1.2, 2.7, 4.8 s, then 7 s plus up
+  to 1 s of jitter) until about 2 minutes have passed since the drop. The
+  default gave up after about 45–55 s. Once LiveKit gives up (Disconnected
+  with no clearing reason), the lobby offers the strip and tries once more
+  on the window's `online` event and once when the tab becomes visible
+  again, as long as the record stands. Both retries need the lock and join
+  with the microphone off.
+- **The view comes back too.** While the activities view is open, the
+  lobby keeps `sessionStorage['lf.view.v1'] = { mode: 'activity',
+  channelId }`. After a reload it reopens that view instead of the chat.
+  Any other view clears the record, and a `/dm/<id>` link opens what it
+  names.
+- **Desktop.** The Tauri shell is the same webview, so all of this
+  applies, and sessionStorage survives a window reload.
 
 ## The `/room/[roomName]` page
 
