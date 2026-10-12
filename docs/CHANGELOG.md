@@ -7,6 +7,11 @@ All notable changes to the LobbyForge monorepo skeleton.
 - **The bug:** the session cookie lived one hour and nothing re-signed a cookie that was still valid — `POST /api/auth/guest` only ran once the cookie was already gone. A signed-in user was signed out an hour after signing in, however active they were, and a guest lost their identity. Found by the 2026-10-13 security review.
 - **The fix — a sliding session:** the cookie now stays valid for 7 days without a request, and every API request (after the revocation check) and every page load re-signs a valid cookie once less than half of that is left, keeping the same session id and `auth_time`. Refused answers and the sign-in, guest and logout routes never get one, so signing out still signs out. The 30-day absolute lifetime (`LOBBYFORGE_SESSION_MAX_AGE_DAYS`) and server-side revocation (sign out everywhere, password change, operator reset) are unchanged and still end a session.
 - **For developers:** `guestSessionNeedsRefresh` (`@lobbyforge/core`), `apps/web/lib/session-refresh.ts`; `GUEST_SESSION_TTL_SECONDS` is now 7 days. docs/GUEST_AUTH.md "Lifetime".
+- **Also from the review, small hardening:**
+  - In production the Google sign-in state cookie is `__Host-lf_oauth_state`, so a sibling subdomain cannot plant a state and finish a sign-in with the attacker's Google code (login CSRF).
+  - Editing a profile refuses control characters (CR/LF, U+0085 …) in the display name, as sign-up already did.
+  - Hushle's `set-explainer` carries `turnNumber` like the other turn moves: a late pick cannot change the next turn's explainer.
+  - The automatic voice retry on `online` / tab-visible (after LiveKit gave up) only runs within 10 minutes of the last time in voice; later, the one-click "Back to #channel" strip is offered instead. An automatic return still joins with the microphone off, on purpose.
 
 ## [Unreleased] - Dependencies: Next 16.4, ioredis 6, TypeScript 6; `middleware.ts` is now `proxy.ts` - 2026-10-13
 

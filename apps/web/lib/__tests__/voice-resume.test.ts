@@ -395,3 +395,14 @@ describe('the view to reopen', () => {
     expect(() => clearLobbyView(throwingStorage)).not.toThrow();
   });
 });
+
+describe('voiceAutoRetryAllowed', () => {
+  it('lets the online / tab-visible retry rejoin only within ten minutes of the last time in voice', async () => {
+    const { voiceAutoRetryAllowed, VOICE_AUTO_RETRY_MAX_AGE_MS } = await import('../voice-resume');
+    const now = 1_800_000_000_000;
+    expect(voiceAutoRetryAllowed({ at: now - 60_000 }, now)).toBe(true);
+    expect(voiceAutoRetryAllowed({ at: now - VOICE_AUTO_RETRY_MAX_AGE_MS - 1 }, now)).toBe(false);
+    expect(voiceAutoRetryAllowed({ at: now - 30 * 60_000 }, now)).toBe(false);
+    expect(voiceAutoRetryAllowed(null, now)).toBe(false);
+  });
+});

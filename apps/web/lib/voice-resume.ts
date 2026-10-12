@@ -35,6 +35,13 @@ export const VOICE_RESUME_KEY = 'lf.voice.resume.v1';
 export const LOBBY_VIEW_KEY = 'lf.view.v1';
 /** A record older than this is not offered after a reload. */
 export const VOICE_RESUME_FRESH_MS = 120_000;
+/**
+ * The online / tab-visible retry after LiveKit gave up only runs while the
+ * tab was in voice (or reconnecting) within this long: coming back to a tab
+ * half an hour later must not drop the person into a voice room. The
+ * one-click strip stays.
+ */
+export const VOICE_AUTO_RETRY_MAX_AGE_MS = 10 * 60_000;
 /** How often `at` is refreshed while connected. */
 export const VOICE_RESUME_HEARTBEAT_MS = 5_000;
 /** The Web Lock the tab in voice holds. */
@@ -132,6 +139,13 @@ export function touchVoiceResume(now: number = Date.now(), storage: StorageLike 
 
 export function clearVoiceResume(storage: StorageLike | null = sessionStore()): void {
   remove(storage, VOICE_RESUME_KEY);
+}
+
+/** May the online / tab-visible retry still rejoin on its own? (A clock moved back counts as recent.) */
+export function voiceAutoRetryAllowed(record: Pick<VoiceResumeRecord, 'at'> | null, now: number = Date.now()): boolean {
+  if (!record) return false;
+  const age = now - record.at;
+  return age < VOICE_AUTO_RETRY_MAX_AGE_MS && age > -VOICE_AUTO_RETRY_MAX_AGE_MS;
 }
 
 /** Seen in voice within the last two minutes (a clock moved back counts as fresh). */
