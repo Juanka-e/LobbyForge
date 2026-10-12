@@ -86,7 +86,7 @@ const NO_REFERRER_PAGES = new Set(['/verify-email', '/reset-password', '/forgot-
 
 const withSources = (sources: string[]) => (sources.length > 0 ? ` ${sources.join(' ')}` : '');
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   if (PLUGIN_UI_ROUTE.test(request.nextUrl.pathname)) return NextResponse.next();
   // The raw path: `nextUrl` rewrites `/_next/data/…` requests to the page they
   // belong to, and those are data, not documents.
@@ -197,11 +197,10 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // Node.js runtime (stable since Next 15.5; a `middleware.ts` without this
-  // still defaults to the Edge runtime in Next 16): the CAPTCHA CSP reads
-  // the instance settings, which needs the database client and the
-  // process-wide settings cache the route handlers fill.
-  runtime: 'nodejs',
+  // A proxy always runs in the Node.js runtime (Next 16; a `runtime` option
+  // here is an error): the CAPTCHA CSP reads the instance settings, which
+  // needs the database client and the process-wide settings cache the route
+  // handlers fill.
   // Run on all routes except static assets.
   matcher: [
     '/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)',

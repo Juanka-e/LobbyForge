@@ -1,7 +1,7 @@
 /**
  * Lazy third-party script loading under the app's nonce CSP.
  *
- * `middleware.ts` puts a fresh `'nonce-…'` in `script-src` on every page
+ * `proxy.ts` puts a fresh `'nonce-…'` in `script-src` on every page
  * and hands it to Next through the request headers; Next stamps it on its
  * own `<script>` tags. A script we insert later has to carry the same
  * nonce or the browser refuses it, so we read it back from one of those

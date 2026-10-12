@@ -32,7 +32,7 @@ const BASE_FRAME = "frame-src 'self' https://www.youtube-nocookie.com";
 
 async function frameSrc(path: string): Promise<string | undefined> {
   const { NextRequest } = await import('next/server');
-  const { middleware } = await import('../../middleware');
+  const { proxy: middleware } = await import('../../proxy');
   const response = await middleware(new NextRequest(`https://chat.example.test${path}`));
   return (response.headers.get('Content-Security-Policy') ?? '')
     .split(';')
@@ -84,7 +84,7 @@ describe('middleware frame-src — approved external plugin UIs', () => {
 
   it('never touches the plugin UI asset route, which sends its own policy', async () => {
     const { NextRequest } = await import('next/server');
-    const { middleware } = await import('../../middleware');
+    const { proxy: middleware } = await import('../../proxy');
     const asset = await middleware(new NextRequest('https://chat.example.test/api/plugin-ui/alpha/1.0.0/index.html'));
     expect(asset.headers.get('Content-Security-Policy')).toBeNull();
     expect(origins.calls).toEqual([]);

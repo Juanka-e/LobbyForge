@@ -46,7 +46,7 @@ const nextConfig = {
   serverExternalPackages: ['@lobbyforge/db'],
   typedRoutes: true,
   async headers() {
-    // Security headers (CSP is set per-request by middleware.ts with a nonce).
+    // Security headers (CSP is set per-request by proxy.ts with a nonce).
     const headers = [
       { key: 'X-Content-Type-Options', value: 'nosniff' },
       { key: 'X-Frame-Options', value: 'DENY' },
@@ -65,7 +65,7 @@ const nextConfig = {
     return [
       { source: '/:path((?!api/plugin-ui/).*)', headers },
       // Email links carry one-time tokens (docs/EMAIL.md §4.1, §4.3): no
-      // Referer at all. Later entries win for the same key; middleware.ts
+      // Referer at all. Later entries win for the same key; proxy.ts
       // sets the same value.
       ...['/verify-email', '/reset-password', '/forgot-password'].map((source) => ({
         source,

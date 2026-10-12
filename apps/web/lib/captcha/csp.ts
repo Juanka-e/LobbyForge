@@ -1,5 +1,5 @@
 /**
- * The CSP side of bot protection (docs/CAPTCHA.md §9), for `middleware.ts`.
+ * The CSP side of bot protection (docs/CAPTCHA.md §9), for `proxy.ts`.
  *
  * ALTCHA needs no origin. An external provider's origins are added to every
  * HTML page response (never API routes or static files), and only while
@@ -16,7 +16,7 @@
  *     published list.
  *
  * How the middleware knows the provider: it runs in the Node.js runtime
- * (`config.runtime = 'nodejs'` in middleware.ts), so it reads the same
+ * (a proxy always runs in Node.js), so it reads the same
  * per-process settings cache the routes use (`resolveCaptchaSettings`, on
  * `globalThis`, 5 s TTL; a save through the admin API invalidates it). Page
  * requests never wait on the database once the process has read it once:

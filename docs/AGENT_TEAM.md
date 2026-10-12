@@ -105,7 +105,7 @@ Several agents can share one working tree when each owns distinct files.
 The lead gives every agent a written list of files it owns. Beyond that:
 
 - Shared files (`apps/web/lib/plugin-registry.ts`, the projection module,
-  `middleware.ts`, `package.json`s) take small, local edits only — never a
+  `proxy.ts`, `package.json`s) take small, local edits only — never a
   rewrite — and each edit is listed in the agent's report.
 - Nobody runs `pnpm install`, rebuilds Docker images or restarts
   containers except the agent the lead named for it; the lead adds

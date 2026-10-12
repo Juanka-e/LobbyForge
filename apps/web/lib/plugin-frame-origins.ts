@@ -1,7 +1,7 @@
 /**
  * The origins the app's own pages may frame for marketplace plugins whose UI
  * is their author's site (`ui: { url }`, docs/PLUGIN_UNLOCK_PLAN.md phase 2),
- * for the `frame-src` that `middleware.ts` sends.
+ * for the `frame-src` that `proxy.ts` sends.
  *
  * Read from the install root, like everything else about installed plugins:
  * every active plugin (`listActivePlugins`), its installed manifest, and the

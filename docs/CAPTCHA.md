@@ -661,7 +661,7 @@ the origins only on the widget pages, the widget was blocked whenever it
 was reached that way, although its own page's response would have allowed
 it. When the provider is `altcha` or `none`, nothing is added anywhere.
 
-**As implemented** (`apps/web/middleware.ts`, `lib/captcha/csp.ts`):
+**As implemented** (`apps/web/proxy.ts`, `lib/captcha/csp.ts`):
 - reCAPTCHA follows Google's published list: script-src
   `https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/`,
   frame-src `https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/`,
@@ -673,13 +673,11 @@ it. When the provider is `altcha` or `none`, nothing is added anywhere.
 - "Active" = the configured provider is external **and** both keys are in
   place (decryptable). While its breaker is open the origins stay (harmless:
   the page renders ALTCHA then).
-- **How the middleware knows the provider:** in Next 16 a `middleware.ts`
-  still defaults to the Edge runtime (only the new `proxy.ts` is Node-only),
-  and Edge cannot reach Postgres or share memory with the route handlers.
-  The middleware now declares `config.runtime = 'nodejs'` (stable since
-  Next 15.5) and, on page requests, reads the same per-process settings
-  cache the routes use (`resolveCaptchaSettings`, on `globalThis`, 5 s
-  TTL).
+- **How the proxy knows the provider:** the request proxy (`proxy.ts`,
+  formerly `middleware.ts`) always runs in the Node.js runtime in Next 16 —
+  an Edge middleware could not reach Postgres or share memory with the route
+  handlers. On page requests it reads the same per-process settings cache
+  the routes use (`resolveCaptchaSettings`, on `globalThis`, 5 s TTL).
   - **A value younger than 5 s** is used as is.
   - **An older value** gets one refresh, capped at 300 ms and shared by all
     readers. Without that, the first page after a provider change saved in

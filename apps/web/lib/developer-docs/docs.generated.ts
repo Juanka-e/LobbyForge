@@ -716,7 +716,7 @@ are per plugin id in host code, not in the SDK:
 | Secret content loaded on the server (answers, decks) | \`apps/web/lib/prepare-plugin-action.ts\` (as Quiz and Hushle do) and a server-only subpath export ([PLUGIN_SDK.md → Server-only subpath exports](PLUGIN_SDK.md#server-only-subpath-exports-m18)) |
 | Phase checks before the reducer | \`validateActionPhase\` in the actions route |
 | Built-in content (packs, decks) | \`apps/web/lib/component-migrations.ts\` |
-| An embed other than YouTube | \`frame-src\` in \`apps/web/middleware.ts:66\` allows only \`https://www.youtube-nocookie.com\` |
+| An embed other than YouTube | \`frame-src\` in \`apps/web/proxy.ts:66\` allows only \`https://www.youtube-nocookie.com\` |
 
 The WebSocket gateway projects the stored state **without**
 \`migrateState\` (\`forwardProjectedActivity\` in

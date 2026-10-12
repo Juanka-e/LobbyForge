@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 /**
  * The ALTCHA widget runs under the app's CSP without a new directive
- * (docs/CAPTCHA.md §9): `middleware.ts` has no `worker-src`, so workers fall
+ * (docs/CAPTCHA.md §9): `proxy.ts` has no `worker-src`, so workers fall
  * back to `script-src 'self' 'nonce-…'`, which refuses `blob:` and WASM.
  * ALTCHA's default build starts its workers from `blob:` URLs; the
  * `external` build ships none, and we bundle Web Crypto workers that Next

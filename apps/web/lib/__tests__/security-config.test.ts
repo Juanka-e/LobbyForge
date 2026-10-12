@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -53,7 +53,7 @@ describe('dev stack origin wiring', () => {
 
 describe('global web security policy', () => {
   const config = readFileSync(join(__dirname, '..', '..', 'next.config.mjs'), 'utf8');
-  const middleware = readFileSync(join(__dirname, '..', '..', 'middleware.ts'), 'utf8');
+  const middleware = readFileSync(join(__dirname, '..', '..', 'proxy.ts'), 'utf8');
 
   it('defines CSP anti-XSS and anti-framing boundaries in middleware', () => {
     expect(middleware).toContain("default-src 'self'");
@@ -76,7 +76,7 @@ describe('global web security policy', () => {
 
   it('leaves the plugin UI route to its own headers, and only that route', async () => {
     const { NextRequest } = await import('next/server');
-    const { middleware: run } = await import('../../middleware');
+    const { proxy: run } = await import('../../proxy');
     // The route sets a sandbox CSP with frame-ancestors 'self'; Next appends
     // route headers to middleware ones, so the app's 'none' must not be there.
     const asset = await run(new NextRequest('http://localhost:3000/api/plugin-ui/buzzer/1.0.0/index.html'));
@@ -92,7 +92,7 @@ describe('global web security policy', () => {
 
   it('sends that frame-src on real responses, next to the anti-framing rules', async () => {
     const { NextRequest } = await import('next/server');
-    const { middleware: run } = await import('../../middleware');
+    const { proxy: run } = await import('../../proxy');
     const response = await run(new NextRequest('http://localhost:3000/lobby'));
     const directives = (response.headers.get('Content-Security-Policy') ?? '').split(';').map((d) => d.trim());
     expect(directives).toContain("frame-src 'self' https://www.youtube-nocookie.com");
@@ -122,9 +122,12 @@ describe('global web security policy', () => {
     expect(config).toContain('Permissions-Policy');
   });
 
-  it('runs the middleware in the Node.js runtime (it reads the CAPTCHA settings cache)', async () => {
-    const { config: middlewareConfig } = await import('../../middleware');
-    expect(middlewareConfig.runtime).toBe('nodejs');
+  it('is a Next 16 proxy (always the Node.js runtime: it reads the CAPTCHA settings cache)', async () => {
+    const module = await import('../../proxy');
+    expect(typeof module.proxy).toBe('function');
+    // A `runtime` option in a proxy file is a build error.
+    expect(module.config).not.toHaveProperty('runtime');
+    expect(existsSync(join(__dirname, '..', '..', 'middleware.ts'))).toBe(false);
   });
 
   it('adds only parsed public realtime origins to connect-src in middleware', () => {
@@ -147,7 +150,7 @@ describe('bot protection CSP (docs/CAPTCHA.md §9)', () => {
 
   async function directives(path: string): Promise<Map<string, string>> {
     const { NextRequest } = await import('next/server');
-    const { middleware: run } = await import('../../middleware');
+    const { proxy: run } = await import('../../proxy');
     const response = await run(new NextRequest(`http://localhost:3000${path}`));
     const policy = response.headers.get('Content-Security-Policy') ?? '';
     return new Map(
