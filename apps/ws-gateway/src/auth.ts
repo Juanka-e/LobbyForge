@@ -67,9 +67,13 @@ async function getRevokedClient() {
   try {
     const RedisMod = await import('ioredis');
     const Redis = ('default' in RedisMod ? RedisMod.default : RedisMod) as unknown as new (
-      url: string
+      url: string,
+      options: { retryStrategy: (times: number) => number }
     ) => { sismember: (key: string, member: string) => Promise<number>; on: (e: string, cb: () => void) => void };
-    const client = new Redis(process.env.REDIS_URL || 'redis://:lobbyforge_dev@localhost:19579');
+    // ioredis 5's linear reconnect delay (ioredis 6 grows it to 5 s per step).
+    const client = new Redis(process.env.REDIS_URL || 'redis://:lobbyforge_dev@localhost:19579', {
+      retryStrategy: (times: number) => Math.min(times * 50, 2000),
+    });
     // Clear (do NOT latch) on error — ioredis keeps reconnecting and the
     // next successful command reuses the same client.
     client.on('error', () => { /* surfaced via the tri-state result */ });

@@ -4,9 +4,20 @@ const globalForRedis = globalThis as unknown as {
   redis: Redis | undefined;
 };
 
+/**
+ * ioredis 6 made the default reconnect delay exponential up to 5 s; with 20
+ * retries per command, a command against a Redis that is down then waits
+ * about 70 s before failing. Keep ioredis 5's linear delay (at most 2 s, so
+ * about 10 s in all): a Redis outage fails requests quickly, and the
+ * fail-closed paths answer instead of hanging.
+ */
+export const REDIS_RETRY_STRATEGY = (times: number): number => Math.min(times * 50, 2000);
+
 export const redis =
   globalForRedis.redis ??
-  new Redis(process.env.REDIS_URL || 'redis://:lobbyforge_dev@localhost:19579');
+  new Redis(process.env.REDIS_URL || 'redis://:lobbyforge_dev@localhost:19579', {
+    retryStrategy: REDIS_RETRY_STRATEGY,
+  });
 
 // V4-012: without an 'error' listener every connection blip (e.g. Redis
 // not running during `next build` page collection) surfaces as an
