@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   tFor,
   loadPluginLocale,
   registerPluginLocale,
+  replacePluginLocale,
   listPluginLocales,
   detectLocale,
   pickBestLocale,
@@ -112,5 +113,45 @@ describe('registration', () => {
     expect(tFor('late', 'tr', 'x.a')).toBe('A');
     loadPluginLocale('late', { tr: { 'x.a': 'Á' } });
     expect(tFor('late', 'tr', 'x.a')).toBe('Á');
+  });
+});
+
+describe('replacePluginLocale (the host loading a marketplace bundle)', () => {
+  it('drops the keys and languages an older bundle shipped', () => {
+    __resetPluginLocaleRegistry();
+    replacePluginLocale('market', {
+      en: { 'catalog.name': 'Buzzer', 'old.key': 'Old' },
+      de: { 'catalog.name': 'Summer' },
+    });
+    expect(tFor('market', 'de', 'catalog.name')).toBe('Summer');
+    replacePluginLocale('market', { en: { 'catalog.name': 'Buzzer 2' }, tr: { 'catalog.name': 'Buzzer' } });
+    expect(listPluginLocales('market')).toEqual(['en', 'tr']);
+    expect(tFor('market', 'en', 'catalog.name')).toBe('Buzzer 2');
+    // German is gone: it falls back to English, not to the old table.
+    expect(tFor('market', 'de', 'catalog.name')).toBe('Buzzer 2');
+    expect(tFor('market', 'en', 'old.key')).toBe('old.key');
+  });
+
+  it('forgets every table with an empty map, and leaves other plugins alone', () => {
+    __resetPluginLocaleRegistry();
+    loadPluginLocale('official', { en: { 'catalog.name': 'Poll' } });
+    replacePluginLocale('market', { en: { 'catalog.name': 'Buzzer' } });
+    replacePluginLocale('market', {});
+    expect(listPluginLocales('market')).toEqual([]);
+    expect(tFor('market', 'en', 'catalog.name')).toBe('catalog.name');
+    expect(tFor('official', 'en', 'catalog.name')).toBe('Poll');
+  });
+});
+
+describe('one registry per process', () => {
+  it('a second copy of the module sees what the first registered (bundlers duplicate modules across chunks)', async () => {
+    __resetPluginLocaleRegistry();
+    replacePluginLocale('shared', { tr: { 'catalog.name': 'Zil' } });
+    vi.resetModules();
+    const copy = await import('../locale.js');
+    expect(copy.tFor).not.toBe(tFor);
+    expect(copy.tFor('shared', 'tr', 'catalog.name')).toBe('Zil');
+    copy.replacePluginLocale('shared', { tr: { 'catalog.name': 'Buzzer' } });
+    expect(tFor('shared', 'tr', 'catalog.name')).toBe('Buzzer');
   });
 });
