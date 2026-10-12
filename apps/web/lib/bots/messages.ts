@@ -30,6 +30,7 @@ import { readMessageBot } from './message-meta';
 import { noteBotActivity } from './activity';
 import { botCanAccessChannel, listBotChannels } from './access';
 import { emitMessageEvent } from './events';
+import { withDefaultNameFlag } from './bot-i18n-server';
 
 /** The part of a bot row the actions need. */
 export interface BotActor {
@@ -186,7 +187,8 @@ export async function postBotMessage(input: {
   content: string;
   /**
    * Extra server-written metadata (Bot API v2: `interaction` on a command
-   * answer). Never from a client; `bot` cannot be overridden.
+   * answer; a built-in bot's default text: `i18n`, lib/bots/bot-i18n.ts).
+   * Never from a client; `bot` cannot be overridden.
    */
   metadata?: Record<string, unknown>;
 }): Promise<BotResult<MessageRow>> {
@@ -219,7 +221,8 @@ export async function postBotMessage(input: {
       channelId: created.channelId,
       userId: null,
       botId: bot.id,
-      bot: snapshot,
+      // Browsers show a built-in bot's default name in each viewer's language.
+      bot: withDefaultNameFlag(snapshot),
       content: created.content,
       metadata: created.metadata,
       replyToId: created.replyToId,

@@ -13,6 +13,12 @@ export interface MessageBotInfo {
   /** '' when the snapshot has no name — the UI shows its own fallback. */
   name: string;
   type: string;
+  /**
+   * Set by the server where it sends a bot to a browser: the name is still
+   * the built-in default, so each viewer sees it in their own language
+   * (lib/bots/bot-i18n.ts). Never stored; `readMessageBot` never sets it.
+   */
+  defaultName?: boolean;
 }
 
 export function readMessageBot(

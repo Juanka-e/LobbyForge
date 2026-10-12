@@ -38,6 +38,7 @@ import {
 import { parseModerationSettings, type ModerationSettings } from './settings';
 import { postBotMessage } from './messages';
 import { defaultBotText, renderBotTemplate } from './templates';
+import { botTextI18n, customBotText } from './bot-i18n-server';
 
 export interface ModerateInput {
   serverId: string;
@@ -149,10 +150,25 @@ async function postNotice(bot: BotRow, settings: ModerationSettings, input: Mode
   // security-review FILE-001: the name only — a full user row would carry
   // the member's avatar and banner data URLs (up to ~14 MB) for one word.
   const names = await listUserDisplayNames(getDb(), [input.userId]);
-  const template = settings.noticeTemplate ?? defaultBotText('bots.moderation.defaultNotice');
-  const content = renderBotTemplate(template, { user: names.get(input.userId) ?? '' });
+  await postNoticeMessage(bot, settings, input.channelId, names.get(input.userId) ?? '');
+}
+
+/**
+ * The notice itself. The admin's own text is posted as written; the
+ * default one also names its catalogue string (`metadata.i18n`), so each
+ * member reads it in their own language (lib/bots/bot-i18n.ts).
+ */
+async function postNoticeMessage(bot: BotRow, settings: ModerationSettings, channelId: string, user: string): Promise<void> {
+  // A template equal to a shipped default (in any language) is the default.
+  const custom = customBotText('bots.moderation.defaultNotice', settings.noticeTemplate);
+  const content = renderBotTemplate(custom ?? defaultBotText('bots.moderation.defaultNotice'), { user });
   if (!content) return;
-  const posted = await postBotMessage({ bot, channelId: input.channelId, content });
+  const posted = await postBotMessage({
+    bot,
+    channelId,
+    content,
+    ...(custom ? {} : { metadata: botTextI18n('bots.moderation.defaultNotice', { user }) }),
+  });
   if (!posted.ok) console.warn(`[bots] moderation notice not posted: ${posted.code}`);
 }
 
@@ -239,11 +255,7 @@ export async function moderateWebhookMessage(input: {
         { windowMs: NOTICE_WINDOW_MS, maxRequests: 1 }
       );
       if (!gate.allowed) return;
-      const template = settings.noticeTemplate ?? defaultBotText('bots.moderation.defaultNotice');
-      const content = renderBotTemplate(template, { user: input.webhook.name });
-      if (!content) return;
-      const posted = await postBotMessage({ bot: moderationBot, channelId: input.channelId, content });
-      if (!posted.ok) console.warn(`[bots] moderation notice not posted: ${posted.code}`);
+      await postNoticeMessage(moderationBot, settings, input.channelId, input.webhook.name);
     })().catch((err) => console.error('[bots] moderation notice failed:', (err as Error).message));
   }
   return { action: 'block', rule: violation.rule, botId: bot.id, botName: bot.name };

@@ -14,7 +14,7 @@ import {
 } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { requireMaterializedSession } from '@/lib/api-auth';
-import { readMessageBot } from '@/lib/bots/message-meta';
+import { messageBotJson } from '@/lib/bots/bot-i18n-server';
 import { projectChatPoll, readMessagePollId, toChatPollUpdate, type ChatPollUpdate, type ChatPollView } from '@/lib/chat-polls';
 
 /** The signed-in member behind a request, or the 401/503 every member route answers. */
@@ -73,7 +73,7 @@ export function messageJson(message: MessageRow): Record<string, unknown> {
     channelId: message.channelId,
     userId: message.userId,
     botId: message.botId ?? null,
-    bot: readMessageBot(message),
+    bot: messageBotJson(message),
     content: message.content,
     metadata: message.metadata,
     replyToId: message.replyToId,
