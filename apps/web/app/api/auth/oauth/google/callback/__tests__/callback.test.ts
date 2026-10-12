@@ -74,11 +74,11 @@ beforeEach(() => {
   dbFns.getEffectiveInstanceAccessSettings.mockResolvedValue(settings());
 });
 
-async function callback(): Promise<Response> {
+async function callback(stateCookie = 'lf_oauth_state'): Promise<Response> {
   const { GET } = await import('../route.js');
   return GET(
     new Request(`https://community.example/api/auth/oauth/google/callback?code=abc&state=${STATE}`, {
-      headers: { cookie: `lf_oauth_state=${STATE}; lf_oauth_redirect=%2Flobby` },
+      headers: { cookie: `${stateCookie}=${STATE}; lf_oauth_redirect=%2Flobby` },
     }),
     {}
   );
@@ -176,8 +176,24 @@ describe('OAuth callback — beta-review S7 session tracking', () => {
     env.NODE_ENV = 'production';
     try {
       recordSession.mockRejectedValue(new Error('redis down'));
-      const res = await callback();
+      // Production reads the state from the __Host- prefixed cookie.
+      const res = await callback('__Host-lf_oauth_state');
       expect(res.headers.get('location')).toBe('https://community.example/login?error=session_unavailable');
+      expect(res.headers.get('set-cookie') ?? '').not.toContain('lf_guest=');
+    } finally {
+      env.NODE_ENV = previous;
+    }
+  });
+});
+
+describe('OAuth callback — the state cookie is host-only in production', () => {
+  it('ignores a bare lf_oauth_state there (a sibling subdomain could plant one)', async () => {
+    const env = process.env as Record<string, string | undefined>;
+    const previous = env.NODE_ENV;
+    env.NODE_ENV = 'production';
+    try {
+      const res = await callback('lf_oauth_state');
+      expect(res.headers.get('location') ?? '').toContain('error=');
       expect(res.headers.get('set-cookie') ?? '').not.toContain('lf_guest=');
     } finally {
       env.NODE_ENV = previous;

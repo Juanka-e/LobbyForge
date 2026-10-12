@@ -8,9 +8,18 @@ import { withApiSecurity } from '@/lib/security-headers';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
+/** C0/C1 control characters (CR/LF, U+0085 …): refused like DisplayNameSchema does at sign-up. */
+const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F-\u009F]/;
+
 const ProfilePatchSchema = z
   .object({
-    displayName: z.string().trim().min(2).max(64).optional(),
+    displayName: z
+      .string()
+      .trim()
+      .min(2)
+      .max(64)
+      .refine((name) => !CONTROL_CHARACTERS.test(name), 'Display name must not contain control characters')
+      .optional(),
     statusText: z.string().trim().max(128).nullable().optional(),
     bio: z.string().trim().max(190).nullable().optional(),
   })

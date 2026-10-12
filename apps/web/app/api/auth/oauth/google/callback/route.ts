@@ -15,6 +15,7 @@ import { buildGuestSessionCookie, createGuestIdentity } from '@/lib/guest-sessio
 import { isOfficialDeployment } from '@/lib/deployment-mode';
 import { authorizeGuestRegistration } from '@/lib/instance-access';
 import { recordSession } from '@/lib/session-tracker';
+import { oauthStateCookieName } from '@/lib/oauth-state-cookie';
 import { timingSafeEqual } from 'node:crypto';
 
 export const dynamic = 'force-dynamic';
@@ -67,7 +68,7 @@ async function handleGet(req: Request): Promise<NextResponse> {
   // also matched any cookie whose name merely ENDED in `lf_oauth_state`
   // (e.g. `x_lf_oauth_state`, which a sibling subdomain can set).
   const cookieHeader = req.headers.get('cookie');
-  const rawCookieState = readCookie(cookieHeader, 'lf_oauth_state');
+  const rawCookieState = readCookie(cookieHeader, oauthStateCookieName());
   const cookieState = rawCookieState && OAUTH_STATE_PATTERN.test(rawCookieState) ? rawCookieState : null;
   // Length guard before timingSafeEqual to prevent RangeError on mismatched lengths.
   const stateBuf = Buffer.from(state);
@@ -113,7 +114,7 @@ async function handleGet(req: Request): Promise<NextResponse> {
         const access = await authorizeGuestRegistration(db, {});
         if (!access.ok) {
           const res = NextResponse.redirect(new URL('/login?error=registration_closed', req.url));
-          res.cookies.delete('lf_oauth_state');
+          res.cookies.delete(oauthStateCookieName());
           res.cookies.delete('lf_oauth_redirect');
           return res;
         }
@@ -167,7 +168,7 @@ async function handleGet(req: Request): Promise<NextResponse> {
       console.error('[oauth/google/callback] session tracking failed:', (trackErr as Error).message);
       if (process.env.NODE_ENV === 'production') {
         const res = NextResponse.redirect(new URL('/login?error=session_unavailable', req.url));
-        res.cookies.delete('lf_oauth_state');
+        res.cookies.delete(oauthStateCookieName());
         res.cookies.delete('lf_oauth_redirect');
         return res;
       }
@@ -181,7 +182,7 @@ async function handleGet(req: Request): Promise<NextResponse> {
     // beforehand via headers.set() — OAuth sign-in never delivered its
     // session. Delete first, then APPEND the session cookie.
     const res = NextResponse.redirect(new URL(redirect, req.url));
-    res.cookies.delete('lf_oauth_state');
+    res.cookies.delete(oauthStateCookieName());
     res.cookies.delete('lf_oauth_redirect');
     res.headers.append('Set-Cookie', signed.setCookieHeader);
     return res;
