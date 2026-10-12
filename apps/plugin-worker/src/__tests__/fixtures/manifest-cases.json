@@ -55,5 +55,55 @@
     { "name": "bad locale code", "patch": { "locales": ["EN_us"] } },
     { "name": "requiresVoiceRoom as a string", "patch": { "requiresVoiceRoom": "yes" } },
     { "name": "allowOutsideVoice as a number", "patch": { "actionPolicies": { "leave": { "role": "member", "allowOutsideVoice": 1 } } } }
-  ]
+  ],
+  "bundles": {
+    "_comment": "parseSandboxBundle(manifest, locales/ files). `patch` edits the base manifest as above; `files` are locale tables (JSON-encoded), `raw` are file contents used verbatim, `fill` generates big files ({ file, keys, chars } → `keys` keys of `chars` characters), `manyFiles` generates that many valid tables. Valid cases name the resulting `locales`.",
+    "valid": [
+      { "name": "no locales folder keeps the manifest default", "files": {}, "locales": ["en"] },
+      { "name": "no locales folder keeps the manifest's own list (languages the UI speaks)", "patch": { "locales": ["en", "tr"] }, "files": {}, "locales": ["en", "tr"] },
+      { "name": "languages come from the files when the manifest has no list", "files": { "tr.json": { "catalog.name": "Zil", "catalog.summary": "Hızlı bir zil oyunu." }, "en.json": { "catalog.name": "Buzzer", "catalog.summary": "A fast buzzer game." } }, "locales": ["en", "tr"] },
+      { "name": "a manifest list naming exactly the shipped languages, in its own order", "patch": { "locales": ["tr", "en"] }, "files": { "en.json": { "catalog.name": "Buzzer" }, "tr.json": { "catalog.name": "Zil" } }, "locales": ["tr", "en"] },
+      { "name": "one language only", "files": { "tr.json": { "catalog.name": "Zil" } }, "locales": ["tr"] },
+      { "name": "region and script codes", "files": { "pt-BR.json": { "catalog.name": "Campainha" }, "zh-Hans.json": { "catalog.name": "抢答器" } }, "locales": ["pt-BR", "zh-Hans"] },
+      { "name": "UI strings, plurals, $-metadata and a blank (untranslated) name", "files": { "de.json": { "$status": "partial", "catalog.name": "", "round.count": "{count, plural, one {# Runde} other {# Runden}}", "host:open-round": "Runde öffnen" } }, "locales": ["de"] },
+      { "name": "an empty table", "files": { "en.json": {} }, "locales": ["en"] },
+      { "name": "a UTF-8 byte-order mark", "raw": { "en.json": "\uFEFF{\"catalog.name\": \"Buzzer\"}" }, "locales": ["en"] },
+      { "name": "tabs and newlines in a summary", "files": { "en.json": { "catalog.summary": "Line one\nLine two\tend" } }, "locales": ["en"] },
+      { "name": "a name of exactly 80 characters", "files": { "en.json": { "catalog.name": "12345678901234567890123456789012345678901234567890123456789012345678901234567890" } }, "locales": ["en"] },
+      { "name": "32 files", "manyFiles": 32 }
+    ],
+    "invalid": [
+      { "name": "not JSON", "raw": { "en.json": "{\"catalog.name\": " } },
+      { "name": "a JSON array", "files": { "en.json": ["Buzzer"] } },
+      { "name": "a JSON string", "files": { "en.json": "Buzzer" } },
+      { "name": "a nested object (tables are flat)", "files": { "en.json": { "catalog": { "name": "Buzzer" } } } },
+      { "name": "a number value", "files": { "en.json": { "catalog.name": 5 } } },
+      { "name": "a null value", "files": { "en.json": { "catalog.name": null } } },
+      { "name": "an underscore language code", "files": { "pt_BR.json": {} } },
+      { "name": "an upper-case language code", "files": { "EN.json": {} } },
+      { "name": "a one-letter language code", "files": { "e.json": {} } },
+      { "name": "a file that is not .json", "raw": { "README.md": "# hi" } },
+      { "name": "a dot file", "raw": { ".DS_Store": "x" } },
+      { "name": "a file in a sub-folder", "files": { "extra/en.json": {} } },
+      { "name": "two files for one language", "files": { "pt-BR.json": {}, "pt-br.json": {} } },
+      { "name": "the manifest lists a language with no file", "patch": { "locales": ["en", "de"] }, "files": { "en.json": {} } },
+      { "name": "a file the manifest does not list", "patch": { "locales": ["en"] }, "files": { "en.json": {}, "tr.json": {} } },
+      { "name": "an invalid manifest still fails first", "patch": { "sdk": null }, "files": { "en.json": {} } },
+      { "name": "a key with a space", "files": { "en.json": { "catalog name": "Buzzer" } } },
+      { "name": "an empty key", "files": { "en.json": { "": "Buzzer" } } },
+      { "name": "a __proto__ key", "raw": { "en.json": "{\"__proto__\": \"x\"}" } },
+      { "name": "a constructor key", "files": { "en.json": { "constructor": "x" } } },
+      { "name": "a key longer than 128 characters", "files": { "en.json": { "k234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890": "x" } } },
+      { "name": "a NUL character", "files": { "en.json": { "catalog.summary": "a\u0000b" } } },
+      { "name": "an escape character", "files": { "en.json": { "catalog.name": "\u001b[31mRed" } } },
+      { "name": "catalog.name longer than 80 characters", "files": { "en.json": { "catalog.name": "123456789012345678901234567890123456789012345678901234567890123456789012345678901" } } },
+      { "name": "catalog.name on two lines", "files": { "en.json": { "catalog.name": "Buzzer\nPro" } } },
+      { "name": "catalog.summary longer than 200 characters", "fill": { "file": "en.json", "key": "catalog.summary", "keys": 1, "chars": 201 } },
+      { "name": "a value longer than 4096 characters", "fill": { "file": "en.json", "keys": 1, "chars": 4097 } },
+      { "name": "more than 1000 keys", "fill": { "file": "en.json", "keys": 1001, "chars": 1 } },
+      { "name": "a file larger than 128 KiB", "fill": { "file": "en.json", "keys": 40, "chars": 4000 } },
+      { "name": "more than 1 MiB of files together", "fill": { "files": ["aa.json", "ab.json", "ac.json", "ad.json", "ae.json", "af.json", "ag.json", "ah.json", "ai.json"], "keys": 30, "chars": 4000 } },
+      { "name": "33 files", "manyFiles": 33 }
+    ]
+  }
 }

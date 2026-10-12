@@ -10,10 +10,10 @@
  * 1.10.0, and old versions were never removed.)
  *
  * A bundle is `sdk: "sandbox-v1"` (ADR-007): `manifest.json` + `server.js`
- * at the root, optional `ui/`. Once a folder is verified, its manifest and
- * server.js are kept in memory with the folder's identity, so every call
- * runs exactly the bytes that were digested. A legacy Node bundle
- * (`index.js`) is refused.
+ * at the root, optional `ui/` and `locales/<code>.json`. Once a folder is
+ * verified, its manifest and server.js are kept in memory with the
+ * folder's identity, so every call runs exactly the bytes that were
+ * digested. A legacy Node bundle (`index.js`) is refused.
  *
  * `computeBundleDigest` must stay byte-for-byte identical to the copy in
  * apps/web/lib/plugin-install-layout.ts: both test suites pin the same vector.
@@ -21,7 +21,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
-import { parseSandboxManifest, type SandboxManifest } from './manifest.js';
+import { parseSandboxBundle, type SandboxLocaleFile, type SandboxManifest } from './manifest.js';
 
 /** The path compose mounts (`plugins-data` volume at /app/plugins). */
 export const DEFAULT_PLUGIN_INSTALL_DIR = '/app/plugins/installed';
@@ -189,7 +189,14 @@ export function resolveBundle(rootDir: string, ref: BundleRef, verified: Verifie
   if (sourceBytes.length > MAX_SOURCE_BYTES) {
     return { ok: false, status: 422, error: `Plugin "${ref.pluginId}": server.js is larger than ${MAX_SOURCE_BYTES} bytes` };
   }
-  const parsed = parseSandboxManifest(manifestBytes);
+  // The same verdict as the installer's: manifest.json plus the optional
+  // locales/<code>.json tables (the worker does not use the tables; it
+  // refuses a bundle the web app would refuse).
+  const localeFiles: SandboxLocaleFile[] = [];
+  for (const [rel, bytes] of read) {
+    if (rel.startsWith('locales/')) localeFiles.push([rel.slice('locales/'.length), bytes]);
+  }
+  const parsed = parseSandboxBundle(manifestBytes, localeFiles);
   if (!parsed.ok) return { ok: false, status: 422, error: `Plugin "${ref.pluginId}": ${parsed.error}` };
   if (parsed.manifest.id !== ref.pluginId) {
     return {

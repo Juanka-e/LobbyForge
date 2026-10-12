@@ -2,7 +2,8 @@
  * On-disk layout of marketplace (dynamic) plugin installs.
  *
  *   <root>/<pluginId>/<version>/           one folder per installed version:
- *        manifest.json, server.js, ui/…     a sdk "sandbox-v1" bundle (ADR-007)
+ *        manifest.json, server.js, ui/…     a sdk "sandbox-v1" bundle (ADR-007),
+ *        locales/<code>.json                with its optional translation tables
  *   <root>/<pluginId>/active.json          { version, digest } of the ACTIVE one
  *
  * `<root>` is LOBBYFORGE_PLUGIN_INSTALL_DIR, default `/app/plugins/installed`:
@@ -27,6 +28,7 @@
 import { createHash } from 'node:crypto';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -36,7 +38,14 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
-import { parseSandboxManifest, type SandboxManifest } from './sandbox-manifest';
+import {
+  MAX_LOCALE_FILE_BYTES,
+  MAX_LOCALE_FILES,
+  parseSandboxBundle,
+  type SandboxLocaleFile,
+  type SandboxLocaleTable,
+  type SandboxManifest,
+} from './sandbox-manifest';
 
 export const DEFAULT_PLUGIN_INSTALL_DIR = '/app/plugins/installed';
 export const ACTIVE_POINTER_FILE = 'active.json';
@@ -61,19 +70,71 @@ function isRegularFile(path: string): boolean {
   }
 }
 
+/** A path from the bundle as it may appear in an error message: short, printable ASCII. */
+function printablePath(path: string): string {
+  return path.slice(0, 64).replace(/[^\x20-\x7e]/g, '?');
+}
+
+/**
+ * The files of a bundle's optional `locales/` folder, for the validator
+ * (parseSandboxBundle): every regular file below it, with its path relative
+ * to `locales/`. The validator decides what is allowed (only
+ * `<code>.json` directly in the folder); this walk refuses what it must
+ * never read — links and other non-regular entries, more files than the
+ * cap, a file over the per-file cap — before reading anything big.
+ */
+function readLocaleFiles(dir: string): { ok: true; files: SandboxLocaleFile[] } | { ok: false; error: string } {
+  const localesDir = join(dir, 'locales');
+  let top: ReturnType<typeof lstatSync>;
+  try {
+    top = lstatSync(localesDir);
+  } catch {
+    return { ok: true, files: [] };
+  }
+  if (!top.isDirectory()) return { ok: false, error: 'locales must be a folder of <language code>.json files.' };
+  const files: SandboxLocaleFile[] = [];
+  const walk = (rel: string): string | null => {
+    for (const entry of readdirSync(rel ? join(localesDir, ...rel.split('/')) : localesDir, { withFileTypes: true })) {
+      const childRel = rel ? `${rel}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        const error = walk(childRel);
+        if (error) return error;
+        continue;
+      }
+      if (!entry.isFile()) return `locales/${printablePath(childRel)}: not a regular file.`;
+      if (files.length >= MAX_LOCALE_FILES) return `locales/: more than ${MAX_LOCALE_FILES} files`;
+      const path = join(localesDir, ...childRel.split('/'));
+      if (statSync(path).size > MAX_LOCALE_FILE_BYTES) {
+        return `locales/${printablePath(childRel)}: larger than ${MAX_LOCALE_FILE_BYTES} bytes`;
+      }
+      files.push([childRel, readFileSync(path)]);
+    }
+    return null;
+  };
+  const error = walk('');
+  return error ? { ok: false, error } : { ok: true, files };
+}
+
+/** A valid installed (or staged) bundle: its manifest and its translation tables. */
+export interface CheckedSandboxBundle {
+  manifest: SandboxManifest;
+  /** `locales/<code>.json`, validated; `{}` when the bundle ships none. */
+  localeTables: Record<string, SandboxLocaleTable>;
+}
+
 /**
  * ADR-007: is `dir` an installable sdk "sandbox-v1" bundle for exactly
  * this plugin id and catalog version? `manifest.json` and `server.js` at
  * the root, a valid manifest (the action policies the host will enforce),
- * a server.js under the worker's cap, and `ui/index.html` when the
- * manifest says `ui: true`. A legacy Node bundle (`index.js`) is refused
- * with the migration hint.
+ * valid `locales/<code>.json` tables when it ships any, a server.js under
+ * the worker's cap, and `ui/index.html` when the manifest says `ui: true`.
+ * A legacy Node bundle (`index.js`) is refused with the migration hint.
  */
 export function checkSandboxBundle(
   dir: string,
   pluginId: string,
   version: string
-): { ok: true; manifest: SandboxManifest } | { ok: false; error: string } {
+): ({ ok: true } & CheckedSandboxBundle) | { ok: false; error: string } {
   const hasManifest = isRegularFile(join(dir, 'manifest.json'));
   const hasServer = isRegularFile(join(dir, 'server.js'));
   if (!hasManifest || !hasServer) {
@@ -89,7 +150,9 @@ export function checkSandboxBundle(
       error: `Bundle missing ${hasManifest ? 'server.js' : 'manifest.json'} at its root — not a sandbox-v1 LobbyForge plugin.`,
     };
   }
-  const parsed = parseSandboxManifest(readFileSync(join(dir, 'manifest.json')));
+  const locales = readLocaleFiles(dir);
+  if (!locales.ok) return locales;
+  const parsed = parseSandboxBundle(readFileSync(join(dir, 'manifest.json')), locales.files);
   if (!parsed.ok) return { ok: false, error: parsed.error };
   if (parsed.manifest.id !== pluginId) {
     return { ok: false, error: `Bundle manifest id "${parsed.manifest.id}" does not match the catalog id "${pluginId}".` };
@@ -106,21 +169,27 @@ export function checkSandboxBundle(
   if (parsed.manifest.ui && !isRegularFile(join(dir, 'ui', 'index.html'))) {
     return { ok: false, error: 'manifest.json says "ui": true but the bundle has no ui/index.html.' };
   }
-  return { ok: true, manifest: parsed.manifest };
+  return { ok: true, manifest: parsed.manifest, localeTables: parsed.localeTables };
 }
 
 /**
- * The manifest of an installed version, read from the web app's own copy
- * of the files (the worker only confirms what server.js defines). Throws
- * when the folder is not a valid sandbox-v1 bundle for that id + version.
+ * An installed version — its manifest and translation tables — read from
+ * the web app's own copy of the files (the worker only confirms what
+ * server.js defines). Throws when the folder is not a valid sandbox-v1
+ * bundle for that id + version.
  */
-export function readInstalledSandboxManifest(root: string, pluginId: string, version: string): SandboxManifest {
+export function readInstalledSandboxBundle(root: string, pluginId: string, version: string): CheckedSandboxBundle {
   if (!PLUGIN_ID_RE.test(pluginId) || !VERSION_RE.test(version)) throw new Error('Invalid plugin id or version');
   const dir = resolve(root, pluginId, version);
   if (!dir.startsWith(resolve(root) + sep)) throw new Error('Invalid plugin path');
   const checked = checkSandboxBundle(dir, pluginId, version);
   if (!checked.ok) throw new Error(checked.error);
-  return checked.manifest;
+  return { manifest: checked.manifest, localeTables: checked.localeTables };
+}
+
+/** The manifest of an installed version (see readInstalledSandboxBundle). */
+export function readInstalledSandboxManifest(root: string, pluginId: string, version: string): SandboxManifest {
+  return readInstalledSandboxBundle(root, pluginId, version).manifest;
 }
 
 /** The ONE install root shared by installer, loader and plugin-worker. */

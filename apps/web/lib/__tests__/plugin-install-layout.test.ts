@@ -19,9 +19,11 @@ import {
   pluginInstallDir,
   pruneSupersededVersions,
   readActivePointer,
+  readInstalledSandboxBundle,
   readInstalledSandboxManifest,
   writeActivePointer,
 } from '../plugin-install-layout';
+import { MAX_LOCALE_FILE_BYTES } from '../sandbox-manifest';
 
 // Same tree + digest as apps/plugin-worker/src/__tests__/bundle.test.ts:
 // the worker recomputes this digest, so both implementations must agree.
@@ -264,6 +266,65 @@ describe('readInstalledSandboxManifest', () => {
     expect(() => readInstalledSandboxManifest(root, 'game', '2.0.0')).toThrow(/legacy Node bundle/);
     expect(() => readInstalledSandboxManifest(root, '../game', '1.0.0')).toThrow();
     expect(() => readInstalledSandboxManifest(root, 'game', '1.0')).toThrow();
+  });
+});
+
+describe('locales/<code>.json in a bundle', () => {
+  const EN = JSON.stringify({ 'catalog.name': 'Game', 'catalog.summary': 'A game.' });
+  const TR = JSON.stringify({ 'catalog.name': 'Oyun', 'catalog.summary': 'Bir oyun.' });
+
+  it('reads and validates the tables, and takes the languages from them', () => {
+    writeTree(join(root, 'game', '1.0.0'), sandboxBundle('1.0.0', undefined, {}, { 'locales/en.json': EN, 'locales/tr.json': TR }));
+    const bundle = readInstalledSandboxBundle(root, 'game', '1.0.0');
+    expect(bundle.manifest.locales).toEqual(['en', 'tr']);
+    expect(bundle.localeTables).toEqual({ en: JSON.parse(EN), tr: JSON.parse(TR) });
+    expect(readInstalledSandboxManifest(root, 'game', '1.0.0').locales).toEqual(['en', 'tr']);
+  });
+
+  it('a bundle without locales/ has no tables and keeps the manifest list', () => {
+    writeTree(join(root, 'game', '1.0.0'), sandboxBundle('1.0.0', undefined, { locales: ['en', 'tr'] }));
+    expect(readInstalledSandboxBundle(root, 'game', '1.0.0')).toMatchObject({ manifest: { locales: ['en', 'tr'] }, localeTables: {} });
+  });
+
+  it('activation refuses a bundle with a malformed locale file, before the worker sees it', async () => {
+    const cases: Array<[string, Record<string, string>, RegExp]> = [
+      ['a non-string value', { 'locales/tr.json': '{"catalog.name": ["Oyun"]}' }, /locales\/tr\.json: "catalog\.name" must be a string/],
+      ['invalid JSON', { 'locales/tr.json': '{' }, /locales\/tr\.json: not valid JSON/],
+      ['a stray file', { 'locales/en.json': EN, 'locales/notes.txt': 'x' }, /locales\/notes\.txt: only <language code>\.json/],
+      ['a sub-folder', { 'locales/old/en.json': EN }, /locales\/old\/en\.json/],
+      ['locales as a file', { locales: 'x' }, /locales must be a folder/],
+      ['an oversized file (refused before it is read)', { 'locales/en.json': 'x'.repeat(MAX_LOCALE_FILE_BYTES + 1) }, /larger than/],
+      ['a manifest list that misses a shipped language', { 'locales/en.json': EN, 'locales/tr.json': TR }, /"tr" is missing from "locales"/],
+    ];
+    for (const [name, files, message] of cases) {
+      const manifest = name.startsWith('a manifest list') ? { locales: ['en'] } : {};
+      const stagingDir = stage('game', sandboxBundle('1.0.0', undefined, manifest, files));
+      const describe = describeOk();
+      const result = await activateStagedBundle({ root, pluginId: 'game', version: '1.0.0', stagingDir, describe });
+      expect(result, name).toMatchObject({ ok: false });
+      expect((result as { error: string }).error, name).toMatch(message);
+      expect(describe, name).not.toHaveBeenCalled();
+    }
+    expect(readActivePointer(root, 'game')).toBeNull();
+  });
+
+  it('activation accepts the example plugin with its English and Turkish tables', async () => {
+    const example = resolve(__dirname, '..', '..', '..', '..', 'examples', 'plugins', 'sandbox-buzzer');
+    const files: Record<string, string> = {
+      'manifest.json': readFileSync(join(example, 'manifest.json'), 'utf8'),
+      'server.js': readFileSync(join(example, 'server.js'), 'utf8'),
+      'ui/index.html': readFileSync(join(example, 'ui', 'index.html'), 'utf8'),
+    };
+    for (const name of readdirSync(join(example, 'locales'))) {
+      files[`locales/${name}`] = readFileSync(join(example, 'locales', name), 'utf8');
+    }
+    const version = (JSON.parse(files['manifest.json']!) as { version: string }).version;
+    const stagingDir = stage('sandbox-buzzer', files);
+    const result = await activateStagedBundle({ root, pluginId: 'sandbox-buzzer', version, stagingDir, describe: describeOk('Sandbox Buzzer') });
+    expect(result.ok, result.ok ? '' : result.error).toBe(true);
+    const bundle = readInstalledSandboxBundle(root, 'sandbox-buzzer', version);
+    expect(Object.keys(bundle.localeTables)).toEqual(['en', 'tr']);
+    expect(bundle.localeTables.tr?.['catalog.name']).toBe('Buzzer');
   });
 });
 

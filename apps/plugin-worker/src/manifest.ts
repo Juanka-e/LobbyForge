@@ -1,10 +1,13 @@
 /**
  * The `sandbox-v1` bundle manifest (ADR-007).
  *
- * A marketplace bundle is `manifest.json` + `server.js` (+ optional `ui/`).
- * The manifest is DATA the host trusts for authorization decisions — the
- * action policies decide who may send which action — so it is validated
- * strictly, and never taken from plugin code.
+ * A marketplace bundle is `manifest.json` + `server.js` (+ optional `ui/`
+ * and `locales/<code>.json`). The manifest is DATA the host trusts for
+ * authorization decisions — the action policies decide who may send which
+ * action — so it is validated strictly, and never taken from plugin code.
+ * The worker checks the locale tables too (`parseSandboxBundle`) so it
+ * refuses exactly the bundles the installer refuses, though it never uses
+ * them.
  *
  * This validator has a twin in the web app (apps/web/lib/sandbox-manifest.ts,
  * used by the installer). Both run the same table of cases
@@ -175,15 +178,189 @@ export function validateSandboxManifest(raw: unknown): ManifestValidation {
   return { ok: true, manifest };
 }
 
-/** Parse manifest.json bytes (size-capped) and validate. */
-export function parseSandboxManifest(bytes: Buffer | string): ManifestValidation {
-  const size = typeof bytes === 'string' ? Buffer.byteLength(bytes) : bytes.length;
-  if (size > MAX_MANIFEST_BYTES) return { ok: false, error: `manifest.json: larger than ${MAX_MANIFEST_BYTES} bytes` };
-  let raw: unknown;
+function byteLength(bytes: Buffer | string): number {
+  return typeof bytes === 'string' ? Buffer.byteLength(bytes) : bytes.length;
+}
+
+function utf8(bytes: Buffer | string): string {
+  return typeof bytes === 'string' ? bytes : bytes.toString('utf8');
+}
+
+/** manifest.json bytes → parsed JSON (size-capped), not yet validated. */
+function readManifestJson(bytes: Buffer | string): { ok: true; raw: unknown } | { ok: false; error: string } {
+  if (byteLength(bytes) > MAX_MANIFEST_BYTES) return { ok: false, error: `manifest.json: larger than ${MAX_MANIFEST_BYTES} bytes` };
   try {
-    raw = JSON.parse(typeof bytes === 'string' ? bytes : bytes.toString('utf8'));
+    return { ok: true, raw: JSON.parse(utf8(bytes)) };
   } catch {
     return { ok: false, error: 'manifest.json: not valid JSON' };
   }
-  return validateSandboxManifest(raw);
+}
+
+/** Parse manifest.json bytes (size-capped) and validate. */
+export function parseSandboxManifest(bytes: Buffer | string): ManifestValidation {
+  const read = readManifestJson(bytes);
+  return read.ok ? validateSandboxManifest(read.raw) : read;
+}
+
+// ── Translations: `locales/<code>.json` ─────────────────────────────────
+//
+// A bundle may ship one flat key → string table per language, the same
+// shape as an official plugin's `plugins/<id>/locales/<code>.json`. The
+// host registers them under the plugin's id, so `catalog.name` and
+// `catalog.summary` name and describe the plugin in each viewer's
+// language on the host's own screens (the lobby, the app lists, the
+// marketplace). The tables are DATA shown to every member of the
+// instance, so they are capped and checked as strictly as the manifest:
+// a bundle with a malformed file is refused as a whole, never loaded with
+// the file silently dropped.
+
+/** One language's table: flat key → text (the ICU subset of `formatMessage`). */
+export type SandboxLocaleTable = Record<string, string>;
+
+/** A file under the bundle's `locales/` folder: its path below `locales/` (POSIX separators) and its bytes. */
+export type SandboxLocaleFile = readonly [path: string, bytes: Buffer | string];
+
+export type LocaleFilesValidation =
+  | { ok: true; tables: Record<string, SandboxLocaleTable> }
+  | { ok: false; error: string };
+
+export type BundleValidation =
+  | { ok: true; manifest: SandboxManifest; localeTables: Record<string, SandboxLocaleTable> }
+  | { ok: false; error: string };
+
+export const MAX_LOCALE_FILES = 32;
+export const MAX_LOCALE_FILE_BYTES = 128 * 1024;
+export const MAX_LOCALE_TOTAL_BYTES = 1024 * 1024;
+export const MAX_LOCALE_KEYS = 1000;
+export const MAX_LOCALE_KEY_LENGTH = 128;
+export const MAX_LOCALE_VALUE_LENGTH = 4096;
+/** `catalog.name` has the manifest `name`'s cap, `catalog.summary` the marketplace summary's. */
+export const MAX_CATALOG_NAME_LENGTH = 80;
+export const MAX_CATALOG_SUMMARY_LENGTH = 200;
+
+/** `<code>.json`, the code in the app's own format (`tr`, `pt-BR`, `zh-Hans`). */
+const LOCALE_FILE_RE = /^([a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*)\.json$/;
+/** Flat keys like the official plugins' (`catalog.name`, `round.open`); `$status`-style metadata is allowed. */
+const LOCALE_KEY_RE = /^[A-Za-z0-9_$][A-Za-z0-9_.:$-]*$/;
+/** Keys that must never become object keys on the host. */
+const PROTOTYPE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+/** C0 controls other than tab and newline, and DEL: never part of a label. */
+const CONTROL_CHAR_RE = /[\u0000-\u0008\u000B-\u001F\u007F]/;
+
+/** A path or key as it may appear in an error message: short, printable ASCII. */
+function printable(text: string): string {
+  return text.slice(0, 64).replace(/[^\x20-\x7e]/g, '?');
+}
+
+/**
+ * Validate the files of a bundle's `locales/` folder. Every file must be a
+ * `<code>.json` directly in `locales/` holding a JSON object of string
+ * values; sizes, key counts and lengths are capped; `catalog.name` must be
+ * one line of at most 80 characters and `catalog.summary` at most 200. A
+ * blank value is allowed: it means "not translated yet" and falls back.
+ */
+export function validateSandboxLocaleFiles(files: readonly SandboxLocaleFile[]): LocaleFilesValidation {
+  const fail = (error: string): LocaleFilesValidation => ({ ok: false, error });
+  if (files.length > MAX_LOCALE_FILES) return fail(`locales/: more than ${MAX_LOCALE_FILES} files`);
+  const sorted = [...files].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const tables: Record<string, SandboxLocaleTable> = {};
+  const seen = new Map<string, string>();
+  let total = 0;
+  for (const [path, bytes] of sorted) {
+    const where = `locales/${printable(path)}`;
+    const match = LOCALE_FILE_RE.exec(path);
+    if (!match) {
+      return fail(`${where}: only <language code>.json files may sit in locales/ (e.g. tr.json, pt-BR.json)`);
+    }
+    const code = match[1]!;
+    const clash = seen.get(code.toLowerCase());
+    if (clash !== undefined) return fail(`${where}: names the same language as locales/${clash}.json`);
+    seen.set(code.toLowerCase(), code);
+
+    const size = byteLength(bytes);
+    if (size > MAX_LOCALE_FILE_BYTES) return fail(`${where}: larger than ${MAX_LOCALE_FILE_BYTES} bytes`);
+    total += size;
+    if (total > MAX_LOCALE_TOTAL_BYTES) return fail(`locales/: the files add up to more than ${MAX_LOCALE_TOTAL_BYTES} bytes`);
+
+    let raw: unknown;
+    try {
+      // A byte-order mark is what some editors save; it is not content.
+      raw = JSON.parse(utf8(bytes).replace(/^\uFEFF/, ''));
+    } catch {
+      return fail(`${where}: not valid JSON`);
+    }
+    if (!isPlainObject(raw)) return fail(`${where}: must be a JSON object of "key": "text" pairs`);
+    const keys = Object.keys(raw);
+    if (keys.length > MAX_LOCALE_KEYS) return fail(`${where}: more than ${MAX_LOCALE_KEYS} keys`);
+    const table: SandboxLocaleTable = {};
+    for (const key of keys) {
+      if (key.length > MAX_LOCALE_KEY_LENGTH || !LOCALE_KEY_RE.test(key) || PROTOTYPE_KEYS.has(key)) {
+        return fail(`${where}: key "${printable(key)}" is not allowed (1-${MAX_LOCALE_KEY_LENGTH} of A-Z a-z 0-9 _ . : - $)`);
+      }
+      const value = raw[key];
+      if (typeof value !== 'string') {
+        return fail(`${where}: "${key}" must be a string (the file is flat: one "key": "text" pair per string)`);
+      }
+      if (value.length > MAX_LOCALE_VALUE_LENGTH) {
+        return fail(`${where}: "${key}" is longer than ${MAX_LOCALE_VALUE_LENGTH} characters`);
+      }
+      if (CONTROL_CHAR_RE.test(value)) return fail(`${where}: "${key}" contains a control character`);
+      table[key] = value;
+    }
+    const name = table['catalog.name'];
+    if (name !== undefined && (name.trim().length > MAX_CATALOG_NAME_LENGTH || /[\r\n]/.test(name))) {
+      return fail(`${where}: "catalog.name" must be one line of at most ${MAX_CATALOG_NAME_LENGTH} characters`);
+    }
+    const summary = table['catalog.summary'];
+    if (summary !== undefined && summary.trim().length > MAX_CATALOG_SUMMARY_LENGTH) {
+      return fail(`${where}: "catalog.summary" must be at most ${MAX_CATALOG_SUMMARY_LENGTH} characters`);
+    }
+    tables[code] = table;
+  }
+  return { ok: true, tables };
+}
+
+/**
+ * Validate a bundle's metadata as a whole: manifest.json and the files of
+ * its `locales/` folder (an empty list when it has none).
+ *
+ * The plugin's languages are the ones it ships tables for. `"locales"` in
+ * the manifest is optional; when the bundle has locale files and the
+ * manifest lists languages too, the two must name the same codes, so a
+ * forgotten file or a stale list is caught at install time. Without locale
+ * files the manifest's list (default `["en"]`) stands, as before.
+ */
+export function parseSandboxBundle(manifestBytes: Buffer | string, localeFiles: readonly SandboxLocaleFile[]): BundleValidation {
+  const read = readManifestJson(manifestBytes);
+  if (!read.ok) return read;
+  const checked = validateSandboxManifest(read.raw);
+  if (!checked.ok) return checked;
+  const files = validateSandboxLocaleFiles(localeFiles);
+  if (!files.ok) return files;
+
+  const manifest = checked.manifest;
+  const shipped = Object.keys(files.tables);
+  if (shipped.length === 0) return { ok: true, manifest, localeTables: {} };
+  const declared = isPlainObject(read.raw) && read.raw.locales !== undefined ? manifest.locales : null;
+  if (declared) {
+    const missing = declared.find((code) => !shipped.includes(code));
+    if (missing !== undefined) {
+      return {
+        ok: false,
+        error: `manifest.json: "locales" lists "${missing}" but the bundle has no locales/${missing}.json (list exactly the languages in locales/, or leave "locales" out)`,
+      };
+    }
+    const unlisted = shipped.find((code) => !declared.includes(code));
+    if (unlisted !== undefined) {
+      return {
+        ok: false,
+        error: `locales/${unlisted}.json: "${unlisted}" is missing from "locales" in manifest.json (list exactly the languages in locales/, or leave "locales" out)`,
+      };
+    }
+  }
+  // The manifest's order when it gives one, else the files' (sorted).
+  const codes = declared ?? shipped;
+  const localeTables: Record<string, SandboxLocaleTable> = {};
+  for (const code of codes) localeTables[code] = files.tables[code]!;
+  return { ok: true, manifest: { ...manifest, locales: [...codes] }, localeTables };
 }

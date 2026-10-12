@@ -11,8 +11,9 @@
  * and prints a JSON summary.
  *
  * What goes in: manifest.json, server.js and, when present, ui/ (regular
- * files only). Entries are `./manifest.json`, `./server.js`, `./ui/...`:
- * the installer extracts with `--strip-components=1`, so they land at the
+ * files only) and locales/ (`<language code>.json` files only). Entries
+ * are `./manifest.json`, `./server.js`, `./locales/...`, `./ui/...`: the
+ * installer extracts with `--strip-components=1`, so they land at the
  * bundle root. The archive is reproducible on a given Node version: sorted
  * entries, mtime 0, uid/gid 0, fixed modes, gzip without a timestamp.
  *
@@ -29,6 +30,11 @@ const MAX_COMPRESSED_BYTES = 10 * 1024 * 1024;
 const MAX_UNPACKED_BYTES = 50 * 1024 * 1024;
 const MAX_ENTRIES = 500;
 const MAX_SERVER_JS_BYTES = 2 * 1024 * 1024;
+// The installer's locale-table limits (apps/web/lib/sandbox-manifest.ts),
+// checked here so a mistake shows up when you pack, not when the owner installs.
+const MAX_LOCALE_FILES = 32;
+const MAX_LOCALE_FILE_BYTES = 128 * 1024;
+const LOCALE_FILE_RE = /^([a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*)\.json$/;
 
 function fail(message) {
   console.error(`pack: ${message}`);
@@ -95,6 +101,43 @@ function collectUi(dir, rel, files) {
   }
 }
 
+/**
+ * locales/: one flat `{ "key": "text" }` table per language, named by its
+ * code (`tr.json`, `pt-BR.json`). The installer re-checks everything (key
+ * names, lengths, `catalog.name` / `catalog.summary` caps); this catches
+ * the common mistakes.
+ */
+function collectLocales(dir, manifest) {
+  const localesDir = join(dir, 'locales');
+  if (!existsSync(localesDir)) return [];
+  if (!lstatSync(localesDir).isDirectory()) fail('locales must be a folder');
+  const names = readdirSync(localesDir).sort();
+  if (names.length > MAX_LOCALE_FILES) fail(`locales/ has more than ${MAX_LOCALE_FILES} files`);
+  const codes = [];
+  for (const name of names) {
+    const stat = lstatSync(join(localesDir, name));
+    const match = LOCALE_FILE_RE.exec(name);
+    if (!stat.isFile() || !match) fail(`locales/${name}: only <language code>.json files may sit in locales/ (e.g. tr.json, pt-BR.json)`);
+    if (stat.size > MAX_LOCALE_FILE_BYTES) fail(`locales/${name} is larger than ${MAX_LOCALE_FILE_BYTES} bytes`);
+    let table;
+    try {
+      table = JSON.parse(readFileSync(join(localesDir, name), 'utf8').replace(/^\uFEFF/, ''));
+    } catch {
+      fail(`locales/${name} is not valid JSON`);
+    }
+    if (!table || typeof table !== 'object' || Array.isArray(table)) fail(`locales/${name} must be a JSON object of "key": "text" pairs`);
+    for (const [key, value] of Object.entries(table)) {
+      if (typeof value !== 'string') fail(`locales/${name}: "${key}" must be a string`);
+    }
+    codes.push(match[1]);
+  }
+  if (Array.isArray(manifest.locales) && codes.length > 0) {
+    const same = manifest.locales.length === codes.length && manifest.locales.every((code) => codes.includes(code));
+    if (!same) fail(`manifest.json "locales" (${manifest.locales.join(', ')}) must list exactly the languages in locales/ (${codes.join(', ')}), or be left out`);
+  }
+  return names.map((name) => ({ path: `locales/${name}`, dir: false }));
+}
+
 function main() {
   const { dir, out } = parseArgs(process.argv.slice(2));
   const manifestPath = join(dir, 'manifest.json');
@@ -121,6 +164,8 @@ function main() {
     { path: 'manifest.json', dir: false },
     { path: 'server.js', dir: false },
   ];
+  const locales = collectLocales(dir, manifest);
+  if (locales.length > 0) files.push({ path: 'locales/', dir: true }, ...locales);
   if (hasUi) {
     files.push({ path: 'ui/', dir: true });
     collectUi(dir, 'ui', files);
