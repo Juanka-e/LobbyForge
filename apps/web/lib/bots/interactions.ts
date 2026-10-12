@@ -46,8 +46,17 @@ function fail(status: number, code: string, error: string, extra?: Record<string
 const EXPIRED = () => fail(410, 'interaction_expired', 'This interaction has expired (15 minutes)');
 const NOT_FOUND = () => fail(404, 'not_found', 'Interaction not found');
 
-/** The `interaction_create` data payload (§4.2). */
-export function interactionCreateData(interaction: BotInteractionRow, user: { id: string; displayName: string | null }) {
+/**
+ * The `interaction_create` data payload (§4.2). `locale` is the invoker's
+ * language (an installed language code such as `en`, `tr`, `pt-BR` — what
+ * their lobby is shown in), so a bot can answer each member in their own
+ * language. Additive: a bot that does not read it is unaffected.
+ */
+export function interactionCreateData(
+  interaction: BotInteractionRow,
+  user: { id: string; displayName: string | null },
+  locale: string
+) {
   return {
     event: 'interaction_create' as const,
     interaction: {
@@ -57,6 +66,7 @@ export function interactionCreateData(interaction: BotInteractionRow, user: { id
       options: interaction.options,
       channelId: interaction.channelId,
       user,
+      locale,
       expiresAt: interaction.expiresAt.toISOString(),
     },
   };
@@ -85,9 +95,12 @@ export async function dispatchInteractionCreate(input: {
   bot: BotRow;
   interaction: BotInteractionRow;
   user: { id: string; displayName: string | null };
+  /** The invoker's resolved language (see `interactionCreateData`). */
+  locale: string;
 }): Promise<void> {
   const { bot, interaction } = input;
-  const data = interactionCreateData(interaction, input.user);
+  // One payload for both paths: the event stream and the signed endpoint.
+  const data = interactionCreateData(interaction, input.user, input.locale);
   if (botHasPermission(bot, 'receive_events')) await publishBotEvent(bot.id, data);
   let current: BotRow | null = null;
   deliverToEndpoint({

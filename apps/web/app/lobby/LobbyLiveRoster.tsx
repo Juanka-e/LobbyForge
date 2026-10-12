@@ -8,6 +8,7 @@ import { handleEmailUnverified, requestVerificationFocus } from '@/components/em
 import type { Translator } from '@/lib/i18n/core';
 import { readMessageInteraction, readMessageWebhook, type MessageInteractionInfo, type MessageWebhookInfo } from '@/lib/bots/interaction-meta';
 import { interactionStore, useInteractionState } from '@/lib/bots/interaction-store';
+import { botDisplayName, localizeBotMessage } from '@/lib/bots/bot-i18n';
 import { BotAvatar, BotBadge } from './BotIdentity';
 import { WebhookAvatar, WebhookBadge } from './WebhookIdentity';
 import { EphemeralAnswerRow, InteractionHeader, PendingInteractionRow } from './slash/InteractionRows';
@@ -68,6 +69,8 @@ interface MessageBot {
   id: string | null;
   name: string;
   type: string;
+  /** The server says the name is a built-in default: show it in the viewer's language. */
+  defaultName?: boolean;
 }
 
 interface WsChatMessageEnvelope {
@@ -126,7 +129,7 @@ function describeAuthor(
   const bot = message.userId ? null : asMessageBot(message.bot);
   if (bot) {
     return {
-      author: bot.name || t('lobbyMain.chat.unknownBot'),
+      author: botDisplayName(bot, t, t('lobbyMain.chat.unknownBot')),
       bot,
       interaction: readMessageInteraction({ userId: message.userId, botId: message.botId ?? bot.id, metadata: message.metadata }),
       webhook: null,
@@ -152,6 +155,7 @@ function asMessageBot(value: unknown): MessageBot | null {
     id: typeof raw.id === 'string' ? raw.id : null,
     name: typeof raw.name === 'string' ? raw.name : '',
     type: typeof raw.type === 'string' ? raw.type : 'custom',
+    ...(raw.defaultName === true ? { defaultName: true } : {}),
   };
 }
 
@@ -299,7 +303,8 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
             authorColor: message.userId === data.currentUserId ? 'primary' : 'default',
             timestamp: formatMessageTimestamp(message.createdAt, t),
             createdAt: message.createdAt,
-            body: message.content,
+            // A built-in bot's default text in this viewer's language.
+            body: message.blocked ? message.content : localizeBotMessage(message, t),
             blocked: message.blocked,
             pinned: typeof message.metadata?.$pinnedAt === 'string',
             poll: message.blocked ? null : catchUp(asChatPollView(message.poll)),
@@ -351,7 +356,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
           x.id === messageId
             ? {
                 ...x,
-                body: x.blocked ? x.body : message.content,
+                body: x.blocked ? x.body : localizeBotMessage(message, t),
                 pinned: typeof message.metadata?.$pinnedAt === 'string',
                 ...(message.poll !== undefined && !x.blocked ? { poll: catchUp(asChatPollView(message.poll)) } : {}),
               }
@@ -361,7 +366,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
     } catch {
       // The next history load corrects it.
     }
-  }, [catchUp, data.serverId, data.channelId]);
+  }, [catchUp, data.serverId, data.channelId, t]);
 
   // ---- Chat WS subscribe ----
   useEffect(() => {
@@ -395,6 +400,8 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
       const m = env.message;
       const who = describeAuthor(m, nameCacheRef.current, t, t('lobbyMain.chat.unknownUser'));
       const author = who.author;
+      // A built-in bot's default text in this viewer's language.
+      const body = localizeBotMessage(m, t);
       // The public answer to this member's command: its pending row is done.
       if (who.interaction) interactionStore.markAnswered(who.interaction.id);
       liveIdsRef.current.add(m.id);
@@ -407,7 +414,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
           authorColor: m.userId === data.currentUserId ? 'primary' : 'default',
           timestamp: formatMessageTimestamp(m.createdAt, t),
           createdAt: m.createdAt,
-          body: m.content,
+          body,
           poll: asChatPollView(m.poll),
         };
         // Newest first; UI uses flex-col-reverse so newest appears at bottom.
@@ -436,7 +443,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
             ? 'lobbyMain.chat.notificationTitleBot'
             : 'lobbyMain.chat.notificationTitle';
         new Notification(t(titleKey, { author, channel: data.channelName }), {
-          body: prefs.showPreview ? m.content : t('lobbyMain.chat.notificationBody'),
+          body: prefs.showPreview ? body : t('lobbyMain.chat.notificationBody'),
           silent: prefs.sound === 'none',
           tag: `lf-message:${data.channelId}`,
         });

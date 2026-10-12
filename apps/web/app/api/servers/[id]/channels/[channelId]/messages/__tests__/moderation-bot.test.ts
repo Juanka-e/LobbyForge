@@ -249,3 +249,50 @@ describe('bot messages in GET .../messages', () => {
     expect(messages[1]).toMatchObject({ userId: MEMBER, botId: null, bot: null });
   });
 });
+
+describe('built-in bot texts in each viewer’s language (lib/bots/bot-i18n.ts)', () => {
+  it('refuses a hand-made metadata.i18n — only a built-in bot writes it', async () => {
+    const { POST } = await import('../route.js');
+    const res = await POST(
+      new Request(`https://chat.example.test/api/servers/${SERVER}/channels/${CHANNEL}/messages`, {
+        method: 'POST',
+        headers: { cookie: cookie(MEMBER), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          content: 'hi',
+          metadata: { i18n: { key: 'bots.moderation.defaultNotice', params: { user: 'Owner' } } },
+        }),
+      }),
+      ctx
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ key: 'i18n' });
+    expect(createMessage).not.toHaveBeenCalled();
+  });
+
+  it('lists a default-named built-in bot with defaultName and passes the i18n metadata through; a renamed one keeps its name', async () => {
+    const i18n = { key: 'bots.welcome.defaultTemplate', params: { user: 'Mert', server: 'Lobby' } };
+    listMessagesForChannel.mockResolvedValue([
+      messageRow({
+        id: 'm3',
+        userId: null,
+        botId: BOT_ID,
+        content: 'Welcome to Lobby, Mert! Glad you are here.',
+        metadata: { bot: { id: BOT_ID, name: 'Karşılama Botu', type: 'welcome' }, i18n },
+      }),
+      messageRow({ id: 'm2', userId: null, botId: BOT_ID, content: 'Hi!', metadata: { bot: { id: BOT_ID, name: 'Greeter', type: 'welcome' } } }),
+    ]);
+    const { GET } = await import('../route.js');
+    const res = await GET(
+      new Request(`https://chat.example.test/api/servers/${SERVER}/channels/${CHANNEL}/messages`, {
+        headers: { cookie: cookie(MEMBER) },
+      }),
+      ctx
+    );
+    const { messages } = (await res.json()) as { messages: Array<Record<string, unknown>> };
+    expect(messages[0]).toMatchObject({
+      bot: { id: BOT_ID, name: 'Karşılama Botu', type: 'welcome', defaultName: true },
+      metadata: { i18n },
+    });
+    expect(messages[1]!.bot).toEqual({ id: BOT_ID, name: 'Greeter', type: 'welcome' });
+  });
+});

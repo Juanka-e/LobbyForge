@@ -17,6 +17,7 @@ import { requireMaterializedSession, type ApiResult } from '@/lib/api-auth';
 import { authorizeServerPermission } from '@/lib/permissions';
 import { BOT_NAME_MAX_LENGTH, botTrustLevel, isBuiltInType, type BotTrustLevel } from './catalog';
 import { parseModerationSettings, parseWelcomeSettings } from './settings';
+import { isDefaultBuiltInBotName, normalizeBuiltInSettings } from './bot-i18n-server';
 
 /**
  * A bot's display name: 1–32 characters, whitespace collapsed, no control
@@ -68,13 +69,24 @@ export interface BotJson {
   lastUsedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /**
+   * A built-in bot still named its shipped default (in any installed
+   * language): each viewer sees that default in their own language, and
+   * the admin page leaves the name alone unless the admin edits it.
+   */
+  defaultName?: boolean;
   /** Only for managers. */
   settings?: Record<string, unknown>;
 }
 
+/**
+ * A greeting / notice template equal to a shipped default (any language)
+ * reads as null — "none written" — so the admin page shows the default in
+ * the admin's language and never sends it back as the admin's own text.
+ */
 export function botSettingsJson(row: Pick<BotRow, 'type' | 'settings'>): Record<string, unknown> {
-  if (row.type === 'welcome') return { ...parseWelcomeSettings(row.settings) };
-  if (row.type === 'moderation') return { ...parseModerationSettings(row.settings) };
+  if (row.type === 'welcome') return normalizeBuiltInSettings(row.type, { ...parseWelcomeSettings(row.settings) });
+  if (row.type === 'moderation') return normalizeBuiltInSettings(row.type, { ...parseModerationSettings(row.settings) });
   return {};
 }
 
@@ -86,6 +98,7 @@ export function toBotJson(row: BotRow, options: { includeSettings: boolean }): B
     name: row.name,
     type: row.type,
     builtIn: isBuiltInType(row.type),
+    defaultName: isDefaultBuiltInBotName(row.type, row.name),
     permissions: row.permissions,
     enabled: row.enabled,
     trustLevel: botTrustLevel(row.type),

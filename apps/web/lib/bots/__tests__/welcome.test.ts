@@ -140,6 +140,68 @@ describe('notifyMemberJoined', () => {
     );
   });
 
+  it('stores the default greeting with its catalogue key, so each viewer reads it in their own language', async () => {
+    getBuiltInBotForServer.mockResolvedValue(welcomeBot());
+    const { notifyMemberJoined } = await load();
+    await notifyMemberJoined({ serverId: SERVER, userId: USER });
+    expect(createMessage).toHaveBeenCalledWith(expect.anything(), {
+      channelId: GENERAL,
+      userId: null,
+      botId: BOT_ID,
+      // `content` stays the fallback in the instance language (bots, search, old clients).
+      content: 'Welcome to Oyun Gecesi, Ayşe! Glad you are here.',
+      metadata: {
+        i18n: { key: 'bots.welcome.defaultTemplate', params: { user: 'Ayşe', server: 'Oyun Gecesi' } },
+        bot: { id: BOT_ID, name: 'Greeter', type: 'welcome' },
+      },
+    });
+    // The realtime copy carries the same metadata for the live lobby.
+    expect(publishChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          metadata: expect.objectContaining({ i18n: { key: 'bots.welcome.defaultTemplate', params: { user: 'Ayşe', server: 'Oyun Gecesi' } } }),
+        }),
+      })
+    );
+  });
+
+  it('a stored template that is a shipped default in another language (an older admin page saved it) is still the default', async () => {
+    getBuiltInBotForServer.mockResolvedValue(
+      welcomeBot({ template: '{user}, {server} sunucusuna hoş geldin! Seni aramızda görmek güzel.' })
+    );
+    const { notifyMemberJoined } = await load();
+    await notifyMemberJoined({ serverId: SERVER, userId: USER });
+    const row = createMessage.mock.calls[0]![1] as { content: string; metadata: Record<string, unknown> };
+    expect(row.content).toBe('Welcome to Oyun Gecesi, Ayşe! Glad you are here.');
+    expect(row.metadata.i18n).toEqual({ key: 'bots.welcome.defaultTemplate', params: { user: 'Ayşe', server: 'Oyun Gecesi' } });
+  });
+
+  it('the i18n params are the cleaned names — no mass ping in any language', async () => {
+    getUserById.mockResolvedValue({ id: USER, displayName: '@everyone\u0007' });
+    getBuiltInBotForServer.mockResolvedValue(welcomeBot());
+    const { notifyMemberJoined } = await load();
+    await notifyMemberJoined({ serverId: SERVER, userId: USER });
+    const row = createMessage.mock.calls[0]![1] as { metadata: { i18n: { params: Record<string, string> } } };
+    expect(row.metadata.i18n.params.user).toBe('everyone');
+  });
+
+  it('tells browsers when a built-in bot still has its default name (any installed language)', async () => {
+    getBuiltInBotForServer.mockResolvedValue(welcomeBot({}, { name: 'Karşılama Botu' }));
+    const { notifyMemberJoined } = await load();
+    await notifyMemberJoined({ serverId: SERVER, userId: USER });
+    expect(publishChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({ bot: { id: BOT_ID, name: 'Karşılama Botu', type: 'welcome', defaultName: true } }),
+      })
+    );
+    // The stored snapshot is the plain name — the flag is never stored.
+    expect((createMessage.mock.calls[0]![1] as { metadata: { bot: unknown } }).metadata.bot).toEqual({
+      id: BOT_ID,
+      name: 'Karşılama Botu',
+      type: 'welcome',
+    });
+  });
+
   it('cannot be made to ping everyone through a display name', async () => {
     getUserById.mockResolvedValue({ id: USER, displayName: '@everyone' });
     getBuiltInBotForServer.mockResolvedValue(welcomeBot({ template: 'Hi {user}' }));

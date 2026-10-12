@@ -44,7 +44,8 @@ export interface ChatMessagePayload {
   userId: string | null;
   /** Set when a bot wrote the message (Bot API or a built-in bot). */
   botId?: string | null;
-  bot?: { id: string; name: string; type: string } | null;
+  /** `defaultName`: a built-in bot's default name — each viewer sees it in their language. */
+  bot?: { id: string; name: string; type: string; defaultName?: boolean } | null;
   content: string;
   metadata: Record<string, unknown> | null;
   replyToId: string | null;

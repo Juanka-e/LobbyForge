@@ -25,11 +25,15 @@
  * `command_name_taken` (with `details.names`) when another bot of the
  * server already owns /roll: catch it and pick another name.
  *
+ * Each /roll is answered in the language of the member who ran it
+ * (`data.interaction.locale`; strings and choice in roll-text.mjs).
+ *
  * Exit codes: 0 after Ctrl+C / SIGTERM, 1 when it cannot run (no secret, a
  * bad PORT, the port already in use).
  */
 import { createServer } from 'node:http';
 import { verifySignature } from '../dist/index.js';
+import { rollAnswer } from './roll-text.mjs';
 
 const secret = process.env.LOBBYFORGE_ENDPOINT_SECRET;
 const port = Number(process.env.PORT || 8787);
@@ -72,7 +76,8 @@ function handle(delivery) {
   const sides = typeof interaction.options.sides === 'number' ? interaction.options.sides : 6;
   return {
     type: 'respond',
-    content: `${interaction.user.displayName ?? 'Someone'} rolled ${roll(sides)} (d${sides})`,
+    // In the invoker's language: "Ayşe rolled 18 (20-sided)" / "Ayşe 18 attı (20 yüzlü)".
+    content: rollAnswer(interaction.locale, { name: interaction.user.displayName, result: roll(sides), sides }),
     ephemeral: false,
   };
 }

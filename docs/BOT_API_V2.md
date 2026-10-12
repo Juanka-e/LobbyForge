@@ -292,8 +292,9 @@ the channel and has `SEND_MESSAGES` (timeouts block it), command enabled
 in this channel, invoker holds `requiredPermission` (owner bypass), bot
 enabled + has `slash_commands` + `botCanAccessChannel`, options validate
 against the schema (server-side, never trust the client). Creates a
-`bot_interactions` row and delivers `interaction_create` (§4) to the
-bot's stream AND its event endpoint (whichever exist). Response `202
+`bot_interactions` row and delivers `interaction_create` (§4) — with the
+invoker's language as `locale` (§3.5) — to the bot's stream AND its event
+endpoint (whichever exist). Response `202
 { interaction: { id, status: 'pending' } }`. Rate limit 20/min per user.
 
 `GET /api/servers/{id}/commands?channelId=` → the commands this member
@@ -393,6 +394,55 @@ As implemented:
   (or until it is deleted — rows cascade with the bot, channel, server and
   invoker).
 
+### 3.5 Languages
+Every `interaction_create` carries **`locale`**: the language of the member
+who ran the command. It's the language their LobbyForge is shown in: their
+choice in Settings, else their browser's (`Accept-Language`), else the
+instance default (`LOBBYFORGE_DEFAULT_LOCALE`), else `en`.
+
+- It's always one of the instance's installed language codes (BCP 47, the
+  folder names under `apps/web/messages`): `en`, `tr`, `pt-BR`, …
+- The event stream and endpoint deliveries carry the same value. A
+  synchronous endpoint answer (§3.4) can use it too.
+- It's additive: a bot that ignores it is unaffected. Instances older than
+  this field don't send it, so treat a missing `locale` as your default
+  language.
+- Only interactions carry it. A channel message is read by everyone, and
+  member events are about someone else, so `message_*` and `member_*`
+  events carry no language: answer those in your bot's default language.
+- Command names, descriptions and choices are registered once, in one
+  language, and the composer shows them to everyone as registered.
+
+With the SDK's locale helpers (`tFor` falls back to English, and
+`pickBestLocale` maps `pt-BR` to a bot that only ships `pt`):
+
+```js
+import { LobbyForgeBot, loadBotLocale, pickBestLocale, tFor } from '@lobbyforge/bot-sdk';
+
+loadBotLocale('dice', {
+  en: { 'roll.result': '{name} rolled {result} ({sides}-sided)' },
+  tr: { 'roll.result': '{name} {result} attı ({sides} yüzlü)' },
+});
+
+bot.on('interaction', async (interaction) => {
+  const sides = interaction.options.sides ?? 6;
+  const result = 1 + Math.floor(Math.random() * sides);
+  const locale = pickBestLocale('dice', interaction.locale); // or tFor('dice', interaction.locale, …) directly
+  await interaction.reply(
+    tFor('dice', locale, 'roll.result', { name: interaction.user.displayName, result, sides })
+  );
+  // tr → "Ayşe 18 attı (20 yüzlü)", anything else → "Ayşe rolled 18 (20-sided)"
+});
+```
+
+`packages/bot-sdk/examples/roll-text.mjs` is the complete version, used by
+both example bots.
+
+The built-in bots solve the same problem the other way round. They post
+one message for everyone, so they store the catalogue key of a default
+text with it, and each member's lobby renders that key in the member's
+language ([BOTS.md → Built-in bots](BOTS.md#built-in-bots)).
+
 ## 4. Event stream (WebSocket gateway)
 
 Implemented in `apps/ws-gateway/src/bot-gateway.ts`. The wire types live in
@@ -482,7 +532,7 @@ succeeds.
 | `message_delete` | same | `{ id, channelId }` |
 | `member_join` | `read_members` | `{ member: {id, displayName} }` |
 | `member_leave` | `read_members` | `{ member: {id, displayName}, reason? }` (`leave` / `kick` / `ban`) |
-| `interaction_create` | `slash_commands` + channel access | `{ interaction: {id, commandName, options, channelId, user:{id,displayName}, expiresAt} }` — forwarded only while the bot still reaches `channelId` (its live channel set; beyond a capped set, one database check) |
+| `interaction_create` | `slash_commands` + channel access | `{ interaction: {id, commandId, commandName, options, channelId, user:{id,displayName}, locale, expiresAt} }` (`locale`: the invoker's language, §3.5) — forwarded only while the bot still reaches `channelId` (its live channel set; beyond a capped set, one database check) |
 | `channel_access_changed` | — | `{ channels }` — sent after every `bot-access` invalidation for the bot, and whenever a policy change or the periodic recheck changes its set |
 
 A poll posted in a text channel (docs/CHAT_POLLS.md) reaches bots as a
@@ -682,7 +732,9 @@ As implemented (`packages/bot-sdk/src/bot.ts`, `signature.ts`,
 - **Events** (`on()` returns an unsubscribe): `ready` `{ bot, channels }`,
   `message`, `message_update`, `message_delete`, `member_join`,
   `member_leave`, `interaction` (with `reply(content, { ephemeral })` and
-  `followup(...)` bound to its id), `channel_access_changed`, `raw` (every
+  `followup(...)` bound to its id, and the invoker's `locale` — optional in
+  the type, since older instances do not send it; §3.5),
+  `channel_access_changed`, `raw` (every
   event payload), `disconnect` `{ code, reason, willReconnect, delayMs }`,
   `error`. A listener that throws or rejects becomes an `error` event.
   `bot.ready` holds the latest bot + channel list.
@@ -704,7 +756,8 @@ As implemented (`packages/bot-sdk/src/bot.ts`, `signature.ts`,
 Ships two examples under `packages/bot-sdk/examples/`: `roll-bot.mjs`
 (a `/roll` command and `!roll` over the socket) and `http-bot.mjs` (a
 `node:http` endpoint that verifies signatures and answers interactions
-synchronously). Both turn every refusal into one line a person can act on
+synchronously). Both answer each member in their language through
+`roll-text.mjs` (English and Turkish strings, §3.5). Both turn every refusal into one line a person can act on
 (`/roll is already registered by another bot on this server — pick another
 name` for `command_name_taken`, a revoked token, a missing permission, a
 port in use) instead of a stack trace, and exit 1 on anything fatal —

@@ -190,7 +190,9 @@ v1 stays as it is. v2 adds, all scoped per channel:
 
 - **Slash commands** — a bot registers commands (`PUT /api/bot/v2/commands`);
   members run them from the composer with `/`. The bot answers each run
-  (an *interaction*) publicly or only to the member who ran it.
+  (an *interaction*) publicly or only to the member who ran it. Each
+  interaction carries that member's language (`locale`), so the answer can
+  be in it ([Languages](BOT_API_V2.md#35-languages)).
 - **Event stream** — the bot connects to the gateway at `/ws/bot`
   (`Authorization: Bot <token>` or an `identify` message) and receives
   `message_*`, `member_*` and `interaction_create` events instead of
@@ -207,10 +209,34 @@ The full contract — routes, payloads, limits, close codes, signing — is in
 
 ## Built-in bots
 
-Both are configured in **Community Settings → Bots**, can be renamed, switched
-on and off, and post in the instance's language (`LOBBYFORGE_DEFAULT_LOCALE`,
-else English) until an admin writes their own text — a bot talks to everyone
-at once, so it cannot follow one reader's language.
+Both are configured in **Community Settings → Bots**, can be renamed and
+switched on and off.
+
+**Languages.** Each member reads a built-in bot's default texts (the greeting,
+the notice) and default names in their own language. In one channel, a
+Turkish member reads "Ayşe, Oyun Gecesi sunucusuna hoş geldin!" and an
+English one "Welcome to Oyun Gecesi, Ayşe!". A text or name an admin writes
+is shown to everyone exactly as written.
+
+- The message is stored once. Its `content` is in the instance language
+  (`LOBBYFORGE_DEFAULT_LOCALE`, else English), as the fallback for bots,
+  search and older apps. A default text also stores
+  `metadata.i18n = { key, params }` (the catalogue key and the cleaned
+  names), and the lobby shows `t(key, params)` in the viewer's language. An
+  unknown key falls back to `content`.
+- A name is the default when it equals the shipped default name in any
+  installed language ("Welcome Bot", "Karşılama Botu"). Nothing extra is
+  stored: browsers get `bot.defaultName: true` and show the default in the
+  viewer's language. A renamed bot keeps its name. An admin who types the
+  default name by hand gets the default.
+- A greeting or notice that is word for word a shipped default in any
+  installed language counts as the default, too, including one an older
+  admin page saved for you. It's read as the default at once and stored as
+  `null` with the next save that changes something. No migration.
+- The settings page fills the fields with the defaults in your language but
+  sends a field only once you edit it. Each field says which kind it is, and
+  **Use the default** switches back. Over the API, `name: null` and
+  `template: null` / `noticeTemplate: null` mean the default.
 
 ### Welcome Bot
 
@@ -286,7 +312,7 @@ permission, except listing):
 | `DELETE` | `/api/servers/{id}/bots/{botId}` | | its messages stay, still marked as a bot's |
 | `POST` | `/api/servers/{id}/bots/{botId}/token` | | issue or rotate: `{ bot, token }` |
 | `DELETE` | `/api/servers/{id}/bots/{botId}/token` | | revoke |
-| `PUT` | `/api/servers/{id}/bots/builtin/{welcome\|moderation}` | `{ enabled?, name?, settings? }` | sets the bot up on first call; settings are merged |
+| `PUT` | `/api/servers/{id}/bots/builtin/{welcome\|moderation}` | `{ enabled?, name?, settings? }` | sets the bot up on first call; settings are merged; `name: null` (or none, on first call) = the default name; a template that is `null` or a shipped default = the default text |
 
 Audit log actions: `bot.create`, `bot.update` (with what changed — for
 moderation settings, counts, never the word list), `bot.enable`,
@@ -370,7 +396,13 @@ copied into a standalone project.
   `messages` gains `bot_id` (`ON DELETE SET NULL`). A bot message has
   `user_id` NULL, `bot_id` set and a `metadata.bot` snapshot
   `{ id, name, type }`. `metadata.bot` is a reserved key: the messages API
-  refuses it from clients, so a member cannot forge a bot message.
+  refuses it from clients, so a member cannot forge a bot message. So is
+  `metadata.i18n` (a built-in bot's default text, see
+  [Built-in bots](#built-in-bots)). The lobby honours it only on a bot's
+  message, and only for `bots.welcome.defaultTemplate` and
+  `bots.moderation.defaultNotice`. Code: `lib/bots/bot-i18n.ts` (client-safe
+  reader and renderer) and `bot-i18n-server.ts` (the "is this a shipped
+  default?" check over every installed language).
 - **Code:** `apps/web/lib/bots/` — `token.ts` (format, hash, verify),
   `permissions.ts` / `catalog.ts` (vocabulary, grant rule), `api.ts` (the Bot
   API pipeline on `withMachineApiSecurity`), `messages.ts` (the one path every

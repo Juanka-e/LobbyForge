@@ -246,4 +246,52 @@ describe('moderateMessage', () => {
       'A message from Mallory was blocked by the moderation filter.'
     );
   });
+
+  it('stores the default notice with its catalogue key, so each member reads it in their own language', async () => {
+    getBuiltInBotForServer.mockResolvedValue(moderationBot({ postNotice: true }));
+    const { moderateMessage } = await load();
+    await moderateMessage(input('salak'));
+    await vi.waitFor(() => expect(createMessage).toHaveBeenCalled());
+    expect((createMessage.mock.calls[0]![1] as { metadata: unknown }).metadata).toEqual({
+      i18n: { key: 'bots.moderation.defaultNotice', params: { user: 'Mallory' } },
+      bot: { id: BOT_ID, name: 'Mod', type: 'moderation' },
+    });
+  });
+
+  it('a stored notice equal to a shipped default in any language counts as the default', async () => {
+    getBuiltInBotForServer.mockResolvedValue(
+      moderationBot({ postNotice: true, noticeTemplate: '{user} kullanıcısının bir mesajı moderasyon filtresine takıldı.' })
+    );
+    const { moderateMessage } = await load();
+    await moderateMessage(input('salak'));
+    await vi.waitFor(() => expect(createMessage).toHaveBeenCalled());
+    const row = createMessage.mock.calls[0]![1] as { content: string; metadata: Record<string, unknown> };
+    expect(row.content).toBe('A message from Mallory was blocked by the moderation filter.');
+    expect(row.metadata.i18n).toEqual({ key: 'bots.moderation.defaultNotice', params: { user: 'Mallory' } });
+  });
+});
+
+describe('moderateWebhookMessage — the notice', () => {
+  const webhook = { id: '77777777-7777-4777-8777-777777777777', name: 'CI' };
+
+  it('names the webhook; the default notice carries its catalogue key, an admin text does not', async () => {
+    getBuiltInBotForServer.mockResolvedValue(moderationBot({ postNotice: true }));
+    const { moderateWebhookMessage } = await load();
+    const verdict = await moderateWebhookMessage({ serverId: SERVER, channelId: CHANNEL, webhook, content: 'salak' });
+    expect(verdict).toMatchObject({ action: 'block' });
+    await vi.waitFor(() => expect(createMessage).toHaveBeenCalled());
+    expect(createMessage.mock.calls[0]![1]).toMatchObject({
+      content: 'A message from CI was blocked by the moderation filter.',
+      metadata: { i18n: { key: 'bots.moderation.defaultNotice', params: { user: 'CI' } } },
+    });
+
+    createMessage.mockClear();
+    vi.resetModules();
+    getBuiltInBotForServer.mockResolvedValue(moderationBot({ postNotice: true, noticeTemplate: 'Removed: {user}' }));
+    const again = await load();
+    await again.moderateWebhookMessage({ serverId: SERVER, channelId: CHANNEL, webhook, content: 'salak' });
+    await vi.waitFor(() => expect(createMessage).toHaveBeenCalled());
+    expect(createMessage.mock.calls[0]![1]).toMatchObject({ content: 'Removed: CI', metadata: { bot: { id: BOT_ID } } });
+    expect((createMessage.mock.calls[0]![1] as { metadata: Record<string, unknown> }).metadata).not.toHaveProperty('i18n');
+  });
 });

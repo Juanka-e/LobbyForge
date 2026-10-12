@@ -65,7 +65,7 @@ Permissions the bot needs: `receive_events` (the stream), `slash_commands`
 | `message` / `message_update` | `{ id, channelId, content, author: { id, displayName, bot?, webhook? }, createdAt, editedAt, replyToId }` — never the bot's own |
 | `message_delete` | `{ id, channelId }` |
 | `member_join` / `member_leave` | `{ id, displayName }` (+ `reason` on leave) |
-| `interaction` | `{ id, commandName, options, channelId, user, expiresAt, reply(content, { ephemeral }), followup(…) }` |
+| `interaction` | `{ id, commandName, options, channelId, user, locale, expiresAt, reply(content, { ephemeral }), followup(…) }` — `locale` is the invoker's language (below) |
 | `channel_access_changed` | the new `[{ id, name }]` |
 | `raw` | every event payload as received |
 | `disconnect` | `{ code, reason, willReconnect, delayMs }` |
@@ -85,6 +85,32 @@ with `bot.readMessages(channelId, { before })`.
 `readMessages`, `sendMessage`, `commands.get / set / delete`,
 `interactions.respond / followup`, `members.get(userId)`,
 `eventEndpoint.get / set(url, { events }) / remove`, `getGatewayUrl`.
+
+### Answering in each member's language
+
+Every interaction carries `locale`, the language of the member who ran the
+command (an installed language code of the instance such as `en`, `tr` or
+`pt-BR`; older instances don't send it). Ship a table per language and
+pick the closest one:
+
+```js
+import { loadBotLocale, pickBestLocale, tFor } from '@lobbyforge/bot-sdk';
+
+loadBotLocale('dice', {
+  en: { 'roll.result': '{name} rolled {result} ({sides}-sided)' },
+  tr: { 'roll.result': '{name} {result} attı ({sides} yüzlü)' },
+});
+
+bot.on('interaction', async (i) => {
+  const sides = i.options.sides ?? 6;
+  const result = 1 + Math.floor(Math.random() * sides);
+  await i.reply(tFor('dice', pickBestLocale('dice', i.locale), 'roll.result', { name: i.user.displayName, result, sides }));
+});
+```
+
+Message and member events carry no language (everyone reads a channel
+message), so answer those in your default language. Details:
+[`docs/BOT_API_V2.md` §3.5](../../docs/BOT_API_V2.md#35-languages).
 
 ### HTTP mode (no socket)
 
@@ -140,3 +166,5 @@ LOBBYFORGE_ENDPOINT_SECRET=whsec_… PORT=8787 node packages/bot-sdk/examples/ht
   private) and `!roll` over the event stream.
 - [`examples/http-bot.mjs`](./examples/http-bot.mjs) — a `node:http`
   endpoint that verifies signatures and answers `/roll` synchronously.
+- [`examples/roll-text.mjs`](./examples/roll-text.mjs) — what both say, in
+  English and Turkish, and which language each member gets.

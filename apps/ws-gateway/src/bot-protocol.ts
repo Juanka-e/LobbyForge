@@ -182,6 +182,14 @@ export interface BotFeedInteraction {
   options: Record<string, BotInteractionOptionValue>;
   channelId: string;
   user: { id: string; displayName: string };
+  /**
+   * The invoker's language: an installed language code of the instance
+   * (`en`, `tr`, `pt-BR`, …) — what their lobby is shown in (their choice,
+   * else their browser's, else the instance default). Answer them in it,
+   * e.g. `tFor(botId, pickBestLocale(botId, interaction.locale), key)`.
+   * Absent from instances older than this field: fall back to your default.
+   */
+  locale?: string;
   /** ISO-8601 — answer before this instant (15 minutes after the run). */
   expiresAt: string;
 }

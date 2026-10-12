@@ -139,12 +139,13 @@ describe('sweepExpiredInteractions — expiry and retention', () => {
 describe('dispatchInteractionCreate', () => {
   it('publishes to the stream and queues a high-priority endpoint delivery with the §4.2 payload', async () => {
     const { dispatchInteractionCreate } = await import('../interactions');
-    await dispatchInteractionCreate({ bot: BOT as never, interaction: interaction as never, user: { id: USER, displayName: 'Ayşe' } });
+    await dispatchInteractionCreate({ bot: BOT as never, interaction: interaction as never, user: { id: USER, displayName: 'Ayşe' }, locale: 'tr' });
+    // Both paths carry the invoker's language (BOT_API_V2 "Languages").
     const data = {
       event: 'interaction_create',
       interaction: {
         id: 'int-1', commandId: 'cmd-1', commandName: 'roll', options: { sides: 6 }, channelId: CHANNEL,
-        user: { id: USER, displayName: 'Ayşe' }, expiresAt: interaction.expiresAt.toISOString(),
+        user: { id: USER, displayName: 'Ayşe' }, locale: 'tr', expiresAt: interaction.expiresAt.toISOString(),
       },
     };
     expect(publishBotEvent).toHaveBeenCalledWith('bot-1', data);
@@ -153,7 +154,7 @@ describe('dispatchInteractionCreate', () => {
 
   it('a synchronous ephemeral answer is applied as the respond call (once, with the current bot row)', async () => {
     const { dispatchInteractionCreate } = await import('../interactions');
-    await dispatchInteractionCreate({ bot: BOT as never, interaction: interaction as never, user: { id: USER, displayName: 'Ayşe' } });
+    await dispatchInteractionCreate({ bot: BOT as never, interaction: interaction as never, user: { id: USER, displayName: 'Ayşe' }, locale: 'tr' });
     const job = deliverToEndpoint.mock.calls[0]![0];
     expect(await job.authorize(BOT)).toBe(true);
     await job.onResponse({ status: 200, body: Buffer.from('{"type":"respond","content":"🎲 4","ephemeral":true}') });
@@ -168,7 +169,7 @@ describe('dispatchInteractionCreate', () => {
 
   it('a synchronous public answer still needs send_messages on the CURRENT bot', async () => {
     const { dispatchInteractionCreate } = await import('../interactions');
-    await dispatchInteractionCreate({ bot: BOT as never, interaction: interaction as never, user: { id: USER, displayName: 'Ayşe' } });
+    await dispatchInteractionCreate({ bot: BOT as never, interaction: interaction as never, user: { id: USER, displayName: 'Ayşe' }, locale: 'tr' });
     const job = deliverToEndpoint.mock.calls[0]![0];
     await job.authorize({ ...BOT, permissions: ['slash_commands', 'receive_events'] });
     await job.onResponse({ status: 200, body: Buffer.from('{"type":"respond","content":"public"}') });
@@ -178,7 +179,7 @@ describe('dispatchInteractionCreate', () => {
 
   it('the endpoint delivery is dropped when the bot lost slash_commands or the channel', async () => {
     const { dispatchInteractionCreate } = await import('../interactions');
-    await dispatchInteractionCreate({ bot: BOT as never, interaction: interaction as never, user: { id: USER, displayName: 'Ayşe' } });
+    await dispatchInteractionCreate({ bot: BOT as never, interaction: interaction as never, user: { id: USER, displayName: 'Ayşe' }, locale: 'tr' });
     const job = deliverToEndpoint.mock.calls[0]![0];
     expect(await job.authorize({ ...BOT, permissions: ['receive_events'] })).toBe(false);
     db.getBotReachableChannel.mockResolvedValueOnce(null);
@@ -187,7 +188,7 @@ describe('dispatchInteractionCreate', () => {
 
   it('no stream publish for a bot without receive_events', async () => {
     const { dispatchInteractionCreate } = await import('../interactions');
-    await dispatchInteractionCreate({ bot: { ...BOT, permissions: ['slash_commands'] } as never, interaction: interaction as never, user: { id: USER, displayName: 'Ayşe' } });
+    await dispatchInteractionCreate({ bot: { ...BOT, permissions: ['slash_commands'] } as never, interaction: interaction as never, user: { id: USER, displayName: 'Ayşe' }, locale: 'tr' });
     expect(publishBotEvent).not.toHaveBeenCalled();
     expect(deliverToEndpoint).toHaveBeenCalled();
   });

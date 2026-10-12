@@ -1,9 +1,10 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
 import { rich } from '@/lib/i18n/rich';
 import type { BotJson } from '@/lib/bots/admin';
+import { botDisplayName } from '@/lib/bots/bot-i18n';
 import {
   DEFAULT_MODERATION_SETTINGS,
   MODERATION_LIMITS,
@@ -39,6 +40,78 @@ function clampInt(raw: string, min: number, max: number, fallback: number): numb
   return Math.min(max, Math.max(min, n));
 }
 
+/**
+ * A name or template that has a built-in default. The field is pre-filled
+ * with the default in the ADMIN's language, but it is only sent once the
+ * admin edits it: an untouched default stays the default — which every
+ * member then reads in their own language — instead of being saved as the
+ * admin's own text in the admin's language. Cleared, or edited back to the
+ * default, it is sent as null (the default).
+ */
+function useDefaultableText(stored: string | null, fallback: string) {
+  const [value, setValue] = useState(stored ?? fallback);
+  const [edited, setEdited] = useState(false);
+  const trimmed = value.trim();
+  const isDefault = trimmed === '' || trimmed === fallback;
+  return {
+    value,
+    isDefault,
+    change(next: string) {
+      setValue(next);
+      setEdited(true);
+    },
+    reset() {
+      setValue(fallback);
+      setEdited(true);
+    },
+    /** undefined = leave what is stored; null = the default; else the admin's text. */
+    payload(): string | null | undefined {
+      if (!edited) return undefined;
+      return isDefault ? null : trimmed;
+    },
+    /** After a save: show what the server now holds. */
+    saved(next: string | null) {
+      setValue(next ?? fallback);
+      setEdited(false);
+    },
+  };
+}
+
+/** Under a defaultable field: who sees what, and the way back to the default. */
+function DefaultNote({
+  id,
+  kind,
+  isDefault,
+  onReset,
+  disabled,
+}: {
+  id: string;
+  kind: 'name' | 'text';
+  isDefault: boolean;
+  onReset: () => void;
+  disabled: boolean;
+}) {
+  const t = useT();
+  const label = isDefault
+    ? t(kind === 'name' ? 'bots.default.nameTranslated' : 'bots.default.textTranslated')
+    : t(kind === 'name' ? 'bots.default.nameCustom' : 'bots.default.textCustom');
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+      <p id={id} className="text-xs text-text-muted">{label}</p>
+      {isDefault ? null : (
+        <button
+          type="button"
+          onClick={onReset}
+          disabled={disabled}
+          className="rounded text-xs font-medium text-primary hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
+        >
+          {t('bots.default.reset')}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function BuiltInHeader({
   title,
   description,
@@ -62,7 +135,7 @@ function BuiltInHeader({
       <BotAvatar size="md" />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="text-base font-semibold text-text-primary">{bot?.name ?? title}</h3>
+          <h3 className="text-base font-semibold text-text-primary">{bot ? botDisplayName(bot, t, title) : title}</h3>
           <BotBadge />
           <TrustBadge level="official" />
           <span className={`text-xs font-medium ${enabled ? 'text-success' : 'text-text-muted'}`}>
@@ -86,28 +159,37 @@ export function WelcomeBotCard({
 }: CardProps & { serverName: string; channels: Array<{ id: string; name: string }> }) {
   const t = useT();
   const stored = parseWelcomeSettings(bot?.settings ?? {});
+  const defaultName = t('bots.welcome.defaultName');
+  const defaultTemplate = t('bots.welcome.defaultTemplate');
   const [enabled, setEnabled] = useState(bot?.enabled ?? false);
-  const [name, setName] = useState(bot?.name ?? t('bots.welcome.defaultName'));
+  const name = useDefaultableText(bot && !bot.defaultName ? bot.name : null, defaultName);
   const [channelId, setChannelId] = useState(stored.channelId ?? '');
-  const [template, setTemplate] = useState(stored.template ?? t('bots.welcome.defaultTemplate'));
+  const template = useDefaultableText(stored.template, defaultTemplate);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
+  const nameNoteId = useId();
+  const templateNoteId = useId();
 
   async function save(nextEnabled: boolean) {
     if (!serverId) return;
     // The server refuses it too; saying why here saves a round trip.
-    if (containsMassMention(template)) {
+    if (containsMassMention(template.value)) {
       setNotice({ tone: 'danger', text: t('bots.error.massMention') });
       return;
     }
     setSaving(true);
     setNotice(null);
+    const namePayload = name.payload();
+    const templatePayload = template.payload();
     const result = await botApi<BotResponse>(t, `/api/servers/${serverId}/bots/builtin/welcome`, {
       method: 'PUT',
       body: {
         enabled: nextEnabled,
-        name: name.trim() || t('bots.welcome.defaultName'),
-        settings: { channelId: channelId || null, template: template.trim() || null },
+        ...(namePayload !== undefined ? { name: namePayload } : {}),
+        settings: {
+          channelId: channelId || null,
+          ...(templatePayload !== undefined ? { template: templatePayload } : {}),
+        },
       },
     });
     setSaving(false);
@@ -116,12 +198,14 @@ export function WelcomeBotCard({
       return;
     }
     setEnabled(result.data.bot.enabled);
+    name.saved(result.data.bot.defaultName ? null : result.data.bot.name);
+    template.saved(parseWelcomeSettings(result.data.bot.settings ?? {}).template);
     onSaved(result.data.bot);
     setNotice({ tone: 'success', text: t('bots.saved') });
   }
 
   const disabled = !canMutate || !serverId || saving;
-  const preview = fillPreview(template.trim() || t('bots.welcome.defaultTemplate'), {
+  const preview = fillPreview(template.value.trim() || defaultTemplate, {
     user: t('bots.welcome.previewUser'),
     server: serverName || t('bots.welcome.previewServer'),
   });
@@ -129,7 +213,7 @@ export function WelcomeBotCard({
   return (
     <Card testId="welcome-bot-card">
       <BuiltInHeader
-        title={t('bots.welcome.defaultName')}
+        title={defaultName}
         description={t('bots.welcome.description')}
         bot={bot}
         enabled={enabled}
@@ -140,14 +224,18 @@ export function WelcomeBotCard({
       <div className="mt-5 grid gap-4 md:grid-cols-2">
         <Field label={t('bots.field.name')}>
           {(id) => (
-            <input
-              id={id}
-              value={name}
-              maxLength={32}
-              onChange={(event) => setName(event.target.value)}
-              disabled={disabled}
-              className={inputClass}
-            />
+            <>
+              <input
+                id={id}
+                aria-describedby={nameNoteId}
+                value={name.value}
+                maxLength={32}
+                onChange={(event) => name.change(event.target.value)}
+                disabled={disabled}
+                className={inputClass}
+              />
+              <DefaultNote id={nameNoteId} kind="name" isDefault={name.isDefault} onReset={name.reset} disabled={disabled} />
+            </>
           )}
         </Field>
         <Field label={t('bots.welcome.channel')} hint={t('bots.welcome.channelHint')}>
@@ -179,16 +267,25 @@ export function WelcomeBotCard({
           })}
         >
           {(id, hintId) => (
-            <textarea
-              id={id}
-              aria-describedby={hintId}
-              rows={3}
-              maxLength={TEMPLATE_MAX_LENGTH}
-              value={template}
-              onChange={(event) => setTemplate(event.target.value)}
-              disabled={disabled}
-              className={inputClass}
-            />
+            <>
+              <textarea
+                id={id}
+                aria-describedby={[templateNoteId, hintId].filter(Boolean).join(' ')}
+                rows={3}
+                maxLength={TEMPLATE_MAX_LENGTH}
+                value={template.value}
+                onChange={(event) => template.change(event.target.value)}
+                disabled={disabled}
+                className={inputClass}
+              />
+              <DefaultNote
+                id={templateNoteId}
+                kind="text"
+                isDefault={template.isDefault}
+                onReset={template.reset}
+                disabled={disabled}
+              />
+            </>
           )}
         </Field>
         <div className="mt-3 rounded-lg border border-border-subtle bg-surface-container/40 p-3">
@@ -197,7 +294,7 @@ export function WelcomeBotCard({
             <BotAvatar size="sm" />
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-text-primary">{name.trim() || t('bots.welcome.defaultName')}</span>
+                <span className="text-sm font-medium text-text-primary">{name.value.trim() || defaultName}</span>
                 <BotBadge />
               </div>
               <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-text-secondary">{preview}</p>
@@ -219,8 +316,9 @@ export function ModerationBotCard({ bot, serverId, canMutate, onSaved }: CardPro
   const t = useT();
   const stored = useMemo(() => parseModerationSettings(bot?.settings ?? {}), [bot?.settings]);
   const d = DEFAULT_MODERATION_SETTINGS;
+  const defaultName = t('bots.moderation.defaultName');
   const [enabled, setEnabled] = useState(bot?.enabled ?? false);
-  const [name, setName] = useState(bot?.name ?? t('bots.moderation.defaultName'));
+  const name = useDefaultableText(bot && !bot.defaultName ? bot.name : null, defaultName);
   const [words, setWords] = useState(stored.blockedWords.join('\n'));
   const [linkPolicy, setLinkPolicy] = useState<LinkPolicy>(stored.linkPolicy);
   const [domains, setDomains] = useState(stored.allowedDomains.join('\n'));
@@ -233,9 +331,11 @@ export function ModerationBotCard({ bot, serverId, canMutate, onSaved }: CardPro
   const [repeatWindow, setRepeatWindow] = useState(String(stored.repeat?.windowSeconds ?? d.repeat!.windowSeconds));
   const [exemptStaff, setExemptStaff] = useState(stored.exemptStaff);
   const [postNotice, setPostNotice] = useState(stored.postNotice);
-  const [noticeTemplate, setNoticeTemplate] = useState(stored.noticeTemplate ?? t('bots.moderation.defaultNotice'));
+  const noticeTemplate = useDefaultableText(stored.noticeTemplate, t('bots.moderation.defaultNotice'));
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
+  const nameNoteId = useId();
+  const noticeNoteId = useId();
 
   function buildSettings(): { ok: true; settings: Record<string, unknown> } | { ok: false; message: string } {
     const lines = (text: string) => text.split('\n').map((line) => line.trim()).filter(Boolean);
@@ -251,9 +351,10 @@ export function ModerationBotCard({ bot, serverId, canMutate, onSaved }: CardPro
     if (rawDomains.length > MODERATION_LIMITS.allowedDomains) {
       return { ok: false, message: t('bots.moderation.tooManyDomains', { count: MODERATION_LIMITS.allowedDomains }) };
     }
-    if (containsMassMention(noticeTemplate)) {
+    if (containsMassMention(noticeTemplate.value)) {
       return { ok: false, message: t('bots.error.massMention') };
     }
+    const noticePayload = noticeTemplate.payload();
     return {
       ok: true,
       settings: {
@@ -275,7 +376,7 @@ export function ModerationBotCard({ bot, serverId, canMutate, onSaved }: CardPro
           : null,
         exemptStaff,
         postNotice,
-        noticeTemplate: noticeTemplate.trim() || null,
+        ...(noticePayload !== undefined ? { noticeTemplate: noticePayload } : {}),
       },
     };
   }
@@ -289,11 +390,12 @@ export function ModerationBotCard({ bot, serverId, canMutate, onSaved }: CardPro
     }
     setSaving(true);
     setNotice(null);
+    const namePayload = name.payload();
     const result = await botApi<BotResponse>(t, `/api/servers/${serverId}/bots/builtin/moderation`, {
       method: 'PUT',
       body: {
         enabled: nextEnabled,
-        name: name.trim() || t('bots.moderation.defaultName'),
+        ...(namePayload !== undefined ? { name: namePayload } : {}),
         settings: built.settings,
       },
     });
@@ -303,6 +405,8 @@ export function ModerationBotCard({ bot, serverId, canMutate, onSaved }: CardPro
       return;
     }
     setEnabled(result.data.bot.enabled);
+    name.saved(result.data.bot.defaultName ? null : result.data.bot.name);
+    noticeTemplate.saved(parseModerationSettings(result.data.bot.settings ?? {}).noticeTemplate);
     onSaved(result.data.bot);
     setNotice({ tone: 'success', text: t('bots.saved') });
   }
@@ -313,7 +417,7 @@ export function ModerationBotCard({ bot, serverId, canMutate, onSaved }: CardPro
   return (
     <Card testId="moderation-bot-card">
       <BuiltInHeader
-        title={t('bots.moderation.defaultName')}
+        title={defaultName}
         description={t('bots.moderation.description')}
         bot={bot}
         enabled={enabled}
@@ -325,7 +429,18 @@ export function ModerationBotCard({ bot, serverId, canMutate, onSaved }: CardPro
       <div className="mt-5 grid gap-4 md:grid-cols-2">
         <Field label={t('bots.field.name')}>
           {(id) => (
-            <input id={id} value={name} maxLength={32} onChange={(e) => setName(e.target.value)} disabled={disabled} className={inputClass} />
+            <>
+              <input
+                id={id}
+                aria-describedby={nameNoteId}
+                value={name.value}
+                maxLength={32}
+                onChange={(e) => name.change(e.target.value)}
+                disabled={disabled}
+                className={inputClass}
+              />
+              <DefaultNote id={nameNoteId} kind="name" isDefault={name.isDefault} onReset={name.reset} disabled={disabled} />
+            </>
           )}
         </Field>
       </div>
@@ -452,16 +567,25 @@ export function ModerationBotCard({ bot, serverId, canMutate, onSaved }: CardPro
             })}
           >
             {(id, hintId) => (
-              <textarea
-                id={id}
-                aria-describedby={hintId}
-                rows={2}
-                maxLength={TEMPLATE_MAX_LENGTH}
-                value={noticeTemplate}
-                onChange={(event) => setNoticeTemplate(event.target.value)}
-                disabled={disabled}
-                className={inputClass}
-              />
+              <>
+                <textarea
+                  id={id}
+                  aria-describedby={[noticeNoteId, hintId].filter(Boolean).join(' ')}
+                  rows={2}
+                  maxLength={TEMPLATE_MAX_LENGTH}
+                  value={noticeTemplate.value}
+                  onChange={(event) => noticeTemplate.change(event.target.value)}
+                  disabled={disabled}
+                  className={inputClass}
+                />
+                <DefaultNote
+                  id={noticeNoteId}
+                  kind="text"
+                  isDefault={noticeTemplate.isDefault}
+                  onReset={noticeTemplate.reset}
+                  disabled={disabled}
+                />
+              </>
             )}
           </Field>
         </div>

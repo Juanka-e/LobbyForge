@@ -20,7 +20,7 @@ import {
 import { authorizeChannelMessageAccess } from '@/lib/message-authorization';
 import { publishChatMessage } from '@/lib/chat-bus';
 import { moderateMessage, moderationBlockedBody } from '@/lib/bots/moderation';
-import { readMessageBot } from '@/lib/bots/message-meta';
+import { messageBotJson } from '@/lib/bots/bot-i18n-server';
 import { emitMessageEvent } from '@/lib/bots/events';
 import { requireVerifiedEmail } from '@/lib/mail/verification';
 import { readMessagePollId } from '@/lib/chat-polls';
@@ -50,6 +50,10 @@ const RESERVED_METADATA_KEYS = new Set([
   // Polls in text channels: `poll.id` is written only by the poll route, in
   // the same transaction as the poll — a member must not attach one by hand.
   'poll',
+  // A built-in bot's default text names its catalogue string, so each viewer
+  // reads it in their own language (lib/bots/bot-i18n.ts). Server-written
+  // only — and honoured on bot messages only.
+  'i18n',
 ]);
 
 function validateUserMetadata(metadata: Record<string, unknown> | undefined): NextResponse | null {
@@ -78,9 +82,10 @@ function toJson(message: MessageRow): Record<string, unknown> {
     id: message.id,
     channelId: message.channelId,
     userId: message.userId,
-    // Bots milestone: a bot-authored message has userId null and names its bot.
+    // Bots milestone: a bot-authored message has userId null and names its bot
+    // (`defaultName: true` when a built-in bot still has its default name).
     botId: message.botId ?? null,
-    bot: readMessageBot(message),
+    bot: messageBotJson(message),
     content: message.content,
     metadata: message.metadata,
     replyToId: message.replyToId,

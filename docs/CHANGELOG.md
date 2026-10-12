@@ -2,6 +2,16 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Bots speak each viewer's language - 2026-10-12
+
+- **Built-in bots:** the Welcome Bot's default greeting, the Moderation Bot's default notice and both bots' default names now show in each member's own language. A Turkish member reads "Ayşe, Oyun Gecesi sunucusuna hoş geldin!" while an English member reads "Welcome to Oyun Gecesi, Ayşe!" in the same channel. A greeting, notice or name an admin writes is shown to everyone exactly as written. Before, the bots spoke only the instance language.
+- **How it's stored:** the message is still stored once, with its text in the instance language as the fallback for bots, search and older apps. A default text also carries `metadata.i18n = { key, params }`, which the lobby renders in the viewer's language, both on first paint and live. `i18n` is a reserved metadata key: members can't send it, and the lobby only honours it on a bot's message and for the two default-text keys. A name is the default when it equals a shipped default name in any installed language. Message and bot payloads to browsers then carry `bot.defaultName: true`. Nothing new is stored for names.
+- **Bot settings:** the name, greeting and notice fields are still pre-filled with the defaults in your language, but a field is only sent once you edit it. Before, one save stored the defaults in the admin's language as if the admin had written them. Each field now says whether members see it in their own language or exactly as written, and "Use the default" switches back. `PUT …/bots/builtin/{type}` takes `name: null` for the default name.
+- **Existing bots:** a stored greeting or notice that is word for word a shipped default (in any installed language) counts as the default, with no migration. It's read as the default at once, and stored as `null` with the next save that changes something.
+- **Bot API v2:** `interaction_create` carries `locale`, the invoker's language code (their choice, else their browser's, else the instance default). It's on the event stream and on HTTP endpoint deliveries alike. The field is additive and optional in the SDK types; older instances don't send it. `docs/BOT_API_V2.md` has a new "Languages" section.
+- **SDK:** the `/roll` examples answer each member in their language ("Ayşe rolled 18 (20-sided)" / "Ayşe 18 attı (20 yüzlü)"), with the strings in `examples/roll-text.mjs`. The `locale.ts` doc example now uses `interaction.locale` instead of a `ctx.locale` that never existed.
+- **Upgrade notes:** no migration and no new dependency.
+
 ## [Unreleased] - The desktop app and its installer speak every shipped language - 2026-10-12
 
 - **Connect screen and tray:** their text now lives in `apps/web/messages/<code>/desktop.json` (en, tr). The app picks the system's language and falls back to English. The tray menu gets its labels from the connect screen and keeps them for the next launch.

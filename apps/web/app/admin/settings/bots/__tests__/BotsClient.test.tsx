@@ -217,16 +217,97 @@ describe('BotsClient', () => {
     expect(screen.getByText('Hi Alex!')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('switch', { name: 'Enable the welcome bot' }));
     await waitFor(() => expect(calls).toHaveLength(1));
+    // The untouched name is not sent: it stays the default.
     expect(calls[0]).toEqual({
       url: `/api/servers/${SERVER}/bots/builtin/welcome`,
       method: 'PUT',
       body: {
         enabled: true,
-        name: 'Welcome Bot',
         settings: { channelId: '22222222-2222-4222-8222-222222222222', template: 'Hi {user}!' },
       },
     });
     await screen.findByText('Saved.');
+  });
+
+  describe('defaults are never saved as the admin’s own text', () => {
+    const welcomeResponse = (call: Call) =>
+      Response.json({
+        bot: bot({ id: 'w1', type: 'welcome', builtIn: true, name: 'Welcome Bot', defaultName: true, trustLevel: 'official', tokenConfigured: false, settings: { channelId: null, template: null } }),
+        created: true,
+        sent: call.body,
+      });
+
+    it('switching the Welcome Bot on sends no name and no greeting — in any admin language', async () => {
+      respond = welcomeResponse;
+      renderPage([], 'tr');
+      // Pre-filled with the defaults in the admin's language…
+      expect(within(screen.getByTestId('welcome-bot-card')).getByLabelText('Ad')).toHaveValue('Karşılama Botu');
+      expect(screen.getByLabelText('Karşılama mesajı')).toHaveValue('{user}, {server} sunucusuna hoş geldin! Seni aramızda görmek güzel.');
+      expect(screen.getAllByText('Varsayılan metin: her üye kendi dilinde görür.').length).toBeGreaterThan(0);
+      fireEvent.click(screen.getByRole('switch', { name: 'Karşılama botunu etkinleştir' }));
+      await waitFor(() => expect(calls).toHaveLength(1));
+      // …but none of it is sent.
+      expect(calls[0]!.body).toEqual({ enabled: true, settings: { channelId: null } });
+      expect(JSON.stringify(calls[0]!.body)).not.toContain('Karşılama');
+    });
+
+    it('switching the Moderation Bot on sends no name and no notice', async () => {
+      respond = () => Response.json({ bot: bot({ id: 'm1', type: 'moderation', builtIn: true, name: 'Moderation Bot', defaultName: true, trustLevel: 'official' }), created: true });
+      renderPage();
+      fireEvent.click(screen.getByRole('switch', { name: 'Post a notice in the channel' }));
+      expect(screen.getByLabelText('Notice')).toHaveValue('A message from {user} was blocked by the moderation filter.');
+      fireEvent.click(screen.getByRole('switch', { name: 'Enable the moderation bot' }));
+      await waitFor(() => expect(calls).toHaveLength(1));
+      const body = calls[0]!.body as { name?: unknown; settings: Record<string, unknown> };
+      expect(body).not.toHaveProperty('name');
+      expect(body.settings).not.toHaveProperty('noticeTemplate');
+      expect(body.settings.postNotice).toBe(true);
+    });
+
+    it('sends what the admin edits; cleared or edited back to the default, it sends null', async () => {
+      respond = welcomeResponse;
+      renderPage();
+      fireEvent.change(within(screen.getByTestId('welcome-bot-card')).getByLabelText('Name'), { target: { value: 'Kapıcı' } });
+      // Edited, then put back to the default word for word: still the default.
+      fireEvent.change(screen.getByLabelText('Greeting'), { target: { value: 'Welcome, {user}!' } });
+      fireEvent.change(screen.getByLabelText('Greeting'), { target: { value: 'Welcome to {server}, {user}! Glad you are here.' } });
+      fireEvent.click(within(screen.getByTestId('welcome-bot-card')).getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls[0]!.body).toMatchObject({ name: 'Kapıcı', settings: { template: null } });
+
+      fireEvent.change(within(screen.getByTestId('welcome-bot-card')).getByLabelText('Name'), { target: { value: '   ' } });
+      fireEvent.click(within(screen.getByTestId('welcome-bot-card')).getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(calls).toHaveLength(2));
+      expect(calls[1]!.body).toMatchObject({ name: null });
+      expect((calls[1]!.body as { settings: Record<string, unknown> }).settings).not.toHaveProperty('template');
+    });
+
+    it('an admin’s own greeting can go back to the default', async () => {
+      respond = welcomeResponse;
+      renderPage([
+        bot({ id: 'w1', type: 'welcome', builtIn: true, name: 'Greeter', defaultName: false, trustLevel: 'official', tokenConfigured: false, settings: { channelId: null, template: 'Hi {user}!' } }),
+      ]);
+      expect(within(screen.getByTestId('welcome-bot-card')).getByLabelText('Name')).toHaveValue('Greeter');
+      expect(screen.getByLabelText('Greeting')).toHaveValue('Hi {user}!');
+      expect(screen.getAllByText('Your own text: everyone sees it exactly as written.').length).toBeGreaterThan(0);
+      const card = screen.getByTestId('welcome-bot-card');
+      // The name and the greeting each have their own way back.
+      fireEvent.click(within(card).getAllByRole('button', { name: 'Use the default' })[1]!);
+      expect(screen.getByLabelText('Greeting')).toHaveValue('Welcome to {server}, {user}! Glad you are here.');
+      fireEvent.click(within(card).getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(calls).toHaveLength(1));
+      // The name was not touched, so it is not sent.
+      expect(calls[0]!.body).toEqual({ enabled: true, settings: { channelId: null, template: null } });
+    });
+
+    it('shows a default-named bot in the admin’s language, whatever language it was stored in', () => {
+      renderPage(
+        [bot({ id: 'w1', type: 'welcome', builtIn: true, name: 'Welcome Bot', defaultName: true, trustLevel: 'official', tokenConfigured: false, settings: { channelId: null, template: null } })],
+        'tr'
+      );
+      expect(within(screen.getByTestId('welcome-bot-card')).getByLabelText('Ad')).toHaveValue('Karşılama Botu');
+      expect(within(screen.getByTestId('welcome-bot-card')).getByRole('heading', { level: 3 })).toHaveTextContent('Karşılama Botu');
+    });
   });
 
   it('saves the Moderation Bot rules', async () => {

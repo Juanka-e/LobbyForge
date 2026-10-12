@@ -69,7 +69,8 @@ import { initialOf } from '@/lib/initial';
 import { projectDmChannel, projectMemberProfile } from '@/lib/profile-privacy';
 import { notifyMemberJoined } from '@/lib/bots/welcome';
 import { resolveAutoJoinServerId } from '@/lib/lobby-auto-join';
-import { readMessageBot } from '@/lib/bots/message-meta';
+import { botMessageForViewer, withDefaultNameFlag } from '@/lib/bots/bot-i18n-server';
+import { botDisplayName } from '@/lib/bots/bot-i18n';
 import { readMessageInteraction, readMessageWebhook } from '@/lib/bots/interaction-meta';
 import { isPollChannelType, type ChatPollView } from '@/lib/chat-polls';
 import { loadPollViewsForMessages } from '@/lib/chat-polls-server';
@@ -377,18 +378,20 @@ function buildMessages(
         blocked: true,
       } satisfies ChatMessage;
     }
-    const bot = readMessageBot(m);
-    if (bot) {
+    // A built-in bot's default name and default texts in the viewer's
+    // language (lib/bots/bot-i18n.ts); anything an admin wrote as written.
+    const botView = botMessageForViewer(m, t);
+    if (botView) {
       const interaction = readMessageInteraction(m);
       return {
         id: m.id,
         authorId: null,
-        author: bot.name || t('lobbyMain.chat.unknownBot'),
+        author: botView.author,
         timestamp: formatMessageTimestamp(m.createdAt, t),
         createdAt: m.createdAt.toISOString(),
-        body: m.content,
+        body: botView.body,
         pinned: typeof m.metadata.$pinnedAt === 'string',
-        bot,
+        bot: botView.bot,
         interaction: interaction && {
           ...interaction,
           invokedBy: {
@@ -687,14 +690,15 @@ async function loadLiveData(
     canStartActivities,
     canCreatePolls,
     installedApps,
-    bots: botRows.filter((bot) => bot.enabled).map(toLobbyBot),
+    bots: botRows.filter((bot) => bot.enabled).map((bot) => toLobbyBot(bot, t)),
   };
 }
 
-function toLobbyBot(bot: BotRow): LobbyBot {
+function toLobbyBot(bot: BotRow, t: Translator): LobbyBot {
   return {
     id: bot.id,
-    name: bot.name,
+    // A built-in bot still named its default shows it in the viewer's language.
+    name: botDisplayName(withDefaultNameFlag({ name: bot.name, type: bot.type }), t),
     type: bot.type,
     builtIn: isBuiltInType(bot.type),
     trustLevel: botTrustLevel(bot.type),

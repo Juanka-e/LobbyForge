@@ -19,6 +19,7 @@ import { emitMemberEvent } from './events';
 import { postBotMessage } from './messages';
 import { parseWelcomeSettings } from './settings';
 import { defaultBotText, renderBotTemplate } from './templates';
+import { botTextI18n, customBotText } from './bot-i18n-server';
 
 export const WELCOME_RATE: RateLimitConfig = { windowMs: 60_000, maxRequests: 10 };
 
@@ -47,11 +48,21 @@ export async function notifyMemberJoined(input: { serverId: string; userId: stri
     ]);
     if (!member || !server) return;
 
-    const template = settings.template ?? defaultBotText('bots.welcome.defaultTemplate');
-    const content = renderBotTemplate(template, { user: member.displayName, server: server.name });
+    // A template equal to a shipped default (in any language) is the default.
+    const custom = customBotText('bots.welcome.defaultTemplate', settings.template);
+    const values = { user: member.displayName, server: server.name };
+    const content = renderBotTemplate(custom ?? defaultBotText('bots.welcome.defaultTemplate'), values);
     if (!content) return;
 
-    const posted = await postBotMessage({ bot, channelId, content });
+    // The default greeting also names its catalogue string, so every
+    // viewer reads it in their own language (lib/bots/bot-i18n.ts); the
+    // admin's own text is shown exactly as written.
+    const posted = await postBotMessage({
+      bot,
+      channelId,
+      content,
+      ...(custom ? {} : { metadata: botTextI18n('bots.welcome.defaultTemplate', values) }),
+    });
     if (!posted.ok) console.warn(`[bots] welcome not posted in ${channelId}: ${posted.code}`);
   } catch (err) {
     console.error('[bots] welcome failed:', (err as Error).message);

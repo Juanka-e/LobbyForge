@@ -18,7 +18,7 @@ import { withApiSecurity } from '@/lib/security-headers';
 import { authorizeChannelMessageAccess } from '@/lib/message-authorization';
 import { authorizeServerPermission } from '@/lib/permissions';
 import { moderateMessage, moderationBlockedBody } from '@/lib/bots/moderation';
-import { readMessageBot } from '@/lib/bots/message-meta';
+import { messageBotJson } from '@/lib/bots/bot-i18n-server';
 import { emitMessageEvent } from '@/lib/bots/events';
 import { publishChatMessageDelete, publishChatMessageUpdate } from '@/lib/chat-bus';
 import { requireVerifiedEmail } from '@/lib/mail/verification';
@@ -47,7 +47,7 @@ function toJson(message: MessageRow): Record<string, unknown> {
     channelId: message.channelId,
     userId: message.userId,
     botId: message.botId ?? null,
-    bot: readMessageBot(message),
+    bot: messageBotJson(message),
     content: message.content,
     metadata: message.metadata,
     replyToId: message.replyToId,

@@ -246,11 +246,14 @@ describe('events', () => {
       options: { sides: 20 },
       channelId: CH1,
       user: { id: USER, displayName: 'Ayşe' },
+      // The invoker's language travels with the interaction.
+      locale: 'tr',
       expiresAt: '2026-10-03T12:15:00.000Z',
     };
     const received = new Promise<void>((resolve) => {
       bot.on('interaction', async (i) => {
         expect(i).toMatchObject(interaction);
+        expect(i.locale).toBe('tr');
         await i.reply('🎲 17', { ephemeral: true });
         await i.followup('again');
         resolve();

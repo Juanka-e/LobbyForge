@@ -31,6 +31,15 @@ export function renderBotTemplate(template: string, values: Record<string, strin
 }
 
 /**
+ * The values exactly as `renderBotTemplate` inserts them — for a default
+ * text stored as `metadata.i18n` params (lib/bots/bot-i18n.ts), so each
+ * viewer's rendering gets the same cleaned names.
+ */
+export function cleanBotTemplateValues(values: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(values).map(([name, value]) => [name, cleanValue(value)]));
+}
+
+/**
  * The language the built-in bots speak when an admin has not written
  * their own text: the instance default (`LOBBYFORGE_DEFAULT_LOCALE`) when
  * it is installed, else English. A bot posts to everyone at once, so it
