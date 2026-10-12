@@ -1119,7 +1119,9 @@ allow.
 - **Custom bots** are driven through the [Bot API](#bot-api-v1) with a token.
   A server can have up to 20.
 - **Channels.** Bots use text and announcement channels that every member can
-  see. A role-gated channel (a private channel) is never available to a bot:
+  see. A role-gated channel (a private channel) is not available to a bot
+  unless someone with *Manage Channels* grants it explicitly
+  ([channel access](BOT_API_V2.md#11-channel-access-per-bot-botschannel_access_mode--bot_channel_access)):
   a bot holds no roles, so there is no way to let it in by accident.
 - **No mass pings.** A bot can never mention \`@everyone\` or \`@here\`.
 
@@ -1179,8 +1181,28 @@ lfb_<bot id: 32 hex>_<secret: 43 base64url characters>
   at once. **Revoke** removes the token; the bot stays but cannot call the
   API. **Deleting** a bot also ends its token. Every one of these is written
   to the audit log (without the token).
+- **Rotate and revoke also switch off the bot's event endpoint.** The
+  outgoing HTTPS endpoint ([Bot API v2](BOT_API_V2.md#52-outgoing-bot-event-endpoint))
+  was set by whoever held the old token, who chose its URL and knows its
+  signing secret. So the endpoint goes off (\`disabled_reason =
+  'token_changed'\`, audited as \`bot.event_endpoint.disable\`): no events, no
+  interactions and no synchronous answers reach it, and a command of the
+  bot answers \`bot_offline\` until the bot is reachable again. A manager
+  cannot switch such an endpoint back on — the bot sets it again with the
+  new token (\`PUT /api/bot/v2/event-endpoint\`, which issues a new secret),
+  or a manager removes it. An open event stream is closed too.
+- **A token outlives the person who issued it.** It belongs to the bot, not
+  to a member: a manager who leaves, is banned or loses Manage Community
+  does not take the bot's token with them. Rotate it when someone who had
+  it should no longer act as the bot.
+- **Private channels.** A bot granted role-gated channels by someone with
+  *Manage Channels* reaches channels other managers may not see. A manager
+  who cannot see one of them (and cannot grant private channels) cannot take
+  that bot's token, nor give it \`read_messages\`, \`send_messages\`,
+  \`receive_events\` or \`slash_commands\` — \`403 cannot_take_hidden_access\`.
+  Revoking the token, or removing permissions, is always allowed.
 
-If a token leaks, rotate it.
+If a token leaks, rotate it — the bot's endpoint goes off with it.
 
 ## Bot API v1
 
@@ -1280,7 +1302,9 @@ v1 stays as it is. v2 adds, all scoped per channel:
 - **Event stream** — the bot connects to the gateway at \`/ws/bot\`
   (\`Authorization: Bot <token>\` or an \`identify\` message) and receives
   \`message_*\`, \`member_*\` and \`interaction_create\` events instead of
-  polling.
+  polling. A \`member_leave\` event says why the member left (\`reason\`:
+  \`leave\`, \`kick\` or \`ban\`) to every bot with \`read_members\` — a bot that
+  reads members learns who was kicked or banned.
 - **Outgoing event endpoint** — or the instance POSTs the same events to the
   bot's HTTPS URL, signed with HMAC-SHA256 (\`X-LobbyForge-Signature\`).
 - **Incoming webhooks** — a channel's webhook URL lets an outside service
@@ -1393,17 +1417,19 @@ permission, except listing):
 |---|---|---|---|
 | \`GET\` | \`/api/servers/{id}/bots\` | | every member; settings only for managers; never a token or hash |
 | \`POST\` | \`/api/servers/{id}/bots\` | \`{ name, permissions }\` | \`201 { bot, token }\` — the only time the token is returned |
-| \`PATCH\` | \`/api/servers/{id}/bots/{botId}\` | \`{ name?, enabled?, permissions? }\` | built-in permissions cannot change |
+| \`PATCH\` | \`/api/servers/{id}/bots/{botId}\` | \`{ name?, enabled?, permissions? }\` | built-in permissions cannot change; adding a channel permission to a bot with private channels the caller cannot see → \`403 cannot_take_hidden_access\` |
 | \`DELETE\` | \`/api/servers/{id}/bots/{botId}\` | | its messages stay, still marked as a bot's |
-| \`POST\` | \`/api/servers/{id}/bots/{botId}/token\` | | issue or rotate: \`{ bot, token }\` |
-| \`DELETE\` | \`/api/servers/{id}/bots/{botId}/token\` | | revoke |
+| \`POST\` | \`/api/servers/{id}/bots/{botId}/token\` | | issue or rotate: \`{ bot, token }\`; switches the event endpoint off; \`403 ungrantable_permissions\` / \`cannot_take_hidden_access\` |
+| \`DELETE\` | \`/api/servers/{id}/bots/{botId}/token\` | | revoke; switches the event endpoint off |
 | \`PUT\` | \`/api/servers/{id}/bots/builtin/{welcome\\|moderation}\` | \`{ enabled?, name?, settings? }\` | sets the bot up on first call; settings are merged; \`name: null\` (or none, on first call) = the default name; a template that is \`null\` or a shipped default = the default text |
 
 Audit log actions: \`bot.create\`, \`bot.update\` (with what changed — for
 moderation settings, counts, never the word list), \`bot.enable\`,
 \`bot.disable\`, \`bot.delete\`, \`bot.token.issue\`, \`bot.token.rotate\`,
-\`bot.token.revoke\`, \`bot.moderation.block\`, and \`message.create\` for bot
-messages (\`metadata.botId\`).
+\`bot.token.revoke\` (\`metadata.endpointDisabled\` when the change switched an
+event endpoint off, which is also written as \`bot.event_endpoint.disable\`
+with \`reason: 'token_changed'\`), \`bot.moderation.block\`, and
+\`message.create\` for bot messages (\`metadata.botId\`).
 
 ## How bots appear
 
@@ -1594,6 +1620,17 @@ working unchanged. v2 adds four things, all **scoped per channel**:
 - The bot admin routes also publish \`bot-access\` invalidations:
   \`permissions_changed\` / \`enabled_changed\` (PATCH), \`deleted\` (DELETE),
   \`token_changed\` (token rotate / revoke).
+- Hidden grants and the token (security review BOT-001): whoever holds the
+  token reads and posts in every channel the bot reaches. So a manager
+  without Manage Channels for whom the bot has hidden grants (role-gated
+  channels they cannot see) can neither issue / rotate its token (\`POST
+  …/bots/{botId}/token\`) nor add \`read_messages\`, \`send_messages\`,
+  \`receive_events\` or \`slash_commands\` to it (\`PATCH …/bots/{botId}\`):
+  403 \`cannot_take_hidden_access\` (the refusal names no channel). Owner,
+  administrators and Manage Channels holders see every channel, so they
+  are never refused; revoking the token or removing a permission is always
+  allowed. Code: \`refuseHiddenChannelReach\` in \`lib/bots/admin.ts\`, over
+  the same \`loadChannelAccessView\` as the channel-access routes.
 
 ### 1.2 New bot permissions (\`@lobbyforge/bot-sdk\` \`BotPermission\`)
 | id | needs from the granter (core) | allows |
@@ -1778,10 +1815,21 @@ As implemented (\`apps/web/app/api/bot/v2/**\`, on v1's pipeline in
 - \`GET /event-endpoint\` (added) → \`{ endpoint: {...} | null }\`, never the
   secret. \`PUT /event-endpoint\` \`{ url, events? }\` → \`{ endpoint, secret }\`:
   **every PUT issues a new secret** (returned only there; the old one stops
-  signing at once) and re-arms a disabled endpoint. \`events\` ⊆ the §4.2
+  signing at once) and re-arms a disabled endpoint — including one switched
+  off by a token rotate / revoke (\`token_changed\`, §5.2): that is how the
+  new token's holder takes it over. \`events\` ⊆ the §4.2
   names minus \`ready\`; default = everything the bot's permissions allow.
-  A URL that is not https, has credentials, or does not resolve only to
-  public addresses → 400 \`invalid_endpoint\`. PUT/DELETE share 10/min.
+  A URL that is not https, has credentials, has a single-label host
+  (\`https://postgres/\`, \`https://web./\` — names that only resolve inside a
+  private network; IP literals are judged by their address), or does not
+  resolve within 2 s only to public addresses → 400 \`invalid_endpoint\`.
+  The \`error\` for the address case is always the same sentence ("url must
+  resolve, over public DNS, to public internet addresses only"): never the
+  address it resolved to, the host name or the resolver's error — those go
+  to the server log only (security review BOT-004). The save is bound to
+  the token that authenticated it: if that token was rotated or revoked
+  while the request ran (say during the DNS check), nothing is saved →
+  401 \`unauthorized\`. PUT/DELETE share 10/min.
   Audit \`bot.event_endpoint.set\` / \`.remove\` (host + events, never the
   secret).
 - \`GET /members/{userId}\` → \`{ member: { id, displayName, nickname,
@@ -2078,7 +2126,7 @@ at-most-once; there is no replay. A bot that reconnects backfills with
   in the process that changed something) plus at most one role-gate
   lookup per message — never a query per bot. Each queued delivery
   re-reads the bot and re-checks \`read_messages\` + channel access before
-  it is sent, so a stale cache cannot leak a message.
+  every attempt (retries included), so a stale cache cannot leak a message.
 - Access changes publish on \`lf:access-invalidation\`:
   \`{ kind: 'bot-access', serverId, botId, reason }\`. Browser
   subscriptions ignore it.
@@ -2151,6 +2199,19 @@ at-most-once; there is no replay. A bot that reconnects backfills with
 - HTTPS only; the URL is checked with the IP-pinned SSRF transport
   (\`apps/web/lib/ip-pinned-https.ts\`) — private, loopback, link-local and
   metadata addresses are refused at save time AND at delivery time.
+- **A token rotate or revoke switches the endpoint off** (security review
+  BOT-002). Its URL and signing secret were set by whoever held the old
+  token, so in the same transaction as the new token hash
+  (\`changeBotToken\`) the endpoint gets \`enabled = false\`,
+  \`disabled_reason = 'token_changed'\` (audited \`bot.event_endpoint.disable\`
+  \`{ reason: 'token_changed' }\`). From then on it is offline everywhere:
+  no event or interaction is delivered (a queued retry is dropped), a
+  synchronous answer that arrives after the change is not applied, and a
+  command of the bot answers 409 \`bot_offline\` unless its event stream is
+  connected (the stream opened with the old token was closed). A manager
+  cannot re-enable it (PATCH → 409 \`endpoint_token_changed\`); the bot sets
+  it again with its new token (\`PUT /event-endpoint\`, new secret), or a
+  manager removes it (DELETE).
 - Each delivery: \`POST <url>\` with body \`{ id, event, timestamp, data }\`
   and headers
   \`X-LobbyForge-Event\`, \`X-LobbyForge-Delivery\` (uuid),
@@ -2178,21 +2239,37 @@ at-most-once; there is no replay. A bot that reconnects backfills with
     \`disabled_reason = 'too_many_failures'\` and is audited
     (\`bot.event_endpoint.disable\`). Managers: \`GET|PATCH|DELETE
     /api/servers/{id}/bots/{botId}/event-endpoint\` (status without the
-    secret; PATCH \`{ enabled: true }\` re-enables and resets the counter;
-    audit \`bot.event_endpoint.enable\` / \`.remove\`);
-  - every attempt re-resolves DNS, refuses private / loopback /
-    link-local / CGNAT / ULA / metadata addresses and pins the connection
-    to the addresses it checked; redirects are never followed; the answer
-    is read up to 64 KiB;
-  - the queue is in-process (16 deliveries in flight, 2 000 waiting,
-    interactions first) and NOT durable: deliveries waiting for a retry
-    are lost when the web process restarts (events are at-most-once);
-  - before the first attempt the current bot row is re-read: still
-    enabled, still \`receive_events\`, the endpoint still enabled and
-    subscribed, plus the event's own check (message events:
+    secret; PATCH \`{ enabled: true }\` re-enables and resets the counter —
+    never for \`token_changed\`, 409 \`endpoint_token_changed\`; DELETE removes
+    it; audit \`bot.event_endpoint.enable\` / \`.remove\`);
+  - every attempt re-resolves DNS — with the c-ares resolver and a 2 s
+    deadline, so a stalling authoritative server costs one cancelled
+    query, not a libuv threadpool thread (the pool is shared with scrypt;
+    the container also raises \`UV_THREADPOOL_SIZE\` to 16) — refuses
+    private / loopback / link-local / CGNAT / ULA / metadata addresses
+    (and single-label hosts) and pins the connection to the addresses it
+    checked; redirects are never followed; the answer is read up to 64 KiB;
+  - the queue is in-process and NOT durable: deliveries waiting for a
+    retry are lost when the web process restarts (events are
+    at-most-once). It is fair across tenants (security review BOT-003):
+    each bot has its own lane (interactions first within it), lanes are
+    grouped per server, and a free slot goes round-robin — the next
+    server, then that server's next bot. Caps: 16 deliveries in flight per
+    process, 8 per server, 2 per bot; 100 waiting per bot (a full lane
+    drops its OWN oldest normal delivery) and 2 000 in all (the longest
+    lane gives one up). An attempt that takes over 1 s — even a 2xx — or
+    fails counts toward a back-off: after 3 in a row the bot's lane waits
+    1 s, then 2 s, 4 s … up to 60 s between attempts, until an answer
+    comes quickly again; deliveries still go out, just not faster than the
+    endpoint can take them;
+  - before EVERY attempt (the first and each retry) and again before a
+    synchronous interaction answer is applied, the current bot row and
+    endpoint are re-read: the bot still enabled, still \`receive_events\`,
+    the endpoint still enabled, subscribed and the very URL + secret the
+    delivery was signed for, plus the event's own check (message events:
     \`read_messages\` + channel access; member events: \`read_members\`;
-    interactions: \`slash_commands\` + channel access). A retry is dropped
-    if the endpoint was switched off or its URL/secret replaced.
+    interactions: \`slash_commands\` + channel access). Anything else drops
+    the delivery (or the answer) silently.
 
 ## 6. SDK (\`@lobbyforge/bot-sdk\` v2)
 \`\`\`ts
@@ -2282,7 +2359,8 @@ only after Ctrl+C / SIGTERM.
 - Admin → Bots: per bot — permissions incl. the new ones, channel access
   (all eligible / chosen channels), registered commands (read-only list,
   enable/disable per command, channel restriction), event endpoint
-  status (URL, last delivery, failures, re-enable).
+  status (URL, last delivery, failures, why it stopped, re-enable — not
+  after a token change — and remove, with a confirmation).
 - Admin → Channels: per text channel — incoming webhooks (create, copy
   URL once, rotate, disable, delete).
 - Everything themed (Tailwind tokens), en + tr.
@@ -2310,8 +2388,11 @@ Every path and payload the UI reads is in one module,
 - Admin → Bots calls \`GET|PUT …/bots/{botId}/channel-access\` (PUT
   \`{ channelIds: [...] | null }\`), \`GET …/bots/{botId}/commands\` +
   \`PATCH …/commands/{commandId}\` (\`{ enabled?, channelIds? }\` — the
-  managers' restriction), \`GET|PATCH …/bots/{botId}/event-endpoint\`
-  (\`{ enabled: true }\` re-enables). Admin → Channels calls
+  managers' restriction), \`GET|PATCH|DELETE …/bots/{botId}/event-endpoint\`
+  (\`{ enabled: true }\` re-enables; \`endpoint_token_changed\` is shown as
+  "switched off because the bot's token changed"; DELETE removes it).
+  \`cannot_take_hidden_access\` (token or permissions refused, §1.1) is
+  shown in the admin's language. Admin → Channels calls
   \`GET|POST …/channels/{channelId}/webhooks\`, \`PATCH|DELETE
   …/webhooks/{webhookId}\` and \`POST …/webhooks/{webhookId}/token\` (rotate).
 
@@ -2324,7 +2405,15 @@ Every path and payload the UI reads is in one module,
 - Webhook tokens and bot tokens are stored hashed; event-endpoint secrets
   are stored (needed to sign) and never returned after creation.
 - Outgoing deliveries never reach private networks (save + delivery
-  checks, no redirects).
+  checks, no redirects), and a refused URL is never explained with what it
+  resolved to.
+- A token rotate / revoke switches the event endpoint off; deliveries,
+  retries and synchronous answers re-check the bot and its endpoint each
+  time.
+- Nobody takes a token (or adds a channel permission) for a bot that
+  reaches private channels they cannot see.
+- One bot or server cannot hold the delivery queue: per-bot and per-server
+  caps, round-robin, back-off for slow endpoints.
 - No event ever carries a message from a channel the bot cannot access.
 - Commands and webhook posts obey timeouts, bans, slow paths and the
   Moderation Bot exactly like member posts.
