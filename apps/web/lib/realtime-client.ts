@@ -9,7 +9,9 @@
  * The client handles auto-reconnect with exponential backoff (cap at
  * 30s). While disconnected, new `subscribe()` calls are queued and
  * replayed on the next `open` event. Existing subscriptions are
- * remembered across reconnects.
+ * remembered across reconnects. The gateway keeps no backlog, so events
+ * published while the socket was down are gone: `onReconnect` tells a
+ * subscriber that shows state to re-read it.
  *
  * Used by the room page for activity-state streaming (replaces the
  * per-session EventSource) and will be used by the future chat UI for
@@ -117,6 +119,10 @@ export class RealtimeClient {
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   private explicitClose = false;
   private readonly onError: ((err: Error) => void) | undefined;
+  private readonly reconnectListeners = new Set<() => void>();
+  /** A socket has authenticated before: the next `hello` is a reconnect. */
+  private authenticatedOnce = false;
+  private wakeListenersInstalled = false;
 
   constructor(options: RealtimeClientOptions = {}) {
     this.url = options.url ?? defaultUrl();
@@ -124,13 +130,58 @@ export class RealtimeClient {
   }
 
   connect(): void {
+    this.installWakeListeners();
     if (this.socket && this.socket.readyState <= WebSocket.OPEN) return;
     this.explicitClose = false;
     this.openSocket();
   }
 
+  /**
+   * Called each time the socket authenticates again after a lost
+   * connection (never for the first one). Returns the unsubscribe.
+   */
+  onReconnect(listener: () => void): () => void {
+    this.reconnectListeners.add(listener);
+    return () => {
+      this.reconnectListeners.delete(listener);
+    };
+  }
+
+  /**
+   * The network came back (`online`) or the tab is visible again. Both
+   * reset the backoff and lift the 20-attempt circuit breaker, so a
+   * client that gave up while the laptop slept connects at once.
+   *
+   * A socket can look OPEN and be dead (the network changed under it, a
+   * phone froze the page): the heartbeat would notice only after 60 s,
+   * and the screen stays stale until then. `online` therefore replaces
+   * the socket outright; becoming visible only reconnects one that is
+   * already closed (subscribers re-read their state on their own).
+   */
+  wake(reason: 'online' | 'visible'): void {
+    if (this.explicitClose) return;
+    this.reconnectAttempt = 0;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    const socket = this.socket;
+    if (socket && socket.readyState <= WebSocket.OPEN) {
+      if (reason !== 'online') return;
+      this.socket = null;
+      this.clearHeartbeat();
+      try {
+        socket.close(4001, 'network changed');
+      } catch {
+        /* swallow */
+      }
+    }
+    this.openSocket();
+  }
+
   close(): void {
     this.explicitClose = true;
+    this.removeWakeListeners();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -196,7 +247,9 @@ export class RealtimeClient {
       return;
     }
 
-    this.socket.addEventListener('open', () => {
+    const socket = this.socket;
+    socket.addEventListener('open', () => {
+      if (this.socket !== socket) return;
       this.reconnectAttempt = 0;
       // The subscription map is the desired state: replay it once and drop
       // the queued subscribe/unsubscribe messages (replaying both sent every
@@ -208,7 +261,8 @@ export class RealtimeClient {
       this.armHeartbeat();
     });
 
-    this.socket.addEventListener('message', (ev) => {
+    socket.addEventListener('message', (ev) => {
+      if (this.socket !== socket) return;
       this.armHeartbeat();
       let parsed: ServerMessage;
       try {
@@ -225,6 +279,8 @@ export class RealtimeClient {
         for (const topic of this.subscriptions.keys()) {
           this.send({ type: 'subscribe', topic });
         }
+        if (this.authenticatedOnce) this.notifyReconnect();
+        this.authenticatedOnce = true;
       } else if (parsed.type === 'event') {
         const set = this.subscriptions.get(parsed.topic as Topic);
         if (!set) return;
@@ -242,13 +298,15 @@ export class RealtimeClient {
       }
     });
 
-    this.socket.addEventListener('close', () => {
+    socket.addEventListener('close', () => {
+      // A socket `wake` replaced: the new one is already in charge.
+      if (this.socket !== socket) return;
       this.clearHeartbeat();
       this.socket = null;
       if (!this.explicitClose) this.scheduleReconnect();
     });
 
-    this.socket.addEventListener('error', () => {
+    socket.addEventListener('error', () => {
       // Browsers intentionally don't expose error details; rely on `close`.
     });
   }
@@ -259,7 +317,7 @@ export class RealtimeClient {
     // Circuit breaker: stop reconnecting after 20 consecutive failures.
     // This prevents infinite hammering when the ws-gateway is permanently
     // down (e.g., not started in the container). The client will retry on
-    // the next page load or visibilitychange → visible.
+    // the next page load, `online`, or visibilitychange → visible (wake).
     if (this.reconnectAttempt >= 20) {
       console.warn('[realtime] gave up after 20 reconnect attempts — ws-gateway may be down');
       this.subscriptions.forEach((handlers) => {
@@ -280,6 +338,35 @@ export class RealtimeClient {
       this.reconnectTimer = null;
       this.openSocket();
     }, delay);
+  }
+
+  private notifyReconnect(): void {
+    for (const listener of this.reconnectListeners) {
+      try {
+        listener();
+      } catch (err) {
+        this.onError?.(err as Error);
+      }
+    }
+  }
+
+  private readonly onOnline = (): void => this.wake('online');
+  private readonly onVisibilityChange = (): void => {
+    if (document.visibilityState === 'visible') this.wake('visible');
+  };
+
+  private installWakeListeners(): void {
+    if (this.wakeListenersInstalled || typeof window === 'undefined') return;
+    this.wakeListenersInstalled = true;
+    window.addEventListener('online', this.onOnline);
+    document.addEventListener('visibilitychange', this.onVisibilityChange);
+  }
+
+  private removeWakeListeners(): void {
+    if (!this.wakeListenersInstalled) return;
+    this.wakeListenersInstalled = false;
+    window.removeEventListener('online', this.onOnline);
+    document.removeEventListener('visibilitychange', this.onVisibilityChange);
   }
 
   private armHeartbeat(): void {

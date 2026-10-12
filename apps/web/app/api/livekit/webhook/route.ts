@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { WebhookReceiver, type WebhookEvent } from 'livekit-server-sdk';
-import { getActiveGameSessionForChannel, logAction } from '@lobbyforge/db';
+import { getActiveGameSessionForChannel, listPlayersForSession, logAction } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { publishActivityStateChange } from '@/lib/activity-bus';
 import { getRoomServiceClient, requireLiveKitCredentials } from '@/lib/livekit';
@@ -216,11 +216,12 @@ const USER_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 const STANDARD_KINDS = new Set<unknown>([undefined, 0, 'STANDARD']);
 
 /**
- * Activity host presence (lib/activity-voice.ts, lib/activity-host.ts):
- * record WHEN someone left a voice room and forget it when they come back,
- * so a host who left is handed over after exactly the grace period. If the
- * person is an open activity's host in that channel, tell its panels to
- * re-read the session (they learn the host is away, or back).
+ * Activity presence (lib/activity-voice.ts, lib/activity-host.ts): record
+ * WHEN someone left a voice room and forget it when they come back, so a
+ * host who left is handed over after exactly the grace period. If the
+ * person is the host of, or a player in, the open activity in that
+ * channel, tell its panels to re-read the session (`presenceChanged`):
+ * they learn who is away, or back.
  *
  * Fire-and-forget, after the answer: this must never hold back the room's
  * webhook queue (LiveKit delivers a room's events one after another), and a
@@ -245,13 +246,17 @@ async function noteVoicePresence(event: WebhookEvent, kind: 'joined' | 'left'): 
       await recordVoiceLeft(room, identity, Date.now());
     }
     const active = await getActiveGameSessionForChannel(getDb(), scope.channelId);
-    if (active && active.serverId === scope.serverId && active.createdBy === identity) {
-      // No identities on the bus: panels re-read the session (host included).
+    if (!active || active.serverId !== scope.serverId) return;
+    const seated =
+      active.createdBy === identity ||
+      (await listPlayersForSession(getDb(), active.id)).some((player) => player.userId === identity);
+    if (seated) {
+      // No identities on the bus: panels re-read the session.
       publishActivityStateChange({
         serverId: scope.serverId,
         sessionId: active.id,
         status: active.status,
-        publicSummary: { rosterChanged: true },
+        publicSummary: { presenceChanged: true },
       });
     }
   } catch (err) {

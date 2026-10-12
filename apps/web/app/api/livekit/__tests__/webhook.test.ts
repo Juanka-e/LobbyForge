@@ -21,6 +21,7 @@ const listRooms = vi.fn();
 const getParticipant = vi.fn();
 const logAction = vi.fn();
 const getActiveGameSessionForChannel = vi.fn();
+const listPlayersForSession = vi.fn();
 const blockVoice = vi.fn();
 const getVoiceBlock = vi.fn();
 const claimVoiceBlockEnforcedAudit = vi.fn();
@@ -33,7 +34,7 @@ vi.mock('@/lib/livekit', () => ({
   requireLiveKitCredentials: () => ({ apiKey: API_KEY, apiSecret: API_SECRET }),
   getRoomServiceClient: () => ({ removeParticipant, listRooms, getParticipant }),
 }));
-vi.mock('@lobbyforge/db', () => ({ logAction, getActiveGameSessionForChannel }));
+vi.mock('@lobbyforge/db', () => ({ logAction, getActiveGameSessionForChannel, listPlayersForSession }));
 vi.mock('@/lib/activity-voice', () => ({ recordVoiceJoined, recordVoiceLeft, forgetVoiceRoomSnapshot }));
 vi.mock('@/lib/activity-bus', () => ({ publishActivityStateChange }));
 // The block list's own behaviour (keys, ladder) is covered in
@@ -104,6 +105,7 @@ beforeEach(() => {
   claimVoiceBlockEnforcedAudit.mockReset().mockResolvedValue(true);
   getParticipant.mockReset().mockRejectedValue(Object.assign(new Error('participant not found'), { status: 404 }));
   getActiveGameSessionForChannel.mockReset().mockResolvedValue(null);
+  listPlayersForSession.mockReset().mockResolvedValue([]);
   recordVoiceJoined.mockReset().mockResolvedValue(undefined);
   recordVoiceLeft.mockReset().mockResolvedValue(undefined);
   forgetVoiceRoomSnapshot.mockReset();
@@ -419,7 +421,7 @@ describe('POST /api/livekit/webhook — other events', () => {
   );
 });
 
-describe('POST /api/livekit/webhook — activity host presence', () => {
+describe('POST /api/livekit/webhook — activity presence', () => {
   const SESSION_ID = '0a1b2c3d-0000-4000-8000-0000000000ee';
 
   function presenceEvent(name: 'participant_joined' | 'participant_left', extra: Record<string, unknown> = {}) {
@@ -451,6 +453,7 @@ describe('POST /api/livekit/webhook — activity host presence', () => {
   });
 
   it("nudges the open activity's panels when its HOST leaves — no identity on the bus", async () => {
+    listPlayersForSession.mockResolvedValue([]);
     getActiveGameSessionForChannel.mockResolvedValue({
       id: SESSION_ID,
       serverId: SERVER_ID,
@@ -464,12 +467,35 @@ describe('POST /api/livekit/webhook — activity host presence', () => {
         serverId: SERVER_ID,
         sessionId: SESSION_ID,
         status: 'lobby',
-        publicSummary: { rosterChanged: true },
+        publicSummary: { presenceChanged: true },
       })
     );
   });
 
-  it('does not nudge for someone who is not the host', async () => {
+  it.each(['participant_left', 'participant_joined'] as const)(
+    'nudges the panels when a PLAYER (not the host) %s',
+    async (name) => {
+      getActiveGameSessionForChannel.mockResolvedValue({
+        id: SESSION_ID,
+        serverId: SERVER_ID,
+        channelId: CHANNEL_ID,
+        status: 'running',
+        createdBy: '0a1b2c3d-0000-4000-8000-0000000000bb',
+      });
+      listPlayersForSession.mockResolvedValue([{ userId: '0a1b2c3d-0000-4000-8000-0000000000bb' }, { userId: IDENTITY }]);
+      await signedPost(presenceEvent(name));
+      await vi.waitFor(() =>
+        expect(publishActivityStateChange).toHaveBeenCalledWith({
+          serverId: SERVER_ID,
+          sessionId: SESSION_ID,
+          status: 'running',
+          publicSummary: { presenceChanged: true },
+        })
+      );
+    }
+  );
+
+  it('does not nudge for someone who is neither the host nor a player (a spectator)', async () => {
     getActiveGameSessionForChannel.mockResolvedValue({
       id: SESSION_ID,
       serverId: SERVER_ID,
@@ -477,8 +503,9 @@ describe('POST /api/livekit/webhook — activity host presence', () => {
       status: 'lobby',
       createdBy: '0a1b2c3d-0000-4000-8000-0000000000bb',
     });
+    listPlayersForSession.mockResolvedValue([{ userId: '0a1b2c3d-0000-4000-8000-0000000000bb' }]);
     await signedPost(presenceEvent('participant_left'));
-    await vi.waitFor(() => expect(getActiveGameSessionForChannel).toHaveBeenCalled());
+    await vi.waitFor(() => expect(listPlayersForSession).toHaveBeenCalledWith(expect.anything(), SESSION_ID));
     expect(publishActivityStateChange).not.toHaveBeenCalled();
   });
 
