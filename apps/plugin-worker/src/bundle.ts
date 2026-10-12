@@ -196,7 +196,10 @@ export function resolveBundle(rootDir: string, ref: BundleRef, verified: Verifie
   for (const [rel, bytes] of read) {
     if (rel.startsWith('locales/')) localeFiles.push([rel.slice('locales/'.length), bytes]);
   }
-  const parsed = parseSandboxBundle(manifestBytes, localeFiles);
+  // Local origins (http:, localhost) only for development and tests, as in the web app.
+  const parsed = parseSandboxBundle(manifestBytes, localeFiles, {
+    allowLocalOrigins: process.env.LOBBYFORGE_PLUGIN_ALLOW_LOCAL_ORIGINS === 'true' && process.env.NODE_ENV !== 'production',
+  });
   if (!parsed.ok) return { ok: false, status: 422, error: `Plugin "${ref.pluginId}": ${parsed.error}` };
   if (parsed.manifest.id !== ref.pluginId) {
     return {
