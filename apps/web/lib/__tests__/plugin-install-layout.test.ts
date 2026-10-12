@@ -258,6 +258,97 @@ describe('activateStagedBundle', () => {
   });
 });
 
+describe('activateStagedBundle — what a bundle asks for beyond the sandbox', () => {
+  const ASKS = {
+    network: { connect: ['https://api.example.com'] },
+    permissions: ['timers'],
+  };
+  const APPROVAL = { network: { connect: ['https://api.example.com'] }, permissions: ['timers' as const] };
+
+  it('refuses until the owner approves, before anything moves or the worker sees it', async () => {
+    const describe = describeOk();
+    const stagingDir = stage('game', sandboxBundle('1.0.0', undefined, ASKS));
+    const result = await activateStagedBundle({ root, pluginId: 'game', version: '1.0.0', stagingDir, describe });
+    expect(result).toMatchObject({
+      ok: false,
+      approvalRequired: { requested: APPROVAL, added: APPROVAL, previous: null },
+    });
+    expect(describe).not.toHaveBeenCalled();
+    expect(existsSync(join(root, 'game', '1.0.0'))).toBe(false);
+    expect(existsSync(stagingDir)).toBe(false);
+    expect(readActivePointer(root, 'game')).toBeNull();
+  });
+
+  it('refuses an approval that is not exactly the request', async () => {
+    for (const approve of [{ permissions: ['timers' as const] }, { ...APPROVAL, permissions: ['timers' as const, 'chat' as const] }]) {
+      const result = await activateStagedBundle({
+        root, pluginId: 'game', version: '1.0.0', stagingDir: stage('game', sandboxBundle('1.0.0', undefined, ASKS)), describe: describeOk(), approve,
+      });
+      expect(result.ok).toBe(false);
+    }
+  });
+
+  it('installs with the exact approval and records it in active.json', async () => {
+    const result = await activateStagedBundle({
+      root, pluginId: 'game', version: '1.0.0', stagingDir: stage('game', sandboxBundle('1.0.0', undefined, ASKS)), describe: describeOk(),
+      approve: { permissions: ['timers'], network: { connect: ['https://api.example.com/'] } },
+    });
+    expect(result).toMatchObject({ ok: true, approved: APPROVAL });
+    const pointer = readActivePointer(root, 'game');
+    expect(pointer?.approved).toEqual(APPROVAL);
+    expect(typeof pointer?.approvedAt).toBe('string');
+  });
+
+  it('an upgrade asking for more asks again, naming only the new part', async () => {
+    await activateStagedBundle({
+      root, pluginId: 'game', version: '1.0.0', stagingDir: stage('game', sandboxBundle('1.0.0', undefined, ASKS)), describe: describeOk(), approve: APPROVAL,
+    });
+    const more = { network: { connect: ['https://api.example.com', 'https://b.example.com'] }, permissions: ['timers', 'chat'] };
+    const result = await activateStagedBundle({
+      root, pluginId: 'game', version: '1.1.0', stagingDir: stage('game', sandboxBundle('1.1.0', undefined, more)), describe: describeOk(), approve: APPROVAL,
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      approvalRequired: {
+        added: { network: { connect: ['https://b.example.com'] }, permissions: ['chat'] },
+        previous: APPROVAL,
+      },
+    });
+    // The old version stays active, with its approval.
+    expect(readActivePointer(root, 'game')).toMatchObject({ version: '1.0.0', approved: APPROVAL });
+  });
+
+  it('a bundle that asks for nothing installs without an approval, and records none', async () => {
+    const result = await activateStagedBundle({
+      root, pluginId: 'game', version: '1.0.0', stagingDir: stage('game', sandboxBundle('1.0.0')), describe: describeOk(),
+    });
+    expect(result).toMatchObject({ ok: true, approved: null });
+    expect(readActivePointer(root, 'game')).not.toHaveProperty('approved');
+  });
+
+  it('a malformed approval in active.json approves nothing', () => {
+    mkdirSync(join(root, 'game'), { recursive: true });
+    writeFileSync(
+      join(root, 'game', ACTIVE_POINTER_FILE),
+      JSON.stringify({ version: '1.0.0', digest: 'a'.repeat(64), approved: { network: { connect: ['https://localhost'] } } })
+    );
+    expect(readActivePointer(root, 'game')).toEqual({ pluginId: 'game', version: '1.0.0', digest: 'a'.repeat(64) });
+  });
+
+  it('a UI on the author’s own site serves no files from the bundle', async () => {
+    const result = await activateStagedBundle({
+      root, pluginId: 'game', version: '1.0.0',
+      stagingDir: stage('game', sandboxBundle('1.0.0', undefined, { ui: { url: 'https://game.example.com/' } })),
+      describe: describeOk(),
+      approve: { uiUrl: 'https://game.example.com/' },
+    });
+    expect(result.ok).toBe(true);
+    const m = readInstalledSandboxManifest(root, 'game', '1.0.0');
+    expect(m.ui).toBe(false);
+    expect(m.uiUrl).toBe('https://game.example.com/');
+  });
+});
+
 describe('readInstalledSandboxManifest', () => {
   it('reads the validated manifest of an installed version, and throws on anything else', () => {
     writeTree(join(root, 'game', '1.0.0'), sandboxBundle('1.0.0'));

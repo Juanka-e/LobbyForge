@@ -27,6 +27,25 @@ export interface SandboxActionPolicy {
   allowOutsideVoice?: boolean;
 }
 
+/**
+ * Outside origins a plugin asks to reach from its UI (docs/PLUGIN_UNLOCK_PLAN.md,
+ * phase 2). Each is an https origin on a public host. Nothing here takes
+ * effect until the instance owner approves it at install.
+ */
+export interface SandboxNetwork {
+  connect?: string[];
+  img?: string[];
+  media?: string[];
+  frame?: string[];
+}
+
+export const SANDBOX_NETWORK_KINDS = ['connect', 'img', 'media', 'frame'] as const;
+export type SandboxNetworkKind = (typeof SANDBOX_NETWORK_KINDS)[number];
+
+/** Host effects a plugin asks to use (phase 3), approved at install like the network. */
+export const SANDBOX_PERMISSIONS = ['timers', 'storage', 'chat', 'voice.mute'] as const;
+export type SandboxPermission = (typeof SANDBOX_PERMISSIONS)[number];
+
 export interface SandboxManifest {
   id: string;
   name: string;
@@ -36,7 +55,12 @@ export interface SandboxManifest {
   minPlayers?: number;
   maxPlayers?: number;
   locales: string[];
+  /** The bundle serves its UI from `ui/` (false for `ui: { url }`, which serves no files). */
   ui: boolean;
+  /** `ui: { "url": … }`: the UI is the author's own page, framed by the lobby (phase 2). */
+  uiUrl?: string;
+  network?: SandboxNetwork;
+  permissions?: SandboxPermission[];
   /** Players must be in the activity's voice room: the host refuses member/player actions from outside it. */
   requiresVoiceRoom?: boolean;
 }
@@ -59,6 +83,69 @@ export const MAX_ACTION_POLICIES = 64;
 export const MAX_ACTOR_FIELDS = 8;
 export const MAX_MANIFEST_BYTES = 64 * 1024;
 export const MAX_PLAYERS_CEILING = 500;
+export const MAX_ORIGINS_PER_KIND = 8;
+export const MAX_UI_URL_LENGTH = 2048;
+
+/** What a manifest may relax, for local development and tests only (never production). */
+export interface SandboxManifestOptions {
+  /** Accept http: and local hosts (localhost, 127.0.0.1, *.local …) in `network` and `ui.url`. */
+  allowLocalOrigins?: boolean;
+}
+
+/** Host names that point into the viewer's own machine or network. */
+const LOCAL_HOST_SUFFIXES = ['.localhost', '.local', '.internal', '.lan', '.home.arpa'];
+
+/**
+ * A host a viewer's browser may be sent to: a DNS name with a dot, not an IP
+ * literal (the URL parser has already turned `0x7f.1` and friends into
+ * dotted IPv4) and not a local name — otherwise a plugin could turn every
+ * viewer's browser into a scanner of their own network.
+ */
+function isPublicHost(host: string): boolean {
+  if (host.startsWith('[') || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) return false;
+  // Letters, digits, dots and hyphens only (IDNs arrive as punycode): no wildcard.
+  if (!/^[a-z0-9.-]+$/.test(host) || !host.includes('.') || host.endsWith('.')) return false;
+  return host !== 'localhost' && !LOCAL_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix));
+}
+
+function allowedUrl(url: URL, options: SandboxManifestOptions): boolean {
+  if (url.username || url.password) return false;
+  if (options.allowLocalOrigins) return url.protocol === 'https:' || url.protocol === 'http:';
+  return url.protocol === 'https:' && isPublicHost(url.hostname);
+}
+
+/**
+ * An origin as written in `network`: `https://host[:port]`, nothing more (a
+ * trailing slash is tolerated) — no path, query, fragment, credentials or
+ * wildcard. Returns the normalized origin, or null.
+ */
+export function normalizeOutsideOrigin(value: unknown, options: SandboxManifestOptions = {}): string | null {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 255) return null;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (!allowedUrl(url, options)) return null;
+  // The written value itself must be the origin: nothing the parser dropped.
+  const written = value.toLowerCase();
+  if (written !== url.origin && written !== `${url.origin}/`) return null;
+  return url.origin;
+}
+
+/** `ui.url`: an absolute https URL on a public host, without credentials or fragment. Normalized, or null. */
+export function normalizeUiUrl(value: unknown, options: SandboxManifestOptions = {}): string | null {
+  if (typeof value !== 'string' || value.length === 0 || value.length > MAX_UI_URL_LENGTH) return null;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (!allowedUrl(url, options) || url.hash) return null;
+  return url.href;
+}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -69,7 +156,7 @@ function isPlayerCount(value: unknown): value is number {
 }
 
 /** Validate a parsed manifest.json. Unknown top-level keys are ignored; unknown policy keys are refused. */
-export function validateSandboxManifest(raw: unknown): ManifestValidation {
+export function validateSandboxManifest(raw: unknown, options: SandboxManifestOptions = {}): ManifestValidation {
   const fail = (error: string): ManifestValidation => ({ ok: false, error: `manifest.json: ${error}` });
   if (!isPlainObject(raw)) return fail('must be a JSON object');
 
@@ -85,7 +172,18 @@ export function validateSandboxManifest(raw: unknown): ManifestValidation {
   if (typeof raw.version !== 'string' || !SANDBOX_VERSION_RE.test(raw.version)) {
     return fail('"version" must be strict semver (e.g. 1.0.0)');
   }
-  if (typeof raw.ui !== 'boolean') return fail('"ui" must be true or false');
+  let uiFiles: boolean;
+  let uiUrl: string | undefined;
+  if (typeof raw.ui === 'boolean') {
+    uiFiles = raw.ui;
+  } else if (isPlainObject(raw.ui) && Object.keys(raw.ui).length === 1 && 'url' in raw.ui) {
+    const url = normalizeUiUrl(raw.ui.url, options);
+    if (!url) return fail('"ui.url" must be an https URL on a public host, without credentials or fragment');
+    uiFiles = false;
+    uiUrl = url;
+  } else {
+    return fail('"ui" must be true, false or { "url": "https://…" }');
+  }
 
   if (!isPlainObject(raw.actionPolicies)) return fail('"actionPolicies" must be an object (it may be empty)');
   const entries = Object.keys(raw.actionPolicies);
@@ -147,6 +245,49 @@ export function validateSandboxManifest(raw: unknown): ManifestValidation {
     return fail('"requiresVoiceRoom" must be true or false');
   }
 
+  let network: SandboxNetwork | undefined;
+  if (raw.network !== undefined) {
+    if (!isPlainObject(raw.network)) return fail('"network" must be an object');
+    for (const key of Object.keys(raw.network)) {
+      if (!(SANDBOX_NETWORK_KINDS as readonly string[]).includes(key)) {
+        return fail(`"network" has an unknown key "${key.slice(0, 32)}" (connect, img, media, frame)`);
+      }
+    }
+    const asked: SandboxNetwork = {};
+    for (const kind of SANDBOX_NETWORK_KINDS) {
+      const list = raw.network[kind];
+      if (list === undefined) continue;
+      if (!Array.isArray(list) || list.length > MAX_ORIGINS_PER_KIND) {
+        return fail(`"network.${kind}" must be an array of at most ${MAX_ORIGINS_PER_KIND} origins`);
+      }
+      const origins: string[] = [];
+      for (const value of list) {
+        const origin = normalizeOutsideOrigin(value, options);
+        if (!origin) {
+          return fail(`"network.${kind}" has "${String(value).slice(0, 80)}", which is not an https origin on a public host`);
+        }
+        if (!origins.includes(origin)) origins.push(origin);
+      }
+      if (origins.length > 0) asked[kind] = origins;
+    }
+    if (Object.keys(asked).length > 0) network = asked;
+  }
+
+  let permissions: SandboxPermission[] | undefined;
+  if (raw.permissions !== undefined) {
+    if (!Array.isArray(raw.permissions) || raw.permissions.length > SANDBOX_PERMISSIONS.length) {
+      return fail(`"permissions" must be an array of at most ${SANDBOX_PERMISSIONS.length} names`);
+    }
+    const names: SandboxPermission[] = [];
+    for (const name of raw.permissions) {
+      if (typeof name !== 'string' || !(SANDBOX_PERMISSIONS as readonly string[]).includes(name)) {
+        return fail(`"permissions" has an unknown name "${String(name).slice(0, 32)}" (${SANDBOX_PERMISSIONS.join(', ')})`);
+      }
+      if (!names.includes(name as SandboxPermission)) names.push(name as SandboxPermission);
+    }
+    if (names.length > 0) permissions = names;
+  }
+
   let locales: string[] = ['en'];
   if (raw.locales !== undefined) {
     if (!Array.isArray(raw.locales) || raw.locales.length === 0 || raw.locales.length > 32) {
@@ -171,8 +312,11 @@ export function validateSandboxManifest(raw: unknown): ManifestValidation {
     sdk: SANDBOX_SDK,
     actionPolicies: policies,
     locales,
-    ui: raw.ui,
+    ui: uiFiles,
   };
+  if (uiUrl) manifest.uiUrl = uiUrl;
+  if (network) manifest.network = network;
+  if (permissions) manifest.permissions = permissions;
   if (isPlayerCount(raw.minPlayers)) manifest.minPlayers = raw.minPlayers;
   if (isPlayerCount(raw.maxPlayers)) manifest.maxPlayers = raw.maxPlayers;
   if (typeof raw.requiresVoiceRoom === 'boolean') manifest.requiresVoiceRoom = raw.requiresVoiceRoom;
@@ -198,9 +342,9 @@ function readManifestJson(bytes: Buffer | string): { ok: true; raw: unknown } | 
 }
 
 /** Parse manifest.json bytes (size-capped) and validate. */
-export function parseSandboxManifest(bytes: Buffer | string): ManifestValidation {
+export function parseSandboxManifest(bytes: Buffer | string, options: SandboxManifestOptions = {}): ManifestValidation {
   const read = readManifestJson(bytes);
-  return read.ok ? validateSandboxManifest(read.raw) : read;
+  return read.ok ? validateSandboxManifest(read.raw, options) : read;
 }
 
 // ── Translations: `locales/<code>.json` ─────────────────────────────────
@@ -331,10 +475,14 @@ export function validateSandboxLocaleFiles(files: readonly SandboxLocaleFile[]):
  * forgotten file or a stale list is caught at install time. Without locale
  * files the manifest's list (default `["en"]`) stands, as before.
  */
-export function parseSandboxBundle(manifestBytes: Buffer | string, localeFiles: readonly SandboxLocaleFile[]): BundleValidation {
+export function parseSandboxBundle(
+  manifestBytes: Buffer | string,
+  localeFiles: readonly SandboxLocaleFile[],
+  options: SandboxManifestOptions = {}
+): BundleValidation {
   const read = readManifestJson(manifestBytes);
   if (!read.ok) return read;
-  const checked = validateSandboxManifest(read.raw);
+  const checked = validateSandboxManifest(read.raw, options);
   if (!checked.ok) return checked;
   const files = validateSandboxLocaleFiles(localeFiles);
   if (!files.ok) return files;

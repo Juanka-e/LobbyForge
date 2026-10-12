@@ -5,6 +5,8 @@ import { useState } from 'react';
 import type { PluginCatalogRow } from '@lobbyforge/db';
 import { useT } from '@/lib/i18n/client';
 import { initialOf } from '@/lib/initial';
+import type { PluginApprovals } from '@/lib/plugin-approvals';
+import { PluginApprovalDialog, type ApprovalRequest } from './PluginApprovalDialog';
 
 const TRUST_COLORS: Record<string, string> = {
   official: 'text-primary border-primary/30 bg-primary/5',
@@ -76,6 +78,8 @@ function PluginCard({ plugin }: { plugin: PluginCatalogRow }) {
   const t = useT();
   const [installing, setInstalling] = useState(false);
   const [installResult, setInstallResult] = useState<InstallResult | null>(null);
+  // The bundle asks for more than the sandbox: the owner approves first.
+  const [approval, setApproval] = useState<ApprovalRequest | null>(null);
   const tags = (plugin.tags as string[]).slice(0, 3);
   const trustClass = TRUST_COLORS[plugin.trustLevel] ?? TRUST_COLORS.unverified;
   const playerConfig = plugin.playerConfig as { minPlayers?: number; maxPlayers?: number } | null;
@@ -158,31 +162,7 @@ function PluginCard({ plugin }: { plugin: PluginCatalogRow }) {
 
       {/* Install button (admin-only — the API checks requireAdminHealthToken) */}
       <button
-        onClick={async () => {
-          setInstalling(true);
-          setInstallResult(null);
-          try {
-            const res = await fetch('/api/marketplace/install', {
-              method: 'POST',
-              credentials: 'same-origin',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ pluginId: plugin.pluginId }),
-            });
-            const data = (await res.json().catch(() => ({}))) as { error?: string };
-            if (res.ok) {
-              setInstallResult({ kind: 'installed' });
-            } else {
-              setInstallResult({
-                kind: 'failed',
-                message: data.error ?? t('hub.marketplace.install.failed'),
-              });
-            }
-          } catch {
-            setInstallResult({ kind: 'failed', message: t('hub.marketplace.install.networkError') });
-          } finally {
-            setInstalling(false);
-          }
-        }}
+        onClick={() => void install(null)}
         disabled={installing}
         className={`mt-3 w-full rounded-lg px-3 py-2 text-xs font-semibold transition-all ${
           installed
@@ -200,6 +180,44 @@ function PluginCard({ plugin }: { plugin: PluginCatalogRow }) {
               ? installResult.message
               : t('hub.marketplace.install.install')}
       </button>
+      <PluginApprovalDialog
+        pluginName={plugin.name}
+        request={approval}
+        busy={installing}
+        onApprove={() => void install(approval?.requested ?? null)}
+        onCancel={() => setApproval(null)}
+      />
     </article>
   );
+
+  /**
+   * POST the install. A 409 `approval_required` opens the approval dialog
+   * with what the bundle asks for; approving sends exactly that back.
+   */
+  async function install(approve: PluginApprovals | null) {
+    setInstalling(true);
+    setInstallResult(null);
+    try {
+      const res = await fetch('/api/marketplace/install', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(approve ? { pluginId: plugin.pluginId, approve } : { pluginId: plugin.pluginId }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string; code?: string } & Partial<ApprovalRequest>;
+      if (res.ok) {
+        setApproval(null);
+        setInstallResult({ kind: 'installed' });
+      } else if (res.status === 409 && data.code === 'approval_required' && data.requested) {
+        setApproval({ requested: data.requested, added: data.added ?? null, previous: data.previous ?? null });
+      } else {
+        setApproval(null);
+        setInstallResult({ kind: 'failed', message: data.error ?? t('hub.marketplace.install.failed') });
+      }
+    } catch {
+      setInstallResult({ kind: 'failed', message: t('hub.marketplace.install.networkError') });
+    } finally {
+      setInstalling(false);
+    }
+  }
 }

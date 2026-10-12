@@ -30,7 +30,9 @@ import {
   activateStagedBundle,
   pluginInstallDir,
   pruneSupersededVersions,
+  type ApprovalRequired,
 } from './plugin-install-layout';
+import type { PluginApprovals } from './plugin-approvals';
 import { isBlockedNetworkIp } from './ip-ranges';
 import { fetchIpPinned } from './ip-pinned-https';
 
@@ -46,7 +48,11 @@ export interface InstallResult {
   version?: string;
   /** Digest of the active version's files (what the worker verifies). */
   digest?: string;
+  /** What the owner approved for this version (null: it asked for nothing beyond the sandbox). */
+  approved?: PluginApprovals | null;
   error?: string;
+  /** Refused until the owner approves what the bundle asks for (plugin-approvals.ts). */
+  approvalRequired?: ApprovalRequired;
 }
 
 /**
@@ -81,7 +87,9 @@ export async function installPluginBundle(
    * BOTH, compared constant-time — a compromised publisher host can no
    * longer swap the artifact behind an unchanged approved catalog row.
    */
-  expectedPin?: { sha256: string; sizeBytes: number }
+  expectedPin?: { sha256: string; sizeBytes: number },
+  /** What the owner approved: must name exactly what the bundle asks for. */
+  approve?: PluginApprovals | null
 ): Promise<InstallResult> {
   // Both are path segments: the id is a folder name, the version too.
   if (!PLUGIN_ID_RE.test(pluginId)) {
@@ -109,7 +117,7 @@ export async function installPluginBundle(
     return { ok: false, error: 'Install path escapes the plugin directory. Rejected.' };
   }
 
-  return withPluginLock(pluginId, () => downloadAndActivate(pluginId, url, version, root, expectedPin));
+  return withPluginLock(pluginId, () => downloadAndActivate(pluginId, url, version, root, expectedPin, approve));
 }
 
 async function downloadAndActivate(
@@ -117,7 +125,8 @@ async function downloadAndActivate(
   url: string,
   version: string,
   root: string,
-  expectedPin: { sha256: string; sizeBytes: number } | undefined
+  expectedPin: { sha256: string; sizeBytes: number } | undefined,
+  approve: PluginApprovals | null | undefined
 ): Promise<InstallResult> {
   // LF-004: Extract to a staging dir first, then move into place — a
   // half-failed install never corrupts a previously working version. The
@@ -169,9 +178,10 @@ async function downloadAndActivate(
       version,
       stagingDir,
       describe: describeWorkerPlugin,
+      approve,
     });
     if (!activation.ok) {
-      return { ok: false, error: activation.error };
+      return { ok: false, error: activation.error, approvalRequired: activation.approvalRequired };
     }
 
     // 4. New requests use the new version from here on.
@@ -185,7 +195,7 @@ async function downloadAndActivate(
       console.warn(`[plugin-installer] could not prune old versions of "${pluginId}":`, (err as Error).message);
     }
 
-    return { ok: true, path: activation.path, version, digest: activation.digest };
+    return { ok: true, path: activation.path, version, digest: activation.digest, approved: activation.approved };
   } catch (err) {
     // One line, no control characters: the message can carry catalogue
     // data (plugin ids, versions, URLs) that must not forge log entries.

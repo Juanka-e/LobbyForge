@@ -2,6 +2,15 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Marketplace plugins: ask for more, and the owner approves at install - 2026-10-12
+
+- **New manifest fields (sandbox-v1):** `network` (outside origins by kind: `connect`, `img`, `media`, `frame`, up to 8 each), `ui: { "url" }` (the plugin's own page as its UI) and `permissions` (`timers`, `storage`, `chat`, `voice.mute`). Origins must be https on a public host: no path, query, wildcard, IP address, `localhost` or local name, so a plugin cannot turn players' browsers into scanners of their own network. Both manifest validators (installer and plugin-worker) share the new cases.
+- **Nothing without the owner's approval:** an install that asks for any of these is refused with `409 approval_required` and what it asks for. The marketplace's Install button then shows a dialog (English and Turkish) that says what each item lets the plugin do; on an upgrade it marks what is new. Approving sends `approve` naming exactly the request; less or more is refused, a malformed one is a `400`.
+- **Recorded:** the approval is kept in the active version's `active.json` and written to the audit log as `plugin.install` (with the version and what was approved). A plugin only gets what its manifest asks for and the record approved, so a bundle installed earlier with these keys gets nothing until approved.
+- **No effect yet:** outside origins and the plugin's own page as its UI arrive with phase 2, host effects with phase 3 (docs/PLUGIN_UNLOCK_PLAN.md, new). Until then an approval is recorded only.
+- **For development:** `LOBBYFORGE_PLUGIN_ALLOW_LOCAL_ORIGINS=true` (never in production) accepts `http:` and local hosts, for tests.
+- **Docs:** PLUGIN_PUBLISHING.md ("Asking for more than the sandbox", the manifest table and the install step) and the plan, PLUGIN_UNLOCK_PLAN.md.
+
 ## [Unreleased] - Voice: back after a reload or a dropped connection - 2026-10-12
 
 - **One click back to voice:** reloading the page used to drop you out of voice with nothing to bring you back. Now the lobby shows "You dropped out of voice. [Back to #channel]" across the top of the centre column. It appears after a reload that comes within 2 minutes of being in voice, and whenever LiveKit gives up reconnecting. It also shows on phones, where the voice footer sits in the closed drawer. Inside a game's activities view the strip is part of the panel. Dismissing it forgets the channel.
