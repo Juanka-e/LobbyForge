@@ -22,6 +22,7 @@ import {
   parseWelcomeSettings,
 } from '@/lib/bots/settings';
 import { defaultBotText } from '@/lib/bots/templates';
+import { isDefaultBuiltInBotName, normalizeBuiltInSettings } from '@/lib/bots/bot-i18n-server';
 import { CorePermission, hasPermission } from '@lobbyforge/core';
 import { requireVerifiedEmail } from '@/lib/mail/verification';
 
@@ -33,7 +34,8 @@ type RouteContext = { params: Promise<{ id: string; type: string }> };
 const BodySchema = z
   .object({
     enabled: z.boolean().optional(),
-    name: BotNameSchema.optional(),
+    /** null = the default name (shown to each member in their own language). */
+    name: BotNameSchema.nullable().optional(),
     settings: z.unknown().optional(),
   })
   .strict();
@@ -51,6 +53,14 @@ function sameJson(a: unknown, b: unknown): boolean {
  * PUT — set up or configure the server's Welcome / Moderation bot. The
  * first call creates the bot; later calls update it. Settings are merged
  * over what is stored; the permission set is always the built-in one.
+ *
+ * Defaults stay defaults: a name of null (or none, on creation) is the
+ * default name, stored in the instance language; a template that is null
+ * or equal to a shipped default in ANY installed language is stored as
+ * null, so the bot posts its default text — which every member reads in
+ * their own language (lib/bots/bot-i18n.ts). A stored template that is a
+ * shipped default (written by an older admin page) is cleaned on the next
+ * save that changes something, never by itself.
  */
 async function handlePut(req: Request, ctx: RouteContext): Promise<NextResponse> {
   const { id: serverId, type } = await ctx.params;
@@ -80,8 +90,11 @@ async function handlePut(req: Request, ctx: RouteContext): Promise<NextResponse>
     if (!settings.success) {
       return invalidBody(settings.error.issues.map((issue) => ({ ...issue, path: ['settings', ...issue.path] })));
     }
-    settingsPatch = Object.fromEntries(
-      Object.entries(settings.data as Record<string, unknown>).filter(([, value]) => value !== undefined)
+    settingsPatch = normalizeBuiltInSettings(
+      type,
+      Object.fromEntries(
+        Object.entries(settings.data as Record<string, unknown>).filter(([, value]) => value !== undefined)
+      )
     );
   }
 
@@ -128,21 +141,35 @@ async function handlePut(req: Request, ctx: RouteContext): Promise<NextResponse>
 
   const patch: UpdateBotInput = {};
   const changes: Record<string, unknown> = {};
-  if (body.name !== undefined && body.name !== bot.name) {
-    patch.name = body.name;
-    changes.name = { from: bot.name, to: body.name };
+  // null = back to the default name; a name that already is a default (in
+  // any installed language) stays as it is.
+  const nextName =
+    body.name === null
+      ? isDefaultBuiltInBotName(type, bot.name)
+        ? bot.name
+        : defaultBotText(DEFAULT_NAME_KEY[botType])
+      : body.name;
+  if (nextName !== undefined && nextName !== bot.name) {
+    patch.name = nextName;
+    changes.name = { from: bot.name, to: nextName };
   }
   if (body.enabled !== undefined && body.enabled !== bot.enabled) {
     patch.enabled = body.enabled;
     changes.enabled = body.enabled;
   }
-  const mergedSettings = { ...parse(bot.settings), ...settingsPatch };
-  if (!sameJson(mergedSettings, parse(bot.settings))) {
+  const storedSettings = normalizeBuiltInSettings(type, parse(bot.settings));
+  const mergedSettings = { ...storedSettings, ...settingsPatch };
+  if (!sameJson(mergedSettings, storedSettings)) {
     patch.settings = mergedSettings;
     changes.settings = settingsAuditSummary(type, mergedSettings);
   }
   // Self-heal: a built-in bot always carries exactly its fixed permissions.
   if (!sameJson([...bot.permissions].sort(), [...permissions].sort())) patch.permissions = permissions;
+  // A stored template that is a shipped default goes as null with the next
+  // write — not an audited change: it already read as the default.
+  if (Object.keys(patch).length > 0 && !patch.settings && !sameJson(storedSettings, parse(bot.settings))) {
+    patch.settings = mergedSettings;
+  }
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json(

@@ -511,4 +511,76 @@ describe('PUT /api/servers/{id}/bots/builtin/{type}', () => {
     expect(res.status).toBe(200);
     expect(auditCalls('bot.disable')).toHaveLength(1);
   });
+
+  describe('defaults stay defaults (each member reads them in their own language)', () => {
+    const TR_GREETING = '{user}, {server} sunucusuna hoş geldin! Seni aramızda görmek güzel.';
+
+    it('creates the bot with the default name in the instance language when none is sent', async () => {
+      process.env.LOBBYFORGE_DEFAULT_LOCALE = 'tr';
+      ensureBuiltInBot.mockImplementation(async (_db: unknown, input: Record<string, unknown>) => ({
+        bot: welcomeRow(input.settings as Record<string, unknown>, { name: input.name }),
+        created: true,
+      }));
+      const { PUT } = await import('../builtin/[type]/route.js');
+      const res = await PUT(req('PUT', '/x', OWNER, { enabled: true, settings: { channelId: null } }), builtinCtx('welcome'));
+      expect(ensureBuiltInBot).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ name: 'Karşılama Botu' }));
+      // It is recognised as the default name — in every language.
+      expect((await res.json()).bot).toMatchObject({ name: 'Karşılama Botu', defaultName: true });
+    });
+
+    it('stores a template equal to a shipped default (any language) as null', async () => {
+      ensureBuiltInBot.mockResolvedValue({ bot: welcomeRow({ template: 'Hi {user}!' }), created: false });
+      const { PUT } = await import('../builtin/[type]/route.js');
+      await PUT(req('PUT', '/x', OWNER, { settings: { template: TR_GREETING } }), builtinCtx('welcome'));
+      const patch = updateBot.mock.calls[0]![2] as { settings: Record<string, unknown> };
+      expect(patch.settings).toMatchObject({ template: null });
+      expect(auditCalls('bot.update')[0]!.metadata.changes).toMatchObject({ settings: { customTemplate: false } });
+    });
+
+    it('shows a stored shipped-default template as null and a default name as defaultName', async () => {
+      ensureBuiltInBot.mockResolvedValue({ bot: welcomeRow({ template: TR_GREETING }, { name: 'Karşılama Botu' }), created: false });
+      const { PUT } = await import('../builtin/[type]/route.js');
+      const res = await PUT(req('PUT', '/x', OWNER, { settings: { channelId: null } }), builtinCtx('welcome'));
+      const body = await res.json();
+      expect(body.bot).toMatchObject({ name: 'Karşılama Botu', defaultName: true, settings: { template: null } });
+      // Nothing visible changed: no write, no audit entry.
+      expect(updateBot).not.toHaveBeenCalled();
+      expect(auditCalls()).toHaveLength(0);
+    });
+
+    it('cleans a stored shipped-default template with the next real change — audited as that change only', async () => {
+      ensureBuiltInBot.mockResolvedValue({ bot: welcomeRow({ template: TR_GREETING }, { enabled: true }), created: false });
+      const { PUT } = await import('../builtin/[type]/route.js');
+      await PUT(req('PUT', '/x', OWNER, { enabled: false }), builtinCtx('welcome'));
+      const patch = updateBot.mock.calls[0]![2] as { enabled: boolean; settings: Record<string, unknown> };
+      expect(patch).toMatchObject({ enabled: false, settings: { template: null } });
+      expect(auditCalls('bot.disable')).toHaveLength(1);
+      expect(auditCalls('bot.update')).toHaveLength(0);
+    });
+
+    it('name null resets a renamed bot to the default name; on a default-named bot it changes nothing', async () => {
+      ensureBuiltInBot.mockResolvedValue({ bot: welcomeRow({}, { name: 'Greeter' }), created: false });
+      const { PUT } = await import('../builtin/[type]/route.js');
+      await PUT(req('PUT', '/x', OWNER, { name: null }), builtinCtx('welcome'));
+      expect(updateBot.mock.calls[0]![2]).toMatchObject({ name: 'Welcome Bot' });
+      expect(auditCalls('bot.update')[0]!.metadata.changes).toMatchObject({ name: { from: 'Greeter', to: 'Welcome Bot' } });
+
+      updateBot.mockClear();
+      logAction.mockClear();
+      ensureBuiltInBot.mockResolvedValue({ bot: welcomeRow({}, { name: 'Karşılama Botu' }), created: false });
+      await PUT(req('PUT', '/x', OWNER, { name: null }), builtinCtx('welcome'));
+      expect(updateBot).not.toHaveBeenCalled();
+      expect(auditCalls()).toHaveLength(0);
+    });
+
+    it('a body without name or template leaves both as stored', async () => {
+      ensureBuiltInBot.mockResolvedValue({ bot: welcomeRow({ template: 'Hi {user}!' }, { name: 'Greeter' }), created: false });
+      const { PUT } = await import('../builtin/[type]/route.js');
+      const res = await PUT(req('PUT', '/x', OWNER, { enabled: true, settings: { channelId: GENERAL } }), builtinCtx('welcome'));
+      expect(res.status).toBe(200);
+      const patch = updateBot.mock.calls[0]![2] as Record<string, unknown>;
+      expect(patch).not.toHaveProperty('name');
+      expect(patch.settings).toMatchObject({ channelId: GENERAL, template: 'Hi {user}!' });
+    });
+  });
 });
