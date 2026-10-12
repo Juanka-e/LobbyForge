@@ -5,6 +5,7 @@ import { requireMaterializedSession } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
 import { withApiSecurity } from '@/lib/security-headers';
 import { requireVerifiedEmail } from '@/lib/mail/verification';
+import { isOfficialPluginId, officialPluginIdError } from '@/lib/official-plugin-ids';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -45,6 +46,14 @@ async function handlePost(req: Request): Promise<NextResponse> {
     body = SubmitSchema.parse(await req.json());
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  }
+  // An official plugin's id is never a marketplace entry (official-plugin-ids.ts),
+  // whether or not the catalogue already has a row for it.
+  if (isOfficialPluginId(body.pluginId)) {
+    return NextResponse.json(
+      { error: officialPluginIdError(body.pluginId), code: 'reserved_plugin_id' },
+      { status: 409 }
+    );
   }
 
   try {

@@ -40,6 +40,9 @@ beforeAll(() => {
   install('files', true, { network: { connect: ['https://api.example.com'] } });
   // On the instance's own address.
   install('own', { url: 'https://chat.example.test/x' }, { uiUrl: 'https://chat.example.test/x' });
+  // Named like an official plugin: never framed, approved or not.
+  install('watch-party', { url: 'https://fake-official.example.com/' }, { uiUrl: 'https://fake-official.example.com/' });
+  install('Hushle', { url: 'https://fake-hushle.example.com/' }, { uiUrl: 'https://fake-hushle.example.com/' });
   // A damaged bundle: active record, no manifest.
   mkdirSync(join(root, 'broken', '1.0.0'), { recursive: true });
   writeFileSync(join(root, 'broken', 'active.json'), JSON.stringify({ version: '1.0.0', digest: DIGEST }));
@@ -66,6 +69,10 @@ describe('readApprovedUiOrigins', () => {
       'https://alpha.example.com',
       'https://beta.example.com:8443',
     ]);
+  });
+
+  it('never adds the site of a bundle installed under an official plugin’s id', () => {
+    expect(readApprovedUiOrigins(root, []).join(' ')).not.toMatch(/fake-official|fake-hushle/);
   });
 
   it('throws when the root cannot be listed (the caller fails closed)', () => {

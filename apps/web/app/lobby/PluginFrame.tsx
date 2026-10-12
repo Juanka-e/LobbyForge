@@ -37,9 +37,12 @@ export { pluginFrameSrc };
  *
  *  - Its own files (`ui: true`): `<iframe sandbox="allow-scripts">` — no
  *    `allow-same-origin`: an OPAQUE origin that cannot read the app's
- *    cookies, storage or DOM — loaded from /api/plugin-ui, whose CSP gives it
- *    no network beyond its own files and the outside origins the instance
- *    owner approved.
+ *    cookies, storage or DOM — loaded from /api/plugin-ui, whose CSP allows
+ *    no fetch, XHR, WebSocket, image or media requests beyond its own files
+ *    and the outside origins the instance owner approved. WebRTC is not
+ *    covered by CSP, and the frame may navigate itself to any origin in
+ *    this page's frame-src: what it is posted below is readable by the
+ *    plugin's author, which is why it is only the viewer's projected state.
  *  - The author's own site (`ui: { url }`, docs/PLUGIN_UNLOCK_PLAN.md
  *    phase 2), only while the owner's approval of that URL stands (the frame
  *    info route names it only then): framed directly with

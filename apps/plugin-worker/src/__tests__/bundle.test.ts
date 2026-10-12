@@ -3,7 +3,7 @@
  * root setting, the digest (pinned to the same vector as the web app's
  * plugin-install-layout.ts) and the refusal rules.
  */
-import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, ftruncateSync, mkdirSync, openSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -66,6 +66,30 @@ describe('computeBundleDigest', () => {
   it('changes when any file changes', () => {
     writeTree(root, { ...VECTOR_FILES, 'lib/nested/b.txt': 'B' });
     expect(computeBundleDigest(root)).not.toBe(VECTOR_DIGEST);
+  });
+
+  /** A file of `size` bytes without writing them (extended, not filled). */
+  function sizedFile(path: string, size: number): void {
+    const fd = openSync(path, 'w');
+    try {
+      ftruncateSync(fd, size);
+    } finally {
+      closeSync(fd);
+    }
+  }
+
+  it('refuses a file over the bundle cap by its size, before reading it (and captures nothing of it)', () => {
+    writeTree(root, VECTOR_FILES);
+    sizedFile(join(root, 'zz-huge.bin'), 64 * 1024 * 1024 + 1);
+    const captured = new Map<string, Buffer>();
+    expect(() => computeBundleDigest(root, captured)).toThrow('bundle is too large');
+    expect(captured.has('zz-huge.bin')).toBe(false);
+  });
+
+  it('counts what earlier files used: the cap is for the whole bundle', () => {
+    sizedFile(join(root, 'a.bin'), 40 * 1024 * 1024);
+    sizedFile(join(root, 'b.bin'), 30 * 1024 * 1024);
+    expect(() => computeBundleDigest(root)).toThrow('bundle is too large');
   });
 });
 

@@ -116,6 +116,24 @@ only believes the header named by `LOBBYFORGE_TRUSTED_PROXY`:
   starts (existing installs are not refused); it logs a warning once and
   Admin → Health (Doctor) shows a `trusted_proxy` warning with this fix.
 
+## Caching: marketplace plugin files stay out of the CDN
+
+Cloudflare caches by file extension and ignores `Vary`. Marketplace plugin
+UI files (`/api/plugin-ui/{plugin}/{version}/…`, ADR-007) are served
+`Cache-Control: public, max-age=31536000, immutable` for browsers, but the
+route decides per request whether to serve them at all: it refuses (403) a
+plugin script requested by one of the app's own pages (`Sec-Fetch-Site:
+same-origin`), so that a plugin's JavaScript on your domain can never be
+used as a gadget against the app. A CDN that cached the frame's 200 would
+hand it to exactly that request.
+
+So every response of that route — files and refusals — also carries
+`CDN-Cache-Control: no-store` and `Cloudflare-CDN-Cache-Control: no-store`.
+Cloudflare honours these over `Cache-Control`, so it never stores them,
+while browsers keep their year-long cache. Nothing to configure; just do
+not add a Cache Rule that forces caching ("Cache Everything" with an Edge
+TTL) on `/api/plugin-ui/*` — that would override the headers.
+
 ## Without Cloudflare (the default path)
 
 No Cloudflare account needed: point DNS at the server, open ports

@@ -35,6 +35,7 @@ import {
   workerRuntimeConfigured,
   type WorkerPluginInfo,
 } from './plugin-worker-client';
+import { isOfficialPluginId, officialPluginIdError } from './official-plugin-ids';
 import { listActivePlugins, pluginInstallDir, readActivePointer } from './plugin-install-layout';
 import { registerSandboxPluginLocales } from './sandbox-plugin-locales';
 
@@ -103,6 +104,8 @@ export async function warmInstalledPlugins(): Promise<void> {
   let count = 0;
   for (const ref of active) {
     try {
+      // Refused before the worker ever loads it (registerDynamicPlugin would refuse it after).
+      if (isOfficialPluginId(ref.pluginId)) throw new Error(officialPluginIdError(ref.pluginId));
       registerDynamicPlugin(await describeWorkerPlugin(ref));
       count += 1;
     } catch (err) {
@@ -123,8 +126,15 @@ export async function warmInstalledPlugins(): Promise<void> {
  * `locales/` tables: from here on its `catalog.name` / `catalog.summary`
  * name it in each viewer's language wherever the host shows it (an older
  * version's tables are replaced).
+ *
+ * Throws for an official plugin's id (official-plugin-ids.ts): a marketplace
+ * bundle named like one must never sit in the registry — the compiled-in
+ * plugin wins every lookup, but the dynamic list would still name it. Every
+ * caller catches (boot and reload log it; the installer refuses such an id
+ * first).
  */
 export function registerDynamicPlugin(info: WorkerPluginInfo): void {
+  if (isOfficialPluginId(info.id)) throw new Error(officialPluginIdError(info.id));
   const state = loaderState();
   state.plugins.set(info.id, buildWorkerPlugin(info));
   if (!state.loadedIds.includes(info.id)) state.loadedIds.push(info.id);
@@ -160,6 +170,7 @@ export async function reloadDynamicPlugin(pluginId: string): Promise<boolean> {
     return false;
   }
   try {
+    if (isOfficialPluginId(pluginId)) throw new Error(officialPluginIdError(pluginId));
     const ref = readActivePointer(pluginInstallDir(), pluginId);
     if (!ref) return false;
     registerDynamicPlugin(await describeWorkerPlugin(ref));

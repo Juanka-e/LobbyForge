@@ -125,6 +125,28 @@ server {
         proxy_read_timeout 90;
     }
 
+    # Marketplace plugin UI files (ADR-007): the lobby frames them, and the
+    # route sends its own complete set of security headers
+    # (apps/web/lib/plugin-ui-assets.ts) — CSP with frame-ancestors 'self',
+    # nosniff, Referrer-Policy no-referrer. The server-level add_header lines
+    # above must not land here: X-Frame-Options DENY contradicts the frame
+    # (CSP frame-ancestors wins in browsers, but it is wrong), and a second
+    # Referrer-Policy would override the route's no-referrer. nginx inherits
+    # add_header only into a location that declares none, so this one
+    # declares the single header that is the same either way.
+    location ^~ /api/plugin-ui/ {
+        add_header X-Content-Type-Options "nosniff" always;
+        proxy_pass http://web:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        # SEC-004: the REAL client address only — the route's per-address
+        # limit keys on it (LOBBYFORGE_TRUSTED_PROXY=x-forwarded-for).
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 90;
+    }
+
     # Next.js app
     location / {
         proxy_pass http://web:3000;

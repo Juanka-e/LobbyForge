@@ -913,14 +913,28 @@ Every file carries this CSP, where `<own>` is your version's own folder,
 ```
 default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline';
 img-src 'self' data:; font-src 'self'; media-src <own> data: blob:; connect-src <own>;
-frame-ancestors 'self'; base-uri 'none'; form-action 'none'; sandbox allow-scripts
+frame-ancestors 'self'; base-uri 'none'; form-action 'none'; webrtc 'block'; sandbox allow-scripts
 ```
 
-So by default: **no network beyond your own files.** `fetch()` and XHR can
-read your own files (level data, a `.wasm`, sound for the Web Audio API)
-and nothing else — not the app, not another plugin, not the web; WebSockets
-and remote images are blocked. The frame cannot send what it is shown
-anywhere.
+So by default: **no fetch, XHR, WebSocket, image or media requests beyond
+your own files.** `fetch()` and XHR can read your own files (level data, a
+`.wasm`, sound for the Web Audio API) and nothing else — not the app, not
+another plugin, not the web; WebSockets and remote images are blocked.
+
+That is what CSP guarantees, and it is less than "no network":
+
+- **WebRTC is not covered by CSP.** `connect-src` does not govern an
+  `RTCPeerConnection`'s STUN/TURN traffic. The policy adds `webrtc 'block'`,
+  which refuses it only in browsers that implement that directive; the
+  others ignore it.
+- **The frame can navigate itself** (`location.href = …`) to any origin the
+  lobby page may frame: that is the embedding page's `frame-src`, not your
+  page's policy.
+
+So write your UI as if its author — you — could read everything the frame
+is shown, because it can: the viewer's projected state, names and language.
+Keep secrets out of what a viewer receives with `projectState`, not with
+the frame.
 
 **Outside origins the owner approved.** A manifest may ask for outside
 origins under `network` ([PLUGIN_PUBLISHING.md → Asking for more than the
@@ -962,12 +976,19 @@ The instance names `<own>` from its configured public origin
 (`LOBBYFORGE_APP_ORIGIN`, else `NEXT_PUBLIC_BASE_URL`), never from the
 request. Without either (a dev setup) it is `'self'`: the app's origin,
 reached without cookies, where every mutating route refuses a cross-site
-request. Navigating the
-frame elsewhere is stopped by the app's own `frame-src`. Assets other than
-the HTML are public and cached for a year (`immutable`, the version is in
-the path): ship a new version to change them. The HTML loads only as an iframe document, and the
+request. Where the frame can navigate itself is bounded by the app page's
+own `frame-src` — the app's origin, YouTube's privacy-enhanced player, the
+CAPTCHA provider's frames when one is configured, and the approved sites of
+plugins whose UI is their own page — not by your page's policy. Assets other than
+the HTML are public and cached for a year by browsers (`immutable`, the
+version is in the path): ship a new version to change them. Shared caches
+never store them (`CDN-Cache-Control: no-store`, see
+[DEPLOY_CLOUDFLARE.md](DEPLOY_CLOUDFLARE.md)). The HTML loads only as an iframe document, and the
 app's own pages can never load your scripts (Fetch Metadata), so do not
-link to your files from anywhere else.
+link to your files from anywhere else. Files are streamed (a `Range` reads
+only that range), and the route allows each address a burst of 1000
+requests, refilled at 50 per second, then answers 429 with `Retry-After`:
+plenty for a game's first load, but do not poll your own files in a loop.
 
 Everything the frame knows arrives in a message; everything it can do is an
 action the lobby sends **as the viewer**, through the normal actions route,

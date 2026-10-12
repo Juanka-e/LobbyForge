@@ -30,6 +30,7 @@ import {
   closeSync,
   constants as fsConstants,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -45,6 +46,7 @@ import { join, resolve, sep } from 'node:path';
 import {
   MAX_LOCALE_FILE_BYTES,
   MAX_LOCALE_FILES,
+  MAX_MANIFEST_BYTES,
   parseSandboxBundle,
   type SandboxLocaleFile,
   type SandboxLocaleTable,
@@ -84,22 +86,29 @@ function isRegularFile(path: string): boolean {
 }
 
 /**
- * Read a file through ONE descriptor and at most `cap + 1` bytes, so what
- * is checked is what is read: no size-then-read window, and a file that
- * grows past the cap while being read is refused (null). Links are not
- * followed where the platform can refuse them (O_NOFOLLOW).
+ * Read a file through ONE descriptor, so what is checked is what is read:
+ * no size-then-read window. The descriptor's size is checked first — a file
+ * over `cap` is refused (null) before anything is read or allocated, and a
+ * small file never costs a cap-sized buffer — and one byte more than that
+ * size is asked for, so a file that grew while being read is refused too
+ * (it throws). Links are not followed where the platform can refuse them
+ * (O_NOFOLLOW); anything but a regular file throws.
  */
 function readFileCapped(path: string, cap: number): Buffer | null {
   const fd = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
   try {
-    const buffer = Buffer.alloc(cap + 1);
+    const info = fstatSync(fd);
+    if (!info.isFile()) throw new Error('bundle contains a non-regular entry');
+    if (info.size > cap) return null;
+    const buffer = Buffer.alloc(info.size + 1);
     let total = 0;
     while (total < buffer.length) {
       const read = readSync(fd, buffer, total, buffer.length - total, total);
       if (read === 0) break;
       total += read;
     }
-    return total > cap ? null : buffer.subarray(0, total);
+    if (total > info.size) throw new Error('a bundle file changed while being read');
+    return buffer.subarray(0, total);
   } finally {
     closeSync(fd);
   }
@@ -185,7 +194,10 @@ export function checkSandboxBundle(
   }
   const locales = readLocaleFiles(dir);
   if (!locales.ok) return locales;
-  const parsed = parseSandboxBundle(readFileSync(join(dir, 'manifest.json')), locales.files, sandboxManifestOptions());
+  // Capped like the locale files: a huge manifest.json is refused unread.
+  const manifestBytes = readFileCapped(join(dir, 'manifest.json'), MAX_MANIFEST_BYTES);
+  if (!manifestBytes) return { ok: false, error: `manifest.json: larger than ${MAX_MANIFEST_BYTES} bytes` };
+  const parsed = parseSandboxBundle(manifestBytes, locales.files, sandboxManifestOptions());
   if (!parsed.ok) return { ok: false, error: parsed.error };
   if (parsed.manifest.id !== pluginId) {
     return { ok: false, error: `Bundle manifest id "${parsed.manifest.id}" does not match the catalog id "${pluginId}".` };
@@ -245,7 +257,9 @@ export interface ActivePluginVersion {
 /**
  * SHA-256 over the sorted list of `relativePath \0 sha256(content) \n` for
  * every regular file under `dir` (POSIX separators). Symlinks and other
- * non-regular entries throw.
+ * non-regular entries throw. Each file's size is checked against what is
+ * left of the bundle cap BEFORE it is read (readFileCapped), so one huge
+ * file is refused without being read into memory.
  */
 export function computeBundleDigest(dir: string): string {
   const files: string[] = [];
@@ -263,9 +277,9 @@ export function computeBundleDigest(dir: string): string {
   const tree = createHash('sha256');
   let total = 0;
   for (const rel of files) {
-    const content = readFileSync(join(dir, ...rel.split('/')));
+    const content = readFileCapped(join(dir, ...rel.split('/')), MAX_DIGEST_BYTES - total);
+    if (!content) throw new Error('bundle is too large');
     total += content.length;
-    if (total > MAX_DIGEST_BYTES) throw new Error('bundle is too large');
     tree.update(`${rel}\0${createHash('sha256').update(content).digest('hex')}\n`);
   }
   return tree.digest('hex');

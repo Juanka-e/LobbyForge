@@ -6,7 +6,7 @@
  * listPluginSummaries() so the existing per-server install flow works
  * unchanged.
  */
-import { and, desc, eq, ilike, sql } from 'drizzle-orm';
+import { and, desc, eq, ilike, isNull, sql } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
 import { pluginCatalog } from '../schema.js';
 
@@ -216,9 +216,28 @@ export async function reviewPlugin(
    *  Postgres). Session-based reviewers pass their uid. */
   reviewerUserId: string | null,
   note?: string | null,
-  bundlePin?: { sha256: string; sizeBytes: number }
-): Promise<void> {
-  await db
+  bundlePin?: { sha256: string; sizeBytes: number },
+  /**
+   * Security review: the submission the reviewer looked at. When given, the
+   * row is updated only while it still has this version (and this bundle
+   * URL), in the same statement — a resubmission that lands while the
+   * review route downloads the bundle can never be approved, or pinned with
+   * the previous bundle's digest, unseen.
+   */
+  expected?: { version: string; manifestUrl?: string | null }
+): Promise<boolean> {
+  const conditions = [eq(pluginCatalog.pluginId, pluginId)];
+  if (expected) {
+    conditions.push(eq(pluginCatalog.version, expected.version));
+    if (expected.manifestUrl !== undefined) {
+      conditions.push(
+        expected.manifestUrl === null
+          ? isNull(pluginCatalog.manifestUrl)
+          : eq(pluginCatalog.manifestUrl, expected.manifestUrl)
+      );
+    }
+  }
+  const updated = await db
     .update(pluginCatalog)
     .set({
       reviewStatus: decision,
@@ -230,7 +249,9 @@ export async function reviewPlugin(
       // Promote to verified-community on approval (unless already official).
       trustLevel: decision === 'approved' ? 'verified-community' : undefined,
     })
-    .where(eq(pluginCatalog.pluginId, pluginId));
+    .where(and(...conditions))
+    .returning({ pluginId: pluginCatalog.pluginId });
+  return updated.length > 0;
 }
 
 /** Increment the download/install count. */

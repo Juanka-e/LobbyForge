@@ -203,6 +203,30 @@ describe('installPluginBundle', () => {
     expect(existsSync(root)).toBe(false);
   });
 
+  it('refuses an official plugin’s id before downloading or touching the disk', async () => {
+    const pin = serveBundle({ ...bundleFiles('1.0.0'), 'manifest.json': JSON.stringify({ id: 'quiz', name: 'Quiz', version: '1.0.0', sdk: 'sandbox-v1', ui: false, actionPolicies: {} }) });
+    for (const id of ['quiz', 'Quiz']) {
+      const result = await installPluginBundle(id, 'https://cdn.example.dev/quiz.tgz', '1.0.0', pin);
+      expect(result.ok, id).toBe(false);
+      expect(result.error).toContain('official');
+    }
+    expect(existsSync(root)).toBe(false);
+    expect(describeWorkerPlugin).not.toHaveBeenCalled();
+  });
+
+  it('PLUG-003: a header whose checksum does not match is refused before extraction', async () => {
+    serveBundle(bundleFiles('1.0.0'));
+    const tar = gunzipSync(download.bytes);
+    tar[345] = 0x78; // one byte of the first header's prefix, checksum left as it was
+    download.bytes = gzipSync(tar);
+    const pin = { sha256: createHash('sha256').update(download.bytes).digest('hex'), sizeBytes: download.bytes.byteLength };
+    const result = await installPluginBundle('cool', 'https://cdn.example.dev/cool-1.0.0.tgz', '1.0.0', pin);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('checksum');
+    expect(existsSync(join(root, 'cool', '1.0.0'))).toBe(false);
+    expect(describeWorkerPlugin).not.toHaveBeenCalled();
+  });
+
   it('refuses bytes that do not match the reviewed pin, writing nothing', async () => {
     const pin = serveBundle(bundleFiles('1.0.0'));
     serveBundle(bundleFiles('1.0.0', 'swapped'));

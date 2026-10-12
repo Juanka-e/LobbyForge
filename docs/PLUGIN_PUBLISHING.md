@@ -26,11 +26,14 @@ marketplace plugin is installed **without trusting its author**:
   the `plugin-worker` container: plain JavaScript, no Node APIs, no
   network, no file system, no timers, a fresh VM for every call;
 - its UI (`ui/`, optional) runs in `<iframe sandbox="allow-scripts">` with
-  an opaque origin and no network beyond its own files (it may load its own
-  sound, video, WebAssembly and data) — plus any outside origins the
-  instance owner approved at install; or, with that approval, its UI is the
-  author's own site, framed by the lobby
-  ([Asking for more than the sandbox](#asking-for-more-than-the-sandbox));
+  an opaque origin, and its CSP allows no fetch, XHR, WebSocket, image or
+  media requests beyond its own files (it may load its own sound, video,
+  WebAssembly and data) — plus any outside origins the instance owner
+  approved at install; or, with that approval, its UI is the author's own
+  site, framed by the lobby
+  ([Asking for more than the sandbox](#asking-for-more-than-the-sandbox)).
+  CSP does not cover WebRTC, so this is not "no network"
+  ([Security notes](#security-notes));
 - it gets what official plugins get from the host: action policies
   (`host` / `member` / `player`, `actorFields`, `joinsRoster`, `audit`),
   `validateAction`, and **per-viewer hidden state** through `projectState`.
@@ -387,7 +390,7 @@ the common mistakes before it packs.
 | `server.js` | 2 MiB |
 | `manifest.json` | 64 KiB |
 | `locales/` | 32 files, 128 KiB each, 1 MiB together, 1000 keys per file (the full rules are under [`locales/`](#locales-optional-your-name-and-description-in-every-language)) |
-| Archive | 10 MB compressed, 50 MB unpacked, 500 entries, regular files and folders only |
+| Archive | 10 MB compressed, 50 MB unpacked, 500 entries, regular files and folders only; plain ustar headers with valid checksums and octal sizes (what `tar -czf` and `pack.mjs` write; no GNU base-256 sizes, long-name or pax entries). Approval and install refuse anything else |
 
 Keep state in kilobytes: every action and every read passes it through the
 VM, and every viewer's read runs `projectState` once. Keep `server.js`
@@ -547,9 +550,22 @@ migrate:
   container is the outer layer: read-only file system, no capabilities,
   memory and pid caps, no secrets except its own RPC token, and a network
   only the web app joins.
+- **What the frame's CSP does and does not stop.** It stops fetch, XHR,
+  WebSocket, image and media requests beyond your own files and the
+  approved origins. It does not cover WebRTC: a page can open an
+  `RTCPeerConnection`, whose STUN/TURN traffic `connect-src` does not
+  govern. The policy carries `webrtc 'block'`, which refuses that only in
+  browsers that implement the directive. And the frame can navigate itself
+  to any origin the lobby page is allowed to frame. So an owner should
+  assume a plugin's author can read whatever its frame is shown — the
+  viewer's projected state, names and language — and nothing more:
+  `projectState` is what keeps a game's secrets from the wrong viewer.
 - **Authorization is the host's.** Who may send an action is decided by
   your manifest's `actionPolicies`, as read and validated by the web app;
   `actorFields` are filled in by the host. Your code cannot widen them.
+- **Official ids are reserved.** A bundle cannot use the id of an official
+  plugin (`hushle`, `quiz`, `poll`, `dice-bot`, `watch-party`,
+  `vampire-village`, in any case): submit and install refuse it.
 - **What review is still for.** A plugin can show misleading text inside
   its own frame, waste its own call budget (and slow other marketplace
   plugins while it does), or leak its own game's secrets through a careless

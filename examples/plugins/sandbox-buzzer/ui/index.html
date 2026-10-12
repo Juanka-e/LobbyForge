@@ -3,7 +3,8 @@
   Sandbox Buzzer — the UI of the example marketplace plugin (ADR-007).
 
   The lobby loads this page in <iframe sandbox="allow-scripts">: an opaque
-  origin with no network beyond its own files (connect-src is its own folder) and no inline scripts. All it
+  origin whose fetch, XHR, WebSocket, image and media requests reach only its
+  own files (connect-src is its own folder), and no inline scripts. All it
   knows comes from the frame protocol (lobbyforge-frame.js); all it can do is
   dispatch actions, which the lobby sends as the viewer.
 -->
