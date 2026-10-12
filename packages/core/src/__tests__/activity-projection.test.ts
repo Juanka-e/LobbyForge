@@ -53,6 +53,15 @@ describe('projectActivityState — poll (S11 anonymous ballots)', () => {
     expect(out.ballotCount).toBe(0);
     expect(out.hasVoted).toBe(false);
   });
+
+  it('B-06: every viewer gets the poll id a vote names, and it names no voter', () => {
+    for (const viewer of ['alice', 'carol', 'host', undefined]) {
+      const out = projectActivityState({ ...pollState(), pollId: 3 }, 'poll', viewer) as Rec;
+      expect(out.pollId, `viewer=${viewer}`).toBe(3);
+      expect(out.ballotBox).toBeUndefined();
+      expect(JSON.stringify(out)).not.toContain('alice');
+    }
+  });
 });
 
 describe('projectActivityState — hushle card ids', () => {
@@ -94,6 +103,24 @@ describe('projectActivityState — hushle card ids', () => {
     for (const viewer of ['p1', 'p3']) {
       const out = projectActivityState(hushle(), 'hushle', viewer) as Rec;
       expect(out.currentCard).toMatchObject({ word: 'apple' });
+    }
+  });
+
+  it('B-06: the deal number (cardSeq) reaches viewers who may not see the card, and names no card', () => {
+    // The host who does not play and the explainer's teammates press (or
+    // watch) Got it without the card; they get the deal number instead.
+    const state = { ...hushle(), cardSeq: 7 };
+    for (const viewer of ['p2', 'host-not-playing', 'spectator', undefined]) {
+      const out = projectActivityState(state, 'hushle', viewer) as Rec;
+      expect(out.cardSeq, `viewer=${viewer}`).toBe(7);
+      expect(out.currentCard).toBeNull();
+      const json = JSON.stringify(out);
+      expect(json).not.toContain('db-card');
+      expect(json).not.toContain('apple');
+    }
+    // Viewers who see the card get the same number — nothing per viewer.
+    for (const viewer of ['p1', 'p3']) {
+      expect((projectActivityState(state, 'hushle', viewer) as Rec).cardSeq).toBe(7);
     }
   });
 });
