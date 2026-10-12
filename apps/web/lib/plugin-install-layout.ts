@@ -27,11 +27,15 @@
  */
 import { createHash } from 'node:crypto';
 import {
+  closeSync,
+  constants as fsConstants,
   existsSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
+  readSync,
   renameSync,
   rmSync,
   statSync,
@@ -70,6 +74,28 @@ function isRegularFile(path: string): boolean {
   }
 }
 
+/**
+ * Read a file through ONE descriptor and at most `cap + 1` bytes, so what
+ * is checked is what is read: no size-then-read window, and a file that
+ * grows past the cap while being read is refused (null). Links are not
+ * followed where the platform can refuse them (O_NOFOLLOW).
+ */
+function readFileCapped(path: string, cap: number): Buffer | null {
+  const fd = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+  try {
+    const buffer = Buffer.alloc(cap + 1);
+    let total = 0;
+    while (total < buffer.length) {
+      const read = readSync(fd, buffer, total, buffer.length - total, total);
+      if (read === 0) break;
+      total += read;
+    }
+    return total > cap ? null : buffer.subarray(0, total);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 /** A path from the bundle as it may appear in an error message: short, printable ASCII. */
 function printablePath(path: string): string {
   return path.slice(0, 64).replace(/[^\x20-\x7e]/g, '?');
@@ -103,11 +129,9 @@ function readLocaleFiles(dir: string): { ok: true; files: SandboxLocaleFile[] } 
       }
       if (!entry.isFile()) return `locales/${printablePath(childRel)}: not a regular file.`;
       if (files.length >= MAX_LOCALE_FILES) return `locales/: more than ${MAX_LOCALE_FILES} files`;
-      const path = join(localesDir, ...childRel.split('/'));
-      if (statSync(path).size > MAX_LOCALE_FILE_BYTES) {
-        return `locales/${printablePath(childRel)}: larger than ${MAX_LOCALE_FILE_BYTES} bytes`;
-      }
-      files.push([childRel, readFileSync(path)]);
+      const content = readFileCapped(join(localesDir, ...childRel.split('/')), MAX_LOCALE_FILE_BYTES);
+      if (!content) return `locales/${printablePath(childRel)}: larger than ${MAX_LOCALE_FILE_BYTES} bytes`;
+      files.push([childRel, content]);
     }
     return null;
   };
