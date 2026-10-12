@@ -7,6 +7,9 @@ import {
   type InstanceSetupStatus,
 } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
+import { getDiscovery } from '@/lib/i18n/catalogue';
+import { installedLocale } from '@/lib/i18n/core';
+import { rememberInstanceDefaultLocale } from '@/lib/i18n/instance-default';
 import { completeSetupSchema } from '@/lib/validators/setup';
 import { hashPassword } from '@/lib/password';
 import { buildGuestSessionCookie, createGuestIdentity } from '@/lib/guest-session';
@@ -37,6 +40,13 @@ async function handlePost(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: message }, { status: 400 });
   }
   const input = parsed.data;
+  // The language step: an installed language, or nothing (an older client).
+  let locale: string | undefined;
+  if (input.locale) {
+    const installed = installedLocale(input.locale, getDiscovery().locales.map((l) => l.code));
+    if (!installed) return NextResponse.json({ error: 'Unknown language.' }, { status: 400 });
+    locale = installed;
+  }
 
   const expectedSetupToken = process.env.LOBBYFORGE_SETUP_TOKEN;
   if (process.env.NODE_ENV === 'production' && !expectedSetupToken) {
@@ -62,7 +72,9 @@ async function handlePost(request: Request): Promise<NextResponse> {
       seoIndexingEnabled: input.seoIndexingEnabled,
       seoTitle: input.seoTitle ?? null,
       seoDescription: input.seoDescription ?? null,
+      ...(locale ? { defaultLocale: locale, ownerLocale: locale } : {}),
     });
+    if (locale) rememberInstanceDefaultLocale(locale);
     const sessionSeed = createGuestIdentity();
     const session = buildGuestSessionCookie(
       { gid: sessionSeed.gid, uid: result.owner.id, name: result.owner.displayName },

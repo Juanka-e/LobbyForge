@@ -155,3 +155,35 @@ describe('POST /api/setup/complete — beta-review S7 session tracking', () => {
     expect(res.status).toBe(200);
   });
 });
+
+// The wizard's first step (docs/TRANSLATING.md): the language it picked
+// becomes the instance default and the owner account's language.
+describe('POST /api/setup/complete — the language step', () => {
+  it('saves an installed language as the instance default and as the owner’s language', async () => {
+    const { __resetInstanceDefaultLocaleForTests, instanceDefaultLocale } = await import('@/lib/i18n/instance-default');
+    __resetInstanceDefaultLocaleForTests();
+    const res = await post({ ...validBody, locale: 'tr' });
+    expect(res.status).toBe(200);
+    expect(completeInitialBootstrap).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ defaultLocale: 'tr', ownerLocale: 'tr' })
+    );
+    // In use at once, without waiting for the cache to expire.
+    expect(instanceDefaultLocale()).toBe('tr');
+  });
+
+  it('refuses a language that is not installed, before hashing or writing anything', async () => {
+    const res = await post({ ...validBody, locale: 'de' });
+    expect(res.status).toBe(400);
+    expect(hashPassword).not.toHaveBeenCalled();
+    expect(completeInitialBootstrap).not.toHaveBeenCalled();
+  });
+
+  it('leaves both unset for a client that sends no language', async () => {
+    const res = await post(validBody);
+    expect(res.status).toBe(200);
+    const input = completeInitialBootstrap.mock.calls[0]![1] as Record<string, unknown>;
+    expect(input).not.toHaveProperty('defaultLocale');
+    expect(input).not.toHaveProperty('ownerLocale');
+  });
+});

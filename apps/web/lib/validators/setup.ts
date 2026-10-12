@@ -37,6 +37,12 @@ export const completeSetupSchema = z.object({
   seoIndexingEnabled: z.boolean(),
   seoTitle: z.string().trim().max(70).regex(SAFE_VISIBLE_TEXT).optional().nullable(),
   seoDescription: z.string().trim().max(160).regex(SAFE_VISIBLE_TEXT).optional().nullable(),
+  /**
+   * The wizard's first step: saved as the instance default and as the
+   * owner account's language. The route checks it against the installed
+   * languages; absent (an older client) leaves both unset.
+   */
+  locale: z.string().trim().min(2).max(35).optional().nullable(),
 });
 
 export type CompleteSetupInput = z.infer<typeof completeSetupSchema>;
