@@ -2,6 +2,14 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Activities: a late press no longer lands on the next card, question or poll - 2026-10-12
+
+- **Hushle:** Got it, Skip, Penalty and Next card name the card they were pressed for. If an opponent's BUST (or a second moderator) moved the card on first, the host's press is ignored instead of scoring a card nobody explained. Every draw now bumps a public deal number, `cardSeq`, and those four actions carry the `cardSeq` of the state the button was drawn from. A counter rather than the card id, because the host who does not play and the explaining team never receive the card; `cardSeq` says how many cards were dealt, never which. BUST keeps its `cardId`.
+- **Quiz:** `answer` carries `questionIndex`, the question the tiles were drawn for. A late or retried answer for question N that arrives after **Next question** is ignored, never recorded against N+1.
+- **Poll:** every `open-poll` numbers the poll (`pollId`, kept by `clear-poll`, so it is never reused in a session), and `vote` carries it. A vote cast just before the host cleared the poll and opened a new one is ignored rather than counted on the new poll, whose option ids repeat the old ones. Closing and reopening keeps the same poll and number.
+- **Rule for all three:** an action whose key is present and does not match is ignored silently: the reducer returns the same state, so it changes nothing and is not audited, and the caller gets a plain 200 with the current state (the same as Vampire Village's `phaseId`). An action without the key is accepted as before, so a panel loaded before the deploy keeps working. `null` counts as absent; any other value that is not a non-negative integer is a 400 from the plugin's `validateAction`.
+- **Docs:** `docs/HUSHLE.md` (new "Stale presses" section, state v4), `docs/QUIZ.md` (Actions), and a new `plugins/poll/README.md` with Poll's action shapes.
+- **Upgrade notes:** no database migration. Hushle state goes to version 4: a running game's row gets `cardSeq: 0` on its next read. Poll gains a `migrateState` that gives a running poll `pollId: 0`. Both values are the same on every read, so a panel that read the migrated state names what the reducer sees. Quiz needs no state change (`currentIndex` was already public).
 ## [Unreleased] - Marketplace plugin frames: sound, video, WebAssembly and their own files - 2026-10-12
 
 - **Sound and video:** a marketplace plugin's `ui/` may ship `mp3`, `ogg`, `oga`, `opus`, `wav`, `m4a`, `flac`, `webm` and `mp4` files and play them with `<audio>`/`<video>` or the Web Audio API. The asset route answers single `Range` requests with 206, so media can seek (Safari plays nothing without it).
