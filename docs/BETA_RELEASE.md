@@ -141,6 +141,9 @@ git clone --branch <release-tag> --depth 1 https://github.com/Juanka-e/LobbyForg
 cd LobbyForge && bash install.sh
 # Default TLS: Let's Encrypt. Behind Cloudflare with an Origin CA
 # certificate instead? See docs/DEPLOY_CLOUDFLARE.md.
+# IPv6 on the host? Check Admin → Health for a `client_address` warning:
+# with Docker's defaults every IPv6 visitor can share one address
+# (docs/DEPLOY_CLOUDFLARE.md#client-addresses-behind-docker).
 
 # Updates — every GitHub release publishes a SIGNED release-manifest.json
 # that pins the immutable image digest. lfctl finds the newest release of

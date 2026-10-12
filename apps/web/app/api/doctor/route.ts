@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { SystemStats } from '@lobbyforge/core';
 import { collectDoctorReport } from '@/lib/doctor';
 import { requireAdminHealthToken } from '@/lib/admin-auth';
-import { withApiSecurity } from '@/lib/security-headers';
+import { resolveClientAddress, withApiSecurity } from '@/lib/security-headers';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -10,7 +10,8 @@ export const runtime = 'nodejs';
 async function handler(req: Request): Promise<NextResponse> {
   const denied = await requireAdminHealthToken(req);
   if (denied) return denied;
-  const { report, stats } = await collectDoctorReport();
+  // INFRA-V-01: the caller's own address is one signal for `client_address`.
+  const { report, stats } = await collectDoctorReport({ clientAddress: resolveClientAddress(req) });
   return NextResponse.json(
     { report, stats: redactStatsForPublic(stats) },
     {

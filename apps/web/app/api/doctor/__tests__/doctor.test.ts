@@ -14,6 +14,7 @@ vi.mock('@/lib/doctor', () => ({
 
 vi.mock('@/lib/security-headers', () => ({
   withApiSecurity: (handler: unknown) => handler,
+  resolveClientAddress: (req: Request) => req.headers.get('x-test-client') ?? 'unknown',
 }));
 
 async function loadRoute() {
@@ -109,5 +110,12 @@ describe('GET /api/doctor report', () => {
     const { GET } = await loadRoute();
     const res = await GET(new Request('https://example.test/api/doctor'), {});
     expect(res.headers.get('Cache-Control')).toBe('no-store');
+  });
+
+  it('passes the caller’s resolved address to the client_address check (security-review INFRA-V-01)', async () => {
+    collectDoctorReport.mockResolvedValue({ report: okReport, stats: { ...baseStats } });
+    const { GET } = await loadRoute();
+    await GET(new Request('https://example.test/api/doctor', { headers: { 'x-test-client': '172.18.0.1' } }), {});
+    expect(collectDoctorReport).toHaveBeenCalledWith({ clientAddress: '172.18.0.1' });
   });
 });

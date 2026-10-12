@@ -13,6 +13,8 @@ import {
   type DoctorReport,
   type SystemStats,
 } from '@lobbyforge/core';
+import type { InstanceStoredImageBytes } from '@lobbyforge/db';
+import { recentClientAddresses } from '@/lib/client-address-sample';
 
 const PROCESS_STARTED_AT = new Date();
 
@@ -127,11 +129,22 @@ function envUrl(name: string, fallback: string): string {
   return raw && raw.length > 0 ? raw : fallback;
 }
 
+export interface DoctorRequestContext {
+  /**
+   * The client address of the request asking for the report, as the app
+   * resolves it (trusted proxy header) — Admin → Health and /api/doctor
+   * pass it for the `client_address` check (security-review INFRA-V-01).
+   */
+  clientAddress?: string | null;
+}
+
 /**
  * Run every Doctor check and return a populated report. This is what the
  * /api/doctor endpoint calls.
  */
-export async function collectDoctorReport(): Promise<{ report: DoctorReport; stats: SystemStats }> {
+export async function collectDoctorReport(
+  context: DoctorRequestContext = {}
+): Promise<{ report: DoctorReport; stats: SystemStats }> {
   const stats = await collectSystemStats();
   const livekitUrl = envUrl('LIVEKIT_URL', 'http://localhost:19580');
   const redisUrl = envUrl('REDIS_URL', 'redis://:lobbyforge_dev@localhost:19579');
@@ -163,6 +176,16 @@ export async function collectDoctorReport(): Promise<{ report: DoctorReport; sta
       nodeEnv: process.env.NODE_ENV,
       trustedProxy: process.env.LOBBYFORGE_TRUSTED_PROXY,
     }),
+    // security-review INFRA-V-01: are the proxied client addresses real
+    // visitors, or one Docker bridge gateway?
+    buildClientAddressCheck({
+      trustedProxy: process.env.LOBBYFORGE_TRUSTED_PROXY,
+      requestAddress: context.clientAddress ?? null,
+      recentAddresses: recentClientAddresses(),
+      gateways: await readDefaultGateways(),
+    }),
+    // security-review FILE-001: images kept in Postgres, instance-wide.
+    ...(await collectImageStorageChecks()),
     buildSecureOriginCheck({
       baseUrl: process.env.NEXT_PUBLIC_BASE_URL,
       appOrigin: process.env.LOBBYFORGE_APP_ORIGIN,
@@ -320,6 +343,212 @@ export function buildTrustedProxyCheck(env: { nodeEnv?: string; trustedProxy?: s
     level: AlertLevel.WARNING,
     message: `${problem}, so every visitor shares one rate-limit bucket and one client can lock everyone out of sign-in. ${TRUSTED_PROXY_FIX}`,
   };
+}
+
+/** The dotted IPv4 of a plain or IPv4-mapped IPv6 address, else null. */
+function ipv4Of(address: string): string | null {
+  const plain = address.trim().replace(/^::ffff:/i, '');
+  const parts = plain.split('.');
+  if (parts.length !== 4 || !parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255)) return null;
+  return parts.map(Number).join('.');
+}
+
+/**
+ * Shaped like a NAT / bridge gateway: a private IPv4 (10/8, 172.16/12,
+ * 192.168/16) ending in `.1`. Docker's bridge gateways come from exactly
+ * these pools (172.17.0.1, 172.18.0.1, … then 192.168.0.1, 192.168.16.1, …),
+ * and it is also the address a router's hairpin NAT shows for every LAN
+ * client. A real visitor's address almost never is.
+ */
+export function isGatewayLikeAddress(address: string): boolean {
+  const ip = ipv4Of(address);
+  if (!ip) return false;
+  const [a, b, , d] = ip.split('.').map(Number) as [number, number, number, number];
+  if (d !== 1) return false;
+  return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+}
+
+const CLIENT_ADDRESS_FIX =
+  'Give the edge network IPv6 (enable_ipv6 on lobbyforge-edge) or turn off Docker’s userland proxy ' +
+  '("userland-proxy": false in /etc/docker/daemon.json, with ip6tables enabled) and restart Docker — ' +
+  'see docs/DEPLOY_CLOUDFLARE.md#client-addresses-behind-docker.';
+
+/** At least this many sampled requests before the share of gateway addresses means anything. */
+const CLIENT_ADDRESS_MIN_SAMPLE = 20;
+
+/**
+ * security-review INFRA-V-01: with a trusted proxy configured, are the
+ * client addresses the app reads real visitors, or one gateway? Behind
+ * Docker's default userland proxy with no IPv6 on the bridge, nginx sees
+ * every IPv6 visitor (or every visitor) as the bridge gateway, so they all
+ * share one per-address rate-limit bucket — one client can lock the rest
+ * out of sign-in, and the per-address upload and guest budgets become
+ * instance-wide.
+ *
+ * Signals: the address of the request asking for this report, and a sample
+ * of recent proxied requests (lib/client-address-sample.ts), each compared
+ * with the container's default gateways (/proc/net/route — the edge bridge
+ * gateway when web shares nginx's network) and with the gateway shape
+ * ({@link isGatewayLikeAddress}). Pure: the caller passes everything.
+ */
+export function buildClientAddressCheck(input: {
+  trustedProxy?: string;
+  requestAddress?: string | null;
+  recentAddresses?: string[];
+  gateways?: string[];
+}): DoctorCheck {
+  const base = { id: 'client_address', category: DoctorCategory.NETWORK };
+  const mode = input.trustedProxy?.trim() ?? '';
+  if (mode !== 'x-forwarded-for' && mode !== 'cloudflare') {
+    return {
+      ...base,
+      ok: true,
+      level: AlertLevel.INFO,
+      message: 'Client addresses are not read from a proxy header — see the trusted_proxy check.',
+    };
+  }
+  const gateways = new Set((input.gateways ?? []).map((g) => ipv4Of(g) ?? g.trim()));
+  const isShared = (address: string) => gateways.has(ipv4Of(address) ?? address.trim()) || isGatewayLikeAddress(address);
+  const known = (address: string | null | undefined): address is string => Boolean(address) && address !== 'unknown';
+
+  const recent = (input.recentAddresses ?? []).filter(known);
+  const sharedRecent = recent.filter(isShared);
+  const requestShared = known(input.requestAddress) && isShared(input.requestAddress);
+  const mostlyShared = recent.length >= CLIENT_ADDRESS_MIN_SAMPLE && sharedRecent.length * 2 >= recent.length;
+  const distinct = new Set(recent).size;
+  const detail = { sampled: recent.length, sharedInSample: sharedRecent.length, distinct };
+
+  if (requestShared || mostlyShared) {
+    const address = requestShared ? input.requestAddress! : mostCommon(sharedRecent);
+    const evidence = requestShared
+      ? 'this request came from it'
+      : `${sharedRecent.length} of the last ${recent.length} requests came from it`;
+    return {
+      ...base,
+      ok: false,
+      level: AlertLevel.WARNING,
+      message:
+        `Requests reach the app from ${address}, a gateway address, instead of each visitor’s own address (${evidence}). ` +
+        'Behind Docker’s default userland proxy with no IPv6 on the bridge, nginx sees IPv6 visitors — or all of them — as the bridge gateway, ' +
+        `so they share one rate-limit bucket and one client can lock the others out of sign-in. ${CLIENT_ADDRESS_FIX}`,
+      detail: { ...detail, address },
+    };
+  }
+  return {
+    ...base,
+    ok: true,
+    level: AlertLevel.INFO,
+    message:
+      recent.length === 0
+        ? 'No proxied requests sampled yet.'
+        : `Client addresses look like real visitors (${distinct} distinct among the last ${recent.length} requests).`,
+    detail,
+  };
+}
+
+function mostCommon(values: string[]): string {
+  const counts = new Map<string, number>();
+  for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '';
+}
+
+/**
+ * The container's default IPv4 gateways from /proc/net/route (Linux;
+ * empty elsewhere or on any error). In the production compose web shares
+ * the edge network with nginx, so this is the bridge gateway nginx would
+ * report for userland-proxied clients.
+ */
+export async function readDefaultGateways(): Promise<string[]> {
+  try {
+    const { readFile } = await import('node:fs/promises');
+    return parseDefaultGateways(await readFile('/proc/net/route', 'utf8'));
+  } catch {
+    return [];
+  }
+}
+
+/** Parse /proc/net/route: default routes (destination 0) with their little-endian hex gateway. */
+export function parseDefaultGateways(routeTable: string): string[] {
+  const gateways = new Set<string>();
+  for (const line of routeTable.split('\n').slice(1)) {
+    const [, destination, gateway] = line.trim().split(/\s+/);
+    if (destination !== '00000000' || !gateway || !/^[0-9A-Fa-f]{8}$/.test(gateway) || gateway === '00000000') continue;
+    const n = Number.parseInt(gateway, 16);
+    gateways.add([n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff].join('.'));
+  }
+  return [...gateways];
+}
+
+/** Default threshold for the `image_storage` warning: 1 GiB of images in Postgres. */
+export const IMAGE_STORAGE_WARN_BYTES = 1024 * 1024 * 1024;
+
+/** The `image_storage` threshold: LOBBYFORGE_IMAGE_STORAGE_WARN_MB, or 1 GiB. */
+export function imageStorageWarnBytes(env: Record<string, string | undefined> = process.env): number {
+  const mb = Number(env.LOBBYFORGE_IMAGE_STORAGE_WARN_MB);
+  return Number.isFinite(mb) && mb > 0 ? Math.round(mb * 1024 * 1024) : IMAGE_STORAGE_WARN_BYTES;
+}
+
+function mebibytes(bytes: number): string {
+  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`;
+}
+
+/**
+ * security-review FILE-001: avatars, banners and the logo live in Postgres
+ * as data URLs, so they grow the database (and every backup). Per-user
+ * quotas, the guest refusal and the per-address daily upload budget bound
+ * the rate; this warns when the instance-wide total passes the threshold.
+ * Pure: the caller passes the totals and the threshold.
+ */
+export function buildImageStorageCheck(totals: InstanceStoredImageBytes, warnBytes: number): DoctorCheck {
+  const base = {
+    id: 'image_storage',
+    category: DoctorCategory.SYSTEM,
+    detail: { ...totals, warnBytes },
+  };
+  const breakdown =
+    `accounts ${mebibytes(totals.userBytes - totals.guestBytes)}, guests ${mebibytes(totals.guestBytes)}, ` +
+    `server banners ${mebibytes(totals.serverBytes)}, logo ${mebibytes(totals.logoBytes)}`;
+  if (totals.totalBytes < warnBytes) {
+    return {
+      ...base,
+      ok: true,
+      level: AlertLevel.INFO,
+      message: `Stored images use ${mebibytes(totals.totalBytes)} of the database (${breakdown}).`,
+    };
+  }
+  const guestHint =
+    totals.guestBytes > 0
+      ? ' Guests can no longer upload images; the ones they stored earlier stay until those guest accounts are removed.'
+      : '';
+  return {
+    ...base,
+    ok: false,
+    level: AlertLevel.WARNING,
+    message:
+      `Stored images use ${mebibytes(totals.totalBytes)} of the database, above the ${mebibytes(warnBytes)} warning threshold (${breakdown}). ` +
+      'Images are kept in Postgres, so they grow the database and every backup. Check the disk and remove accounts or servers you no longer need.' +
+      `${guestHint} Change the threshold with LOBBYFORGE_IMAGE_STORAGE_WARN_MB.`,
+  };
+}
+
+async function collectImageStorageChecks(): Promise<DoctorCheck[]> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const [{ getInstanceStoredImageBytes }, { getDb }] = await Promise.all([import('@lobbyforge/db'), import('@/lib/db')]);
+    const totals = await Promise.race([
+      getInstanceStoredImageBytes(getDb()),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('timeout')), 3000);
+      }),
+    ]);
+    return [buildImageStorageCheck(totals, imageStorageWarnBytes())];
+  } catch (err) {
+    // The postgres check already reports an unreachable database.
+    console.error('[doctor] image storage check unavailable:', (err as Error).message);
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**

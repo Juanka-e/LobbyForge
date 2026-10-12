@@ -14,6 +14,7 @@
 import { NextResponse } from 'next/server';
 import { GUEST_COOKIE_NAME, clearCookieHeader } from '@lobbyforge/core';
 import { maintenanceResponseForRequest } from '@/lib/maintenance-guard';
+import { noteClientAddress } from '@/lib/client-address-sample';
 
 const SECURITY_HEADER_NAMES = [
   'X-Content-Type-Options',
@@ -263,15 +264,32 @@ export function resolveClientAddress(
   req: Request,
   mode: TrustedProxyMode = (process.env.LOBBYFORGE_TRUSTED_PROXY as TrustedProxyMode) || 'none'
 ): string {
+  return resolveClientAddressFromHeaders(req.headers, mode);
+}
+
+/**
+ * `resolveClientAddress` for callers holding only the headers (a server
+ * component's `headers()`, e.g. Admin → Health). Addresses read from a
+ * trusted proxy header are sampled for Doctor's `client_address` check
+ * (security-review INFRA-V-01, lib/client-address-sample.ts).
+ */
+export function resolveClientAddressFromHeaders(
+  headers: Pick<Headers, 'get'>,
+  mode: TrustedProxyMode = (process.env.LOBBYFORGE_TRUSTED_PROXY as TrustedProxyMode) || 'none'
+): string {
   if (mode === 'cloudflare') {
-    return req.headers.get('cf-connecting-ip')?.trim() || 'unknown';
+    const address = headers.get('cf-connecting-ip')?.trim() || 'unknown';
+    noteClientAddress(address);
+    return address;
   }
   if (mode === 'x-forwarded-for') {
     // SEC-004: nginx is configured to send ONLY $remote_addr, but if a
     // chain ever leaks through, the LAST entry is the hop the trusted
     // proxy observed — the FIRST is attacker-controllable.
-    const chain = req.headers.get('x-forwarded-for')?.split(',').map((x) => x.trim()).filter(Boolean);
-    return chain?.[chain.length - 1] ?? 'unknown';
+    const chain = headers.get('x-forwarded-for')?.split(',').map((x) => x.trim()).filter(Boolean);
+    const address = chain?.[chain.length - 1] ?? 'unknown';
+    noteClientAddress(address);
+    return address;
   }
   // In production behind a reverse proxy (Nginx), warn loudly if the trusted
   // proxy is not configured — without it, ALL clients share one rate-limit
