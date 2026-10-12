@@ -26,7 +26,9 @@
     { "name": "an empty network object", "patch": { "network": {} } },
     { "name": "ui as the author's own page", "patch": { "ui": { "url": "https://game.example.com/play?room=1" } } },
     { "name": "every known permission", "patch": { "permissions": ["timers", "storage", "chat", "voice.mute"] } },
-    { "name": "an empty permission list", "patch": { "permissions": [] } }
+    { "name": "an empty permission list", "patch": { "permissions": [] } },
+    { "name": "a system action (only timers fire it)", "patch": { "permissions": ["timers"], "actionPolicies": { "auto-reveal": { "role": "system" } } } },
+    { "name": "a system action that asks for an audit row", "patch": { "actionPolicies": { "tick": { "role": "system", "audit": true } } } }
   ],
   "invalid": [
     { "name": "not an object", "manifest": ["sandbox-v1"] },
@@ -60,6 +62,9 @@
     { "name": "bad locale code", "patch": { "locales": ["EN_us"] } },
     { "name": "requiresVoiceRoom as a string", "patch": { "requiresVoiceRoom": "yes" } },
     { "name": "allowOutsideVoice as a number", "patch": { "actionPolicies": { "leave": { "role": "member", "allowOutsideVoice": 1 } } } },
+    { "name": "a system action with actorFields", "patch": { "actionPolicies": { "tick": { "role": "system", "actorFields": ["playerId"] } } } },
+    { "name": "a system action that joins the roster", "patch": { "actionPolicies": { "tick": { "role": "system", "joinsRoster": true } } } },
+    { "name": "a system action with allowOutsideVoice", "patch": { "actionPolicies": { "tick": { "role": "system", "allowOutsideVoice": true } } } },
     { "name": "network as an array", "patch": { "network": ["https://api.example.com"] } },
     { "name": "network with an unknown kind", "patch": { "network": { "script": ["https://cdn.example.com"] } } },
     { "name": "network list that is not an array", "patch": { "network": { "connect": "https://api.example.com" } } },

@@ -14,16 +14,19 @@
  * Defence in depth around that, in compose: a separate container with no
  * host secrets except the RPC token, a read-only mount of the install
  * directory, memory/pid caps, no capabilities, no-new-privileges, and a
- * network that only the web app joins. The worker makes no outbound calls
- * (there is no plugin storage in sandbox v1).
+ * network that only the web app joins. The worker makes no outbound calls:
+ * a plugin's storage reaches it as a snapshot in `ctx.storage` (JSON the
+ * web app read), and what the plugin wants done — timers, storage writes,
+ * chat posts — leaves as `effects` the web app validates and applies
+ * (docs/PLUGIN_SDK.md "Effects").
  *
  * RPC surface (POST /rpc, header `x-lf-worker-token`). Every op names the
  * exact bundle — `pluginId`, the active `version` and the `digest` of its
  * files, as recorded by the web app's installer — and the worker refuses
  * anything else (bundle.ts).
  *   { op: 'describe', ...ref }                          → { plugin: {...manifest, has*} }
- *   { op: 'createInitialState', ...ref, ctx }           → { result }
- *   { op: 'handleAction', ...ref, ctx, state, action }  → { result } | { unchanged: true }
+ *   { op: 'createInitialState', ...ref, ctx }           → { result, effects? }
+ *   { op: 'handleAction', ...ref, ctx, state, action }  → { result, effects? } | { unchanged: true, effects? }
  *   { op: 'validateAction', ...ref, action }            → { result: string | null }
  *   { op: 'projectState', ...ref, state, viewerId, ctx }→ { result }
  *   { op: 'migrateState', ...ref, raw }                 → { result }
@@ -69,6 +72,10 @@ export const SANDBOX_STACK_BYTES = 256 * 1024;
 const KILL_GRACE_MS = 250;
 const MAX_PLAYERS = 500;
 const ID_MAX = 128;
+/** ctx.storage as JSON: the host keeps a plugin's storage under 64 KiB; this is the slack-padded backstop. */
+const MAX_STORAGE_JSON_BYTES = 256 * 1024;
+/** Effects one call may return (the host enforces its own, lower limit). */
+const MAX_EFFECTS = 64;
 const LOCALE_RE = /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/;
 
 function envInt(name: string, fallback: number, min: number, max: number): number {
@@ -135,7 +142,8 @@ function nullableId(value: unknown): string | null {
 /**
  * The ctx a plugin sees in createInitialState / handleAction: plain data
  * only. `random()` is added inside the VM, drawing from the CSPRNG values
- * passed with the call.
+ * passed with the call; `storage` becomes the read-only `get` / `keys`
+ * snapshot there.
  */
 interface SandboxCtx {
   players: Array<{ id: string; name: string }>;
@@ -145,6 +153,7 @@ interface SandboxCtx {
   serverId: string;
   hostId: string | null;
   actorId: string | null;
+  storage: Record<string, unknown>;
 }
 
 /**
@@ -191,7 +200,15 @@ function readCtx(raw: unknown): SandboxCtx {
     serverId: boundedId(env.serverId),
     hostId: nullableId(env.hostId),
     actorId: nullableId(env.actorId ?? env.actorUserId),
+    storage: isPlainObject(env.storage) ? env.storage : {},
   };
+}
+
+/** The storage snapshot is data the web app read, but a cap is a cap. */
+function storageTooLarge(raw: unknown): boolean {
+  const env = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+  if (env.storage === undefined) return false;
+  return Buffer.byteLength(JSON.stringify(env.storage) ?? '', 'utf8') > MAX_STORAGE_JSON_BYTES;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -200,7 +217,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 type RpcReply = { status: number; body: unknown };
 
-type OpOutcome = { ok: true; value: unknown; unchanged: boolean } | { ok: false; reply: RpcReply };
+type OpOutcome = { ok: true; value: unknown; unchanged: boolean; effects?: unknown } | { ok: false; reply: RpcReply };
 
 async function runOp(bundle: LoadedBundle, input: Record<string, unknown> & { op: SandboxOp }): Promise<OpOutcome> {
   const pluginId = bundle.manifest.id;
@@ -216,11 +233,13 @@ async function runOp(bundle: LoadedBundle, input: Record<string, unknown> & { op
   } catch {
     return { ok: false, reply: { status: 500, body: { error: `Plugin "${pluginId}" failed: its result is not JSON` } } };
   }
-  if (isPlainObject(parsed) && parsed.u === 1 && input.op === 'handleAction') return { ok: true, value: null, unchanged: true };
+  if (isPlainObject(parsed) && parsed.u === 1 && input.op === 'handleAction') {
+    return { ok: true, value: null, unchanged: true, ...('e' in parsed ? { effects: parsed.e } : {}) };
+  }
   if (!isPlainObject(parsed) || !('r' in parsed)) {
     return { ok: false, reply: { status: 500, body: { error: `Plugin "${pluginId}" failed: malformed result` } } };
   }
-  return { ok: true, value: parsed.r, unchanged: false };
+  return { ok: true, value: parsed.r, unchanged: false, ...('e' in parsed ? { effects: parsed.e } : {}) };
 }
 
 const OPS = new Set<SandboxOp>(['describe', 'createInitialState', 'handleAction', 'validateAction', 'projectState', 'migrateState']);
@@ -268,6 +287,10 @@ async function handleRpc(rawBody: Buffer): Promise<RpcReply> {
     };
   }
 
+  if ((op === 'createInitialState' || op === 'handleAction') && storageTooLarge(msg.ctx)) {
+    return { status: 413, body: { error: 'ctx.storage exceeds the size cap' } };
+  }
+
   let input: Record<string, unknown> & { op: SandboxOp };
   if (op === 'createInitialState') {
     input = { op, ctx: readCtx(msg.ctx), random: cryptoRandomFloats(randomValuesPerCall()) };
@@ -285,7 +308,12 @@ async function handleRpc(rawBody: Buffer): Promise<RpcReply> {
 
   const outcome = await runOp(bundle, input);
   if (!outcome.ok) return outcome.reply;
-  if (outcome.unchanged) return { status: 200, body: { unchanged: true } };
+  // Effects travel to the web app, which validates every one; here only the shape.
+  if (outcome.effects !== undefined && (!Array.isArray(outcome.effects) || outcome.effects.length > MAX_EFFECTS)) {
+    return { status: 500, body: { error: `Plugin "${manifest.id}" failed: effects must be an array of at most ${MAX_EFFECTS}` } };
+  }
+  const effects = outcome.effects !== undefined ? { effects: outcome.effects } : {};
+  if (outcome.unchanged) return { status: 200, body: { unchanged: true, ...effects } };
 
   if (op === 'validateAction') {
     const value = outcome.value;
@@ -300,7 +328,7 @@ async function handleRpc(rawBody: Buffer): Promise<RpcReply> {
   if (!isPlainObject(outcome.value)) {
     return { status: 500, body: { error: `Plugin "${manifest.id}" failed: ${op} must return an object` } };
   }
-  return { status: 200, body: { result: outcome.value } };
+  return { status: 200, body: { result: outcome.value, ...effects } };
 }
 
 function json(res: http.ServerResponse, status: number, body: unknown): void {

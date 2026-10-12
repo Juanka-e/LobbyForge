@@ -17,9 +17,14 @@
 
 export const SANDBOX_SDK = 'sandbox-v1';
 
-/** Same role set and fields as `GamePluginActionPolicy` in @lobbyforge/plugin-sdk. */
+/**
+ * Same role set and fields as `GamePluginActionPolicy` in @lobbyforge/plugin-sdk.
+ * A `system` action is never sent by a client: only the host runs it, when
+ * a timer the plugin set falls due. It takes no actor fields, never joins
+ * the roster and has no voice rule (`audit` may still be set).
+ */
 export interface SandboxActionPolicy {
-  role: 'host' | 'member' | 'player';
+  role: 'host' | 'member' | 'player' | 'system';
   actorFields?: string[];
   joinsRoster?: boolean;
   audit?: boolean;
@@ -74,7 +79,9 @@ export const SANDBOX_VERSION_RE = /^\d+\.\d+\.\d+(-[a-z0-9.-]+)?(\+[a-z0-9.-]+)?
 const ACTION_TYPE_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
 const FIELD_RE = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
 const LOCALE_RE = /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/;
-const ROLES = new Set(['host', 'member', 'player']);
+const ROLES = new Set(['host', 'member', 'player', 'system']);
+/** Policy keys that make no sense without a client actor. */
+const ACTOR_ONLY_KEYS = ['actorFields', 'joinsRoster', 'allowOutsideVoice'] as const;
 const POLICY_KEYS = new Set(['role', 'actorFields', 'joinsRoster', 'audit', 'allowOutsideVoice']);
 /** Names that must never become object keys on the host (prototype pollution) or be overwritten. */
 const RESERVED_NAMES = new Set(['__proto__', 'constructor', 'prototype', 'type', 'actionId']);
@@ -199,7 +206,11 @@ export function validateSandboxManifest(raw: unknown, options: SandboxManifestOp
       if (!POLICY_KEYS.has(key)) return fail(`actionPolicies["${actionType}"] has an unknown key "${key.slice(0, 32)}"`);
     }
     if (typeof policy.role !== 'string' || !ROLES.has(policy.role)) {
-      return fail(`actionPolicies["${actionType}"].role must be "host", "member" or "player"`);
+      return fail(`actionPolicies["${actionType}"].role must be "host", "member", "player" or "system"`);
+    }
+    if (policy.role === 'system') {
+      const actorKey = ACTOR_ONLY_KEYS.find((key) => policy[key] !== undefined);
+      if (actorKey) return fail(`actionPolicies["${actionType}"]: a "system" action has no actor, so "${actorKey}" does not apply`);
     }
     const clean: SandboxActionPolicy = { role: policy.role as SandboxActionPolicy['role'] };
     if (policy.actorFields !== undefined) {
