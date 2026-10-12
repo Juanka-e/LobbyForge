@@ -38,6 +38,8 @@ import VoiceMediaPage from '@/app/admin/settings/voice-media/page';
  * takes the same `notFound()` as a slug that is not in the map.
  */
 const PAGES = {
+  // `/admin` itself: its canonical route redirects to the overview.
+  '': AdminSettingsPage,
   apps: AppsPage,
   audit: AuditPage,
   bandwidth: BandwidthPage,

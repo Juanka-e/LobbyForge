@@ -247,7 +247,8 @@ describe('guardCaptchaSurface (sign-up, new guests)', () => {
     set.mockResolvedValueOnce('OK' as never).mockRejectedValueOnce(new Error('ECONNREFUSED'));
     // The ALTCHA marker goes through, the form token marker fails: fail closed.
     expect(await refusal(await guardCaptchaSurface(request(), { captchaToken: token, formToken: ft }, 'guest'))).toBe('captcha_unavailable');
-    const [key, , px, ttl, nx] = set.mock.calls[1]!;
+    // ioredis 6 types `set` by overload; the call is `set(key, value, 'PX', ttl, 'NX')`.
+    const [key, , px, ttl, nx] = set.mock.calls[1]! as unknown as unknown[];
     expect(String(key)).toMatch(/^lf:production:captcha:form-used:[0-9a-f]{64}$/);
     expect([px, nx]).toEqual(['PX', 'NX']);
     expect(Number(ttl)).toBeGreaterThan(2 * 60 * 60_000 - 60_000);

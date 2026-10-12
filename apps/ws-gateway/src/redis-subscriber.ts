@@ -35,15 +35,18 @@ export function envPrefix(): string {
   return process.env.NODE_ENV || 'dev';
 }
 
+/** ioredis 5's linear reconnect delay (ioredis 6 grows it to 5 s per step). */
+const RETRY_STRATEGY = (times: number): number => Math.min(times * 50, 2000);
+
 function makeRedis(): SubscriberConnection {
   const url = process.env.REDIS_URL;
   if (!url) {
     if (process.env.NODE_ENV === 'production') {
       throw new Error('REDIS_URL is required for ws-gateway in production');
     }
-    return new Redis('redis://:lobbyforge_dev@localhost:19579');
+    return new Redis('redis://:lobbyforge_dev@localhost:19579', { retryStrategy: RETRY_STRATEGY });
   }
-  return new Redis(url);
+  return new Redis(url, { retryStrategy: RETRY_STRATEGY });
 }
 
 let connectionFactory: () => SubscriberConnection = makeRedis;

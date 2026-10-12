@@ -252,7 +252,7 @@ per video change, the host's controls, and heartbeats (1/min for the host).
 
 ## CSP change
 
-`apps/web/middleware.ts`, one directive:
+`apps/web/proxy.ts`, one directive:
 
 ```diff
 -    "frame-src 'none'",
