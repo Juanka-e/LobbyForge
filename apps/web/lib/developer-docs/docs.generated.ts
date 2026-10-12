@@ -1264,7 +1264,9 @@ v1 stays as it is. v2 adds, all scoped per channel:
 
 - **Slash commands** — a bot registers commands (\`PUT /api/bot/v2/commands\`);
   members run them from the composer with \`/\`. The bot answers each run
-  (an *interaction*) publicly or only to the member who ran it.
+  (an *interaction*) publicly or only to the member who ran it. Each
+  interaction carries that member's language (\`locale\`), so the answer can
+  be in it ([Languages](BOT_API_V2.md#35-languages)).
 - **Event stream** — the bot connects to the gateway at \`/ws/bot\`
   (\`Authorization: Bot <token>\` or an \`identify\` message) and receives
   \`message_*\`, \`member_*\` and \`interaction_create\` events instead of
@@ -1281,10 +1283,34 @@ The full contract — routes, payloads, limits, close codes, signing — is in
 
 ## Built-in bots
 
-Both are configured in **Community Settings → Bots**, can be renamed, switched
-on and off, and post in the instance's language (\`LOBBYFORGE_DEFAULT_LOCALE\`,
-else English) until an admin writes their own text — a bot talks to everyone
-at once, so it cannot follow one reader's language.
+Both are configured in **Community Settings → Bots**, can be renamed and
+switched on and off.
+
+**Languages.** Each member reads a built-in bot's default texts (the greeting,
+the notice) and default names in their own language. In one channel, a
+Turkish member reads "Ayşe, Oyun Gecesi sunucusuna hoş geldin!" and an
+English one "Welcome to Oyun Gecesi, Ayşe!". A text or name an admin writes
+is shown to everyone exactly as written.
+
+- The message is stored once. Its \`content\` is in the instance language
+  (\`LOBBYFORGE_DEFAULT_LOCALE\`, else English), as the fallback for bots,
+  search and older apps. A default text also stores
+  \`metadata.i18n = { key, params }\` (the catalogue key and the cleaned
+  names), and the lobby shows \`t(key, params)\` in the viewer's language. An
+  unknown key falls back to \`content\`.
+- A name is the default when it equals the shipped default name in any
+  installed language ("Welcome Bot", "Karşılama Botu"). Nothing extra is
+  stored: browsers get \`bot.defaultName: true\` and show the default in the
+  viewer's language. A renamed bot keeps its name. An admin who types the
+  default name by hand gets the default.
+- A greeting or notice that is word for word a shipped default in any
+  installed language counts as the default, too, including one an older
+  admin page saved for you. It's read as the default at once and stored as
+  \`null\` with the next save that changes something. No migration.
+- The settings page fills the fields with the defaults in your language but
+  sends a field only once you edit it. Each field says which kind it is, and
+  **Use the default** switches back. Over the API, \`name: null\` and
+  \`template: null\` / \`noticeTemplate: null\` mean the default.
 
 ### Welcome Bot
 
@@ -1360,7 +1386,7 @@ permission, except listing):
 | \`DELETE\` | \`/api/servers/{id}/bots/{botId}\` | | its messages stay, still marked as a bot's |
 | \`POST\` | \`/api/servers/{id}/bots/{botId}/token\` | | issue or rotate: \`{ bot, token }\` |
 | \`DELETE\` | \`/api/servers/{id}/bots/{botId}/token\` | | revoke |
-| \`PUT\` | \`/api/servers/{id}/bots/builtin/{welcome\\|moderation}\` | \`{ enabled?, name?, settings? }\` | sets the bot up on first call; settings are merged |
+| \`PUT\` | \`/api/servers/{id}/bots/builtin/{welcome\\|moderation}\` | \`{ enabled?, name?, settings? }\` | sets the bot up on first call; settings are merged; \`name: null\` (or none, on first call) = the default name; a template that is \`null\` or a shipped default = the default text |
 
 Audit log actions: \`bot.create\`, \`bot.update\` (with what changed — for
 moderation settings, counts, never the word list), \`bot.enable\`,
@@ -1444,7 +1470,13 @@ copied into a standalone project.
   \`messages\` gains \`bot_id\` (\`ON DELETE SET NULL\`). A bot message has
   \`user_id\` NULL, \`bot_id\` set and a \`metadata.bot\` snapshot
   \`{ id, name, type }\`. \`metadata.bot\` is a reserved key: the messages API
-  refuses it from clients, so a member cannot forge a bot message.
+  refuses it from clients, so a member cannot forge a bot message. So is
+  \`metadata.i18n\` (a built-in bot's default text, see
+  [Built-in bots](#built-in-bots)). The lobby honours it only on a bot's
+  message, and only for \`bots.welcome.defaultTemplate\` and
+  \`bots.moderation.defaultNotice\`. Code: \`lib/bots/bot-i18n.ts\` (client-safe
+  reader and renderer) and \`bot-i18n-server.ts\` (the "is this a shipped
+  default?" check over every installed language).
 - **Code:** \`apps/web/lib/bots/\` — \`token.ts\` (format, hash, verify),
   \`permissions.ts\` / \`catalog.ts\` (vocabulary, grant rule), \`api.ts\` (the Bot
   API pipeline on \`withMachineApiSecurity\`), \`messages.ts\` (the one path every
@@ -1752,8 +1784,9 @@ the channel and has \`SEND_MESSAGES\` (timeouts block it), command enabled
 in this channel, invoker holds \`requiredPermission\` (owner bypass), bot
 enabled + has \`slash_commands\` + \`botCanAccessChannel\`, options validate
 against the schema (server-side, never trust the client). Creates a
-\`bot_interactions\` row and delivers \`interaction_create\` (§4) to the
-bot's stream AND its event endpoint (whichever exist). Response \`202
+\`bot_interactions\` row and delivers \`interaction_create\` (§4) — with the
+invoker's language as \`locale\` (§3.5) — to the bot's stream AND its event
+endpoint (whichever exist). Response \`202
 { interaction: { id, status: 'pending' } }\`. Rate limit 20/min per user.
 
 \`GET /api/servers/{id}/commands?channelId=\` → the commands this member
@@ -1853,6 +1886,55 @@ As implemented:
   (or until it is deleted — rows cascade with the bot, channel, server and
   invoker).
 
+### 3.5 Languages
+Every \`interaction_create\` carries **\`locale\`**: the language of the member
+who ran the command. It's the language their LobbyForge is shown in: their
+choice in Settings, else their browser's (\`Accept-Language\`), else the
+instance default (\`LOBBYFORGE_DEFAULT_LOCALE\`), else \`en\`.
+
+- It's always one of the instance's installed language codes (BCP 47, the
+  folder names under \`apps/web/messages\`): \`en\`, \`tr\`, \`pt-BR\`, …
+- The event stream and endpoint deliveries carry the same value. A
+  synchronous endpoint answer (§3.4) can use it too.
+- It's additive: a bot that ignores it is unaffected. Instances older than
+  this field don't send it, so treat a missing \`locale\` as your default
+  language.
+- Only interactions carry it. A channel message is read by everyone, and
+  member events are about someone else, so \`message_*\` and \`member_*\`
+  events carry no language: answer those in your bot's default language.
+- Command names, descriptions and choices are registered once, in one
+  language, and the composer shows them to everyone as registered.
+
+With the SDK's locale helpers (\`tFor\` falls back to English, and
+\`pickBestLocale\` maps \`pt-BR\` to a bot that only ships \`pt\`):
+
+\`\`\`js
+import { LobbyForgeBot, loadBotLocale, pickBestLocale, tFor } from '@lobbyforge/bot-sdk';
+
+loadBotLocale('dice', {
+  en: { 'roll.result': '{name} rolled {result} ({sides}-sided)' },
+  tr: { 'roll.result': '{name} {result} attı ({sides} yüzlü)' },
+});
+
+bot.on('interaction', async (interaction) => {
+  const sides = interaction.options.sides ?? 6;
+  const result = 1 + Math.floor(Math.random() * sides);
+  const locale = pickBestLocale('dice', interaction.locale); // or tFor('dice', interaction.locale, …) directly
+  await interaction.reply(
+    tFor('dice', locale, 'roll.result', { name: interaction.user.displayName, result, sides })
+  );
+  // tr → "Ayşe 18 attı (20 yüzlü)", anything else → "Ayşe rolled 18 (20-sided)"
+});
+\`\`\`
+
+\`packages/bot-sdk/examples/roll-text.mjs\` is the complete version, used by
+both example bots.
+
+The built-in bots solve the same problem the other way round. They post
+one message for everyone, so they store the catalogue key of a default
+text with it, and each member's lobby renders that key in the member's
+language ([BOTS.md → Built-in bots](BOTS.md#built-in-bots)).
+
 ## 4. Event stream (WebSocket gateway)
 
 Implemented in \`apps/ws-gateway/src/bot-gateway.ts\`. The wire types live in
@@ -1942,7 +2024,7 @@ succeeds.
 | \`message_delete\` | same | \`{ id, channelId }\` |
 | \`member_join\` | \`read_members\` | \`{ member: {id, displayName} }\` |
 | \`member_leave\` | \`read_members\` | \`{ member: {id, displayName}, reason? }\` (\`leave\` / \`kick\` / \`ban\`) |
-| \`interaction_create\` | \`slash_commands\` + channel access | \`{ interaction: {id, commandName, options, channelId, user:{id,displayName}, expiresAt} }\` — forwarded only while the bot still reaches \`channelId\` (its live channel set; beyond a capped set, one database check) |
+| \`interaction_create\` | \`slash_commands\` + channel access | \`{ interaction: {id, commandId, commandName, options, channelId, user:{id,displayName}, locale, expiresAt} }\` (\`locale\`: the invoker's language, §3.5) — forwarded only while the bot still reaches \`channelId\` (its live channel set; beyond a capped set, one database check) |
 | \`channel_access_changed\` | — | \`{ channels }\` — sent after every \`bot-access\` invalidation for the bot, and whenever a policy change or the periodic recheck changes its set |
 
 A poll posted in a text channel (docs/CHAT_POLLS.md) reaches bots as a
@@ -2142,7 +2224,9 @@ As implemented (\`packages/bot-sdk/src/bot.ts\`, \`signature.ts\`,
 - **Events** (\`on()\` returns an unsubscribe): \`ready\` \`{ bot, channels }\`,
   \`message\`, \`message_update\`, \`message_delete\`, \`member_join\`,
   \`member_leave\`, \`interaction\` (with \`reply(content, { ephemeral })\` and
-  \`followup(...)\` bound to its id), \`channel_access_changed\`, \`raw\` (every
+  \`followup(...)\` bound to its id, and the invoker's \`locale\` — optional in
+  the type, since older instances do not send it; §3.5),
+  \`channel_access_changed\`, \`raw\` (every
   event payload), \`disconnect\` \`{ code, reason, willReconnect, delayMs }\`,
   \`error\`. A listener that throws or rejects becomes an \`error\` event.
   \`bot.ready\` holds the latest bot + channel list.
@@ -2164,7 +2248,8 @@ As implemented (\`packages/bot-sdk/src/bot.ts\`, \`signature.ts\`,
 Ships two examples under \`packages/bot-sdk/examples/\`: \`roll-bot.mjs\`
 (a \`/roll\` command and \`!roll\` over the socket) and \`http-bot.mjs\` (a
 \`node:http\` endpoint that verifies signatures and answers interactions
-synchronously). Both turn every refusal into one line a person can act on
+synchronously). Both answer each member in their language through
+\`roll-text.mjs\` (English and Turkish strings, §3.5). Both turn every refusal into one line a person can act on
 (\`/roll is already registered by another bot on this server — pick another
 name\` for \`command_name_taken\`, a revoked token, a missing permission, a
 port in use) instead of a stack trace, and exit 1 on anything fatal —
