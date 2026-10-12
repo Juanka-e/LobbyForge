@@ -347,6 +347,28 @@ describe('activateStagedBundle — what a bundle asks for beyond the sandbox', (
     expect(m.ui).toBe(false);
     expect(m.uiUrl).toBe('https://game.example.com/');
   });
+
+  it('refuses a UI on this instance’s own address — its host or a subdomain — before asking for approval', async () => {
+    const saved = process.env.LOBBYFORGE_APP_ORIGIN;
+    process.env.LOBBYFORGE_APP_ORIGIN = 'https://chat.example.com';
+    try {
+      for (const url of ['https://chat.example.com/evil.html', 'https://chat.example.com:8443/', 'https://play.chat.example.com/']) {
+        const describe = describeOk();
+        const stagingDir = stage('game', sandboxBundle('1.0.0', undefined, { ui: { url } }));
+        const result = await activateStagedBundle({
+          root, pluginId: 'game', version: '1.0.0', stagingDir, describe, approve: { uiUrl: url },
+        });
+        expect(result, url).toMatchObject({ ok: false, error: expect.stringContaining('own address') });
+        expect(result).not.toHaveProperty('approvalRequired');
+        expect(describe).not.toHaveBeenCalled();
+        expect(existsSync(stagingDir)).toBe(false);
+      }
+      expect(readActivePointer(root, 'game')).toBeNull();
+    } finally {
+      if (saved === undefined) delete process.env.LOBBYFORGE_APP_ORIGIN;
+      else process.env.LOBBYFORGE_APP_ORIGIN = saved;
+    }
+  });
 });
 
 describe('readInstalledSandboxManifest', () => {

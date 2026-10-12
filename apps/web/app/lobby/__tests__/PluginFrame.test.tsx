@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// @vitest-environment-options {"settings":{"navigation":{"disableChildFrameNavigation":true}}}
+// @vitest-environment-options {"url":"https://chat.example.test/lobby","settings":{"navigation":{"disableChildFrameNavigation":true}}}
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -11,6 +11,8 @@ import {
   PluginFrameSurface,
   createActionLimiter,
   parseFrameMessage,
+  readFrameInfo,
+  resolveFrameTarget,
   type PluginFrameProps,
 } from '../PluginFrame';
 
@@ -307,5 +309,172 @@ describe('PluginFrameSurface', () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ frame: null }, { status: 404 })));
     render(wrap(<PluginFrameSurface {...surfaceProps()} fallback={<p>no surface</p>} />));
     expect(await screen.findByText('no surface')).toBeInTheDocument();
+  });
+
+  it('frames the author’s approved site when the server names it', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({
+          frame: { pluginId: 'sandbox-buzzer', version: '2.0.0', hasProjection: true, mode: 'external', src: SITE, origin: SITE_ORIGIN },
+        })
+      )
+    );
+    const { container } = render(wrap(<PluginFrameSurface {...surfaceProps()} fallback={<p>no surface</p>} />));
+    await waitFor(() => expect(container.querySelector('iframe')).not.toBeNull());
+    expect(container.querySelector('iframe')!.getAttribute('src')).toBe(SITE);
+    expect(screen.getByTestId('plugin-frame-site')).toHaveTextContent('game.example.com');
+  });
+
+  it('falls back when an external site’s URL and origin disagree', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({ frame: { version: '2.0.0', hasProjection: true, mode: 'external', src: SITE, origin: 'https://evil.example.com' } })
+      )
+    );
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(wrap(<PluginFrameSurface {...surfaceProps()} fallback={<p>no surface</p>} />));
+    expect(await screen.findByText('no surface')).toBeInTheDocument();
+    errors.mockRestore();
+  });
+});
+
+// ── The author's own site (`ui: { url }`, phase 2 of the plugin unlock) ──
+
+const SITE = 'https://game.example.com/play?room=7';
+const SITE_ORIGIN = 'https://game.example.com';
+
+function mountExternal(overrides: Partial<PluginFrameProps> = {}) {
+  return mount(baseProps({ externalUrl: SITE, ...overrides }));
+}
+
+describe('PluginFrame — external site: the iframe', () => {
+  it('frames the approved URL with its own origin, forms and pointer lock — no popups, modals or top navigation', () => {
+    const { iframe } = mountExternal();
+    expect(iframe.getAttribute('src')).toBe(SITE);
+    const flags = (iframe.getAttribute('sandbox') ?? '').split(' ').sort();
+    expect(flags).toEqual(['allow-forms', 'allow-pointer-lock', 'allow-same-origin', 'allow-scripts']);
+    expect(iframe.getAttribute('sandbox')).not.toMatch(/top-navigation|popups|modals|downloads/);
+    expect(iframe.getAttribute('referrerpolicy')).toBe('no-referrer');
+    expect(iframe.hasAttribute('allow')).toBe(false);
+    expect(iframe.getAttribute('title')).toBe('Buzzer — app screen from game.example.com');
+  });
+
+  it('names the site above the frame, so a sign-in box inside is visibly not this app', () => {
+    mountExternal();
+    const badge = screen.getByTestId('plugin-frame-site');
+    expect(badge).toHaveTextContent('Runs on game.example.com');
+    expect(badge).toHaveTextContent('not LobbyForge. Never type your LobbyForge password into it.');
+    // The host comes from the approved URL, with a non-default port when there is one.
+    expect(resolveFrameTarget('p', '1.0.0', 'https://game.example.com:8443/x', 'https://chat.example.test')?.host).toBe(
+      'game.example.com:8443'
+    );
+  });
+
+  it('shows no badge for the plugin’s own files', () => {
+    mount(baseProps());
+    expect(screen.queryByTestId('plugin-frame-site')).toBeNull();
+  });
+
+  it('renders nothing, and says why, for a site on the page’s own host or a subdomain of it', () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    for (const url of ['https://chat.example.test/uploads/x.html', 'https://chat.example.test:8443/', 'https://play.chat.example.test/']) {
+      const { container, unmount } = render(wrap(<PluginFrame {...baseProps({ externalUrl: url })} />));
+      expect(container.querySelector('iframe'), url).toBeNull();
+      expect(container.textContent, url).toBe('');
+      unmount();
+    }
+    expect(errors).toHaveBeenCalledWith(expect.stringContaining('not framing its UI'));
+    errors.mockRestore();
+    expect(resolveFrameTarget('p', '1.0.0', 'javascript:alert(1)', 'https://chat.example.test')).toBeNull();
+  });
+});
+
+describe('PluginFrame — external site: messages', () => {
+  it('accepts messages only from its iframe AND the declared origin', () => {
+    const dispatch = vi.fn();
+    const { frameWindow } = mountExternal({ dispatch });
+    // Right window, wrong origin: the opaque origin of a files frame, the app, another site.
+    send(frameWindow, { lf: 1, type: 'ready' }, 'null');
+    send(frameWindow, { lf: 1, type: 'ready' }, 'https://chat.example.test');
+    send(frameWindow, { lf: 1, type: 'ready' }, 'https://evil.example.com');
+    send(frameWindow, { lf: 1, type: 'ready' }, 'http://game.example.com');
+    // Right origin, wrong window.
+    send({ postMessage: vi.fn() }, { lf: 1, type: 'ready' }, SITE_ORIGIN);
+    send(window, { lf: 1, type: 'ready' }, SITE_ORIGIN);
+    expect(posted(frameWindow)).toEqual([]);
+    expect(screen.getByRole('status')).toBeInTheDocument();
+
+    send(frameWindow, { lf: 1, type: 'ready' }, SITE_ORIGIN);
+    expect(posted(frameWindow).map((p) => p.message.type)).toEqual(['init']);
+    send(frameWindow, { lf: 1, type: 'action', action: { type: 'buzz' } }, 'https://evil.example.com');
+    expect(dispatch).not.toHaveBeenCalled();
+    send(frameWindow, { lf: 1, type: 'action', action: { type: 'buzz' } }, SITE_ORIGIN);
+    expect(dispatch).toHaveBeenCalledWith({ type: 'buzz' });
+  });
+
+  it('posts init and every state to the declared origin, never to "*"', () => {
+    const props = baseProps({ externalUrl: SITE });
+    const { frameWindow, rerender } = mount(props);
+    send(frameWindow, { lf: 1, type: 'ready' }, SITE_ORIGIN);
+    rerender(wrap(<PluginFrame {...props} state={{ phase: 'open', round: 3 }} />));
+    const all = posted(frameWindow);
+    expect(all.map((p) => p.message.type)).toEqual(['init', 'state']);
+    expect(all.map((p) => p.target)).toEqual([SITE_ORIGIN, SITE_ORIGIN]);
+    expect(all[0]!.message).toMatchObject({ viewer: { userId: 'u1', isHost: true }, state: PROJECTED });
+  });
+
+  it('lets the site move between its own pages: each new document says ready again before it hears anything', () => {
+    const props = baseProps({ externalUrl: SITE });
+    const { frameWindow, iframe, rerender } = mount(props);
+    fireEvent.load(iframe);
+    send(frameWindow, { lf: 1, type: 'ready' }, SITE_ORIGIN);
+    expect(posted(frameWindow).map((p) => p.message.type)).toEqual(['init']);
+    // Another page of the site: not an error, but nothing is posted until it is ready.
+    fireEvent.load(iframe);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('status')).toBeInTheDocument();
+    rerender(wrap(<PluginFrame {...props} state={{ phase: 'revealed', round: 2 }} />));
+    expect(posted(frameWindow).map((p) => p.message.type)).toEqual(['init']);
+    // A page on another site in the same window is never heard.
+    send(frameWindow, { lf: 1, type: 'ready' }, 'https://elsewhere.example.com');
+    expect(posted(frameWindow).map((p) => p.message.type)).toEqual(['init']);
+    send(frameWindow, { lf: 1, type: 'ready' }, SITE_ORIGIN);
+    expect(posted(frameWindow).map((p) => p.message.type)).toEqual(['init', 'init']);
+    expect(posted(frameWindow)[1]!.message.state).toEqual({ phase: 'revealed', round: 2 });
+  });
+
+  it('offers a retry when the next page never says ready', () => {
+    vi.useFakeTimers();
+    const { frameWindow, iframe } = mountExternal();
+    fireEvent.load(iframe);
+    send(frameWindow, { lf: 1, type: 'ready' }, SITE_ORIGIN);
+    fireEvent.load(iframe);
+    act(() => {
+      vi.advanceTimersByTime(FRAME_READY_TIMEOUT_MS + 1);
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent("This app didn't start");
+  });
+});
+
+describe('readFrameInfo', () => {
+  it('reads both modes, and refuses an external site whose URL and origin disagree', () => {
+    expect(readFrameInfo(true, { frame: { version: '1.0.0', hasProjection: true, mode: 'files', src: '/x' } })).toEqual({
+      version: '1.0.0',
+      hasProjection: true,
+      externalUrl: null,
+    });
+    // An older server: no mode, its own files.
+    expect(readFrameInfo(true, { frame: { version: '1.0.0' } })).toEqual({ version: '1.0.0', hasProjection: false, externalUrl: null });
+    expect(readFrameInfo(true, { frame: { version: '1.0.0', mode: 'external', src: SITE, origin: SITE_ORIGIN } })).toMatchObject({
+      externalUrl: SITE,
+    });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(readFrameInfo(true, { frame: { version: '1.0.0', mode: 'external', src: SITE, origin: 'https://x.example' } })).toBeNull();
+    expect(readFrameInfo(true, { frame: { version: '1.0.0', mode: 'external', src: SITE } })).toBeNull();
+    errors.mockRestore();
+    expect(readFrameInfo(false, { frame: { version: '1.0.0' } })).toBeNull();
+    expect(readFrameInfo(true, { frame: null })).toBeNull();
   });
 });

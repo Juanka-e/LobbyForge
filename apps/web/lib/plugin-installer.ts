@@ -23,6 +23,7 @@ import { join, resolve, sep } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { registerDynamicPlugin } from './plugin-loader';
+import { resetPluginFrameOrigins } from './plugin-frame-origins';
 import { describeWorkerPlugin, workerRuntimeConfigured } from './plugin-worker-client';
 import {
   PLUGIN_ID_RE,
@@ -184,8 +185,10 @@ async function downloadAndActivate(
       return { ok: false, error: activation.error, approvalRequired: activation.approvalRequired };
     }
 
-    // 4. New requests use the new version from here on.
+    // 4. New requests use the new version from here on — and the pages'
+    // frame-src the approval on its new record (an external UI's site).
     registerDynamicPlugin(activation.info);
+    resetPluginFrameOrigins();
 
     // 5. Delete superseded versions. A failure here leaves stale folders
     // (deleted on the next install), never a broken plugin.
