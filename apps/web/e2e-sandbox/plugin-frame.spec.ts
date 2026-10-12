@@ -12,10 +12,12 @@ import { BUZZER_VERSION, PORT } from './playwright.config';
  * the CSP, the Fetch Metadata labels and the module-script loading.
  */
 
+/** The probe's policy: fetch() and media reach its own folder only. */
+const OWN = `http://localhost:${PORT}/api/plugin-ui/probe/1.0.0/`;
 const PLUGIN_UI_CSP =
-  "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
-  "font-src 'self'; connect-src 'none'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'; " +
-  'sandbox allow-scripts';
+  "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
+  `font-src 'self'; media-src ${OWN} data: blob:; connect-src ${OWN}; frame-ancestors 'self'; base-uri 'none'; ` +
+  "form-action 'none'; sandbox allow-scripts";
 
 const PLAYERS = [
   { userId: 'u1', name: 'Ayşe', isHost: true },
@@ -78,6 +80,8 @@ function expectNothingLeft(requests: Recorded[]) {
  * `init(initialState)` and records every message and action from the frame.
  */
 async function openHarness(page: Page, pluginId: string, version: string, initialState: unknown, afterInit = '') {
+  // The probe asks for another plugin's file; it needs that one's version.
+  const query = pluginId === 'probe' ? `?other=${BUZZER_VERSION}` : '';
   // The app's real policy for its pages (frame-src 'self' …) and its nonce,
   // from a live response: the middleware stamps every app route.
   const app = await page.request.get('/api/plugin-ui/probe');
@@ -89,7 +93,7 @@ async function openHarness(page: Page, pluginId: string, version: string, initia
 <head><meta charset="utf-8"><title>Lobby stand-in</title></head>
 <body>
 <iframe id="frame" sandbox="allow-scripts" referrerpolicy="no-referrer" title="app"
-  style="width:640px;height:420px;border:0" src="/api/plugin-ui/${pluginId}/${version}/index.html"></iframe>
+  style="width:640px;height:420px;border:0" src="/api/plugin-ui/${pluginId}/${version}/index.html${query}"></iframe>
 <script nonce="${nonce}">
   window.__messages = [];
   window.__actions = [];
@@ -153,7 +157,7 @@ test('the asset route answers with the sandbox policy, and nothing that forbids 
   expect(skippedByMiddleware.headers()['x-frame-options']).toBe('DENY');
 });
 
-test('the frame runs in an opaque origin: no cookies, storage, parent DOM or network; protocol v1 round-trips', async ({
+test('the frame runs in an opaque origin: no cookies, storage, parent DOM or network beyond its own files; protocol v1 round-trips', async ({
   page,
   context,
 }) => {
@@ -182,14 +186,29 @@ test('the frame runs in an opaque origin: no cookies, storage, parent DOM or net
   expect(String(probe.localStorage)).toMatch(/^blocked:/);
   expect(probe.popup).toBe('allowed:null');
   expect(popups).toEqual([]);
+  // fetch() and media reach the plugin's own files, and nothing else: not
+  // the app's pages or API, not another plugin's folder, not the web.
   expect(probe.appFetch).toBe('blocked');
-  expect(probe.ownFileFetch).toBe('blocked');
+  expect(probe.apiFetch).toBe('blocked');
+  expect(probe.otherPluginFetch).toBe('blocked');
   expect(probe.externalFetch).toBe('blocked');
+  expect(probe.ownFileFetch).toBe('allowed');
+  expect(probe.ownWasm).toBe('allowed');
+  expect(probe.ownAudio).toBe('loaded');
+  expect(probe.externalAudio).toBe('blocked');
   expect(probe.externalImage).toBe('blocked');
   expect(probe.ownImage).toBe('loaded');
   const violations = probe.violations as string[];
-  expect(violations.some((v) => v.startsWith('connect-src'))).toBe(true);
+  // The app, its API and another plugin's folder were refused by the CSP —
+  // not merely unreadable under CORS, which would still send the request.
+  const app = `http://localhost:${PORT}`;
+  expect(violations).toContain(`connect-src ${app}/lobby`);
+  expect(violations).toContain(`connect-src ${app}/api/health`);
+  expect(violations).toContain(`connect-src ${app}/api/plugin-ui/sandbox-buzzer/${BUZZER_VERSION}/style.css`);
   expect(violations.some((v) => v.startsWith('img-src https://example.com'))).toBe(true);
+  expect(violations.some((v) => v.startsWith('media-src https://example.com'))).toBe(true);
+  // 'wasm-unsafe-eval' compiled the module: no script-src refusal.
+  expect(violations.some((v) => v.startsWith('script-src'))).toBe(false);
   // (The inline <script> was refused before probe.js could listen for the
   // violation; inlineScriptRan === false above is the proof.)
 
@@ -229,6 +248,10 @@ test('the frame runs in an opaque origin: no cookies, storage, parent DOM or net
     expect(req?.headers.cookie, file).toBeUndefined();
     if (file.endsWith('.js')) expect(req?.headers.origin, file).toBe('null');
   }
+  // The sound loaded from its own folder (206: a media element asks for a range).
+  const beep = requests.find((r) => r.url.endsWith('/probe/1.0.0/beep.wav'));
+  expect([200, 206]).toContain(beep?.status);
+  expect(beep?.headers.cookie).toBeUndefined();
   expectNothingLeft(requests);
 });
 

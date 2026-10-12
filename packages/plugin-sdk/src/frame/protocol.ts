@@ -12,7 +12,7 @@
  * route's own CSP repeats `sandbox allow-scripts`. The frame therefore runs in
  * an OPAQUE origin: it cannot read the app's cookies, storage or DOM, and the
  * app's session cookie is not sent with its requests. Its CSP has
- * `connect-src 'none'` and only `'self'` images, so it has no network to send
+ * `connect-src` limited to its own files and only `'self'` images, so it has no network to send
  * anything to. Everything it knows arrives in the messages below, and the
  * state it is given is already PROJECTED for its viewer by the server — it
  * never sees more than that person could. Everything it can do is an `action`,

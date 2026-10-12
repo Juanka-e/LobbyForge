@@ -659,19 +659,46 @@ and `localStorage`/`document.cookie` throw.
 
 The route serves only the **active** version of an installed plugin that
 declares `ui: true`, only files under `ui/`, and only these extensions, each
-with a fixed type: `html js mjs css json png jpg jpeg gif webp svg woff woff2`.
-Every file carries this CSP:
+with a fixed type:
+
+| Kind | Extensions |
+|---|---|
+| Page, code, styles, data | `html js mjs css json` |
+| Images | `png jpg jpeg gif webp svg` |
+| Fonts | `woff woff2` |
+| Sound and video | `mp3 ogg oga opus wav m4a flac webm mp4` |
+| WebAssembly and engine data | `wasm bin data pck` |
+
+Every file carries this CSP, where `<own>` is your version's own folder,
+`https://<instance>/api/plugin-ui/<your-id>/<version>/`:
 
 ```
-default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline';
-img-src 'self' data:; font-src 'self'; connect-src 'none';
+default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline';
+img-src 'self' data:; font-src 'self'; media-src <own> data: blob:; connect-src <own>;
 frame-ancestors 'self'; base-uri 'none'; form-action 'none'; sandbox allow-scripts
 ```
 
-So: **no network** (`fetch`, XHR, WebSocket and remote images are blocked —
-the frame cannot send what it is shown anywhere), no inline `<script>`
-(put code in files; inline `style` is fine), only the app may frame it, and
-the page stays sandboxed even if someone opens it directly. Navigating the
+So: **no network beyond your own files.** `fetch()` and XHR can read your
+own files (level data, a `.wasm`, sound for the Web Audio API) and nothing
+else — not the app, not another plugin, not the web; WebSockets and remote
+images are blocked. The frame cannot send what it is shown anywhere.
+`<audio>` and `<video>` play your own files (and `blob:`/`data:` URLs you
+make); the route answers `Range` requests, so they can seek. WebAssembly
+compiles (`WebAssembly.instantiate`, `instantiateStreaming`), so an engine
+build without threads runs — a single-threaded Godot web export, or an
+Emscripten build. There are still no workers, no `eval`, and no
+SharedArrayBuffer (the frame is not cross-origin isolated). A browser plays
+sound only after the viewer has pressed something in the frame: start
+sounds from a click, as the example's buzzer does. Each file may be at most
+16 MiB, and the whole bundle 10 MB packed (50 MB unpacked). No inline
+`<script>` (put code in files; inline `style` is fine), only the app may
+frame it, and the page stays sandboxed even if someone opens it directly.
+
+The instance names `<own>` from its configured public origin
+(`LOBBYFORGE_APP_ORIGIN`, else `NEXT_PUBLIC_BASE_URL`), never from the
+request. Without either (a dev setup) it is `'self'`: the app's origin,
+reached without cookies, where every mutating route refuses a cross-site
+request. Navigating the
 frame elsewhere is stopped by the app's own `frame-src`. Assets are public
 and cached for a year (`immutable`, the version is in the path): ship a new
 version to change them. The HTML loads only as an iframe document, and the

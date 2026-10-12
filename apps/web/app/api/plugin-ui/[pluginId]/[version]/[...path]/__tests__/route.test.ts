@@ -4,10 +4,15 @@ import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { GET, HEAD } from '../route';
 import {
-  PLUGIN_UI_CSP,
   fetchMetadataRefusal,
+  parseByteRange,
   parsePluginUiPath,
+  pluginUiAssetSource,
+  pluginUiCsp,
 } from '@/lib/plugin-ui-assets';
+
+/** The policy when no public origin is configured (a dev setup). */
+const DEV_CSP = pluginUiCsp("'self'");
 
 const DIGEST = 'a'.repeat(64);
 let root: string;
@@ -50,6 +55,10 @@ beforeAll(() => {
     'ui/app.js': 'console.log("buzz")',
     'ui/style.css': 'body{margin:0}',
     'ui/data.json': '{"a":1}',
+    'ui/sfx/buzz.mp3': '0123456789',
+    'ui/sfx/intro.webm': 'webm-bytes',
+    'ui/engine.wasm': '\0asm',
+    'ui/game.pck': 'pck',
     'ui/img/logo.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>',
     'ui/notes.txt': 'not an allowed extension',
     'ui/index.php': '<?php ?>',
@@ -79,6 +88,8 @@ const saved = { ...process.env };
 beforeEach(() => {
   process.env.LOBBYFORGE_PLUGIN_INSTALL_DIR = root;
   process.env.LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED = 'true';
+  delete process.env.LOBBYFORGE_APP_ORIGIN;
+  delete process.env.NEXT_PUBLIC_BASE_URL;
 });
 afterEach(() => {
   process.env = { ...saved };
@@ -105,19 +116,21 @@ const FROM_FRAME = (dest: string) => ({ 'sec-fetch-dest': dest, 'sec-fetch-site'
 
 describe('GET /api/plugin-ui — what is served', () => {
   it('serves the active version’s index.html with the sandbox headers', async () => {
+    process.env.LOBBYFORGE_APP_ORIGIN = 'https://chat.example.test';
     const res = await get('buzzer', '1.0.0', ['index.html'], AS_IFRAME);
     expect(res.status).toBe(200);
     expect(await res.text()).toContain('<title>Buzzer</title>');
     expect(res.headers.get('content-type')).toBe('text/html; charset=utf-8');
-    expect(res.headers.get('content-security-policy')).toBe(PLUGIN_UI_CSP);
-    const csp = PLUGIN_UI_CSP.split('; ');
-    expect(csp).toEqual([
+    // fetch() and media reach this version's own files and nothing else.
+    const own = 'https://chat.example.test/api/plugin-ui/buzzer/1.0.0/';
+    expect(res.headers.get('content-security-policy')?.split('; ')).toEqual([
       "default-src 'none'",
-      "script-src 'self'",
+      "script-src 'self' 'wasm-unsafe-eval'",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data:",
       "font-src 'self'",
-      "connect-src 'none'",
+      `media-src ${own} data: blob:`,
+      `connect-src ${own}`,
       "frame-ancestors 'self'",
       "base-uri 'none'",
       "form-action 'none'",
@@ -148,7 +161,7 @@ describe('GET /api/plugin-ui — what is served', () => {
     expect(svg.status).toBe(200);
     expect(svg.headers.get('content-type')).toBe('image/svg+xml');
     expect(svg.headers.get('content-disposition')).toBe('inline');
-    expect(svg.headers.get('content-security-policy')).toBe(PLUGIN_UI_CSP);
+    expect(svg.headers.get('content-security-policy')).toBe(DEV_CSP);
     expect(js.headers.get('content-disposition')).toBeNull();
   });
 
@@ -157,6 +170,46 @@ describe('GET /api/plugin-ui — what is served', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('content-length')).toBe(String('console.log("buzz")'.length));
     expect(await res.text()).toBe('');
+  });
+
+  it('serves sound, video, WebAssembly and engine data with fixed types', async () => {
+    const mp3 = await get('buzzer', '1.0.0', ['sfx', 'buzz.mp3'], FROM_FRAME('audio'));
+    expect(mp3.status).toBe(200);
+    expect(mp3.headers.get('content-type')).toBe('audio/mpeg');
+    expect(mp3.headers.get('accept-ranges')).toBe('bytes');
+    const webm = await get('buzzer', '1.0.0', ['sfx', 'intro.webm'], FROM_FRAME('video'));
+    expect(webm.headers.get('content-type')).toBe('video/webm');
+    const wasm = await get('buzzer', '1.0.0', ['engine.wasm'], FROM_FRAME('empty'));
+    expect(wasm.status).toBe(200);
+    expect(wasm.headers.get('content-type')).toBe('application/wasm');
+    const pck = await get('buzzer', '1.0.0', ['game.pck'], FROM_FRAME('empty'));
+    expect(pck.headers.get('content-type')).toBe('application/octet-stream');
+    // Still never a document, nor for the app's own pages.
+    expect((await get('buzzer', '1.0.0', ['sfx', 'buzz.mp3'], { 'sec-fetch-dest': 'document', 'sec-fetch-site': 'none' })).status).toBe(403);
+    expect((await get('buzzer', '1.0.0', ['engine.wasm'], { 'sec-fetch-dest': 'empty', 'sec-fetch-site': 'same-origin' })).status).toBe(403);
+  });
+
+  it('answers a byte range with 206, so audio and video can seek', async () => {
+    const part = await get('buzzer', '1.0.0', ['sfx', 'buzz.mp3'], { ...FROM_FRAME('audio'), range: 'bytes=2-5' });
+    expect(part.status).toBe(206);
+    expect(await part.text()).toBe('2345');
+    expect(part.headers.get('content-range')).toBe('bytes 2-5/10');
+    expect(part.headers.get('content-length')).toBe('4');
+    expect(part.headers.get('content-security-policy')).toBe(DEV_CSP);
+
+    const tail = await get('buzzer', '1.0.0', ['sfx', 'buzz.mp3'], { range: 'bytes=7-' });
+    expect(await tail.text()).toBe('789');
+    const head = await get('buzzer', '1.0.0', ['sfx', 'buzz.mp3'], { range: 'bytes=0-1' }, 'HEAD');
+    expect(head.status).toBe(206);
+    expect(await head.text()).toBe('');
+
+    const past = await get('buzzer', '1.0.0', ['sfx', 'buzz.mp3'], { range: 'bytes=10-' });
+    expect(past.status).toBe(416);
+    expect(past.headers.get('content-range')).toBe('bytes */10');
+    // Several ranges, or nonsense: the whole file (a server may ignore Range).
+    const many = await get('buzzer', '1.0.0', ['sfx', 'buzz.mp3'], { range: 'bytes=0-1,4-5' });
+    expect(many.status).toBe(200);
+    expect(await many.text()).toBe('0123456789');
   });
 
   it('serves browsers that send no Fetch Metadata (the CSP sandbox still holds)', async () => {
@@ -279,6 +332,35 @@ describe('GET /api/plugin-ui — Fetch Metadata', () => {
   });
 });
 
+describe('pluginUiAssetSource / parseByteRange', () => {
+  it('names the version’s own folder on the configured origin, never one taken from the request', () => {
+    expect(pluginUiAssetSource('buzzer', '1.2.0', { LOBBYFORGE_APP_ORIGIN: 'https://chat.example.test/some/path' })).toBe(
+      'https://chat.example.test/api/plugin-ui/buzzer/1.2.0/'
+    );
+    expect(pluginUiAssetSource('buzzer', '1.2.0', { NEXT_PUBLIC_BASE_URL: 'http://localhost:19520' })).toBe(
+      'http://localhost:19520/api/plugin-ui/buzzer/1.2.0/'
+    );
+    expect(pluginUiAssetSource('buzzer', '1.2.0', { LOBBYFORGE_APP_ORIGIN: 'not a url', NEXT_PUBLIC_BASE_URL: 'https://b.test' })).toBe(
+      'https://b.test/api/plugin-ui/buzzer/1.2.0/'
+    );
+    expect(pluginUiAssetSource('buzzer', '1.2.0', { LOBBYFORGE_APP_ORIGIN: 'javascript:alert(1)' })).toBe("'self'");
+    expect(pluginUiAssetSource('buzzer', '1.2.0', {})).toBe("'self'");
+  });
+
+  it('reads one byte range', () => {
+    expect(parseByteRange('bytes=0-0', 10)).toEqual({ start: 0, end: 0 });
+    expect(parseByteRange('bytes=3-100', 10)).toEqual({ start: 3, end: 9 });
+    expect(parseByteRange('bytes=-4', 10)).toEqual({ start: 6, end: 9 });
+    expect(parseByteRange('bytes=-40', 10)).toEqual({ start: 0, end: 9 });
+    expect(parseByteRange('bytes=10-', 10)).toBe('unsatisfiable');
+    expect(parseByteRange('bytes=-0', 10)).toBe('unsatisfiable');
+    expect(parseByteRange('bytes=5-2', 10)).toBeNull();
+    expect(parseByteRange('bytes=-', 10)).toBeNull();
+    expect(parseByteRange('items=0-1', 10)).toBeNull();
+    expect(parseByteRange(null, 10)).toBeNull();
+  });
+});
+
 describe('parsePluginUiPath / fetchMetadataRefusal', () => {
   it('parses a clean nested path and its type', () => {
     expect(parsePluginUiPath(['assets', 'img', 'Logo-2x.PNG'])).toEqual({
@@ -295,6 +377,9 @@ describe('parsePluginUiPath / fetchMetadataRefusal', () => {
     expect(fetchMetadataRefusal(req(FROM_FRAME('script')), 'script')).toBeNull();
     expect(fetchMetadataRefusal(req(FROM_FRAME('image')), 'image')).toBeNull();
     expect(fetchMetadataRefusal(req(FROM_FRAME('font')), 'font')).toBeNull();
+    expect(fetchMetadataRefusal(req(FROM_FRAME('audio')), 'media')).toBeNull();
+    expect(fetchMetadataRefusal(req(FROM_FRAME('video')), 'media')).toBeNull();
+    expect(fetchMetadataRefusal(req(FROM_FRAME('empty')), 'data')).toBeNull();
     expect(fetchMetadataRefusal(req(AS_IFRAME), 'document')).toBeNull();
     expect(fetchMetadataRefusal(req({}), 'script')).toBeNull();
   });

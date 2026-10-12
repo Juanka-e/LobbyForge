@@ -757,7 +757,7 @@ anything you compile in the way you review your own code.
 | | A: compiled in | B: marketplace (sandbox-v1) |
 |---|---|---|
 | Language and APIs | TypeScript, React, the whole SDK | plain JavaScript in \`server.js\`, no imports, no Node APIs |
-| Your own UI | a React panel in the app | \`ui/\` in a sandboxed iframe (no network), postMessage protocol v1 |
+| Your own UI | a React panel in the app | \`ui/\` in a sandboxed iframe (no network beyond its own files; sound, video and WebAssembly work), postMessage protocol v1 |
 | \`actionPolicies\`, \`validateAction\` | yes | yes: policies from \`manifest.json\`, \`validateAction\` in the sandbox |
 | Hidden state per viewer | yes, with a core projection branch | yes, with the plugin's own \`projectState\` |
 | Name and summary in each viewer's language | \`catalog.name\` / \`catalog.summary\` in \`locales/<code>.json\` | the same keys in the bundle's \`locales/<code>.json\` ([PLUGIN_PUBLISHING.md](PLUGIN_PUBLISHING.md#locales-optional-your-name-and-description-in-every-language)) |
@@ -2986,19 +2986,46 @@ and \`localStorage\`/\`document.cookie\` throw.
 
 The route serves only the **active** version of an installed plugin that
 declares \`ui: true\`, only files under \`ui/\`, and only these extensions, each
-with a fixed type: \`html js mjs css json png jpg jpeg gif webp svg woff woff2\`.
-Every file carries this CSP:
+with a fixed type:
+
+| Kind | Extensions |
+|---|---|
+| Page, code, styles, data | \`html js mjs css json\` |
+| Images | \`png jpg jpeg gif webp svg\` |
+| Fonts | \`woff woff2\` |
+| Sound and video | \`mp3 ogg oga opus wav m4a flac webm mp4\` |
+| WebAssembly and engine data | \`wasm bin data pck\` |
+
+Every file carries this CSP, where \`<own>\` is your version's own folder,
+\`https://<instance>/api/plugin-ui/<your-id>/<version>/\`:
 
 \`\`\`
-default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline';
-img-src 'self' data:; font-src 'self'; connect-src 'none';
+default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline';
+img-src 'self' data:; font-src 'self'; media-src <own> data: blob:; connect-src <own>;
 frame-ancestors 'self'; base-uri 'none'; form-action 'none'; sandbox allow-scripts
 \`\`\`
 
-So: **no network** (\`fetch\`, XHR, WebSocket and remote images are blocked —
-the frame cannot send what it is shown anywhere), no inline \`<script>\`
-(put code in files; inline \`style\` is fine), only the app may frame it, and
-the page stays sandboxed even if someone opens it directly. Navigating the
+So: **no network beyond your own files.** \`fetch()\` and XHR can read your
+own files (level data, a \`.wasm\`, sound for the Web Audio API) and nothing
+else — not the app, not another plugin, not the web; WebSockets and remote
+images are blocked. The frame cannot send what it is shown anywhere.
+\`<audio>\` and \`<video>\` play your own files (and \`blob:\`/\`data:\` URLs you
+make); the route answers \`Range\` requests, so they can seek. WebAssembly
+compiles (\`WebAssembly.instantiate\`, \`instantiateStreaming\`), so an engine
+build without threads runs — a single-threaded Godot web export, or an
+Emscripten build. There are still no workers, no \`eval\`, and no
+SharedArrayBuffer (the frame is not cross-origin isolated). A browser plays
+sound only after the viewer has pressed something in the frame: start
+sounds from a click, as the example's buzzer does. Each file may be at most
+16 MiB, and the whole bundle 10 MB packed (50 MB unpacked). No inline
+\`<script>\` (put code in files; inline \`style\` is fine), only the app may
+frame it, and the page stays sandboxed even if someone opens it directly.
+
+The instance names \`<own>\` from its configured public origin
+(\`LOBBYFORGE_APP_ORIGIN\`, else \`NEXT_PUBLIC_BASE_URL\`), never from the
+request. Without either (a dev setup) it is \`'self'\`: the app's origin,
+reached without cookies, where every mutating route refuses a cross-site
+request. Navigating the
 frame elsewhere is stopped by the app's own \`frame-src\`. Assets are public
 and cached for a year (\`immutable\`, the version is in the path): ship a new
 version to change them. The HTML loads only as an iframe document, and the
@@ -3276,7 +3303,8 @@ marketplace plugin is installed **without trusting its author**:
   the \`plugin-worker\` container: plain JavaScript, no Node APIs, no
   network, no file system, no timers, a fresh VM for every call;
 - its UI (\`ui/\`, optional) runs in \`<iframe sandbox="allow-scripts">\` with
-  an opaque origin and no network;
+  an opaque origin and no network beyond its own files (it may load its own
+  sound, video, WebAssembly and data);
 - it gets what official plugins get from the host: action policies
   (\`host\` / \`member\` / \`player\`, \`actorFields\`, \`joinsRoster\`, \`audit\`),
   \`validateAction\`, and **per-viewer hidden state** through \`projectState\`.
@@ -3446,8 +3474,9 @@ talks to the lobby with postMessage protocol v1 (\`init\`, \`state\`,
 \`action\`, \`resize\`) and always receives the state **already projected**
 for its viewer. Use \`@lobbyforge/plugin-sdk/frame\`; see "Marketplace
 plugin UI (sandboxed iframe)" in [PLUGIN_SDK.md](PLUGIN_SDK.md). Inside
-the frame there is no network (\`connect-src 'none'\`) and no external
-script or stylesheet.
+the frame \`fetch()\` and media reach only your own files under \`ui/\`
+(sound, video, \`.wasm\`, data), and there is no external script or
+stylesheet. The file types and limits are listed there.
 
 ### \`locales/\` (optional): your name and description in every language
 
@@ -3487,8 +3516,8 @@ my-game/
   is "Anket" in Turkish and Dice Bot is "Zar", while Quiz, Watch Party and
   Hushle stay as they are. The example's Buzzer stays "Buzzer".
 - **Your UI is separate.** The host reads these tables; the iframe does
-  not get them (it has no network, and the asset route serves only
-  \`ui/\`). Ship your UI's strings under \`ui/\` and pick them with
+  not get them (it can fetch only its own files, and the asset route
+  serves only \`ui/\`). Ship your UI's strings under \`ui/\` and pick them with
   \`init.locale\`, as the example's \`ui/app.js\` does.
 
 **Languages.** Name each file by the app's code for the language: a

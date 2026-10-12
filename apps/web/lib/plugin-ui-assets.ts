@@ -15,9 +15,13 @@
  *    has `sandbox="allow-scripts"`; repeating it in the CSP keeps the document
  *    in an opaque origin even when it is opened some other way (a link, a
  *    frame without the attribute), so a plugin page can never run as the app.
- *    `connect-src 'none'` and `'self'`-only images/scripts/styles/fonts: no
- *    network to send anything to. `frame-ancestors 'self'`: only the app's own
- *    pages can frame it.
+ *    `'self'`-only images/scripts/styles/fonts, and `fetch()` and media
+ *    limited to the plugin's OWN files (see `pluginUiAssetSource`): no
+ *    network to send anything to. `'wasm-unsafe-eval'` lets it compile
+ *    WebAssembly, which reaches nothing a script cannot. `frame-ancestors
+ *    'self'`: only the app's own pages can frame it.
+ *  - Single `Range` requests answer 206, so audio and video can seek (Safari
+ *    plays no media from a server that ignores Range).
  *  - `X-Content-Type-Options: nosniff` and a fixed Content-Type per extension.
  *  - `Cross-Origin-Resource-Policy: cross-origin` and
  *    `Access-Control-Allow-Origin: *`. The frame's origin is opaque, so to the
@@ -50,19 +54,52 @@ import {
   readInstalledSandboxManifest,
 } from './plugin-install-layout';
 
+/**
+ * Where a plugin version's files live, as a CSP source:
+ * `https://chat.example.com/api/plugin-ui/<id>/<version>/`. A source ending
+ * in `/` matches every path below it and nothing else, so `fetch()` and
+ * `<audio>` reach this version's own files only — not the app's API, not
+ * another plugin. The origin comes from configuration, never from the
+ * request: the response is cached `public, immutable`, and a Host header
+ * must not be able to write itself into a policy a shared cache hands to
+ * everyone. Without a configured origin (a dev setup) it is `'self'`: the
+ * app's origin, which the frame reaches without cookies (its origin is
+ * opaque and every app cookie is SameSite=Lax) and where every mutating
+ * route refuses a cross-site request.
+ */
+export function pluginUiAssetSource(
+  pluginId: string,
+  version: string,
+  env: Record<string, string | undefined> = process.env
+): string {
+  for (const value of [env.LOBBYFORGE_APP_ORIGIN, env.NEXT_PUBLIC_BASE_URL]) {
+    if (!value) continue;
+    try {
+      const { origin, protocol } = new URL(value);
+      if (protocol === 'https:' || protocol === 'http:') return `${origin}/api/plugin-ui/${pluginId}/${version}/`;
+    } catch {
+      /* not a URL: try the next one */
+    }
+  }
+  return "'self'";
+}
+
 /** The frame document's policy: ADR-007's CSP plus `sandbox allow-scripts`. */
-export const PLUGIN_UI_CSP = [
-  "default-src 'none'",
-  "script-src 'self'",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data:",
-  "font-src 'self'",
-  "connect-src 'none'",
-  "frame-ancestors 'self'",
-  "base-uri 'none'",
-  "form-action 'none'",
-  'sandbox allow-scripts',
-].join('; ');
+export function pluginUiCsp(assetSource: string): string {
+  return [
+    "default-src 'none'",
+    "script-src 'self' 'wasm-unsafe-eval'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self'",
+    `media-src ${assetSource} data: blob:`,
+    `connect-src ${assetSource}`,
+    "frame-ancestors 'self'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    'sandbox allow-scripts',
+  ].join('; ');
+}
 
 /** For refusals: nothing loads, nothing frames it. */
 const REFUSAL_CSP = "default-src 'none'; frame-ancestors 'none'; sandbox";
@@ -71,7 +108,7 @@ const REFUSAL_CSP = "default-src 'none'; frame-ancestors 'none'; sandbox";
 const PERMISSIONS_POLICY =
   'camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), hid=(), display-capture=()';
 
-type AssetKind = 'document' | 'script' | 'style' | 'data' | 'image' | 'font';
+type AssetKind = 'document' | 'script' | 'style' | 'data' | 'image' | 'font' | 'media';
 
 /** The ONLY extensions served, each with a fixed type. */
 export const PLUGIN_UI_TYPES: Readonly<Record<string, { contentType: string; kind: AssetKind }>> = {
@@ -90,6 +127,21 @@ export const PLUGIN_UI_TYPES: Readonly<Record<string, { contentType: string; kin
   svg: { contentType: 'image/svg+xml', kind: 'image' },
   woff2: { contentType: 'font/woff2', kind: 'font' },
   woff: { contentType: 'font/woff', kind: 'font' },
+  // Sound and video for <audio>/<video>, or fetched for the Web Audio API.
+  mp3: { contentType: 'audio/mpeg', kind: 'media' },
+  ogg: { contentType: 'audio/ogg', kind: 'media' },
+  oga: { contentType: 'audio/ogg', kind: 'media' },
+  opus: { contentType: 'audio/ogg', kind: 'media' },
+  wav: { contentType: 'audio/wav', kind: 'media' },
+  m4a: { contentType: 'audio/mp4', kind: 'media' },
+  flac: { contentType: 'audio/flac', kind: 'media' },
+  webm: { contentType: 'video/webm', kind: 'media' },
+  mp4: { contentType: 'video/mp4', kind: 'media' },
+  // WebAssembly and engine data (Godot's .pck, Unity's .data), read with fetch().
+  wasm: { contentType: 'application/wasm', kind: 'data' },
+  bin: { contentType: 'application/octet-stream', kind: 'data' },
+  data: { contentType: 'application/octet-stream', kind: 'data' },
+  pck: { contentType: 'application/octet-stream', kind: 'data' },
 };
 
 /** One path segment: letters, digits, `.`, `_`, `-`; no leading or trailing dot. */
@@ -148,6 +200,32 @@ export function fetchMetadataRefusal(req: Request, kind: AssetKind): string | nu
   return null;
 }
 
+/**
+ * A single `bytes=` range of a file of `size` bytes: `{ start, end }`
+ * (inclusive), `'unsatisfiable'` for a range past the end, or null to send
+ * the whole file (no header, several ranges, or anything malformed — a
+ * server may always ignore Range).
+ */
+export function parseByteRange(
+  header: string | null,
+  size: number
+): { start: number; end: number } | 'unsatisfiable' | null {
+  if (!header) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!match || (match[1] === '' && match[2] === '')) return null;
+  if (match[1] === '') {
+    // A suffix: the last N bytes.
+    const length = Number(match[2]);
+    if (length === 0 || size === 0) return 'unsatisfiable';
+    return { start: Math.max(0, size - length), end: size - 1 };
+  }
+  const start = Number(match[1]);
+  if (start >= size) return 'unsatisfiable';
+  const end = match[2] === '' ? size - 1 : Math.min(Number(match[2]), size - 1);
+  if (end < start) return null;
+  return { start, end };
+}
+
 function refusal(status: 403 | 404, method: string): Response {
   return new Response(method === 'HEAD' ? null : status === 404 ? 'Not found\n' : 'Forbidden\n', {
     status,
@@ -162,17 +240,18 @@ function refusal(status: 403 | 404, method: string): Response {
 }
 
 /** The headers of every served file. Exported for the tests and the docs. */
-export function pluginUiHeaders(contentType: string, kind: AssetKind, length: number): Headers {
+export function pluginUiHeaders(contentType: string, kind: AssetKind, length: number, csp: string): Headers {
   const headers = new Headers({
     'Content-Type': contentType,
     'Content-Length': String(length),
-    'Content-Security-Policy': PLUGIN_UI_CSP,
+    'Content-Security-Policy': csp,
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
     'Permissions-Policy': PERMISSIONS_POLICY,
     'Cross-Origin-Resource-Policy': 'cross-origin',
     'Access-Control-Allow-Origin': '*',
     'Cache-Control': 'public, max-age=31536000, immutable',
+    'Accept-Ranges': 'bytes',
     Vary: 'Sec-Fetch-Dest, Sec-Fetch-Site',
   });
   if (kind === 'image' && contentType === 'image/svg+xml') headers.set('Content-Disposition', 'inline');
@@ -246,6 +325,19 @@ export async function servePluginUiAsset(
   } catch {
     return refusal(404, method);
   }
-  const headers = pluginUiHeaders(parsed.contentType, parsed.kind, body.byteLength);
+  const csp = pluginUiCsp(pluginUiAssetSource(params.pluginId, params.version, env));
+  const range = parseByteRange(req.headers.get('range'), body.byteLength);
+  if (range === 'unsatisfiable') {
+    const headers = pluginUiHeaders(parsed.contentType, parsed.kind, 0, csp);
+    headers.set('Content-Range', `bytes */${body.byteLength}`);
+    return new Response(null, { status: 416, headers });
+  }
+  if (range) {
+    const part = body.subarray(range.start, range.end + 1);
+    const headers = pluginUiHeaders(parsed.contentType, parsed.kind, part.byteLength, csp);
+    headers.set('Content-Range', `bytes ${range.start}-${range.end}/${body.byteLength}`);
+    return new Response(method === 'HEAD' ? null : new Uint8Array(part), { status: 206, headers });
+  }
+  const headers = pluginUiHeaders(parsed.contentType, parsed.kind, body.byteLength, csp);
   return new Response(method === 'HEAD' ? null : new Uint8Array(body), { status: 200, headers });
 }
