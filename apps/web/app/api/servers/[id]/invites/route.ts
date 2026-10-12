@@ -163,7 +163,9 @@ async function handlePost(req: Request, ctx: { params: Promise<{ id: string }> }
       action: 'invite.create',
       targetType: 'invite',
       targetId: row.id,
-      metadata: { code: row.code, maxUses: row.maxUses, expiresAt: row.expiresAt?.toISOString() ?? null },
+      // security-review AUTHZ-010: no `code` — the target is the invite's
+      // id, and the code itself is a working way in for whoever reads it.
+      metadata: { maxUses: row.maxUses, expiresAt: row.expiresAt?.toISOString() ?? null },
     }).catch((err) => console.error('[audit] invite.create failed:', (err as Error).message));
     return NextResponse.json({ invite: toJson(row) }, { status: 201 });
   } catch {

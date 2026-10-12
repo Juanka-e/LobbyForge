@@ -81,7 +81,10 @@ async function handlePost(req: Request, ctx: { params: Promise<{ code: string }>
         action: 'invite.redeem',
         targetType: 'membership',
         targetId: result.membershipId,
-        metadata: { code, roleId: result.roleId },
+        // security-review AUTHZ-010: the invite's id, never its code — the
+        // audit log is read by everyone with View Audit Log, and a code is
+        // a working way in.
+        metadata: { inviteId: result.inviteId, roleId: result.roleId },
       }).catch((err) => console.error('[audit] invite.redeem failed:', (err as Error).message));
       // Bots milestone: the Welcome Bot greets the new member (never throws).
       await notifyMemberJoined({ serverId: result.serverId, userId: session.uid });

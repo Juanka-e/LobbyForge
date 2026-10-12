@@ -265,7 +265,8 @@ describe('built-in bot texts in each viewer’s language (lib/bots/bot-i18n.ts)'
       ctx
     );
     expect(res.status).toBe(400);
-    expect(await res.json()).toMatchObject({ key: 'i18n' });
+    // security-review AUTHZ-008: no client metadata at all, reserved or not.
+    expect(await res.json()).toMatchObject({ code: 'metadata_not_allowed' });
     expect(createMessage).not.toHaveBeenCalled();
   });
 

@@ -92,6 +92,7 @@ describe('redeemInvite with an expiry', () => {
       membershipId: 'm-1',
       serverId: 'srv-1',
       roleId: 'role-everyone',
+      inviteId: 'inv-1',
     });
     expect(chains.filter((c) => c[0]!.op === 'insert')[0]![0]!.args[0]).toBe(memberships);
     expect(chains.filter((c) => c[0]!.op === 'update').map((c) => c[0]!.args[0])).toEqual([invites]);

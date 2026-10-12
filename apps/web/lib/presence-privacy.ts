@@ -45,23 +45,32 @@ function canViewActivityKind(
   return true;
 }
 
+/**
+ * May the viewer see that this user is online right now? The same rule as
+ * the `status` of {@link applyPresencePrivacy}; signals that only exist
+ * while someone is online — the typing indicator — follow it too.
+ */
+export function canViewOnlineStatus(privacy: UserPrivacySettings, relation: ViewerRelation): boolean {
+  return canViewScope(privacy.onlineStatusVisibility, relation);
+}
+
 export function applyPresencePrivacy(
   presence: UserPresenceSnapshot,
   privacy: UserPrivacySettings,
   relation: ViewerRelation
 ): PublicPresenceSnapshot {
-  const canViewOnlineStatus = canViewScope(privacy.onlineStatusVisibility, relation);
+  const onlineVisible = canViewOnlineStatus(privacy, relation);
   // A hidden status hides everything that would show the user is online:
   // the voice room they sit in, the heartbeat and what they are doing.
   // The final test pass found `status: "hidden"` next to the live
   // `channelId`, which put a hidden user in their voice room for everyone.
   const canViewActivity =
-    canViewOnlineStatus &&
+    onlineVisible &&
     canViewScope(privacy.activityVisibility, relation) &&
     canViewActivityKind(presence.activity, privacy);
 
   const canViewChannel =
-    canViewOnlineStatus &&
+    onlineVisible &&
     (relation.isSelf ||
       !relation.visibleChannelIds ||
       relation.visibleChannelIds.has(presence.channelId));
@@ -72,8 +81,8 @@ export function applyPresencePrivacy(
     channelId: canViewChannel ? presence.channelId : null,
     // beta-review: a hidden status must not leak through the heartbeat
     // timestamp either (clients derive "online" from lastSeen).
-    lastSeen: canViewOnlineStatus ? presence.lastSeen : 0,
-    status: canViewOnlineStatus ? presence.status : 'hidden',
+    lastSeen: onlineVisible ? presence.lastSeen : 0,
+    status: onlineVisible ? presence.status : 'hidden',
   };
 
   if (canViewActivity && presence.activity) {

@@ -12,8 +12,10 @@ const isCurrentlyBanned = vi.fn();
 const listBansForServer = vi.fn();
 const userExists = vi.fn();
 const logAction = vi.fn().mockResolvedValue(undefined);
+const getActiveMemberTimeout = vi.fn().mockResolvedValue(null);
 
 vi.mock('@lobbyforge/db', () => ({
+  getActiveMemberTimeout,
   getServerById,
   isServerMember,
   getUserPermissions,
@@ -272,6 +274,25 @@ describe('POST /api/servers/{id}/bans', () => {
     });
     const res = await POST(req, { params: Promise.resolve({ id: SERVER_ID }) });
     expect(res.status).toBe(409);
+  });
+
+  it('403 actor_timed_out: a timed-out moderator cannot ban', async () => {
+    getServerById.mockResolvedValue(mockServer(OWNER_ID));
+    isServerMember.mockResolvedValue(true);
+    getUserPermissions.mockResolvedValue(['ban_members']);
+    getActiveMemberTimeout.mockResolvedValueOnce(new Date(Date.now() + 60_000));
+    const { POST } = await loadRoute();
+    const res = await POST(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/bans`, {
+        method: 'POST',
+        headers: { cookie: makeSessionCookie() },
+        body: JSON.stringify({ userId: TARGET_ID, reason: 'spam' }),
+      }),
+      { params: Promise.resolve({ id: SERVER_ID }) }
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'actor_timed_out' });
+    expect(banUser).not.toHaveBeenCalled();
   });
 
   it('creates a ban and returns 201', async () => {

@@ -97,8 +97,22 @@ The owner shortcut is what makes the "owner always has ADMINISTRATOR" rule work 
 | `GET`    | `/api/servers/{id}/roles`         | — | List the server's roles, ordered by `position ASC`. Members can read. | 60 / min |
 | `POST`   | `/api/servers/{id}/roles`         | `{ name, color?, icon?, displaySeparately?, position?, permissions }` | Create a role. Requires `MANAGE_ROLES`. | 10 / min |
 | `GET`    | `/api/servers/{id}/roles/{roleId}` | — | Fetch a single role. Members can read. | 60 / min |
-| `PATCH`  | `/api/servers/{id}/roles/{roleId}` | `{ name?, color?, icon?, displaySeparately?, position?, permissions? }` | Partial update. Requires `MANAGE_ROLES`. Renaming `@everyone` is rejected. | 30 / min |
-| `DELETE` | `/api/servers/{id}/roles/{roleId}` | — | Delete a role. Requires `MANAGE_ROLES`. Deleting `@everyone` is rejected (it's structural, not a real role). Best-effort clears the `roleId` on memberships that pointed at the role. | 10 / min |
+| `PATCH`  | `/api/servers/{id}/roles/{roleId}` | `{ name?, color?, icon?, displaySeparately?, position?, permissions? }` | Partial update. Requires `MANAGE_ROLES`. Renaming `@everyone` is rejected; so is any position change that would move `@everyone` off the bottom (below). | 30 / min |
+| `DELETE` | `/api/servers/{id}/roles/{roleId}` | — | Delete a role. Requires `MANAGE_ROLES`. Deleting `@everyone` is rejected (it's structural, not a real role). Best-effort clears the `roleId` on memberships that pointed at the role. A role that is some channels' last gate is refused with 409 (below). | 10 / min |
+
+**`@everyone` stays the lowest role.** It is every member's floor, so its
+position never changes — for anyone, the owner included — and no other role
+may be moved to or under its position (`updateRole` shifts the roles in
+between, which would push `@everyone` up). Both are `400 { code:
+"everyone_role_lowest" }`. Re-sending `@everyone`'s unchanged position (the
+role editor does) is fine. A non-owner with `MANAGE_ROLES` used to be able to
+raise it to any position below their own.
+
+**Deleting a role that gates channels** answers `409 { code:
+"role_gates_channels", channels, hiddenChannelCount }`. `channels` names only
+the channels the actor may see (owner / `MANAGE_CHANNELS` see all, everyone
+else the channels their roles open); the private ones they cannot see are
+counted in `hiddenChannelCount`, never named.
 
 ### Members
 
@@ -154,7 +168,14 @@ acts on the owner, and acting on yourself is refused (400
 `self_action`). Refusals from the gate carry a `code`: `forbidden`,
 `insufficient_rank`, `target_is_owner`, `self_action`,
 `target_not_member`, `server_not_found`, `user_not_found`,
-`invalid_request`.
+`invalid_request`, `actor_timed_out`.
+
+**A timed-out member cannot moderate.** The same gate refuses an actor who
+is currently timed out — `403 { code: "actor_timed_out", until }` — for
+every operation it covers: kick, ban, timeout (setting or clearing one),
+role assignment, voice mute and voice disconnect. A timeout already
+silences messages, invites and voice; moderation powers used to survive
+it. The owner cannot be timed out, so the owner is never refused.
 
 ### Atomic Position Shifting (M15.6)
 
@@ -197,9 +218,10 @@ interface MemberJson {
 |---:|---|
 | 200 | `GET` / `PATCH` / `PUT` / `DELETE` success |
 | 201 | `POST` (role create) success |
-| 400 | Body fails zod validation, unknown permission string in `permissions`, renaming `@everyone`, deleting `@everyone`, kicking the owner |
+| 400 | Body fails zod validation, unknown permission string in `permissions`, renaming `@everyone`, deleting `@everyone`, moving `@everyone` or a role to/under it (`everyone_role_lowest`), kicking the owner |
 | 401 | Cookie missing or signature invalid |
-| 403 | Caller is not a member (read) or lacks the required permission (write) |
+| 403 | Caller is not a member (read) or lacks the required permission (write); a timed-out moderator (`actor_timed_out`) |
+| 409 | Deleting a role that is some channels' last gate (`role_gates_channels`) |
 | 404 | Server not found, role not found in this server, member not found |
 | 500 | Drizzle threw (wrapped with a sanitized message) |
 | 503 | Cookie has no `uid` (DB not migrated / down) — see "503 contract" below |
@@ -253,7 +275,8 @@ deleteRole(db, roleId)
   // channels) and deletes nothing when the role is a channel's LAST
   // visibility override — the cascade would make that channel public
   // (security-review AUTHZ-001). DELETE /roles/{id} answers 409 with
-  // `{ code: 'role_gates_channels', channels: [{ id, name }] }`.
+  // `{ code: 'role_gates_channels', channels: [{ id, name }], hiddenChannelCount }`
+  // — the route names only the channels the actor may see.
 
 getUserPermissions(db, userId, serverId)
   // Returns the union of permissions. Owner shortcut returns

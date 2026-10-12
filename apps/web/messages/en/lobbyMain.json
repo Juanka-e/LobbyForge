@@ -189,6 +189,7 @@
   "lobbyMain.voice.disconnectError.owner": "The server owner can’t be disconnected.",
   "lobbyMain.voice.disconnectError.rateLimited": "Too many attempts. Wait a moment and try again.",
   "lobbyMain.voice.disconnectError.self": "To leave voice yourself, use Disconnect.",
+  "lobbyMain.voice.disconnectError.timedOut": "You’re timed out in this server, so you can’t disconnect members until it ends.",
   "lobbyMain.voice.disconnectError.unavailable": "The voice server could not be reached. Try again.",
   "lobbyMain.voice.disconnectFromVoice": "Disconnect from voice",
   "lobbyMain.voice.empty": "No voice channels yet",

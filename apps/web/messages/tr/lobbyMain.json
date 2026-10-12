@@ -189,6 +189,7 @@
   "lobbyMain.voice.disconnectError.owner": "Sunucu sahibinin ses bağlantısı kesilemez.",
   "lobbyMain.voice.disconnectError.rateLimited": "Çok fazla deneme yaptın. Biraz bekleyip tekrar dene.",
   "lobbyMain.voice.disconnectError.self": "Sesten kendin ayrılmak için Bağlantıyı kes’i kullan.",
+  "lobbyMain.voice.disconnectError.timedOut": "Bu sunucuda zaman aşımındasın; süre bitene kadar üyelerin ses bağlantısını kesemezsin.",
   "lobbyMain.voice.disconnectError.unavailable": "Ses sunucusuna ulaşılamadı. Tekrar dene.",
   "lobbyMain.voice.disconnectFromVoice": "Ses bağlantısını kes",
   "lobbyMain.voice.empty": "Henüz sesli kanal yok",

@@ -209,6 +209,19 @@ describe('setTyping / getTypingUsers', () => {
     const typers = await getTypingUsers(SERVER_ID, 'ch-1');
     expect(typers).toEqual([]);
   });
+
+  it('getTypingEntries keeps each name with its user id, skipping a key that expired mid-read', async () => {
+    // user-1's key expired between SCAN and MGET: its null must not shift
+    // user-2's name onto user-1 (the per-viewer filter works by id).
+    store.set(`lf:test:typing:${SERVER_ID}:ch-1:user-2`, 'Bob');
+    scanImpl.mockResolvedValue([
+      '0',
+      [`lf:test:typing:${SERVER_ID}:ch-1:user-1`, `lf:test:typing:${SERVER_ID}:ch-1:user-2`],
+    ] as [string, string[]]);
+    const { getTypingEntries, getTypingUsers } = await import('../redis.js');
+    expect(await getTypingEntries(SERVER_ID, 'ch-1')).toEqual([{ userId: 'user-2', displayName: 'Bob' }]);
+    expect(await getTypingUsers(SERVER_ID, 'ch-1', 'user-2')).toEqual([]);
+  });
 });
 
 describe('reserveUserBandwidth (security follow-up)', () => {

@@ -77,14 +77,17 @@ export function BlockListProvider({ children }: { children: ReactNode }) {
 export function useBlockList(): BlockListContextValue {
   const ctx = useContext(BlockListContext);
   if (!ctx) {
-    // Fallback when no provider — return a no-op context so components
-    // outside the provider don't crash.
-    return {
-      blockedIds: new Set(),
-      isBlocked: () => false,
-      toggleBlock: async () => {},
-      refresh: async () => {},
-    };
+    // Fallback when no provider — a no-op context so components outside
+    // the provider don't crash. One shared object: an effect that depends
+    // on `blockedIds` must not rerun on every render.
+    return NO_PROVIDER;
   }
   return ctx;
 }
+
+const NO_PROVIDER: BlockListContextValue = {
+  blockedIds: new Set(),
+  isBlocked: () => false,
+  toggleBlock: async () => {},
+  refresh: async () => {},
+};

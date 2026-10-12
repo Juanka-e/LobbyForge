@@ -25,49 +25,22 @@ import { emitMessageEvent } from '@/lib/bots/events';
 import { requireVerifiedEmail } from '@/lib/mail/verification';
 import { readMessagePollId } from '@/lib/chat-polls';
 import { loadPollViewsForMessages } from '@/lib/chat-polls-server';
+import { MESSAGE_BODY_MAX_BYTES } from '@/lib/message-limits';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
+// security-review AUTHZ-008: a message's `metadata` is written by the
+// server only — polls, bots, webhooks, apps, pins. A member's POST used to
+// accept a free-form record (only its top-level key NAMES were checked),
+// so about 1 MB could ride along on every message into each lobby render,
+// list response and live subscriber. No first-party client sends it: it is
+// refused outright (`metadata_not_allowed`), and the schema is strict, so
+// any other unknown field is a 400 too instead of being dropped silently.
 const CreateMessageSchema = z.object({
   content: MessageContentSchema,
   replyToId: z.string().uuid().optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-});
-
-const RESERVED_METADATA_KEYS = new Set([
-  'system',
-  'plugin',
-  'bot',
-  'app',
-  'trust',
-  'signature',
-  'moderation',
-  // Bot API v2: written only by the server — a bot's command answer and an
-  // incoming webhook's post. A member must not be able to forge either.
-  'interaction',
-  'webhook',
-  // Polls in text channels: `poll.id` is written only by the poll route, in
-  // the same transaction as the poll — a member must not attach one by hand.
-  'poll',
-  // A built-in bot's default text names its catalogue string, so each viewer
-  // reads it in their own language (lib/bots/bot-i18n.ts). Server-written
-  // only — and honoured on bot messages only.
-  'i18n',
-]);
-
-function validateUserMetadata(metadata: Record<string, unknown> | undefined): NextResponse | null {
-  if (!metadata) return null;
-  for (const key of Object.keys(metadata)) {
-    if (key.startsWith('$') || key.startsWith('_') || RESERVED_METADATA_KEYS.has(key)) {
-      return NextResponse.json(
-        { error: 'Message metadata contains reserved keys', key },
-        { status: 400 }
-      );
-    }
-  }
-  return null;
-}
+}).strict();
 
 function getSessionSecret(): string {
   const secret = process.env.LOBBYFORGE_SESSION_SECRET;
@@ -221,7 +194,13 @@ async function handlePost(
 
     let body: z.infer<typeof CreateMessageSchema>;
     try {
-      const raw = await req.json();
+      const raw: unknown = await req.json();
+      if (raw !== null && typeof raw === 'object' && 'metadata' in raw) {
+        return NextResponse.json(
+          { error: 'Message metadata is set by the server only', code: 'metadata_not_allowed' },
+          { status: 400 }
+        );
+      }
       body = CreateMessageSchema.parse(raw);
     } catch {
       return NextResponse.json(
@@ -251,9 +230,6 @@ async function handlePost(
       );
       if (!mentionAuth.ok) return mentionAuth.response;
     }
-    const metadataError = validateUserMetadata(body.metadata);
-    if (metadataError) return metadataError;
-
     // Bots milestone: the server's Moderation Bot (if enabled) checks the
     // message before it is stored. A blocked sender gets a 422 whose
     // code + rule the lobby translates; the bot writes the audit entry.
@@ -276,7 +252,6 @@ async function handlePost(
       channelId,
       userId: session.uid,
       content: body.content,
-      ...(body.metadata !== undefined ? { metadata: body.metadata } : {}),
       ...(body.replyToId !== undefined ? { replyToId: body.replyToId } : {}),
     });
     publishChatMessage({
@@ -333,5 +308,6 @@ export const GET = withApiSecurity(handleGet, {
 
 export const POST = withApiSecurity(handlePost, {
   allowedMethods: ['POST'],
+  maxBodyBytes: MESSAGE_BODY_MAX_BYTES,
   rateLimit: { identifier: 'messages-create', config: { windowMs: 60_000, maxRequests: 30 } },
 });

@@ -261,9 +261,14 @@ cast → 500).
 - **Audit metadata** is `{ requestId, source }` (plus `membershipId` on
   approval) — never the invite code. Moderators who read the audit log may
   lack MANAGE_SERVER, and invite codes are for MANAGE_SERVER holders only
-  (beta-review F7); masking them in the audit reader would be one more
-  place to get wrong, and the request id already leads a manager to the
-  code in the join-request list.
+  (beta-review F7); the request id already leads a manager to the code in
+  the join-request list.
+- **Invite audit rows** follow the same rule (security-review AUTHZ-010):
+  `invite.create` logs `{ maxUses, expiresAt }` with the invite's id as
+  `targetId`, and `invite.redeem` logs `{ inviteId, roleId }` — no `code`.
+  Rows written before that still carry `code`; the audit readers
+  (`GET /api/servers/{id}/audit-logs` and Community Settings → Audit Log,
+  `lib/audit-log-view.ts`) drop it for anyone without MANAGE_SERVER.
 - **Mine** returns only the caller's own pending request (or a moderator's
   rejection in its cooldown, with `retryAfter`) — no membership needed, no
   note or moderator echoed back. `POST` is the lobby's Ask to join (see

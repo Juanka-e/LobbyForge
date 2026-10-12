@@ -373,7 +373,15 @@ The interaction contract is fixed:
 - `/admin/audit` loads the authorized community audit trail, resolves actor
   display names, and provides client-side search, category filters, sorting,
   metadata inspection, and CSV export. CSV cells are escaped and formula-like
-  values are neutralized before download.
+  values are neutralized before download. Row metadata is projected per
+  viewer, here and in `GET /api/servers/{id}/audit-logs` alike
+  (`projectAuditMetadata` in `lib/audit-log-view.ts`, security-review
+  AUTHZ-010): an invite `code` only for MANAGE_SERVER; a channel row's
+  `name`, `topic` and `visibleToRoleIds` only when the viewer may see that
+  channel; the Moderation Bot's `detail` (the matched word or link host) and
+  `excerpt` only when the viewer may see the channel the message was in.
+  Owners and MANAGE_CHANNELS holders see every channel. Old rows are covered
+  because the projection happens on read.
 - On self-hosted instances, `/lobby` repairs a missing membership for the
   first community only when the account is the setup owner or the instance is
   in `registration_mode = open` (guest accounts also require guest access).
