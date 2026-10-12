@@ -2,6 +2,12 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Sessions no longer end after an hour - 2026-10-13
+
+- **The bug:** the session cookie lived one hour and nothing re-signed a cookie that was still valid — `POST /api/auth/guest` only ran once the cookie was already gone. A signed-in user was signed out an hour after signing in, however active they were, and a guest lost their identity. Found by the 2026-10-13 security review.
+- **The fix — a sliding session:** the cookie now stays valid for 7 days without a request, and every API request (after the revocation check) and every page load re-signs a valid cookie once less than half of that is left, keeping the same session id and `auth_time`. Refused answers and the sign-in, guest and logout routes never get one, so signing out still signs out. The 30-day absolute lifetime (`LOBBYFORGE_SESSION_MAX_AGE_DAYS`) and server-side revocation (sign out everywhere, password change, operator reset) are unchanged and still end a session.
+- **For developers:** `guestSessionNeedsRefresh` (`@lobbyforge/core`), `apps/web/lib/session-refresh.ts`; `GUEST_SESSION_TTL_SECONDS` is now 7 days. docs/GUEST_AUTH.md "Lifetime".
+
 ## [Unreleased] - Dependencies: Next 16.4, ioredis 6, TypeScript 6; `middleware.ts` is now `proxy.ts` - 2026-10-13
 
 - **Next.js 16.4.0** (was 16.3.8). Its strict route matching found a real bug: the `@modal` interceptors for `/admin/…` and `/settings/…` caught URLs that had no page of their own, so a click from the lobby worked while a hard load of the same URL 404'd (`/admin` itself among them). New canonical routes: `/admin` redirects to the admin overview (`/admin/settings`), and an unknown `/admin/…` or `/settings/…` is a proper 404. The modal map opens `/admin` on the overview too.

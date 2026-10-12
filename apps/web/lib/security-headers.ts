@@ -14,6 +14,7 @@
 import { NextResponse } from 'next/server';
 import { GUEST_COOKIE_NAME, clearCookieHeader } from '@lobbyforge/core';
 import { maintenanceResponseForRequest } from '@/lib/maintenance-guard';
+import { withRefreshedSession } from '@/lib/session-refresh';
 
 const SECURITY_HEADER_NAMES = [
   'X-Content-Type-Options',
@@ -404,7 +405,12 @@ export function withApiSecurity<TContext = unknown>(
     }
 
     const response = await handler(boundedReq, ctx);
-    return applySecurityHeaders(response);
+    // The sliding session (lib/session-refresh.ts): a valid cookie past half
+    // its lifetime is re-signed. Not on the sign-in routes that bypass the
+    // revocation check — they set or clear the cookie themselves.
+    return applySecurityHeaders(
+      options.sessionRevocation === 'bypass' ? response : withRefreshedSession(req, response)
+    );
   };
 }
 
