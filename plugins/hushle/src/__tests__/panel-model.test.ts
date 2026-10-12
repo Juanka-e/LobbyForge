@@ -5,6 +5,7 @@ import {
   DIFFICULTY_PRESETS,
   EMPTY_TURN_LOG,
   advanceTurnLog,
+  cardMoveIntent,
   draftOf,
   explainerCandidates,
   gameTotals,
@@ -20,6 +21,7 @@ import {
   standings,
   startGameAction,
   turnDeadline,
+  turnMoveIntent,
   turnNumber,
   withPlayerAdded,
   withPlayerRemoved,
@@ -90,6 +92,37 @@ describe('turn and timer', () => {
     expect(s.phase).toBe('playing');
     expect(isTurnRunning(s)).toBe(false);
     expect(isTurnRunning(teamSetupState())).toBe(false);
+  });
+
+  it("names the deal a host move is for, from every viewer's snapshot alike", () => {
+    const state = playingState();
+    // The deal number is public — the host, the guessers and spectators get
+    // it with no card — and it is what the host's card moves send.
+    for (const viewer of [MIRA, THEO, KAYA, NOVA, SAM]) {
+      expect(cardMoveIntent(project(state, viewer))).toEqual({ cardSeq: state.cardSeq });
+    }
+    const next = hushleReducer(state, { type: 'correct-guess', ...cardMoveIntent(state) });
+    expect(next.cardSeq).toBe(state.cardSeq + 1);
+    expect(cardMoveIntent(next)).toEqual({ cardSeq: next.cardSeq });
+    // A snapshot from before deal numbers sends none; so does garbage.
+    for (const cardSeq of [undefined, null, -1, 1.5, '3']) {
+      expect(cardMoveIntent({ cardSeq } as unknown as HushleState)).toEqual({});
+    }
+  });
+
+  it("names the turn a host's turn move is for, from the snapshot", () => {
+    const setup = teamSetupState();
+    expect(turnMoveIntent(project(setup, KAYA))).toEqual({ turnNumber: 0 });
+    const first = playingState();
+    for (const viewer of [MIRA, THEO, KAYA, NOVA, SAM]) {
+      expect(turnMoveIntent(project(first, viewer))).toEqual({ turnNumber: first.turnNumber });
+    }
+    const second = hushleReducer(first, { type: 'end-turn', ...turnMoveIntent(first) });
+    expect(second.turnNumber).toBe(first.turnNumber + 1);
+    expect(hushleReducer(second, { type: 'end-turn', ...turnMoveIntent(first) })).toBe(second);
+    for (const turnNumber of [undefined, null, -1, 1.5, '2']) {
+      expect(turnMoveIntent({ turnNumber } as unknown as HushleState)).toEqual({});
+    }
   });
 
   it('numbers turns as the reducer counts them', () => {

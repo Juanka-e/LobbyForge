@@ -168,7 +168,20 @@ describe('team setup', () => {
     const panel = await mount({ state: project(state, KAYA) });
     expect(panel.text()).toContain('Ice goes first, and Mira explains.');
     await panel.click(panel.button('Start first turn'));
-    expect(panel.actions).toEqual([{ type: 'start-turn', teamId: state.teams[0]!.id, explainerId: MIRA }]);
+    // The turn it starts from (0) rides along: a second press is ignored.
+    expect(panel.actions).toEqual([{ type: 'start-turn', teamId: state.teams[0]!.id, explainerId: MIRA, turnNumber: 0 }]);
+  });
+
+  it('a double press of Start first turn starts one turn', async () => {
+    const state = teamSetupState();
+    const panel = await mount({ state: project(state, KAYA) });
+    const start = panel.button('Start first turn');
+    await panel.click(start);
+    await panel.click(start);
+    expect(panel.actions).toHaveLength(2);
+    const once = hushleReducer(state, panel.actions[0]!);
+    expect(once.turnNumber).toBe(1);
+    expect(hushleReducer(once, panel.actions[1]!)).toBe(once);
   });
 
   it('cannot start without a team, and offers to split the room', async () => {
@@ -388,7 +401,8 @@ describe('a running turn, seat by seat', () => {
     await panel.click(gotIt);
     await panel.click(gotIt);
     await panel.click(panel.button('Skip'));
-    expect(panel.actions).toEqual([{ type: 'correct-guess' }]);
+    // Each press names the deal it was drawn for (B-06, stale intent).
+    expect(panel.actions).toEqual([{ type: 'correct-guess', cardSeq: state.cardSeq }]);
     expect(gotIt.disabled).toBe(true);
 
     // The next card unlocks the host's buttons.
@@ -398,7 +412,38 @@ describe('a running turn, seat by seat', () => {
     const afterSkip = { ...hushleReducer(next, { type: 'pass' }), currentCard: UMBRELLA };
     await panel.rerender({ state: project(afterSkip, SAM) });
     await panel.click(panel.button('Penalty'));
-    expect(panel.actions).toEqual([{ type: 'correct-guess' }, { type: 'pass' }, { type: 'penalty' }]);
+    expect(panel.actions).toEqual([
+      { type: 'correct-guess', cardSeq: state.cardSeq },
+      { type: 'pass', cardSeq: next.cardSeq },
+      { type: 'penalty', cardSeq: afterSkip.cardSeq },
+    ]);
+    // Three different deals, and none of them reveals the card.
+    expect(new Set([state.cardSeq, next.cardSeq, afterSkip.cardSeq]).size).toBe(3);
+  });
+
+  it('a host who cannot see the card still names it: the deal number, never the card id', async () => {
+    const panel = await view(SAM, SAM);
+    expect(q(panel, 'article[aria-label="Word card"]')).toBeNull();
+    await panel.click(panel.button('Got it'));
+    const [sent] = panel.actions;
+    expect(sent).toEqual({ type: 'correct-guess', cardSeq: state.cardSeq });
+    expect(JSON.stringify(panel.actions)).not.toContain(LIGHTHOUSE.id);
+  });
+
+  it('a press the reducer receives after a BUST moved the card on scores nothing', async () => {
+    const panel = await view(SAM, SAM);
+    await panel.click(panel.button('Got it'));
+    const [gotIt] = panel.actions;
+    // Juno's BUST reaches the server first: Lighthouse costs a point, a new card is dealt.
+    const busted = hushleReducer(state, { type: 'bust-forbidden', bustedBy: JUNO, cardId: LIGHTHOUSE.id });
+    expect(hushleReducer(busted, gotIt!)).toBe(busted);
+  });
+
+  it('a session from before deal numbers (read raw) sends the classic payload', async () => {
+    const legacy = { ...project(state, SAM), cardSeq: undefined } as unknown as ReturnType<typeof project>;
+    const panel = await mount({ state: legacy, actorUserId: SAM, hostUserId: SAM });
+    await panel.click(panel.button('Got it'));
+    expect(panel.actions).toEqual([{ type: 'correct-guess' }]);
   });
 
   it('a host on the watching team busts instead of a second penalty button', async () => {
@@ -428,11 +473,27 @@ describe('a running turn, seat by seat', () => {
     await panel.click(panel.button('End turn'));
     await panel.click(panel.button('End game'));
     expect(panel.actions).toEqual([
-      { type: 'next-card' },
+      { type: 'next-card', cardSeq: state.cardSeq },
       { type: 'set-explainer', explainerId: THEO },
-      { type: 'end-turn' },
+      { type: 'end-turn', turnNumber: state.turnNumber },
       { type: 'end-game' },
     ]);
+  });
+
+  it('End turn pressed twice ends ONE turn', async () => {
+    const host = await view(KAYA);
+    const endTurn = host.button('End turn');
+    await host.click(endTurn);
+    await host.click(endTurn);
+    expect(host.actions).toEqual([
+      { type: 'end-turn', turnNumber: state.turnNumber },
+      { type: 'end-turn', turnNumber: state.turnNumber },
+    ]);
+    const after = host.actions.reduce((s, action) => hushleReducer(s, action), state);
+    // Ice's turn ended once; Amber's turn runs.
+    expect(after.turnNumber).toBe(state.turnNumber + 1);
+    expect(after.currentTeamId).toBe(state.teams[1]!.id);
+    expect(after.timer.startedAt).not.toBeNull();
   });
 
   it('a host who plays on the explaining team scores blind', async () => {
@@ -502,7 +563,7 @@ describe('a running turn, seat by seat', () => {
     expect(q(host, 'article[aria-label="Word card"]')).toBeNull();
     expect(host.buttons(/Got it|Skip|Penalty|BUST|Next card|End turn/)).toHaveLength(0);
     await host.click(host.button('Start next turn'));
-    expect(host.actions).toEqual([{ type: 'end-turn' }]);
+    expect(host.actions).toEqual([{ type: 'end-turn', turnNumber: late.turnNumber }]);
     await host.unmount();
 
     const player = await mount({ state: project(late, MIRA), actorUserId: MIRA });
@@ -566,7 +627,11 @@ describe('between turns', () => {
     expect(q(panel, '[role="timer"]')).toBeNull();
     expect(panel.buttons(/Got it|BUST/)).toHaveLength(0);
     await panel.click(panel.button('Start next turn'));
-    expect(panel.actions).toEqual([{ type: 'end-turn' }]);
+    expect(panel.actions).toEqual([{ type: 'end-turn', turnNumber: state.turnNumber }]);
+    // A second press names the turn that just ended: Amber's turn is not cut short.
+    await panel.click(panel.button('Start next turn'));
+    const once = hushleReducer(state, panel.actions[0]!);
+    expect(hushleReducer(once, panel.actions[1]!)).toBe(once);
   });
 
   it('keeps the players waiting for the host', async () => {

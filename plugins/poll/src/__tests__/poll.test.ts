@@ -1,6 +1,7 @@
 import { isValidElement } from 'react';
 import { describe, expect, it } from 'vitest';
 import {
+  migratePollState,
   pollPlugin,
   pollValidateAction,
   pollTally,
@@ -115,11 +116,116 @@ describe('poll plugin — close / reopen / clear', () => {
     expect(pollTally(state)[1].votes).toBe(1);
   });
 
-  it('clear returns to the pristine idle state', () => {
+  it('clear returns to the pristine idle state — keeping the poll number', () => {
     let state = open(initial());
     state = vote(state, 'p1', 'opt-1');
     state = dispatch(state, { type: 'clear-poll', hostId: 'host-1' });
-    expect(state).toEqual(initial());
+    expect(state).toEqual({ ...initial(), pollId: 1 });
+  });
+});
+
+describe('poll plugin — stale votes (B-06): a vote names its poll', () => {
+  const voteFor = (state: PollState, playerId: string, optionId: string, pollId: number | null): PollState =>
+    dispatch(state, { type: 'vote', playerId, optionId, pollId });
+
+  it('numbers every poll it opens; close and reopen keep the number, clear keeps it for the next', () => {
+    const s0 = initial();
+    expect(s0.pollId).toBe(0);
+    const first = open(s0);
+    expect(first.pollId).toBe(1);
+    const closed = dispatch(first, { type: 'close-poll', hostId: 'host-1' });
+    expect(dispatch(closed, { type: 'reopen-poll', hostId: 'host-1' }).pollId).toBe(1);
+    const cleared = dispatch(closed, { type: 'clear-poll', hostId: 'host-1' });
+    expect(cleared.pollId).toBe(1);
+    expect(open(cleared).pollId).toBe(2);
+    // Opening over a running poll replaces it — a new poll, a new number.
+    expect(open(first).pollId).toBe(2);
+  });
+
+  it('a vote naming the open poll counts; one without a poll number counts as before', () => {
+    let state = open(initial());
+    state = voteFor(state, 'p1', 'opt-1', state.pollId);
+    state = vote(state, 'p2', 'opt-2');
+    state = voteFor(state, 'p3', 'opt-2', null);
+    expect(pollTally(state).map((t) => t.votes)).toEqual([1, 2, 0]);
+    expect(state.ballotBox).toEqual(['p1', 'p2', 'p3']);
+  });
+
+  it('a vote cast before the host cleared and reopened is ignored — never counted on the new poll', () => {
+    const before = open(initial());
+    const castFor = before.pollId;
+    const cleared = dispatch(before, { type: 'clear-poll', hostId: 'host-1' });
+    const reopened = dispatch(cleared, {
+      type: 'open-poll', hostId: 'host-1', question: 'Snacks?', options: ['Chips', 'Fruit'],
+    });
+    // `opt-1` exists on the new poll too; the vote still names the old one.
+    const late = voteFor(reopened, 'p1', 'opt-1', castFor);
+    expect(late).toBe(reopened);
+    expect(late.ballotBox).toEqual([]);
+    // p1 may still vote on the new poll.
+    expect(voteFor(reopened, 'p1', 'opt-2', reopened.pollId).ballotBox).toEqual(['p1']);
+  });
+
+  it('a vote for the same poll across a close and reopen still counts', () => {
+    const first = open(initial());
+    const castFor = first.pollId;
+    let state = dispatch(first, { type: 'close-poll', hostId: 'host-1' });
+    state = dispatch(state, { type: 'reopen-poll', hostId: 'host-1' });
+    state = voteFor(state, 'p1', 'opt-3', castFor);
+    expect(pollTally(state)[2]!.votes).toBe(1);
+  });
+
+  it('a vote naming a poll that is not on — older or newer — is ignored', () => {
+    const state = open(open(initial()));
+    expect(voteFor(state, 'p1', 'opt-1', 1)).toBe(state);
+    expect(voteFor(state, 'p1', 'opt-1', 3)).toBe(state);
+  });
+
+  it("validateAction: a vote's pollId, when present, is a non-negative integer", () => {
+    expect(pollValidateAction({ type: 'vote', playerId: 'p', optionId: 'opt-1', pollId: 0 })).toBeNull();
+    expect(pollValidateAction({ type: 'vote', playerId: 'p', optionId: 'opt-1', pollId: 12 })).toBeNull();
+    expect(pollValidateAction({ type: 'vote', playerId: 'p', optionId: 'opt-1', pollId: null })).toBeNull();
+    for (const pollId of [-1, 1.5, '1', Number.NaN, {}]) {
+      expect(pollValidateAction({ type: 'vote', playerId: 'p', optionId: 'opt-1', pollId })).toContain('pollId');
+    }
+    // The reducer ignores such a vote as well (defense in depth).
+    const state = open(initial());
+    expect(dispatch(state, { type: 'vote', playerId: 'p', optionId: 'opt-1', pollId: '1' } as unknown as PollAction)).toBe(state);
+  });
+});
+
+describe('poll plugin — state migration', () => {
+  it('gives a session written before poll numbers the number 0, the same on every read', () => {
+    // An open poll persisted by the previous build: no pollId.
+    const legacy = {
+      question: 'Next game?',
+      options: [{ id: 'opt-1', text: 'Hushle', votes: 1 }, { id: 'opt-2', text: 'Quiz', votes: 0 }],
+      phase: 'open',
+      hostId: 'host-1',
+      ballotBox: ['p1'],
+      createdAt: '2026-10-01T10:00:00.000Z',
+      closedAt: null,
+    };
+    const migrated = migratePollState(legacy);
+    expect(migrated).toEqual({ ...legacy, pollId: 0 });
+    expect(migratePollState(legacy)).toEqual(migrated);
+    expect(migratePollState(migrated)).toBe(migrated);
+    // A panel that read the migrated state votes for poll 0 and is counted;
+    // an old panel that sends no number is counted too.
+    const voted = dispatch(migrated, { type: 'vote', playerId: 'p2', optionId: 'opt-2', pollId: migrated.pollId });
+    expect(voted.ballotBox).toEqual(['p1', 'p2']);
+    expect(vote(voted, 'p3', 'opt-1').ballotBox).toEqual(['p1', 'p2', 'p3']);
+    // The next poll gets a number of its own.
+    const next = open(dispatch(voted, { type: 'clear-poll', hostId: 'host-1' }));
+    expect(next.pollId).toBe(1);
+  });
+
+  it("falls back to the pristine state on garbage, and is wired as the plugin's migrateState", () => {
+    expect(migratePollState(null)).toEqual(initial());
+    expect(migratePollState('nope')).toEqual(initial());
+    expect(migratePollState([])).toEqual(initial());
+    expect(pollPlugin.migrateState).toBeDefined();
+    expect((pollPlugin.migrateState!({ phase: 'idle', options: [] }) as PollState).pollId).toBe(0);
   });
 });
 

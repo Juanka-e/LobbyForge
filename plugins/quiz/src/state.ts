@@ -218,11 +218,25 @@ export type QuizAction =
   | { type: 'set-questions'; questions: QuizQuestion[] }
   | { type: 'join'; playerId: string }
   | { type: 'leave'; playerId: string }
-  | { type: 'answer'; playerId: string; index: number }
+  /**
+   * `index` is the option. `questionIndex` is the question it answers (the
+   * 0-based `currentIndex` the tiles were drawn for): when present and no
+   * longer the open question, the answer is ignored — a late or retried
+   * answer never lands on the next question. Absent (or null), it answers
+   * whatever question is open, as panels from before it did.
+   */
+  | { type: 'answer'; playerId: string; index: number; questionIndex?: number | null }
   /** Anyone may call time once the deadline has passed — the reducer checks the clock. */
   | { type: 'time-up' }
-  | { type: 'reveal' }
-  | { type: 'next' }
+  /**
+   * The host's Reveal now / Next question. `questionIndex` is the question
+   * the button was drawn for (revealed or moved on from): when present and
+   * not the current one, the action is ignored, so a late Reveal never
+   * reveals the next question early and a second Next never skips one.
+   * Absent (or null), it acts on the current question as before.
+   */
+  | { type: 'reveal'; questionIndex?: number | null }
+  | { type: 'next'; questionIndex?: number | null }
   | { type: 'end' }
   /** A finished quiz goes back to the lobby for another round (host). */
   | { type: 'play-again' };
@@ -233,10 +247,10 @@ export type QuizClientAction =
   | { type: 'set-questions'; questions: QuizQuestion[] }
   | { type: 'join' }
   | { type: 'leave' }
-  | { type: 'answer'; index: number }
+  | { type: 'answer'; index: number; questionIndex?: number }
   | { type: 'time-up' }
-  | { type: 'reveal' }
-  | { type: 'next' }
+  | { type: 'reveal'; questionIndex?: number }
+  | { type: 'next'; questionIndex?: number }
   | { type: 'end' }
   | { type: 'play-again' };
 

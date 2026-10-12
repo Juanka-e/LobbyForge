@@ -90,6 +90,15 @@ describe('projectActivityState — quiz v2: the deck never leaves the server', (
     }
   });
 
+  it('B-06: every viewer gets the question number an answer names, and nothing of its answer', () => {
+    for (const viewer of VIEWERS) {
+      const out = project(playing(), viewer);
+      expect(out.currentIndex, `viewer=${viewer}`).toBe(1);
+      expect((out.current as Rec).index).toBe(1);
+      expect(JSON.stringify(out.current)).not.toContain('correctIndex');
+    }
+  });
+
   it('keeps the public copy of the open question and the question total', () => {
     const out = project(playing(), 'ana');
     expect(out.current).toEqual({ index: 1, question: deck[1]!.question, options: deck[1]!.options });

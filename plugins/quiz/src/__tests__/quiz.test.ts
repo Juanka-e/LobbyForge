@@ -93,6 +93,21 @@ describe('validateAction — the raw HTTP payload guard', () => {
     expect(quizValidateAction({ type: 'answer', index: -1, playerId: 'p1' })).toMatch(/index/);
     expect(quizValidateAction({ type: 'answer', index: 1.5, playerId: 'p1' })).toMatch(/index/);
     expect(quizValidateAction({ type: 'answer', index: '1', playerId: 'p1' })).toMatch(/index/);
+    // B-06: the question an answer is for, when given, is a question number.
+    expect(quizValidateAction({ type: 'answer', index: 1, playerId: 'p1', questionIndex: 0 })).toBeNull();
+    expect(quizValidateAction({ type: 'answer', index: 1, playerId: 'p1', questionIndex: 7 })).toBeNull();
+    expect(quizValidateAction({ type: 'answer', index: 1, playerId: 'p1', questionIndex: null })).toBeNull();
+    for (const questionIndex of [-1, 0.5, '0', Number.NaN, {}]) {
+      expect(quizValidateAction({ type: 'answer', index: 1, playerId: 'p1', questionIndex })).toMatch(/questionIndex/);
+    }
+    // The host's Reveal now and Next question name theirs the same way.
+    for (const type of ['reveal', 'next']) {
+      expect(quizValidateAction({ type })).toBeNull();
+      expect(quizValidateAction({ type, questionIndex: 3 })).toBeNull();
+      expect(quizValidateAction({ type, questionIndex: null })).toBeNull();
+      expect(quizValidateAction({ type, questionIndex: -1 })).toMatch(/questionIndex/);
+      expect(quizValidateAction({ type, questionIndex: '3' })).toMatch(/questionIndex/);
+    }
   });
 
   it('play-again needs nothing but its type', () => {

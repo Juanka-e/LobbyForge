@@ -74,6 +74,7 @@ import {
   sharePercent,
   showTurnout,
   totalVotes,
+  voteAction,
   voteStorageKey,
   type PollPhase,
 } from './view';
@@ -254,6 +255,7 @@ export function PollPanel(props: PollPanelProps): ReactNode {
         hasVoted={hasVoted}
         playerCount={Array.isArray(players) ? players.length : 0}
         createdAt={typeof state?.createdAt === 'string' ? state.createdAt : null}
+        pollId={state?.pollId}
         actorUserId={actorUserId}
         dispatch={dispatch}
       />
@@ -350,6 +352,7 @@ function LivePoll({
   hasVoted,
   playerCount,
   createdAt,
+  pollId,
   actorUserId,
   dispatch,
 }: {
@@ -361,6 +364,8 @@ function LivePoll({
   hasVoted: boolean;
   playerCount: number;
   createdAt: string | null;
+  /** The poll these choices belong to; missing on a state from before poll numbers. */
+  pollId: unknown;
   actorUserId: string;
   dispatch: Dispatch;
 }): ReactNode {
@@ -382,7 +387,9 @@ function LivePoll({
 
   const cast = (optionId: string) => {
     if (!vote.begin(optionId)) return;
-    void dispatch({ type: 'vote', playerId: actorUserId, optionId });
+    // `pollId` is this render's poll: if the host cleared it and opened
+    // another before the vote landed, the vote is ignored, not moved over.
+    void dispatch(voteAction(actorUserId, optionId, pollId));
   };
 
   return (

@@ -220,7 +220,8 @@ blanks `reveal` while a question is open. The leaderboard's per-round gains
 are public by design, so it is visible who got the last question right —
 but never which wrong answer anyone picked.
 
-Other guarantees: one locked answer per player per question (no retries);
+Other guarantees: one locked answer per player per question (no retries),
+on the question it names (a late answer never lands on the next one);
 `playerId` is injected by the host from the session; answers after the
 deadline are refused; the score moves only at a reveal.
 
@@ -240,15 +241,39 @@ text is reachable.
 | `set-questions` | host | `questions` (legacy: starts a custom quiz, all questions, in order) | lobby |
 | `join` | member, `playerId` injected | — | any but ended |
 | `leave` | member, `playerId` injected, `allowOutsideVoice` | — | any but ended |
-| `answer` | member, `playerId` injected | `index` | playing |
+| `answer` | member, `playerId` injected | `index`; optional `questionIndex` | playing |
 | `time-up` | member | — | playing, after the deadline |
-| `reveal` | host | — | playing |
-| `next` | host | — | reveal |
+| `reveal` | host | optional `questionIndex` | playing |
+| `next` | host | optional `questionIndex` | reveal |
 | `end` | host | — | playing, reveal |
 | `play-again` | host | — | ended (→ lobby) |
 
 Every action is checked by `quizValidateAction` before dispatch (and again
 by the reducer); anything invalid or out of phase leaves the state untouched.
+
+**An answer names its question.** `questionIndex` is the 0-based question
+the tiles were drawn for (`currentIndex` of the state the panel rendered).
+An answer whose `questionIndex` is not the open question is ignored — the
+reducer returns the same state — so an answer for question N that arrives
+late or is retried after the host pressed **Next question** is never
+recorded against N+1 (or rejected there as a second answer). An answer
+without a `questionIndex` (a panel loaded before it, still open after a
+deploy) answers the open question, as before; `null` counts as absent, and
+anything else that is not a non-negative integer is a 400. The question
+number is public (`currentIndex`, `current.index`), so sending it reveals
+nothing. An answer for question N that arrives during N's reveal was
+already refused (409 `wrong_phase` from the host, and the reducer only
+takes answers while a question is open).
+
+The host's **Reveal now** and **Next question** name their question the
+same way (`reveal` and `next` with `questionIndex`, the question on screen
+when the button was drawn). A Reveal now that lands after the host moved on
+does not reveal the next question early, and a second Next — a double tap,
+or the host and a moderator together — does not skip a question that was
+answered and revealed in the meantime. Without a `questionIndex` they act on
+the current question, as before. `questionIndex` restarts at 0 with every
+game (`play-again`), so it does not guard against a press that arrives a
+whole game late.
 
 ## State
 

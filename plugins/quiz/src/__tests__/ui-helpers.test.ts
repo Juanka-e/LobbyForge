@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  answerAction,
+  hostStepAction,
   isTypingTarget,
   nativeLanguageName,
   optionIndexForKey,
@@ -11,6 +13,8 @@ import {
 } from '../ui/helpers';
 import { optionSwatch, OPTION_SWATCHES } from '../ui/palette';
 import { newQuizPlayer } from '../state';
+import { quizReducer } from '../actions';
+import { customGame, makeEnv } from './helpers';
 
 describe('keyboard shortcuts', () => {
   it('maps 1–4 and A–D (either case) to the options on screen', () => {
@@ -37,6 +41,39 @@ describe('keyboard shortcuts', () => {
     expect(isTypingTarget({ tagName: 'DIV', isContentEditable: true } as unknown as EventTarget)).toBe(true);
     expect(isTypingTarget({ tagName: 'BUTTON' } as unknown as EventTarget)).toBe(false);
     expect(isTypingTarget(null)).toBe(false);
+  });
+});
+
+describe('the answer a tile sends', () => {
+  it('names the question the tiles were drawn for (B-06)', () => {
+    expect(answerAction(2, 4)).toEqual({ type: 'answer', index: 2, questionIndex: 4 });
+  });
+
+  it('is ignored once the host has moved on, and counts on the question it names', () => {
+    const env = makeEnv();
+    const open = customGame(['ana'], env);
+    const tapped = answerAction(1, open.currentIndex);
+    const moved = quizReducer(quizReducer(open, { type: 'reveal' }, env), { type: 'next' }, env);
+    // The host injects playerId; the panel never sends it.
+    expect(quizReducer(moved, { ...tapped, playerId: 'ana' } as never, env)).toBe(moved);
+    expect(quizReducer(open, { ...tapped, playerId: 'ana' } as never, env).answers.ana?.choice).toBe(1);
+  });
+});
+
+describe("the host's Reveal now and Next question", () => {
+  it('name the question the buttons were drawn for (B-06)', () => {
+    expect(hostStepAction('reveal', 2)).toEqual({ type: 'reveal', questionIndex: 2 });
+    expect(hostStepAction('next', 2)).toEqual({ type: 'next', questionIndex: 2 });
+  });
+
+  it('a second Next built from the same reveal is ignored', () => {
+    const env = makeEnv();
+    const revealed = quizReducer(customGame(['ana'], env), hostStepAction('reveal', 0) as never, env);
+    const next = hostStepAction('next', revealed.currentIndex);
+    const moved = quizReducer(revealed, next as never, env);
+    expect(moved.currentIndex).toBe(1);
+    const shown = quizReducer(moved, { type: 'reveal' }, env);
+    expect(quizReducer(shown, next as never, env)).toBe(shown);
   });
 });
 

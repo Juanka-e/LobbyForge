@@ -13,7 +13,7 @@ import {
   POLL_MAX_QUESTION_LENGTH,
   POLL_MIN_OPTIONS,
 } from './constants';
-import type { PollOption } from './index';
+import type { PollAction, PollOption } from './index';
 
 export type PollPhase = 'idle' | 'open' | 'closed';
 
@@ -29,6 +29,20 @@ export function pollPhaseOf(value: unknown): PollPhase {
  */
 export function resultsVisible(phase: PollPhase, hasVoted: boolean): boolean {
   return phase === 'closed' || (phase === 'open' && hasVoted);
+}
+
+/**
+ * The `vote` a choice sends: the option, and the poll the choices were
+ * drawn for. Take `pollId` from the state the panel rendered, not at click
+ * time — the reducer ignores a vote naming another poll, so a vote cast just
+ * as the host cleared and reopened cannot land on the new one. A state from
+ * before poll numbers (read raw) has none, and the vote goes without, as
+ * before.
+ */
+export function voteAction(playerId: string, optionId: string, pollId: unknown): PollAction {
+  return typeof pollId === 'number' && Number.isSafeInteger(pollId) && pollId >= 0
+    ? { type: 'vote', playerId, optionId, pollId }
+    : { type: 'vote', playerId, optionId };
 }
 
 /** Vote counts only — the panel never knows who voted for what. */
