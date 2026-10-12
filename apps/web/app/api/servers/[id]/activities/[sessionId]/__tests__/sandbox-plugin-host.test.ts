@@ -46,6 +46,8 @@ const dbFns = vi.hoisted(() => ({
   getGameSessionById: vi.fn(async () => structuredClone(store.row)),
   isServerMember: vi.fn(async () => true),
   getUserPermissions: vi.fn(async () => [] as string[]),
+  getActiveMemberTimeout: vi.fn(async () => null),
+  getPluginInstall: vi.fn(async () => ({ enabled: true, settings: {} })),
   listPlayersForSession: vi.fn(async () => store.roster.map((userId) => ({ userId, status: 'active', score: 0 }))),
   addPlayerToSession: vi.fn(async (_db: unknown, _sessionId: string, userId: string) => {
     store.roster.push(userId);

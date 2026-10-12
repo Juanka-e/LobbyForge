@@ -9,9 +9,25 @@
  * request — every timer whose due time has passed is fired under the
  * session's write lock, earliest first (ties: the one set first), each as
  * its `role: "system"` action through the reducer with `ctx.now` = its due
- * time and no actor. Its effects apply too (a timer may set the next one;
- * a chain that is already due keeps firing in the same touch, up to
- * MAX_TIMER_FIRINGS_PER_TOUCH, and the rest fires on the next touch).
+ * time and no actor. Its effects apply too (a timer may set the next one,
+ * and a chain that is already due keeps firing in the same touch).
+ *
+ * CATCH-UP IS BOUNDED (security review: an idle 1 s timer that re-arms
+ * itself used to build a backlog that every touch then replayed, up to 32
+ * reducer calls — 32 worker RPCs for a sandboxed plugin — under the
+ * session lock):
+ *  - a timer that re-arms itself (its firing sets a timer with the same
+ *    id) while it is catching up skips the occurrences that were missed:
+ *    the re-armed timer moves to the LATEST occurrence of its period that
+ *    is due, so the backlog collapses to one more firing;
+ *  - one touch runs at most MAX_TIMER_FIRINGS_PER_TOUCH reducer calls and
+ *    starts none after TIMER_FIRING_BUDGET_MS of wall time; what is still
+ *    due fires on the next touch (`pendingDue`). The actions route then
+ *    refuses its action with a retryable 409 rather than run it ahead of a
+ *    due timer.
+ *
+ * A timer of an app that is no longer installed or enabled in the
+ * community is dropped without running (lib/activity-app-install.ts).
  *
  * Exactly once: the lock serializes touches, and a fired timer is removed
  * in the same write as the state it produced, so of two concurrent reads
@@ -53,9 +69,12 @@ import {
 } from './activity-effects';
 import { buildHttpPluginContext, callHandleAction } from './plugin-context';
 import { attachSandboxScope, isWorkerBackedPlugin } from './plugin-worker-client';
+import { isAppEnabled } from './activity-app-install';
 
-/** Timers fired in one touch; a chain that is still due continues on the next. */
-export const MAX_TIMER_FIRINGS_PER_TOUCH = 32;
+/** Reducer calls in one touch; what is still due continues on the next. */
+export const MAX_TIMER_FIRINGS_PER_TOUCH = 8;
+/** Wall time after which a touch starts no further firing (the next touch continues). */
+export const TIMER_FIRING_BUDGET_MS = 500;
 
 const TERMINAL = new Set(['ended', 'cancelled']);
 
@@ -87,6 +106,33 @@ export function hasDueTimer(timers: readonly PendingTimer[], now: number): boole
   return nextDueTimer(timers, now) !== null;
 }
 
+/** The timers that are not due yet (a removed app's due timers are dropped unrun). */
+export function withoutDueTimers(timers: readonly PendingTimer[], now: number): PendingTimer[] {
+  return timers.filter((timer) => timer.at > now);
+}
+
+/**
+ * Catch-up collapse: `fired` (due at `fired.at`) just ran and left
+ * `timers`. If it re-armed itself (a timer with its id) at a time that is
+ * still due by `now`, move that timer to the latest occurrence of the same
+ * period that is due — the occurrences in between were missed while nobody
+ * touched the session and are not replayed one by one. Returns the timers
+ * and how many occurrences were skipped.
+ */
+export function collapseRearmedTimer(
+  timers: readonly PendingTimer[],
+  fired: PendingTimer,
+  now: number
+): { timers: PendingTimer[]; skipped: number } {
+  const rearmed = timers.find((timer) => timer.id === fired.id);
+  if (!rearmed || rearmed.at > now || rearmed.at <= fired.at) return { timers: [...timers], skipped: 0 };
+  const period = rearmed.at - fired.at;
+  const skipped = Math.floor((now - rearmed.at) / period);
+  if (skipped <= 0) return { timers: [...timers], skipped: 0 };
+  const at = rearmed.at + skipped * period;
+  return { timers: timers.map((timer) => (timer === rearmed ? { ...timer, at } : timer)), skipped };
+}
+
 export interface FiredTimers {
   state: Record<string, unknown>;
   timers: PendingTimer[];
@@ -96,16 +142,26 @@ export interface FiredTimers {
   effects: ValidEffect[];
   /** System action types fired whose policy asks for an audit row. */
   audited: string[];
+  /** Timers taken off the list (run, or dropped as no longer system actions). */
   fired: number;
+  /** Reducer calls made. */
+  calls: number;
+  /** Missed occurrences of self-re-arming timers that were skipped (collapsed). */
+  skipped: number;
+  /** A timer is still due: the per-touch cap stopped the catch-up; the next touch continues. */
+  pendingDue: boolean;
   stateChanged: boolean;
   timersChanged: boolean;
 }
 
 /**
- * Fire every timer due at `now`, in due order, on `state` (already
- * migrated). `ctx` is a system ctx (`actorUserId: ''`); each call gets the
- * due time as `ctx.now` and the storage as it stands. Pure apart from the
- * reducer calls: the caller writes the result.
+ * Fire the timers due at `now`, in due order, on `state` (already
+ * migrated) — at most `maxFirings` reducer calls, and none started after
+ * `budgetMs` of wall time (the first always runs, so every touch makes
+ * progress). A self-re-arming timer's missed occurrences collapse
+ * (`collapseRearmedTimer`). `ctx` is a system ctx (`actorUserId: ''`);
+ * each call gets the due time as `ctx.now` and the storage as it stands.
+ * Pure apart from the reducer calls: the caller writes the result.
  */
 export async function runDueTimers(input: {
   plugin: RegisteredGamePlugin;
@@ -116,20 +172,30 @@ export async function runDueTimers(input: {
   now: number;
   ctx: GamePluginContext;
   maxFirings?: number;
+  budgetMs?: number;
+  /** Wall clock for the budget (tests inject one); not the touch's `now`. */
+  clock?: () => number;
 }): Promise<FiredTimers> {
   const { plugin } = input;
   const grant = input.grant ?? effectGrantFor(plugin);
-  const max = input.maxFirings ?? MAX_TIMER_FIRINGS_PER_TOUCH;
+  const max = Math.max(1, input.maxFirings ?? MAX_TIMER_FIRINGS_PER_TOUCH);
+  const budgetMs = input.budgetMs ?? TIMER_FIRING_BUDGET_MS;
+  const clock = input.clock ?? (() => performance.now());
+  const started = clock();
   let state = input.state;
   let timers = [...input.timers];
   let storage = input.storage;
   const effects: ValidEffect[] = [];
   const audited: string[] = [];
   let fired = 0;
+  let calls = 0;
+  let skipped = 0;
   let stateChanged = false;
-  while (fired < max) {
+  for (;;) {
     const due = nextDueTimer(timers, input.now);
     if (!due) break;
+    // The cap: a reducer-call budget and a wall-time budget per touch.
+    if (calls >= max || (calls > 0 && clock() - started >= budgetMs)) break;
     timers = timers.filter((timer) => timer !== due);
     fired += 1;
     // A timer whose action is no longer a system action (the plugin was
@@ -140,6 +206,7 @@ export async function runDueTimers(input: {
       continue;
     }
     setCallContext(input.ctx, { storage, now: due.at });
+    calls += 1;
     let result: unknown;
     try {
       result = await callHandleAction(plugin, input.ctx, state, due.action);
@@ -159,12 +226,26 @@ export async function runDueTimers(input: {
     }
     if (step.state !== state) stateChanged = true;
     state = step.state;
-    timers = planned.timers;
+    const collapsed = collapseRearmedTimer(planned.timers, due, input.now);
+    timers = collapsed.timers;
+    skipped += collapsed.skipped;
     storage = planned.storage;
     effects.push(...postCommitEffects(step.effects));
     if (step.changed && shouldAuditAction(policy)) audited.push(due.action.type);
   }
-  return { state, timers, storage, effects, audited, fired, stateChanged, timersChanged: fired > 0 };
+  return {
+    state,
+    timers,
+    storage,
+    effects,
+    audited,
+    fired,
+    calls,
+    skipped,
+    pendingDue: hasDueTimer(timers, input.now),
+    stateChanged,
+    timersChanged: fired > 0,
+  };
 }
 
 /**
@@ -219,7 +300,9 @@ export interface FiredSession {
  * The GET and end routes' touch: fire the session's due timers, if any.
  * Returns the committed row, or null when nothing fired (nothing due, the
  * session ended, the lock was busy — the next touch tries again — or a
- * failure, logged: a read never fails over a timer).
+ * failure, logged: a read never fails over a timer). When the app is no
+ * longer installed or enabled in the community, the due timers are dropped
+ * without running (the returned state is the session's own, unchanged).
  */
 export async function fireDueSessionTimers(input: {
   db: DbClient;
@@ -234,6 +317,9 @@ export async function fireDueSessionTimers(input: {
   if (!plugin || TERMINAL.has(row.status) || !hasDueTimer(readStoredTimers(row.timers), now)) return null;
   const grant = effectGrantFor(plugin);
   try {
+    if (!(await isAppEnabled(db, row.serverId, plugin.manifest.id))) {
+      return await dropDueSessionTimers({ db, row, plugin, now });
+    }
     const ctx = await buildSystemContext({
       db,
       plugin,
@@ -284,4 +370,37 @@ export async function fireDueSessionTimers(input: {
     }
     return null;
   }
+}
+
+/** The app was removed from the community: its due timers go, unrun, in one write. */
+async function dropDueSessionTimers(input: {
+  db: DbClient;
+  row: GameSessionRow;
+  plugin: RegisteredGamePlugin;
+  now: number;
+}): Promise<FiredSession | null> {
+  const { db, row, plugin, now } = input;
+  let state: Record<string, unknown> = {};
+  const committed = await withGameSessionWriteLock(db, row.id, async (tx, fresh) => {
+    if (!fresh || TERMINAL.has(fresh.status)) return null;
+    const timers = readStoredTimers(fresh.timers);
+    if (!hasDueTimer(timers, now)) return null;
+    const revision = (fresh as { revision?: number }).revision ?? 0;
+    const cas = await setGameSessionStateCAS(tx, fresh.id, revision, fresh.state, undefined, {
+      timers: withoutDueTimers(timers, now),
+    });
+    if (!cas.ok || !cas.row) return null;
+    state = (plugin.migrateState ? await plugin.migrateState(cas.row.state) : cas.row.state) as Record<string, unknown>;
+    return cas.row;
+  });
+  if (!committed) return null;
+  console.warn(`[activity-timers] due timers of "${plugin.manifest.id}" dropped: the app is not installed or enabled in the community`);
+  publishActivityStateChange({
+    serverId: row.serverId,
+    sessionId: row.id,
+    status: committed.status,
+    revision: (committed as { revision?: number }).revision,
+    publicSummary: { timersChanged: true },
+  });
+  return { row: committed, state };
 }

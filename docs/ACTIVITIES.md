@@ -122,7 +122,9 @@ Current hardening:
   `isPgUniqueViolation`) gets the same 409 with the winner's `sessionId` —
   never a 500.
 - The selected plugin must be installed and enabled for the server in
-  `plugins_enabled`.
+  `plugins_enabled` (otherwise 403 `app_not_installed`).
+- A member who is timed out in the community starts nothing: 403
+  `timed_out` with `until`.
 
 ### `GET /api/servers/{id}/channels/{channelId}/activities` — list
 
@@ -176,12 +178,20 @@ Before `handleAction` runs, the host evaluates the plugin's action policy:
   game (`phase: 'ended'`) that is not one of the plugin's `restartActions`.
 - `system`: never from a client (403 `system_action`); the host runs it when
   one of the plugin's timers falls due.
+- a member who is timed out in the community: 403 `timed_out` (with
+  `until`) for every action — host actions included — except one whose
+  policy says `allowOutsideVoice` (leaving).
+- an app that is no longer installed or enabled in the community: 403
+  `app_not_installed` (uninstalling or disabling it ends its sessions, so
+  this only meets a session left open by a race).
 
 The reducer may return effects with the state (`withEffects`): timers,
 storage writes, chat lines. An invalid or unpermitted one refuses the whole
 action (422 `effect_refused`). Timers that fell due before the action fire
 first, in the same write; storage writes and chat lines go after the
-commit. The response carries the new `timersDueAt`. Details:
+commit. One request fires at most 8 timers: when more were due, what fired
+commits and the action answers a retryable 409 `timers_pending` (the lobby
+retries it). The response carries the new `timersDueAt`. Details:
 [PLUGIN_SDK.md → Effects](./PLUGIN_SDK.md#effects-timers-storage-and-chat).
 
 If the policy has `actorFields`, the host overwrites those fields with the
@@ -219,8 +229,20 @@ server's `plugins_enabled` rows:
   `installed`, `enabled`, `settings`, and `installedAt`.
 - `POST` requires `MANAGE_SERVER`, validates `pluginId`, and upserts
   `enabled` plus supported settings (`allowedChannelIds`, `allowedRoleIds`,
-  `defaultMaxPlayers`, `overflowPolicy`).
-- `DELETE` requires `MANAGE_SERVER` and removes the server-local install row.
+  `defaultMaxPlayers`, `overflowPolicy`, `chatChannelId`). A `chatChannelId`
+  must be a text or announcement channel of the community (400
+  `invalid_chat_channel`); choosing a role-gated one also needs Manage
+  Channels and seeing it (403 `chat_channel_not_allowed`), as granting a bot
+  that channel does. Saving `enabled: false` ends the app's open sessions in
+  the community.
+- `DELETE` requires `MANAGE_SERVER`, removes the server-local install row
+  and ends the app's open sessions in the community.
+
+Ending them on uninstall or disable is audited per session as
+`activity.end` with `{ pluginId, wasHost, reason: 'app_uninstalled' |
+'app_disabled' }` (the actor is whoever removed the app) and published on
+the activity bus so open panels close; nothing of the plugin runs on the way
+out.
 
 The route never installs arbitrary package code. It can only enable plugins
 already compiled into `apps/web/lib/plugin-registry.ts`.

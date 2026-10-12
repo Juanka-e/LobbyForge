@@ -19,9 +19,18 @@
  * so it pings nobody: not `@everyone`, not `@here`, not a member by name
  * (the lobby treats `@<display name>` in the text as a mention).
  *
- * HOW OFTEN: at most one per 5 s and 30 per hour per session. Over the
- * limit the post is dropped (logged) — chat is a side channel; the action
- * that asked for it still applies.
+ * HOW OFTEN: at most one per 5 s and 30 per hour per session, and at most
+ * 60 per hour per (community, plugin) — the session limits alone reset
+ * whenever the activity is restarted. Over a limit the post is dropped
+ * (logged) — chat is a side channel; the action that asked for it still
+ * applies.
+ *
+ * MODERATION: a post goes through the community's Moderation Bot like a
+ * member's message or a webhook's post — its blocked-word and link rules
+ * (lib/bots/moderation.ts `moderateAppMessage`). A post the rules block is
+ * dropped (logged and audited as `bot.moderation.block`); the action still
+ * applies. The limits run first, so a plugin cannot turn blocked posts
+ * into an audit-log flood.
  *
  * Delivered like every other message: stored, published on the chat bus,
  * and audited as `message.create` (actor: none; the plugin named in the
@@ -36,12 +45,15 @@ import {
 } from '@lobbyforge/db';
 import { publishChatMessage } from './chat-bus';
 import { distributedRateLimit, type RateLimitConfig } from './security-headers';
+import { moderateAppMessage } from './bots/moderation';
 
 /** Channel types an app may post to (they have a chat in the lobby). */
 export const APP_MESSAGE_CHANNEL_TYPES = new Set(['text', 'announcement']);
 
 export const APP_CHAT_BURST_LIMIT: RateLimitConfig = { windowMs: 5_000, maxRequests: 1 };
 export const APP_CHAT_HOURLY_LIMIT: RateLimitConfig = { windowMs: 60 * 60 * 1000, maxRequests: 30 };
+/** Per community and plugin, across its sessions: restarting the activity does not reset it. */
+export const APP_CHAT_PLUGIN_HOURLY_LIMIT: RateLimitConfig = { windowMs: 60 * 60 * 1000, maxRequests: 60 };
 
 const ZERO_WIDTH_SPACE = '​';
 
@@ -69,7 +81,7 @@ async function appChatChannel(db: DbClient, serverId: string, pluginId: string):
 
 export type AppMessageOutcome =
   | { posted: true; messageId: string; channelId: string }
-  | { posted: false; reason: 'no_channel' | 'rate_limited' };
+  | { posted: false; reason: 'no_channel' | 'rate_limited' | 'blocked_by_moderation' };
 
 /**
  * Post one app message for a session. `text` is already validated by the
@@ -92,6 +104,22 @@ export async function postAppMessage(input: {
   if (!burst.allowed) return { posted: false, reason: 'rate_limited' };
   const hourly = await distributedRateLimit(`activity-app-chat:hour:${input.sessionId}`, APP_CHAT_HOURLY_LIMIT);
   if (!hourly.allowed) return { posted: false, reason: 'rate_limited' };
+  const perPlugin = await distributedRateLimit(
+    `activity-app-chat:plugin-hour:${input.serverId}:${input.pluginId}`,
+    APP_CHAT_PLUGIN_HOURLY_LIMIT
+  );
+  if (!perPlugin.allowed) return { posted: false, reason: 'rate_limited' };
+
+  // The community's word and link rules, on the text as the plugin wrote it.
+  const verdict = await moderateAppMessage({
+    serverId: input.serverId,
+    channelId,
+    pluginId: input.pluginId,
+    pluginName: input.pluginName,
+    sessionId: input.sessionId,
+    content: input.text,
+  });
+  if (verdict.action === 'block') return { posted: false, reason: 'blocked_by_moderation' };
 
   const content = neutralizeMentions(input.text);
   const app = { pluginId: input.pluginId, name: input.pluginName.slice(0, 80) };

@@ -271,6 +271,62 @@ describe('moderateMessage', () => {
   });
 });
 
+describe('moderateAppMessage — a plugin’s chat.post', () => {
+  const app = { serverId: SERVER, channelId: CHANNEL, pluginId: 'sandbox-buzzer', pluginName: 'Buzzer', sessionId: 'sess-1' };
+
+  it('blocks a blocked word or a refused link, audited as a block by the plugin — no notice, no staff exemption', async () => {
+    getBuiltInBotForServer.mockResolvedValue(
+      moderationBot({ postNotice: true, exemptStaff: true, linkPolicy: 'allowlist', allowedDomains: ['lobbyforge.app'] })
+    );
+    const { moderateAppMessage } = await load();
+    expect(await moderateAppMessage({ ...app, content: 'Team SALAKSIN won' })).toEqual({
+      action: 'block',
+      rule: 'blocked_word',
+      botId: BOT_ID,
+      botName: 'Mod',
+    });
+    expect((await moderateAppMessage({ ...app, content: 'prizes at https://evil.example/x' })).action).toBe('block');
+    expect((await moderateAppMessage({ ...app, content: 'docs: https://lobbyforge.app/help' })).action).toBe('allow');
+    expect(logAction).toHaveBeenCalledTimes(2);
+    const entry = logAction.mock.calls[0]![1] as Record<string, unknown> & { metadata: Record<string, unknown> };
+    expect(entry).toMatchObject({ actorUserId: null, action: 'bot.moderation.block', targetType: 'plugin', targetId: 'sandbox-buzzer' });
+    expect(entry.metadata).toMatchObject({
+      rule: 'blocked_word',
+      channelId: CHANNEL,
+      kind: 'app',
+      pluginName: 'Buzzer',
+      sessionId: 'sess-1',
+      excerpt: 'Team SALAKSIN won',
+    });
+    expect(entry.metadata.contentSha256).toMatch(/^[0-9a-f]{64}$/);
+    // An app is not a member: no permission lookup, no notice in the channel.
+    expect(getUserPermissions).not.toHaveBeenCalled();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(createMessage).not.toHaveBeenCalled();
+  });
+
+  it('a role-gated channel: the audit entry leaves its words out', async () => {
+    getBuiltInBotForServer.mockResolvedValue(moderationBot());
+    isChannelOpenToBots.mockResolvedValue(false);
+    const { moderateAppMessage } = await load();
+    expect((await moderateAppMessage({ ...app, content: 'salak' })).action).toBe('block');
+    const entry = logAction.mock.calls[0]![1] as { metadata: Record<string, unknown> };
+    expect(entry.metadata.excerpt).toBeNull();
+  });
+
+  it('the mention rule does not apply (an app’s mentions are inert), and nothing is blocked without the bot', async () => {
+    getBuiltInBotForServer.mockResolvedValue(moderationBot({ blockedWords: [], maxMentions: 1 }));
+    const { moderateAppMessage } = await load();
+    expect((await moderateAppMessage({ ...app, content: '@ayse @mert @deniz tied!' })).action).toBe('allow');
+
+    vi.resetModules();
+    getBuiltInBotForServer.mockResolvedValue(null);
+    const again = await load();
+    expect((await again.moderateAppMessage({ ...app, content: 'salak' })).action).toBe('allow');
+    expect(logAction).not.toHaveBeenCalled();
+  });
+});
+
 describe('moderateWebhookMessage — the notice', () => {
   const webhook = { id: '77777777-7777-4777-8777-777777777777', name: 'CI' };
 

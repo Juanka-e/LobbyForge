@@ -303,9 +303,9 @@ What your bot posts is your responsibility.
    the reducer returned the *same object*, the action counts as refused:
    the state is still written back, but nothing joins the roster and no
    audit row is written.
-5. A change notice goes out on Redis. It carries no state. The SSE route
-   and the WebSocket gateway then load the row and **project it per
-   viewer** with `projectActivityState`
+5. A change notice goes out on Redis. It carries no state. The WebSocket
+   gateway (and a panel's REST re-read) then load the row and **project it
+   per viewer** with `projectActivityState`
    (`packages/core/src/activity-projection.ts`) — or, for a marketplace
    plugin, with its own `projectState` in the plugin worker
    (`apps/web/lib/plugin-projection.ts`; the gateway asks the web app).
@@ -695,7 +695,7 @@ are per plugin id in host code, not in the SDK:
 
 | You need | Edit |
 |---|---|
-| Hidden information (roles, hands, answers): strip or rewrite it per viewer | add an `if (pluginId === 'buzzer')` branch to `packages/core/src/activity-projection.ts` (used by REST, SSE and the WS gateway). Without it, **every viewer receives the whole state**. |
+| Hidden information (roles, hands, answers): strip or rewrite it per viewer | add an `if (pluginId === 'buzzer')` branch to `packages/core/src/activity-projection.ts` (used by REST and the WS gateway). Without it, **every viewer receives the whole state**. |
 | Secret content loaded on the server (answers, decks) | `apps/web/lib/prepare-plugin-action.ts` (as Quiz and Hushle do) and a server-only subpath export ([PLUGIN_SDK.md → Server-only subpath exports](PLUGIN_SDK.md#server-only-subpath-exports-m18)) |
 | Phase checks before the reducer | `validateActionPhase` in the actions route |
 | Built-in content (packs, decks) | `apps/web/lib/component-migrations.ts` |
@@ -788,7 +788,7 @@ How it runs:
   actions route — read by the web app from its own copy of the files, so
   plugin code cannot widen them; `validateAction`; a reducer that returns
   its input is a refused action; and `projectState` gives per-viewer
-  hidden state on every read path (GET, SSE, the action response, and the
+  hidden state on every read path (GET, the action response, and the
   WebSocket gateway, which asks web through the signed internal
   `POST /api/internal/activity-projection`). Without `projectState` the
   state is public and the lobby says so.
@@ -972,7 +972,7 @@ camera or screen share.
 | Activity actions | 30 / min **per client IP**: a LAN party behind one NAT shares it | `activity-action` limit in `actions/route.ts`; IP key from `rateLimitKey` in `security-headers.ts` |
 | Concurrent actions | applied one at a time per session; a `409` (clients retry) only when the session's write lock is not granted within 10 s | `GAME_SESSION_LOCK_TIMEOUT_MS` in `packages/db/src/queries/gameSessions.ts` |
 | Activity starts | 10 / min per IP; **one running activity per voice/stage channel** | `activities-create` limit and `getActiveGameSessionForChannel` check in `channels/[channelId]/activities/route.ts` |
-| Activity reads | GET 60 / min, SSE opens 30 / min per IP; SSE poll fallback 5 s | `activity-get` in `[sessionId]/route.ts`, `activity-stream` in `stream/route.ts`, `POLL_FALLBACK_MS` in `activity-bus.ts:196` |
+| Activity reads | GET 60 / min per IP; poll fallback 5 s when the WebSocket is down (the SSE route was removed 2026-10-13) | `activity-get` in `[sessionId]/route.ts`, `POLL_INTERVAL_MS` in `app/room/useActivitySession.ts` |
 | Action body | 1 MiB | `DEFAULT_MAX_BODY_BYTES` in `security-headers.ts` |
 | State size | no explicit cap. Every action rewrites the whole JSONB and every subscriber reloads and projects it, so keep state in kilobytes. | inferred |
 | Players per app | `defaultMaxPlayers` 1–500 | `apps/route.ts:27` |
@@ -1012,7 +1012,7 @@ platforms' public developer docs. Re-check them before quoting.
   rendered in Discord's client. Discord itself cannot be self-hosted, and
   hiding secrets is up to each app's backend. In LobbyForge the reducer
   and the per-viewer projection run in *your* server, and the same code
-  path serves REST, SSE and WebSocket. A player reading the network tab
+  path serves REST and WebSocket. A player reading the network tab
   sees only their own slice.
 - **Extension ceiling.** Discord's bot platform is far ahead: events,
   commands, components, webhooks, voice and OAuth. Matrix's protocol
@@ -1075,8 +1075,8 @@ Each points to where it is tracked.
 | PLUGIN_PUBLISHING.md | Submit via `/marketplace` → "Submit a plugin"; enable via the Apps panel | No submit UI exists; the Apps panel lists compiled-in plugins only. **Fixed 2026-10-03:** doc updated |
 | [PLUGIN_SDK.md](PLUGIN_SDK.md) | `renderClient: (props) => HushlePanel(props)` | Must return `createElement(Panel, props)` (React #310, see `plugins/dice-bot/src/index.ts`) |
 | PLUGIN_SDK.md | `messages.sendGameMessage` posts to the channel | It only writes to the server log (`plugin-context.ts:99-104`) |
-| PLUGIN_SDK.md | "What M16 doesn't do": no plugin UI, the panel polls every 2 s | Panels render, and updates arrive over SSE/WebSocket |
-| [ACTIVITIES.md](ACTIVITIES.md) | The panel polls every 2 s | SSE/WebSocket push, 5 s poll fallback |
+| PLUGIN_SDK.md | "What M16 doesn't do": no plugin UI, the panel polls every 2 s | Panels render, and updates arrive over the WebSocket |
+| [ACTIVITIES.md](ACTIVITIES.md) | The panel polls every 2 s | WebSocket push, 5 s poll fallback |
 | README | Vampire Village and Watch Party are "planned"; bot-sdk "runtime planned" | Both games ship; the bot SDK has a working HTTP client |
 | `POST /api/marketplace/install` error text | "plugins run in-process without isolation" | The worker is mandatory. **Fixed 2026-10-03:** the message now says plugins run only in the plugin-worker, sandboxed in a QuickJS VM (ADR-007) |
 | [BOTS.md](BOTS.md) | (accurate) | Add: switching the Moderation Bot on needs *Manage Messages* unless you are the owner |

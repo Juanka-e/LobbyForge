@@ -54,6 +54,10 @@ const store = vi.hoisted(() => ({
   row: null as unknown as Row,
   storage: {} as Record<string, unknown>,
   lockTail: Promise.resolve() as Promise<unknown>,
+  /** The app's install in the community (null: uninstalled). */
+  install: { enabled: true, settings: {} } as { enabled: boolean; settings: Record<string, unknown> } | null,
+  /** Set on a row read: what the row looks like by the time the lock is taken (another writer in between). */
+  beforeLock: null as ((row: Row) => Row) | null,
 }));
 
 const dbFns = vi.hoisted(() => ({
@@ -61,6 +65,8 @@ const dbFns = vi.hoisted(() => ({
   getGameSessionById: vi.fn(async () => (store.row.status === 'ended' ? null : structuredClone(store.row))),
   isServerMember: vi.fn(async () => true),
   getUserPermissions: vi.fn(async () => [] as string[]),
+  getActiveMemberTimeout: vi.fn(async () => null as Date | null),
+  getPluginInstall: vi.fn(async () => (store.install ? structuredClone(store.install) : null)),
   listPlayersForSession: vi.fn(async () => [] as Array<{ userId: string; status: string; score: number }>),
   addPlayerToSession: vi.fn(async () => undefined),
   logAction: vi.fn(async () => undefined),
@@ -78,7 +84,13 @@ const dbFns = vi.hoisted(() => ({
   ),
   // A real lock: callers run one at a time, each on the row as it stands then.
   withGameSessionWriteLock: vi.fn(async (_db: unknown, _id: string, fn: (tx: unknown, row: unknown) => Promise<unknown>) => {
-    const run = store.lockTail.then(() => fn({ __mockTx: true }, structuredClone(store.row)));
+    const run = store.lockTail.then(() => {
+      if (store.beforeLock) {
+        store.row = store.beforeLock(store.row);
+        store.beforeLock = null;
+      }
+      return fn({ __mockTx: true }, structuredClone(store.row));
+    });
     store.lockTail = run.catch(() => undefined);
     return run;
   }),
@@ -167,6 +179,7 @@ function makePlugin(permissions: string[]): RegisteredGamePlugin {
       mute: { role: 'host' },
       peek: { role: 'host' },
       noop: { role: 'host' },
+      leave: { role: 'member', allowOutsideVoice: true },
     },
     createInitialState: () => ({ armed: 0, fired: [] }),
     handleAction: (ctx: GamePluginContext, raw: unknown, action: unknown) => {
@@ -185,11 +198,22 @@ function makePlugin(permissions: string[]): RegisteredGamePlugin {
         case 'tick': {
           tickLog.push({ label: a.label, now: ctx.now });
           const next = { ...state, fired: [...state.fired, { label: a.label, now: ctx.now, actor: ctx.actorUserId }] };
+          // A looping timer re-arms itself (same id) every second.
+          if (typeof a.loop === 'string') {
+            return withEffects(next, [{ type: 'timer.set', id: a.loop, afterMs: 1_000, action: { type: 'tick', label: a.label, loop: a.loop } }]);
+          }
+          // A stepping timer sets the next step under a NEW id (it cannot collapse).
+          if (typeof a.step === 'number') {
+            const step = a.step + 1;
+            return withEffects(next, [{ type: 'timer.set', id: `step-${step}`, afterMs: 1_000, action: { type: 'tick', label: `s${step}`, step } }]);
+          }
           // A chained timer sets the next one from its own due time.
           return a.chain
             ? withEffects(next, [{ type: 'timer.set', id: 'chain', afterMs: 1_000, action: { type: 'tick', label: `${String(a.label)}+`, chain: false } }])
             : next;
         }
+        case 'leave':
+          return { ...state, left: [...((state as { left?: string[] }).left ?? []), ctx.actorUserId] };
         case 'remember':
           return withEffects(state, [{ type: 'storage.set', key: String(a.key ?? 'k'), value: a.value }]);
         case 'announce':
@@ -267,10 +291,13 @@ beforeEach(() => {
   vi.stubEnv('LOBBYFORGE_SESSION_SECRET', SECRET);
   store.storage = {};
   store.lockTail = Promise.resolve();
+  store.install = { enabled: true, settings: {} };
+  store.beforeLock = null;
   tickLog.length = 0;
-  for (const fn of [dbFns.setGameSessionStateCAS, dbFns.writePluginDataBatch, dbFns.withGameSessionWriteLock, dbFns.endGameSession, dbFns.listPluginData, publish, postAppMessage]) {
+  for (const fn of [dbFns.setGameSessionStateCAS, dbFns.writePluginDataBatch, dbFns.withGameSessionWriteLock, dbFns.endGameSession, dbFns.listPluginData, dbFns.logAction, publish, postAppMessage]) {
     fn.mockClear();
   }
+  dbFns.getActiveMemberTimeout.mockReset().mockResolvedValue(null);
   registry.clear();
   registry.set('timer-game', makePlugin(['timers', 'storage', 'chat']));
 });
@@ -485,5 +512,167 @@ describe('storage and chat: after the commit', () => {
     expect(postAppMessage).toHaveBeenCalledWith(
       expect.objectContaining({ serverId: 'srv-1', sessionId: 'sess-1', pluginId: 'timer-game', pluginName: 'Timer Game', text: 'Team A won 12–9.' })
     );
+  });
+});
+
+describe('ACT-002: a timer that fell due is never overtaken by an action', () => {
+  const at = (ms: number) => T0 + ms;
+
+  it('the row read before the lock had no timers, the row under it has a due one: the timer fires first', async () => {
+    // Another call set a timer between this action's first read and its
+    // lock, and that timer is already due: the old route built the system
+    // ctx only from the first read, so the action ran ahead of it.
+    seed();
+    vi.setSystemTime(at(10_000));
+    store.beforeLock = (row) => ({ ...row, revision: row.revision + 1, timers: [{ id: 'late', at: at(5_000), action: { type: 'tick', label: 'late' } }] });
+    const res = await act(HOST, { type: 'arm', timers: [{ id: 'next', afterMs: 2_000, label: 'n' }] });
+    expect(res.status).toBe(200);
+    expect(tickLog).toEqual([{ label: 'late', now: at(5_000) }]);
+    expect(state()).toMatchObject({ armed: 1, fired: [{ label: 'late', actor: '' }] });
+    expect(store.row.timers.map((t) => t.id)).toEqual(['next']);
+  });
+
+  it('same, for a plugin that no longer holds the timers permission: the ctx is built under the lock, through its transaction', async () => {
+    const { buildHttpPluginContext } = await import('@/lib/plugin-context');
+    const build = buildHttpPluginContext as unknown as ReturnType<typeof vi.fn>;
+    build.mockClear();
+    registry.set('timer-game', makePlugin(['storage']));
+    seed();
+    vi.setSystemTime(at(10_000));
+    store.beforeLock = (row) => ({ ...row, revision: row.revision + 1, timers: [{ id: 'late', at: at(5_000), action: { type: 'tick', label: 'late' } }] });
+    expect((await act(HOST, { type: 'noop' })).status).toBe(200);
+    expect(tickLog).toEqual([{ label: 'late', now: at(5_000) }]);
+    expect(build).toHaveBeenCalledWith(expect.objectContaining({ db: { __mockTx: true }, actorUserId: '' }));
+  });
+});
+
+describe('a timed-out member does not play', () => {
+  it('every action is refused with timed_out (and when the timeout ends) — the host’s too; nothing is written', async () => {
+    const until = new Date(T0 + 600_000);
+    dbFns.getActiveMemberTimeout.mockResolvedValue(until);
+    seed();
+    const res = await act(HOST, { type: 'arm', timers: [{ id: 'r', afterMs: 5_000, label: 'r' }] });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'timed_out', until: until.toISOString() });
+    expect(dbFns.getActiveMemberTimeout).toHaveBeenCalledWith(expect.anything(), 'srv-1', HOST);
+    expect(dbFns.setGameSessionStateCAS).not.toHaveBeenCalled();
+    expect(state().armed).toBe(0);
+  });
+
+  it('leaving (an action marked allowOutsideVoice) is still allowed', async () => {
+    dbFns.getActiveMemberTimeout.mockResolvedValue(new Date(T0 + 600_000));
+    seed();
+    expect((await act(ALICE, { type: 'leave' })).status).toBe(200);
+    expect((store.row.state as { left?: string[] }).left).toEqual([ALICE]);
+  });
+});
+
+describe('an app removed from the community runs nothing', () => {
+  const at = (ms: number) => T0 + ms;
+
+  it('uninstalled or disabled: an action on a session still open is refused with app_not_installed; nothing runs or is written', async () => {
+    for (const install of [null, { enabled: false, settings: {} }]) {
+      store.install = install;
+      seed([{ id: 'due', at: at(1_000), action: { type: 'tick', label: 'due' } }]);
+      vi.setSystemTime(at(2_000));
+      const res = await act(HOST, { type: 'arm', timers: [] });
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { code: string }).code).toBe('app_not_installed');
+    }
+    expect(tickLog).toEqual([]);
+    expect(dbFns.setGameSessionStateCAS).not.toHaveBeenCalled();
+  });
+
+  it('a read drops the due timers without running them, and keeps the ones not due yet', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    store.install = null;
+    seed([
+      { id: 'due', at: at(1_000), action: { type: 'tick', label: 'due' } },
+      { id: 'later', at: at(60_000), action: { type: 'tick', label: 'later' } },
+    ]);
+    vi.setSystemTime(at(2_000));
+    const res = await read(ALICE);
+    expect(res.status).toBe(200);
+    expect(tickLog).toEqual([]);
+    expect(state().fired).toEqual([]);
+    expect(store.row.timers.map((t) => t.id)).toEqual(['later']);
+    const body = (await res.json()) as { activity: { timersDueAt: string[] } };
+    expect(body.activity.timersDueAt).toEqual([new Date(at(60_000)).toISOString()]);
+    expect(publish).toHaveBeenCalledWith(expect.objectContaining({ publicSummary: { timersChanged: true } }));
+    warn.mockRestore();
+  });
+
+  it('ending drops the due timers without running them too', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    store.install = { enabled: false, settings: {} };
+    seed([{ id: 'due', at: at(1_000), action: { type: 'tick', label: 'due' } }]);
+    vi.setSystemTime(at(2_000));
+    expect((await end(HOST)).status).toBe(200);
+    expect(tickLog).toEqual([]);
+    expect(store.row.status).toBe('ended');
+    warn.mockRestore();
+  });
+
+  it('removed while the action ran: the state commits, but its storage write and chat line are dropped', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    seed();
+    // Installed for the route's check; gone by the time the effects apply.
+    dbFns.getPluginInstall.mockImplementationOnce(async () => {
+      const install = structuredClone(store.install);
+      store.install = null;
+      return install;
+    });
+    expect((await act(HOST, { type: 'remember', value: 1 })).status).toBe(200);
+    expect(dbFns.setGameSessionStateCAS).toHaveBeenCalledTimes(1);
+    expect(dbFns.writePluginDataBatch).not.toHaveBeenCalled();
+    store.install = { enabled: true, settings: {} };
+    dbFns.getPluginInstall.mockImplementationOnce(async () => {
+      store.install = null;
+      return { enabled: true, settings: {} };
+    });
+    expect((await act(HOST, { type: 'announce', text: 'hi' })).status).toBe(200);
+    expect(postAppMessage).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});
+
+describe('timer catch-up is bounded (security review)', () => {
+  const at = (ms: number) => T0 + ms;
+
+  it('a 1 s timer that re-arms itself, idle for an hour, fires twice on the next read — not once per missed second', async () => {
+    seed([{ id: 'loop', at: at(1_000), action: { type: 'tick', label: 'loop', loop: 'loop' } }]);
+    vi.setSystemTime(at(3_600_500));
+    expect((await read(ALICE)).status).toBe(200);
+    expect(tickLog).toEqual([
+      { label: 'loop', now: at(1_000) },
+      { label: 'loop', now: at(3_600_000) },
+    ]);
+    expect(store.row.timers).toEqual([{ id: 'loop', at: at(3_601_000), action: { type: 'tick', label: 'loop', loop: 'loop' } }]);
+  });
+
+  it('a backlog that cannot collapse fires 8 per touch; an action waits behind it with a retryable 409 and runs once it is caught up', async () => {
+    seed([{ id: 'step-0', at: at(1_000), action: { type: 'tick', label: 's0', step: 0 } }]);
+    vi.setSystemTime(at(13_500));
+    // 1 s steps from 1 s to 13 s are due: 13 firings in all.
+    const read1 = await read(ALICE);
+    expect(tickLog).toHaveLength(8);
+    const body = (await read1.json()) as { activity: { timersDueAt: string[] } };
+    // Still due: the panel re-reads for it (lib/activity-next-check.ts).
+    expect(Date.parse(body.activity.timersDueAt[0]!)).toBeLessThanOrEqual(at(13_500));
+
+    tickLog.length = 0;
+    seed([{ id: 'step-0', at: at(1_000), action: { type: 'tick', label: 's0', step: 0 } }]);
+    const first = await act(HOST, { type: 'arm', timers: [{ id: 'x', afterMs: 60_000, label: 'x' }] });
+    expect(first.status).toBe(409);
+    expect(await first.json()).toMatchObject({ code: 'timers_pending', retryable: true });
+    // The 8 that fired committed; the action did not run.
+    expect(state().fired).toHaveLength(8);
+    expect(state().armed).toBe(0);
+    const retry = await act(HOST, { type: 'arm', timers: [{ id: 'x', afterMs: 60_000, label: 'x' }] });
+    expect(retry.status).toBe(200);
+    expect(state().fired).toHaveLength(13);
+    expect(state().armed).toBe(1);
+    // In due order, the action last.
+    expect(state().fired.map((f) => f.label)).toEqual(Array.from({ length: 13 }, (_, i) => `s${i}`));
   });
 });

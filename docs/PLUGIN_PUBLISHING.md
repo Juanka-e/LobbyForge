@@ -233,8 +233,8 @@ timer's due time.
 
 `projectState(state, viewerId, ctx)` gets only `ctx.sessionId`,
 `ctx.serverId`, `ctx.hostId` and `ctx.now` — no players, no locale, no
-random values — because the same projection is served over REST, SSE and
-the WebSocket gateway and must not differ between them. Localise in the
+random values — because the same projection is served over REST and the
+WebSocket gateway and must not differ between them. Localise in the
 UI, not in the projection.
 
 ### Effects: timers, storage and chat
@@ -265,7 +265,7 @@ case 'auto-reveal': // "role": "system" in actionPolicies: only the host runs it
 | `timer.set { id, afterMs \| at, action }` | `timers` | ≤ 8 pending per session, 1 s – 24 h, same `id` replaces; `action` is one of your `system` actions |
 | `timer.clear { id }` | `timers` | |
 | `storage.set { key, value }`, `storage.delete { key }` | `storage` | key `[a-zA-Z0-9._:-]{1,128}`, ≤ 64 KiB in all per community |
-| `chat.post { text }` | `chat` | ≤ 500 characters, mentions made inert, ≤ 1 per 5 s and 30 per hour per session |
+| `chat.post { text }` | `chat` | ≤ 500 characters, mentions made inert, ≤ 1 per 5 s and 30 per hour per session and 60 per hour per community; the community's Moderation Bot word and link rules apply |
 
 - One invalid or unapproved effect refuses the whole action (`422`,
   `code: "effect_refused"`): nothing of it is applied.
@@ -273,6 +273,9 @@ case 'auto-reveal': // "role": "system" in actionPolicies: only the host runs it
   after the due time, the host runs the system action through
   `handleAction` with `ctx.now` = the due time. Open panels re-read at the
   due time, so it happens on time while anyone is watching; never early.
+  After an idle stretch a timer that re-arms itself fires once for the
+  latest missed occurrence, not once per occurrence, and one touch fires at
+  most 8 timers ([PLUGIN_SDK.md → Timers fire lazily](PLUGIN_SDK.md#timers-fire-lazily)).
 - Storage writes land **after** the state commits, as one batch; a batch
   that no longer fits by then is dropped (logged). Sessions of your plugin
   share the storage: merge with `ctx.storage` when you write.
@@ -285,9 +288,8 @@ The full rules, ordering and failure cases:
 
 ### Hidden information
 
-Every path a viewer reads state through — the activity GET, the SSE
-snapshot and updates, the response to their own action, the WebSocket
-gateway — calls `projectState(state, viewerId)` for that viewer. Put
+Every path a viewer reads state through — the activity GET, the response
+to their own action, the WebSocket gateway — calls `projectState(state, viewerId)` for that viewer. Put
 secrets in the state and strip them per viewer in `projectState`, the way
 the example hides who buzzed until the host reveals. A failed projection
 fails the request; it never falls back to the full state.
