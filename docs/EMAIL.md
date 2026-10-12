@@ -174,7 +174,8 @@ The entry point is `sendMail({ to, template, locale, vars })`.
   - `reset`: code plus link;
   - `test`.
 - **Content:** plain text plus simple HTML, built from `messages/{en,tr}/email.json`
-  in the recipient's `users.locale`, falling back to the instance default.
+  in the recipient's saved `users.locale`, else the triggering request's
+  language, else the instance default.
   No remote images, no tracking. The code is never in the subject line.
 - **Sign-up never blocks on mail.** It returns at once and the send happens
   without waiting. Failures are logged (no addresses in logs, or masked)
@@ -183,13 +184,17 @@ The entry point is `sendMail({ to, template, locale, vars })`.
   at 80%, and at 100% sends are refused with `mail_quota`.
 
 **As implemented** (`lib/mail/send.ts`, `templates.ts`, `stats.ts`):
-- **Language.** `users.locale` is never written by the UI yet (it is `en`
-  for nearly everyone), so an email the recipient asked for (sign-up,
-  resend, change, forgot password) is written in their saved `users.locale`
-  when it is an explicit choice (anything but the default `en`), else in the
-  language of the request — the `lf_locale` cookie, then Accept-Language,
-  then `LOBBYFORGE_DEFAULT_LOCALE`, then English — the same order the pages
-  use. The admin test uses the instance default.
+- **Language** (docs/TRANSLATING.md). An email goes out in the recipient's
+  saved language (`users.locale`, written by Settings → Appearance →
+  Language and, for the owner, by the setup wizard), else in the language
+  of the request that triggered it — the requester's own saved language,
+  the `lf_locale` cookie, then Accept-Language — else the instance default
+  (saved in Admin → Overview or at setup, then `LOBBYFORGE_DEFAULT_LOCALE`),
+  then English: the same order the pages use. Since migration 0048 NULL
+  means "never chose", so an explicit English choice is honoured. A
+  password reset is written in the ACCOUNT OWNER's saved language, not the
+  language of whoever asked for it. The admin test uses the instance
+  default. A saved code whose language was since removed is skipped.
 - **Links** are built from `LOBBYFORGE_APP_ORIGIN`, else
   `NEXT_PUBLIC_BASE_URL` — never from the request's Host header. With
   neither configured the email carries the code only.

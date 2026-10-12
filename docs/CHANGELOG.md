@@ -2,6 +2,18 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Languages: saved per account, default chosen in the admin panel and at setup - 2026-10-12
+
+- **Your language follows you:** Settings → Appearance → Language now saves the choice on your account as well as in the browser, so the desktop app and your other browsers use it too. Pages pick the language in this order: your account's language → this browser's choice → the browser's Accept-Language → the instance default → English. "Match my browser" clears both. Guests save it the same way.
+- **Default language in the admin panel:** Community Settings → Overview has a *Default language* list with every installed language, in its own name and with its status. It says which setting is in effect: the saved value, `LOBBYFORGE_DEFAULT_LOCALE`, or English. A save takes effect at once and is written to the audit log.
+- **Setup screen:** the setup wizard starts with a *Language* step. It lists every language found on disk and switches the wizard to the one you pick straight away. Finishing setup saves it as the instance default and as the owner's language.
+- **Adding a language stays a no-code job:** a language folder added under `apps/web/messages/` shows up in the language picker, on the setup screen and in the admin list on its own.
+- **One default everywhere:** the built-in bots' default texts, emails and the sandboxed plugins' language hint all use the same instance default (the saved value, then `LOBBYFORGE_DEFAULT_LOCALE`, then English). The plugin hint used to skip it and fall back to English.
+- **Emails:** an email goes out in the recipient's saved language, else in the language of the request that sent it, else the instance default. An explicit English choice now counts. A password reset is written in the account owner's language, not the language of whoever asked for it.
+- **API:** `GET`/`PATCH /api/settings/me` carry `locale` (an installed code, or `null` to follow the browser). New `GET`/`PUT /api/admin/default-locale` (instance owner only). `POST /api/setup/complete` takes an optional `locale`.
+- **For developers:** `localeFromRequest(req)` (`lib/i18n/server`, `lib/i18n/request-locale`) is now async, because it can read the account's saved language. The instance default is resolved only by `lib/i18n/instance-default.ts`: `getInstanceDefaultLocale()` (async) and `instanceDefaultLocale()` (sync, cached). `mailLocale` and `preferredMailLocale` are async; `requestLocale` is gone (use `localeFromRequest`).
+- **Upgrade notes:** migration 0048 makes `users.locale` nullable with no default, and clears every existing `'en'` to NULL ("never chose"), because nothing used to write that column. It also adds `instance_settings.default_locale`. Rolling back the app is safe: the previous image treats NULL like English. `LOBBYFORGE_DEFAULT_LOCALE` is documented in both `.env` examples and passed through by the dev compose file; a saved default overrides it. `servers.default_locale` is still unused.
+
 ## [Unreleased] - Marketplace plugins: names and summaries in every language - 2026-10-12
 
 - **Marketplace plugins:** a sandbox-v1 bundle can ship `locales/<code>.json`, the same tables official plugins ship. Its `catalog.name` and `catalog.summary` name and describe the plugin in each viewer's language in the lobby's activity list and header, the community app list, the room picker and the instance's marketplace page. `manifest.json`'s `name` stays the fallback. Adding a language to a marketplace plugin is one more file, no code. See `docs/PLUGIN_PUBLISHING.md` → `locales/`.

@@ -12,6 +12,8 @@ shows in English.
 - [Guidelines](#guidelines)
 - [For developers: adding strings](#for-developers-adding-strings)
 - [How it works](#how-it-works)
+- [Each person's language](#each-persons-language)
+- [Instance default language](#instance-default-language)
 
 ## Add a language
 
@@ -34,8 +36,12 @@ apps/web/messages/de/<area>.json      one file per area of the app
 plugins/<game>/locales/de.json        one per game that has translations
 ```
 
-The language appears in **Settings → Appearance → Language** straight away,
-marked *In progress*.
+The language appears straight away, marked *In progress*, everywhere a
+language is chosen — with no code change:
+
+- **Settings → Appearance → Language**, for every member;
+- the first step of the **setup screen** (`/setup`), for a new instance;
+- the **Default language** list in **Community Settings → Overview**.
 
 ## Translate
 
@@ -238,11 +244,17 @@ missing your string.
 - **The folder is the registry.** Languages are discovered from
   `apps/web/messages/<code>/_locale.json`; nothing in the code lists them,
   which is why adding one needs no code change.
-- **The server picks the language**, in this order: the user's explicit
-  choice (the `lf_locale` cookie, set from the language picker) → their
-  browser's `Accept-Language`, honouring its quality values → the instance
-  default (`LOBBYFORGE_DEFAULT_LOCALE`, e.g. `tr`) → English.
-  "Match my browser" stores no cookie, so it keeps following the browser.
+- **The server picks the language**, in this order:
+  1. the signed-in account's saved language (`users.locale`);
+  2. this browser's choice (the `lf_locale` cookie);
+  3. the browser's `Accept-Language`, honouring its quality values;
+  4. the [instance default](#instance-default-language);
+  5. English.
+
+  Signed out, the order starts at 2. Each saved choice counts only while
+  its language is installed: one whose folder was removed is skipped. A
+  request does at most one extra lookup for this — a signed-in page reads
+  one column of the account row; the instance default is cached.
 - **Only the active language reaches the browser**, already merged over
   English. Adding a language does not make the app bigger for anyone.
 - **`<html lang>` is the page's language**, which CSS casing and screen
@@ -252,15 +264,57 @@ missing your string.
 - **`complete` and `partial`** live in `_locale.json` (and as `"$status"`
   in a plugin's file). Only `complete` languages must have every string.
 
+## Each person's language
+
+**Settings → Appearance → Language** saves the choice twice: on the
+account (`users.locale`) and in the browser's `lf_locale` cookie. The
+account copy is what makes it follow the person — the desktop app and a
+second browser have cookie jars of their own — and it wins over the
+cookie. The cookie keeps the choice in that browser after signing out.
+Guests are accounts too, so they save it the same way.
+
+**Match my browser** clears both: the account's language goes back to
+NULL and the cookie is removed, so the browser's `Accept-Language`
+decides again. NULL means "never chose"; an explicit English choice is
+stored as `en` and honoured like any other. (Before migration 0048 the
+column was `NOT NULL DEFAULT 'en'` and nothing wrote it, so the migration
+cleared every `en` to NULL.)
+
+Emails follow the same idea: the recipient's saved language, else the
+language of the request that triggered the email, else the instance
+default — and a password reset is written in the account owner's language,
+not the language of whoever asked for it (docs/EMAIL.md §2.3).
+
 ## Instance default language
 
-A community whose members' browsers are set to English but who want the
-community in their own language can set, for example:
+The default is what a visitor gets when neither their account, nor their
+browser's cookie, nor their `Accept-Language` names a language the instance
+offers — and the language of text with no single reader: the built-in
+bots' default messages, an email with no recipient language, the language
+hint a sandboxed plugin falls back to. It is decided in this order, each
+step only when it names an installed language:
 
-```sh
-LOBBYFORGE_DEFAULT_LOCALE=tr
-```
+1. **the language saved by the owner** — picked on the first step of the
+   setup screen, and changeable in **Community Settings → Overview →
+   Default language**, which lists every installed language (in its own
+   name, with its status) and says which step is in effect;
+2. **`LOBBYFORGE_DEFAULT_LOCALE`** in the server environment, e.g.
+   `LOBBYFORGE_DEFAULT_LOCALE=tr`;
+3. English.
 
-This is a fallback, not an override: someone whose browser asks for a
+It is a fallback, not an override: someone whose browser asks for a
 language the instance has still gets it, and anyone can pick their own in
-Settings.
+Settings. The saved value lives in `instance_settings.default_locale`;
+each server process caches it for 30 seconds, and the process that saves
+it uses the new value at once. Changes are written to the audit log.
+`lib/i18n/instance-default.ts` is the one place that resolves it.
+
+**The setup screen.** Its first step, *Language*, lists every language
+found under `apps/web/messages/`, starting on the one the browser asked
+for. Picking one switches the wizard immediately — every later step is in
+that language — and finishing setup saves it as the instance default and
+as the owner account's language.
+
+(`servers.default_locale` is set when a server is created but nothing
+reads it: the language comes from the account, the browser and the
+instance default above.)
