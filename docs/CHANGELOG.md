@@ -2,6 +2,15 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Dependencies: Next 16.4, ioredis 6, TypeScript 6; `middleware.ts` is now `proxy.ts` - 2026-10-13
+
+- **Next.js 16.4.0** (was 16.3.8). Its strict route matching found a real bug: the `@modal` interceptors for `/admin/…` and `/settings/…` caught URLs that had no page of their own, so a click from the lobby worked while a hard load of the same URL 404'd (`/admin` itself among them). New canonical routes: `/admin` redirects to the admin overview (`/admin/settings`), and an unknown `/admin/…` or `/settings/…` is a proper 404. The modal map opens `/admin` on the overview too.
+- **`middleware.ts` → `proxy.ts`:** Next 16 renamed the file convention. The function is `proxy`, and the `runtime: 'nodejs'` option is gone (a proxy always runs in Node.js; setting it is now a build error). Behaviour is unchanged: the same CSP, nonce, origin rules and CAPTCHA/plugin frame sources.
+- **ioredis 6.0.0** (web app and ws-gateway; was 5.x). No code change was needed beyond one test's typing.
+- **TypeScript 6.0.3** (was 5.9). TypeScript 6 no longer includes every `@types` package automatically: the shared `tsconfig.base.json` now lists `types: ["node"]`.
+- **Also:** altcha 3.3.0 with altcha-lib 2.6.0 (moved together), @playwright/test 1.63.0, LiveKit server v1.13.9 (compose files and the Trivy scan pin), actions/setup-node 7.1.0, upload-artifact 7.0.2, download-artifact 8.0.2.
+- **Audit:** `pnpm audit` reports one advisory, `braces` (GHSA-vfj7-8cjw-p6xm), reachable only through `@next/eslint-plugin-next` at lint time; it has no patched release. It is not in any production image.
+
 ## [Unreleased] - Plugins: timers, storage and chat lines (host effects) - 2026-10-13
 
 - **Effects:** a plugin's reducer stays pure and synchronous. To have the host do something more, it returns `withEffects(state, effects)` (`{ __lf: 1, state, effects }`; a marketplace `server.js` writes the object itself). The host checks every effect and the plugin's permission for it, and applies all of them or none: one invalid or unpermitted effect refuses the whole action with `422` and `code: "effect_refused"`. Returning the same state with no effects still means "no change".

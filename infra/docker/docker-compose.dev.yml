@@ -61,7 +61,7 @@ services:
   livekit:
     # beta-review: the same pinned server as production (was :latest, so the
     # CI voice E2E never exercised the version we actually ship).
-    image: livekit/livekit-server:v1.13.7@sha256:6fd3b7088874c4d119160dd688798dfec852bc014786d392caad15f6f63912a3
+    image: livekit/livekit-server:v1.13.9@sha256:6fd3b7088874c4d119160dd688798dfec852bc014786d392caad15f6f63912a3
     container_name: lobbyforge-livekit
     restart: unless-stopped
     # Browser runs on the host in local development. Advertising the Docker
