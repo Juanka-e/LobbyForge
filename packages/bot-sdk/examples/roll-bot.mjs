@@ -12,6 +12,10 @@
  * runtimes pass one: `new LobbyForgeBot({ …, WebSocket })` from the `ws`
  * package. In a standalone project import from '@lobbyforge/bot-sdk'.
  *
+ * Languages: each /roll is answered in the language of the member who ran
+ * it ("Ayşe rolled 18 (20-sided)" / "Ayşe 18 attı (20 yüzlü)") — the
+ * strings and the choice are in roll-text.mjs.
+ *
  * Exit codes: 0 after Ctrl+C / SIGTERM, 1 on anything fatal — a refused
  * start (bad token, a command name another bot owns, missing permission,
  * instance unreachable) or a stream the gateway closed for good (token
@@ -19,6 +23,7 @@
  * A supervisor (systemd, Docker, pm2) can tell "stopped" from "broken".
  */
 import { BotApiError, BotCloseCode, LobbyForgeBot } from '../dist/index.js';
+import { DEFAULT_LOCALE, rollAnswer } from './roll-text.mjs';
 
 const baseUrl = process.env.LOBBYFORGE_URL;
 const token = process.env.LOBBYFORGE_BOT_TOKEN;
@@ -103,19 +108,23 @@ bot.on('ready', ({ bot: me, channels }) => {
 bot.on('interaction', async (interaction) => {
   if (interaction.commandName !== COMMAND) return;
   const sides = typeof interaction.options.sides === 'number' ? interaction.options.sides : 6;
-  const who = interaction.user.displayName ?? 'Someone';
-  // Answer within 15 minutes; ephemeral answers reach only the invoker.
+  // Answer within 15 minutes, in the invoker's language
+  // (`interaction.locale`); ephemeral answers reach only the invoker.
   // A failed answer (expired, already answered, a missing permission)
   // reaches the 'error' listener below; the bot keeps running.
-  await interaction.reply(`${who} rolled ${roll(sides)} (d${sides})`, {
-    ephemeral: interaction.options.private === true,
-  });
+  const text = rollAnswer(interaction.locale, { name: interaction.user.displayName, result: roll(sides), sides });
+  await interaction.reply(text, { ephemeral: interaction.options.private === true });
 });
 
-// Plain chat works too (needs read_messages + send_messages).
+// Plain chat works too (needs read_messages + send_messages). A channel
+// message carries no language — everyone reads it — so this answers in
+// the bot's default language.
 bot.on('message', async (message) => {
   if (message.author.bot || message.content.trim() !== '!roll') return;
-  await bot.sendMessage(message.channelId, `${message.author.displayName ?? 'Someone'} rolled ${roll(6)} (d6)`);
+  await bot.sendMessage(
+    message.channelId,
+    rollAnswer(DEFAULT_LOCALE, { name: message.author.displayName, result: roll(6), sides: 6 })
+  );
 });
 
 bot.on('channel_access_changed', (channels) => {
