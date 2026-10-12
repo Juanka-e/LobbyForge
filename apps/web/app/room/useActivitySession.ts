@@ -26,7 +26,12 @@ import { useT } from '@/lib/i18n/client';
  *  - When several players act at once, the server can refuse some of
  *    them with a retryable 409. `dispatch` retries those itself, with the
  *    same `actionId` (see `lib/activity-action-retry.ts`), and shows an
- *    error only when every attempt failed.
+ *    error only when every attempt failed. A lost answer (the network
+ *    blinked) is retried the same way for a few seconds.
+ *  - Events published while the socket was down are lost (the gateway
+ *    keeps no backlog), so the state is re-read whenever the socket
+ *    reconnects, the network comes back, or the tab is shown again after
+ *    a while in the background (a phone may have frozen the page).
  */
 
 export interface ActivityDetail {
@@ -49,6 +54,8 @@ function toDetail(raw: ActivityDetail & { host?: unknown }): ActivityDetail {
 const POLL_INTERVAL_MS = 5_000;
 const TRANSPORT_CHECK_MS = 5_000;
 const TRANSPORT_FIRST_CHECK_MS = 1_500;
+/** Hidden at least this long: re-read when the tab is shown again. */
+const HIDDEN_REREAD_MS = 5_000;
 
 export function useActivitySession({
   serverId,
@@ -156,19 +163,42 @@ export function useActivitySession({
       // event stateless when it could not project it for this viewer (a
       // sandboxed plugin's projection call failed), and the panel must not
       // sit on the old state until the next action.
-      const summary = (raw as { publicSummary?: { rosterChanged?: unknown } }).publicSummary;
-      if (summary?.rosterChanged === true || (event.status && !event.state)) void fetchOnce();
+      // `presenceChanged`: a player or the host left the voice room or came
+      // back (the LiveKit webhook) — the session answer says where they stand.
+      const summary = (raw as { publicSummary?: { rosterChanged?: unknown; presenceChanged?: unknown } }).publicSummary;
+      if (summary?.rosterChanged === true || summary?.presenceChanged === true || (event.status && !event.state)) {
+        void fetchOnce();
+      }
     };
 
     void fetchOnce();
 
+    let offReconnect: (() => void) | null = null;
     try {
       const client = getRealtimeClient();
       client.connect();
       unsubscribe = client.subscribe(`activity-state:${serverId}:${sessionId}` as const, handleEvent);
+      offReconnect = client.onReconnect(() => void fetchOnce());
     } catch {
       pollFallback = true;
     }
+
+    // Catch up after the network or the tab was away. A socket that is
+    // still open delivered everything; one that died reconnects (and
+    // re-reads above) — but a dead socket can look open for up to a
+    // minute, so these re-read directly too.
+    let hiddenAt: number | null = null;
+    const onOnline = () => void fetchOnce();
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenAt = Date.now();
+        return;
+      }
+      if (hiddenAt !== null && Date.now() - hiddenAt >= HIDDEN_REREAD_MS) void fetchOnce();
+      hiddenAt = null;
+    };
+    window.addEventListener('online', onOnline);
+    document.addEventListener('visibilitychange', onVisibility);
 
     const ensureTransport = () => {
       if (cancelled) return;
@@ -194,6 +224,9 @@ export function useActivitySession({
       cancelled = true;
       if (refreshRef.current === fetchOnce) refreshRef.current = null;
       unsubscribe?.();
+      offReconnect?.();
+      window.removeEventListener('online', onOnline);
+      document.removeEventListener('visibilitychange', onVisibility);
       clearTimeout(firstCheck);
       clearInterval(transportTimer);
       if (pollTimer) clearInterval(pollTimer);
@@ -252,7 +285,7 @@ export function useActivitySession({
         );
         return true;
       } catch {
-        // fetch itself failed: no answer from the server at all.
+        // No answer from the server at all, for the whole retry window.
         setError(t('room.activity.error.network'));
         return false;
       } finally {

@@ -233,3 +233,96 @@ describe('RealtimeClient', () => {
     expect(errors[0].message).toContain('forbidden');
   });
 });
+describe('RealtimeClient catching up after a lost connection', () => {
+  const hello = { type: 'hello', ok: true, uid: 'u1', at: 'now' };
+  const subscribe = (topic: string) => JSON.stringify({ type: 'subscribe', topic });
+
+  it('tells reconnect listeners when a NEW socket authenticates, never for the first one', async () => {
+    vi.useFakeTimers();
+    const reconnects = vi.fn();
+    const client = new RealtimeClient({ url: 'ws://test' });
+    const off = client.onReconnect(reconnects);
+    client.connect();
+    MockWebSocket.instances[0].open();
+    MockWebSocket.instances[0].receive(hello);
+    expect(reconnects).not.toHaveBeenCalled();
+
+    MockWebSocket.instances[0].close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    const sock2 = MockWebSocket.instances[1];
+    sock2.open();
+    expect(reconnects).not.toHaveBeenCalled(); // not before it is authenticated
+    sock2.receive(hello);
+    expect(reconnects).toHaveBeenCalledTimes(1);
+
+    off();
+    sock2.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    MockWebSocket.instances[2].open();
+    MockWebSocket.instances[2].receive(hello);
+    expect(reconnects).toHaveBeenCalledTimes(1);
+  });
+
+  it('replaces a socket that looks open when the network comes back, and the old one cannot interfere', () => {
+    const received: unknown[] = [];
+    const client = new RealtimeClient({ url: 'ws://test' });
+    client.subscribe('chat:srv:abc', (data) => received.push(data));
+    client.connect();
+    const stale = MockWebSocket.instances[0];
+    stale.open();
+    stale.receive(hello);
+
+    client.wake('online');
+    expect(MockWebSocket.instances).toHaveLength(2);
+    expect(stale.readyState).toBe(MockWebSocket.CLOSED);
+    const fresh = MockWebSocket.instances[1];
+    fresh.open();
+    expect(fresh.sent).toContain(subscribe('chat:srv:abc'));
+    expect(client.readyState).toBe(MockWebSocket.OPEN);
+
+    // A late event or close from the replaced socket is ignored.
+    stale.receive({ type: 'event', topic: 'chat:srv:abc', data: { from: 'stale' }, at: 'now' });
+    stale.dispatch('close', {});
+    expect(client.readyState).toBe(MockWebSocket.OPEN);
+    fresh.receive({ type: 'event', topic: 'chat:srv:abc', data: { from: 'fresh' }, at: 'now' });
+    expect(received).toEqual([{ from: 'fresh' }]);
+  });
+
+  it('leaves an open socket alone when the tab is shown again', () => {
+    const client = new RealtimeClient({ url: 'ws://test' });
+    client.connect();
+    MockWebSocket.instances[0].open();
+    client.wake('visible');
+    expect(MockWebSocket.instances).toHaveLength(1);
+  });
+
+  it('connects at once, without waiting out the backoff, when the tab is shown after giving up', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const client = new RealtimeClient({ url: 'ws://test' });
+    client.connect();
+    // The gateway is down: every attempt closes until the breaker trips.
+    for (let i = 0; i < 25; i++) {
+      MockWebSocket.instances.at(-1)!.close();
+      await vi.advanceTimersByTimeAsync(30_000);
+    }
+    const attempts = MockWebSocket.instances.length;
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(MockWebSocket.instances).toHaveLength(attempts); // gave up
+
+    client.wake('visible');
+    expect(MockWebSocket.instances).toHaveLength(attempts + 1);
+    // And the backoff starts over: the next failure retries after ~0.5 s.
+    MockWebSocket.instances.at(-1)!.close();
+    await vi.advanceTimersByTimeAsync(600);
+    expect(MockWebSocket.instances).toHaveLength(attempts + 2);
+  });
+
+  it('stays closed after an explicit close()', () => {
+    const client = new RealtimeClient({ url: 'ws://test' });
+    client.connect();
+    client.close();
+    client.wake('online');
+    expect(MockWebSocket.instances).toHaveLength(1);
+  });
+});

@@ -4,7 +4,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { I18nProvider } from '@/lib/i18n/client';
 import { providerPropsFor } from '@/lib/i18n/catalogue';
-import { CONFLICT_MAX_ATTEMPTS } from '@/lib/activity-action-retry';
+import { CONFLICT_MAX_ATTEMPTS, TRANSIENT_RETRY_WINDOW_MS } from '@/lib/activity-action-retry';
 import { useActivitySession } from '../useActivitySession';
 
 /**
@@ -14,8 +14,17 @@ import { useActivitySession } from '../useActivitySession';
  * only when every attempt failed.
  */
 
+const realtime = vi.hoisted(() => ({ reconnectListeners: new Set<() => void>() }));
 vi.mock('@/lib/realtime-client', () => ({
-  getRealtimeClient: () => ({ connect: () => {}, subscribe: () => () => {}, readyState: 1 }),
+  getRealtimeClient: () => ({
+    connect: () => {},
+    subscribe: () => () => {},
+    onReconnect: (listener: () => void) => {
+      realtime.reconnectListeners.add(listener);
+      return () => realtime.reconnectListeners.delete(listener);
+    },
+    readyState: 1,
+  }),
 }));
 
 const SERVER = 'srv-1';
@@ -154,15 +163,30 @@ describe('useActivitySession dispatch under concurrent actions', () => {
     expect(onEnded).toHaveBeenCalled();
   });
 
-  it('says a network failure in words', async () => {
+  it('says a network failure in words, once the retry window is spent', async () => {
     actionAnswers = [() => {
       throw new TypeError('Failed to fetch');
     }];
     const { result } = await mountSession('tr');
-    await act(async () => {
-      await result.current.dispatch({ type: 'vote' });
-    });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      let pending!: Promise<boolean>;
+      act(() => {
+        pending = result.current.dispatch({ type: 'vote' });
+      });
+      // Busy (the button stays disabled) while it retries the same actionId.
+      expect(result.current.busy).toBe(true);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(TRANSIENT_RETRY_WINDOW_MS + 1_000);
+        await pending;
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(actionBodies.length).toBeGreaterThan(1);
+    expect(new Set(actionBodies).size).toBe(1);
     expect(result.current.error).toBe('Sunucuya ulaşılamadı. Bağlantını kontrol et.');
+    expect(result.current.busy).toBe(false);
   });
 
   it('re-reads the session when a retry turns out to be a duplicate', async () => {
@@ -267,4 +291,72 @@ describe('useActivitySession host hand-over', () => {
     await new Promise((resolve) => setTimeout(resolve, 2_000));
     expect(reads).toHaveLength(1);
   }, 10_000);
+});
+
+describe('useActivitySession catching up after the connection was away', () => {
+  const detailReads = () =>
+    (fetch as unknown as { mock: { calls: Array<[string]> } }).mock.calls.filter(([url]) => url === DETAIL).length;
+
+  let visibility: DocumentVisibilityState = 'visible';
+  beforeEach(() => {
+    visibility = 'visible';
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility });
+  });
+
+  it('re-reads the session when the realtime socket reconnects (events sent meanwhile are lost)', async () => {
+    const { unmount } = await mountSession();
+    const before = detailReads();
+    act(() => {
+      for (const listener of realtime.reconnectListeners) listener();
+    });
+    await waitFor(() => expect(detailReads()).toBe(before + 1));
+    unmount();
+    expect(realtime.reconnectListeners.size).toBe(0);
+  });
+
+  it('re-reads when the network comes back', async () => {
+    await mountSession();
+    const before = detailReads();
+    act(() => {
+      window.dispatchEvent(new Event('online'));
+    });
+    await waitFor(() => expect(detailReads()).toBe(before + 1));
+  });
+
+  it('re-reads when the tab is shown after a while in the background, not after a quick switch', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    await mountSession();
+    const before = detailReads();
+    const flip = (state: DocumentVisibilityState, at: number) => {
+      now.mockReturnValue(at);
+      visibility = state;
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+    };
+    flip('hidden', 1_000_000);
+    flip('visible', 1_002_000);
+    expect(detailReads()).toBe(before);
+    flip('hidden', 1_010_000);
+    flip('visible', 1_040_000);
+    await waitFor(() => expect(detailReads()).toBe(before + 1));
+  });
+
+  it('lands a tap made while the network blinked, without an error', async () => {
+    actionAnswers = [
+      () => {
+        throw new TypeError('Failed to fetch');
+      },
+      committed,
+    ];
+    const { result } = await mountSession();
+    let ok: boolean | undefined;
+    await act(async () => {
+      ok = await result.current.dispatch({ type: 'vote', option: 'a' });
+    });
+    expect(ok).toBe(true);
+    expect(result.current.error).toBeNull();
+    expect(actionBodies).toHaveLength(2);
+    expect(new Set(actionBodies).size).toBe(1);
+  });
 });

@@ -18,7 +18,7 @@ import type { InstalledApp } from '../page';
 import { makeVoice } from './voice-context';
 
 vi.mock('@/lib/realtime-client', () => ({
-  getRealtimeClient: () => ({ connect: () => {}, subscribe: () => () => {}, readyState: 1 }),
+  getRealtimeClient: () => ({ connect: () => {}, subscribe: () => () => {}, onReconnect: () => () => {}, readyState: 1 }),
 }));
 vi.mock('@/lib/plugin-registry', () => ({ getPlugin: () => null }));
 vi.mock('../PluginFrame', () => ({
