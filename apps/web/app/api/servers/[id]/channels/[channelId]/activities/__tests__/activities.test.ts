@@ -469,6 +469,80 @@ describe('POST /api/servers/{id}/channels/{channelId}/activities', () => {
   });
 });
 
+describe('POST /api/servers/{id}/channels/{channelId}/activities — a marketplace plugin', () => {
+  const rpc: Array<Record<string, unknown>> = [];
+
+  beforeEach(async () => {
+    rpc.length = 0;
+    vi.stubEnv('LOBBYFORGE_PLUGIN_WORKER_URL', 'http://plugin-worker:7101');
+    vi.stubEnv('LOBBYFORGE_PLUGIN_WORKER_TOKEN', 'token');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: unknown, init?: RequestInit) => {
+        rpc.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(JSON.stringify({ result: { phase: 'idle' } }), { status: 200 });
+      })
+    );
+    const { buildWorkerPlugin } = await import('@/lib/plugin-worker-client');
+    const market = buildWorkerPlugin({
+      id: 'market',
+      name: 'Market',
+      version: '1.0.0',
+      digest: 'c'.repeat(64),
+      sdk: 'sandbox-v1',
+      actionPolicies: {},
+      locales: ['en', 'tr'],
+      ui: false,
+      hasValidateAction: false,
+      hasProjection: false,
+      hasMigrateState: false,
+    });
+    getPluginServer.mockImplementation(((id: string) => (id === 'market' ? market : null)) as never);
+    getPluginInstall.mockResolvedValue({ ...mockPluginInstall(), pluginId: 'market' });
+    getServerById.mockResolvedValue(mockServer());
+    getUserPermissions.mockResolvedValue(['start_activity']);
+    createGameSession.mockResolvedValue(mockSession({ pluginId: 'market' }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  async function start(headers: Record<string, string>) {
+    const { POST } = await loadListRoute();
+    return POST(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}/activities`, {
+        method: 'POST',
+        headers: { ...headers, cookie: [makeSessionCookie(), headers.cookie].filter(Boolean).join('; ') },
+        body: JSON.stringify({ pluginId: 'market' }),
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID }) }
+    );
+  }
+
+  it('createInitialState gets the starter’s language in ctx.locale (saved choice, then the browser’s)', async () => {
+    expect((await start({ cookie: 'lf_locale=tr' })).status).toBe(201);
+    expect(rpc.find((call) => call.op === 'createInitialState')?.ctx).toMatchObject({
+      locale: 'tr',
+      actorId: USER_ID,
+      hostId: USER_ID,
+    });
+
+    rpc.length = 0;
+    expect((await start({ 'accept-language': 'tr-TR,tr;q=0.9' })).status).toBe(201);
+    expect(rpc.find((call) => call.op === 'createInitialState')?.ctx).toMatchObject({ locale: 'tr' });
+
+    rpc.length = 0;
+    expect((await start({ 'accept-language': 'en-US' })).status).toBe(201);
+    expect(rpc.find((call) => call.op === 'createInitialState')?.ctx).toMatchObject({ locale: 'en' });
+    expect(createGameSession).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({ pluginId: 'market', state: { phase: 'idle' } })
+    );
+  });
+});
+
 describe('GET /api/servers/{id}/channels/{channelId}/activities', () => {
   it('returns 401 when there is no guest session', async () => {
     const { GET } = await loadListRoute();
