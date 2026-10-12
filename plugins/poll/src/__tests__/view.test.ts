@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { POLL_MAX_OPTION_LENGTH, POLL_MAX_OPTIONS, POLL_MAX_QUESTION_LENGTH, pollValidateAction } from '../index';
+import {
+  POLL_MAX_OPTION_LENGTH,
+  POLL_MAX_OPTIONS,
+  POLL_MAX_QUESTION_LENGTH,
+  pollPlugin,
+  pollValidateAction,
+  type PollState,
+} from '../index';
 import {
   checkDraft,
   pollPhaseOf,
@@ -7,8 +14,34 @@ import {
   sharePercent,
   showTurnout,
   totalVotes,
+  voteAction,
   voteStorageKey,
 } from '../view';
+
+describe('poll panel — the vote a choice sends', () => {
+  it('names the poll the choices were drawn for (B-06)', () => {
+    expect(voteAction('u1', 'opt-2', 4)).toEqual({ type: 'vote', playerId: 'u1', optionId: 'opt-2', pollId: 4 });
+    expect(pollValidateAction(voteAction('u1', 'opt-2', 4))).toBeNull();
+  });
+
+  it('sends the classic payload for a state from before poll numbers (or garbage)', () => {
+    for (const pollId of [undefined, null, -1, 2.5, '3']) {
+      expect(voteAction('u1', 'opt-1', pollId)).toEqual({ type: 'vote', playerId: 'u1', optionId: 'opt-1' });
+    }
+  });
+
+  it('a vote built from one poll is ignored once the host cleared it and opened the next', () => {
+    const reduce = (state: PollState, action: Parameters<typeof pollPlugin.handleAction>[2]) =>
+      pollPlugin.handleAction(null as never, state, action);
+    const open = (state: PollState) =>
+      reduce(state, { type: 'open-poll', hostId: 'h', question: 'Q?', options: ['A', 'B'] });
+    const first = open(pollPlugin.createInitialState(null as never));
+    const cast = voteAction('u1', 'opt-1', first.pollId);
+    const second = open(reduce(first, { type: 'clear-poll', hostId: 'h' }));
+    expect(reduce(second, cast)).toBe(second);
+    expect(reduce(first, cast).ballotBox).toEqual(['u1']);
+  });
+});
 
 describe('poll panel — when results show', () => {
   it('keeps the tally hidden until the viewer has voted', () => {
