@@ -157,7 +157,8 @@ describe('dispatchInteractionCreate', () => {
     await dispatchInteractionCreate({ bot: BOT as never, interaction: interaction as never, user: { id: USER, displayName: 'Ayşe' }, locale: 'tr' });
     const job = deliverToEndpoint.mock.calls[0]![0];
     expect(await job.authorize(BOT)).toBe(true);
-    await job.onResponse({ status: 200, body: Buffer.from('{"type":"respond","content":"🎲 4","ephemeral":true}') });
+    // event-delivery hands over the bot as re-read right after the answer arrived.
+    await job.onResponse({ status: 200, body: Buffer.from('{"type":"respond","content":"🎲 4","ephemeral":true}'), bot: BOT });
     expect(db.claimBotInteractionAnswer).toHaveBeenCalledWith(
       expect.anything(),
       { interactionId: 'int-1', botId: 'bot-1', response: { content: '🎲 4', ephemeral: true } },
@@ -171,10 +172,23 @@ describe('dispatchInteractionCreate', () => {
     const { dispatchInteractionCreate } = await import('../interactions');
     await dispatchInteractionCreate({ bot: BOT as never, interaction: interaction as never, user: { id: USER, displayName: 'Ayşe' }, locale: 'tr' });
     const job = deliverToEndpoint.mock.calls[0]![0];
-    await job.authorize({ ...BOT, permissions: ['slash_commands', 'receive_events'] });
-    await job.onResponse({ status: 200, body: Buffer.from('{"type":"respond","content":"public"}') });
+    await job.onResponse({
+      status: 200,
+      body: Buffer.from('{"type":"respond","content":"public"}'),
+      bot: { ...BOT, permissions: ['slash_commands', 'receive_events'] },
+    });
     expect(db.claimBotInteractionAnswer).not.toHaveBeenCalled();
     expect(postBotMessage).not.toHaveBeenCalled();
+  });
+
+  it('the answer acts as the bot handed over at answer time, not the one the command was run with', async () => {
+    const { dispatchInteractionCreate } = await import('../interactions');
+    await dispatchInteractionCreate({ bot: BOT as never, interaction: interaction as never, user: { id: USER, displayName: 'Ayşe' }, locale: 'tr' });
+    const job = deliverToEndpoint.mock.calls[0]![0];
+    // Switched off since the command ran: refused, nothing claimed or pushed.
+    await job.onResponse({ status: 200, body: Buffer.from('{"type":"respond","content":"x","ephemeral":true}'), bot: { ...BOT, enabled: false } });
+    expect(db.claimBotInteractionAnswer).not.toHaveBeenCalled();
+    expect(publishUserEvent).not.toHaveBeenCalled();
   });
 
   it('the endpoint delivery is dropped when the bot lost slash_commands or the channel', async () => {

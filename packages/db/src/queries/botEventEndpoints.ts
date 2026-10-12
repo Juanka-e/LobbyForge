@@ -12,6 +12,7 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
 import { botEventEndpoints, bots } from '../schema.js';
 import { normalizeBotChannelAccessMode, type BotChannelAccessMode } from './botChannelAccess.js';
+import { ENDPOINT_DISABLED_TOKEN_CHANGED } from './bots.js';
 
 export interface BotEventEndpointRow {
   botId: string;
@@ -60,43 +61,64 @@ export async function listBotEventEndpoints(db: DbClient, botIds: string[]): Pro
  * Create or replace a bot's endpoint. Saving re-arms it: enabled, failure
  * counter at zero, no disabled reason. `secret` omitted keeps the stored
  * one (changing the URL or the event list does not force a new secret).
+ *
+ * `expectTokenHash` (the Bot API route passes the hash of the token that
+ * authenticated the request): the save only happens while the bot still
+ * has exactly that token. The bot row is locked first, so a token rotate /
+ * revoke (`changeBotToken`, which also switches the endpoint off) commits
+ * either entirely before — and this save is refused, `null` — or entirely
+ * after it, switching off what was saved here (security review BOT-002:
+ * an endpoint save that started with the old token, say behind a slow DNS
+ * answer, cannot land after the rotation and re-arm the endpoint).
  */
 export async function upsertBotEventEndpoint(
   db: DbClient,
-  input: { botId: string; url: string; events: string[]; secret?: string },
+  input: { botId: string; url: string; events: string[]; secret?: string; expectTokenHash?: string },
   now: Date = new Date()
-): Promise<BotEventEndpointRow> {
-  const existing = await getBotEventEndpoint(db, input.botId);
-  if (!existing && !input.secret) throw new Error('upsertBotEventEndpoint: a new endpoint needs a secret');
-  const values = {
-    botId: input.botId,
-    url: input.url,
-    secret: input.secret ?? existing!.secret,
-    events: input.events,
-    enabled: true,
-    failureCount: 0,
-    disabledReason: null,
-    createdAt: now,
-    updatedAt: now,
-  };
-  const [row] = await db
-    .insert(botEventEndpoints)
-    .values(values)
-    .onConflictDoUpdate({
-      target: botEventEndpoints.botId,
-      set: {
-        url: values.url,
-        secret: values.secret,
-        events: values.events,
-        enabled: true,
-        failureCount: 0,
-        disabledReason: null,
-        updatedAt: now,
-      },
-    })
-    .returning();
-  if (!row) throw new Error('upsertBotEventEndpoint: upsert returned no rows');
-  return normalizeEndpoint(row as Record<string, unknown>);
+): Promise<BotEventEndpointRow | null> {
+  return db.transaction(async (tx) => {
+    if (input.expectTokenHash !== undefined) {
+      const [bot] = await tx
+        .select({ tokenHash: bots.tokenHash })
+        .from(bots)
+        .where(eq(bots.id, input.botId))
+        .limit(1)
+        .for('update');
+      if (!bot || bot.tokenHash !== input.expectTokenHash) return null;
+    }
+    const current = await tx.select().from(botEventEndpoints).where(eq(botEventEndpoints.botId, input.botId)).limit(1);
+    const existing = current[0] ? normalizeEndpoint(current[0] as Record<string, unknown>) : null;
+    if (!existing && !input.secret) throw new Error('upsertBotEventEndpoint: a new endpoint needs a secret');
+    const values = {
+      botId: input.botId,
+      url: input.url,
+      secret: input.secret ?? existing!.secret,
+      events: input.events,
+      enabled: true,
+      failureCount: 0,
+      disabledReason: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const [row] = await tx
+      .insert(botEventEndpoints)
+      .values(values)
+      .onConflictDoUpdate({
+        target: botEventEndpoints.botId,
+        set: {
+          url: values.url,
+          secret: values.secret,
+          events: values.events,
+          enabled: true,
+          failureCount: 0,
+          disabledReason: null,
+          updatedAt: now,
+        },
+      })
+      .returning();
+    if (!row) throw new Error('upsertBotEventEndpoint: upsert returned no rows');
+    return normalizeEndpoint(row as Record<string, unknown>);
+  });
 }
 
 export async function deleteBotEventEndpoint(db: DbClient, botId: string): Promise<boolean> {
@@ -104,7 +126,12 @@ export async function deleteBotEventEndpoint(db: DbClient, botId: string): Promi
   return deleted.length > 0;
 }
 
-/** A manager switches a disabled endpoint back on (counter reset). */
+/**
+ * A manager switches a disabled endpoint back on (counter reset). Never
+ * one switched off by a token change (`token_changed`, BOT-002): only a
+ * holder of the new token may arm it, by saving it again — null then, as
+ * for a missing endpoint (the route tells the two apart first).
+ */
 export async function reenableBotEventEndpoint(
   db: DbClient,
   botId: string,
@@ -113,7 +140,12 @@ export async function reenableBotEventEndpoint(
   const rows = await db
     .update(botEventEndpoints)
     .set({ enabled: true, failureCount: 0, disabledReason: null, updatedAt: now })
-    .where(eq(botEventEndpoints.botId, botId))
+    .where(
+      and(
+        eq(botEventEndpoints.botId, botId),
+        sql`${botEventEndpoints.disabledReason} IS DISTINCT FROM ${ENDPOINT_DISABLED_TOKEN_CHANGED}`
+      )
+    )
     .returning();
   return rows[0] ? normalizeEndpoint(rows[0] as Record<string, unknown>) : null;
 }

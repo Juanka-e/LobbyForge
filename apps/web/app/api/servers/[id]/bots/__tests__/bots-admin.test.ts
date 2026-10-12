@@ -24,13 +24,29 @@ const logAction = vi.fn();
 const getChannelById = vi.fn();
 const isChannelOpenToBots = vi.fn();
 const getBuiltInBotForServer = vi.fn();
+const changeBotToken = vi.fn();
+// The managers' channel-access view (BOT-001: hidden grants).
+const listChannelsForServer = vi.fn();
+const listBotAccessibleChannels = vi.fn();
+const getBotChannelAccessState = vi.fn();
+const listVisibleChannelsForMember = vi.fn();
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 vi.mock('@lobbyforge/db', () => ({
   // Bot API v2 §1.1: the channel rule lives in @lobbyforge/db; emulate it
-  // over this file's channel mocks (no explicit grants → the v1 rule).
-  getBotReachableChannel: async (db: unknown, bot: { serverId: string }, id: string) => {
+  // over this file's channel mocks (no explicit grants → the v1 rule) —
+  // including Postgres' answer to a bot id that is not a uuid (22P02).
+  // `builtin-welcome-channel.test.ts` runs the real queries.
+  getBotReachableChannel: async (db: unknown, bot: { id: string; serverId: string }, id: string) => {
+    if (!UUID.test(bot.id)) throw Object.assign(new Error('invalid input syntax for type uuid'), { code: '22P02' });
     const channel = await getChannelById(db, id);
     if (!channel || channel.serverId !== bot.serverId || !['text', 'announcement'].includes(channel.type)) return null;
+    return (await isChannelOpenToBots(db, id)) ? channel : null;
+  },
+  getChannelOpenToBots: async (db: unknown, serverId: string, id: string) => {
+    const channel = await getChannelById(db, id);
+    if (!channel || channel.serverId !== serverId || !['text', 'announcement'].includes(channel.type)) return null;
     return (await isChannelOpenToBots(db, id)) ? channel : null;
   },
   listBotReachableChannels: async () => [],
@@ -47,11 +63,16 @@ vi.mock('@lobbyforge/db', () => ({
   updateBot,
   deleteBot,
   setBotTokenHash,
+  changeBotToken,
   ensureBuiltInBot,
   logAction,
   getChannelById,
   isChannelOpenToBots,
   getBuiltInBotForServer,
+  listChannelsForServer,
+  listBotAccessibleChannels,
+  getBotChannelAccessState,
+  listVisibleChannelsForMember,
   canMemberAccessChannel: vi.fn(),
 }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
@@ -71,6 +92,9 @@ const MEMBER = '55555555-5555-4555-8555-555555555555';
 const BOT_ID = '0f8fad5b-d9cb-469f-a165-70867728950e';
 const GENERAL = '22222222-2222-4222-8222-222222222222';
 const FOREIGN_CHANNEL = '77777777-7777-4777-8777-777777777777';
+/** A role-gated channel MANAGER holds no role for. */
+const VAULT = '88888888-8888-4888-8888-888888888888';
+const WELCOME_BOT_ID = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
 
 const PERMS: Record<string, string[]> = {
   [OWNER]: ['administrator'],
@@ -122,9 +146,20 @@ beforeEach(() => {
   vi.resetModules();
   process.env.LOBBYFORGE_SESSION_SECRET = SECRET;
   delete process.env.LOBBYFORGE_DEFAULT_LOCALE;
-  for (const fn of [getServerById, isServerMember, getUserPermissions, listBotsForServer, countBotsForServer, createBot, getBotById, updateBot, deleteBot, setBotTokenHash, ensureBuiltInBot, logAction, getChannelById, isChannelOpenToBots, getBuiltInBotForServer]) {
+  for (const fn of [getServerById, isServerMember, getUserPermissions, listBotsForServer, countBotsForServer, createBot, getBotById, updateBot, deleteBot, setBotTokenHash, changeBotToken, ensureBuiltInBot, logAction, getChannelById, isChannelOpenToBots, getBuiltInBotForServer, listChannelsForServer, listBotAccessibleChannels, getBotChannelAccessState, listVisibleChannelsForMember]) {
     fn.mockReset();
   }
+  // Default: the bot uses every open channel — nothing hidden from anyone.
+  const general = { id: GENERAL, serverId: SERVER, type: 'text', name: 'general', position: 0 };
+  const vault = { id: VAULT, serverId: SERVER, type: 'text', name: 'vault', position: 1 };
+  listChannelsForServer.mockResolvedValue([general, vault]);
+  listBotAccessibleChannels.mockResolvedValue([general]);
+  getBotChannelAccessState.mockResolvedValue({ mode: 'all', channelIds: [] });
+  listVisibleChannelsForMember.mockResolvedValue([general]);
+  changeBotToken.mockImplementation(async (_db: unknown, _id: string, hash: string | null) => ({
+    bot: botRow({ tokenHash: hash, tokenIssuedAt: hash ? new Date() : null }),
+    endpointDisabled: false,
+  }));
   getServerById.mockResolvedValue({ id: SERVER, name: 'Lobby', ownerUserId: OWNER });
   isServerMember.mockImplementation(async (_db: unknown, uid: string) => uid in PERMS);
   getUserPermissions.mockImplementation(async (_db: unknown, uid: string) => PERMS[uid] ?? []);
@@ -358,7 +393,7 @@ describe('bot tokens', () => {
     expect(res.status).toBe(200);
     const { token } = await res.json();
     expect(token).toMatch(BOT_TOKEN_PATTERN);
-    expect(setBotTokenHash).toHaveBeenCalledWith(expect.anything(), BOT_ID, hashBotToken(token));
+    expect(changeBotToken).toHaveBeenCalledWith(expect.anything(), BOT_ID, hashBotToken(token));
     expect(auditCalls('bot.token.rotate')).toHaveLength(1);
     expect(JSON.stringify(logAction.mock.calls)).not.toContain(token);
   });
@@ -370,11 +405,11 @@ describe('bot tokens', () => {
     const denied = await POST(req('POST', '/x', MANAGER), botCtx());
     expect(denied.status).toBe(403);
     expect(await denied.json()).toMatchObject({ code: 'ungrantable_permissions', permissions: ['read_audit_log'] });
-    expect(setBotTokenHash).not.toHaveBeenCalled();
+    expect(changeBotToken).not.toHaveBeenCalled();
 
     const owner = await POST(req('POST', '/x', OWNER), botCtx());
     expect(owner.status).toBe(200);
-    expect(setBotTokenHash).toHaveBeenCalledTimes(1);
+    expect(changeBotToken).toHaveBeenCalledTimes(1);
   });
 
   it('does not hold a permission id that no longer exists against the manager', async () => {
@@ -394,7 +429,7 @@ describe('bot tokens', () => {
     const { DELETE } = await import('../[botId]/token/route.js');
     const res = await DELETE(req('DELETE', '/x', OWNER), botCtx());
     expect(res.status).toBe(200);
-    expect(setBotTokenHash).toHaveBeenCalledWith(expect.anything(), BOT_ID, null);
+    expect(changeBotToken).toHaveBeenCalledWith(expect.anything(), BOT_ID, null);
     expect((await res.json()).bot.tokenConfigured).toBe(false);
     expect(auditCalls('bot.token.revoke')).toHaveLength(1);
   });
@@ -404,7 +439,102 @@ describe('bot tokens', () => {
     expect((await tokens.POST(req('POST', '/x', MEMBER), botCtx())).status).toBe(403);
     getBotById.mockResolvedValue(botRow({ type: 'moderation', tokenHash: null }));
     expect((await tokens.POST(req('POST', '/x', OWNER), botCtx())).status).toBe(400);
-    expect(setBotTokenHash).not.toHaveBeenCalled();
+    expect(changeBotToken).not.toHaveBeenCalled();
+  });
+
+  it('BOT-002: a rotate or revoke that switched the event endpoint off audits that too (reason token_changed)', async () => {
+    changeBotToken.mockImplementation(async (_db: unknown, _id: string, hash: string | null) => ({
+      bot: botRow({ tokenHash: hash }),
+      endpointDisabled: true,
+    }));
+    const tokens = await import('../[botId]/token/route.js');
+    expect((await tokens.POST(req('POST', '/x', MANAGER), botCtx())).status).toBe(200);
+    expect(auditCalls('bot.token.rotate')[0]!.metadata).toMatchObject({ endpointDisabled: true });
+    expect(auditCalls('bot.event_endpoint.disable')).toEqual([
+      expect.objectContaining({ actorUserId: MANAGER, targetType: 'bot', metadata: expect.objectContaining({ reason: 'token_changed' }) }),
+    ]);
+    logAction.mockClear();
+    expect((await tokens.DELETE(req('DELETE', '/x', OWNER), botCtx())).status).toBe(200);
+    expect(auditCalls('bot.token.revoke')[0]!.metadata).toMatchObject({ endpointDisabled: true });
+    expect(auditCalls('bot.event_endpoint.disable')[0]!.metadata).toMatchObject({ reason: 'token_changed' });
+  });
+
+  it('no endpoint switched off → no extra audit entry', async () => {
+    const { POST } = await import('../[botId]/token/route.js');
+    await POST(req('POST', '/x', OWNER), botCtx());
+    expect(auditCalls('bot.event_endpoint.disable')).toHaveLength(0);
+    expect(auditCalls('bot.token.rotate')[0]!.metadata).not.toHaveProperty('endpointDisabled');
+  });
+});
+
+describe('BOT-001: a bot with access to private channels the manager cannot see', () => {
+  /** The bot was granted #vault (role-gated) by someone with Manage Channels; MANAGER cannot see it. */
+  function grantHiddenChannel() {
+    getBotChannelAccessState.mockResolvedValue({ mode: 'selected', channelIds: [GENERAL, VAULT] });
+  }
+
+  it('token POST: 403 cannot_take_hidden_access for that manager — no token is minted', async () => {
+    grantHiddenChannel();
+    const { POST } = await import('../[botId]/token/route.js');
+    const res = await POST(req('POST', '/x', MANAGER), botCtx());
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body).toMatchObject({ code: 'cannot_take_hidden_access' });
+    expect(body.token).toBeUndefined();
+    // The refusal names no channel.
+    expect(JSON.stringify(body)).not.toContain(VAULT);
+    expect(JSON.stringify(body)).not.toContain('vault');
+    expect(changeBotToken).not.toHaveBeenCalled();
+    expect(logAction).not.toHaveBeenCalled();
+  });
+
+  it('token POST: the owner (who sees every channel) still may; so may the manager once nothing is hidden', async () => {
+    grantHiddenChannel();
+    const { POST } = await import('../[botId]/token/route.js');
+    expect((await POST(req('POST', '/x', OWNER), botCtx())).status).toBe(200);
+    // The private grant is one MANAGER can see now (a role opens #vault for them).
+    listVisibleChannelsForMember.mockResolvedValue([
+      { id: GENERAL, serverId: SERVER, type: 'text', name: 'general', position: 0 },
+      { id: VAULT, serverId: SERVER, type: 'text', name: 'vault', position: 1 },
+    ]);
+    expect((await POST(req('POST', '/x', MANAGER), botCtx())).status).toBe(200);
+    expect(changeBotToken).toHaveBeenCalledTimes(2);
+  });
+
+  it('token DELETE (revoke) is never blocked — it only takes access away', async () => {
+    grantHiddenChannel();
+    const { DELETE } = await import('../[botId]/token/route.js');
+    expect((await DELETE(req('DELETE', '/x', MANAGER), botCtx())).status).toBe(200);
+  });
+
+  it('PATCH: adding read_messages, send_messages, receive_events or slash_commands is refused for that manager', async () => {
+    grantHiddenChannel();
+    // MANAGER may grant all four (they hold Send Messages and Read Message History).
+    getBotById.mockResolvedValue(botRow({ permissions: ['read_members'] }));
+    const { PATCH } = await import('../[botId]/route.js');
+    for (const added of ['read_messages', 'send_messages', 'receive_events', 'slash_commands']) {
+      const res = await PATCH(req('PATCH', '/x', MANAGER, { permissions: ['read_members', added] }), botCtx());
+      expect(res.status, added).toBe(403);
+      expect(await res.json()).toMatchObject({ code: 'cannot_take_hidden_access' });
+    }
+    expect(updateBot).not.toHaveBeenCalled();
+  });
+
+  it('PATCH: removing a permission, keeping them, renaming or a non-channel permission stays allowed; the owner may add', async () => {
+    grantHiddenChannel();
+    getBotById.mockResolvedValue(botRow({ permissions: ['send_messages', 'read_messages'] }));
+    const { PATCH } = await import('../[botId]/route.js');
+    expect((await PATCH(req('PATCH', '/x', MANAGER, { permissions: ['send_messages'] }), botCtx())).status).toBe(200);
+    expect((await PATCH(req('PATCH', '/x', MANAGER, { name: 'Herald', permissions: ['send_messages', 'read_messages'] }), botCtx())).status).toBe(200);
+    expect((await PATCH(req('PATCH', '/x', MANAGER, { enabled: false }), botCtx())).status).toBe(200);
+    const owner = await PATCH(req('PATCH', '/x', OWNER, { permissions: ['send_messages', 'read_messages', 'receive_events'] }), botCtx());
+    expect(owner.status).toBe(200);
+  });
+
+  it('a bot without private grants is unaffected (mode all reaches only channels every member sees)', async () => {
+    getBotById.mockResolvedValue(botRow({ permissions: ['send_messages'] }));
+    const { PATCH } = await import('../[botId]/route.js');
+    expect((await PATCH(req('PATCH', '/x', MANAGER, { permissions: ['send_messages', 'read_messages'] }), botCtx())).status).toBe(200);
   });
 });
 
@@ -502,6 +632,22 @@ describe('PUT /api/servers/{id}/bots/builtin/{type}', () => {
     expect(audit!.metadata.changes).toMatchObject({ settings: { blockedWords: 2, linkPolicy: 'block' } });
     // The audit log gets counts, not the word list.
     expect(JSON.stringify(audit)).not.toContain('salak');
+  });
+
+  it('checks the channel against the EXISTING Welcome Bot (its real id and §1.1 mode), or the open-channel rule before it exists', async () => {
+    const { PUT } = await import('../builtin/[type]/route.js');
+    ensureBuiltInBot.mockImplementation(async (_db: unknown, input: Record<string, unknown>) => ({
+      bot: welcomeRow(input.settings as Record<string, unknown>, { id: WELCOME_BOT_ID }),
+      created: true,
+    }));
+    // First save: no bot row yet — no bot id is queried at all.
+    getBuiltInBotForServer.mockResolvedValue(null);
+    expect((await PUT(req('PUT', '/x', OWNER, { settings: { channelId: GENERAL } }), builtinCtx('welcome'))).status).toBe(200);
+    // Later saves: the bot's own row (a uuid) decides.
+    getBuiltInBotForServer.mockResolvedValue(welcomeRow({}, { id: WELCOME_BOT_ID }));
+    ensureBuiltInBot.mockResolvedValue({ bot: welcomeRow({}, { id: WELCOME_BOT_ID }), created: false });
+    expect((await PUT(req('PUT', '/x', OWNER, { settings: { channelId: GENERAL } }), builtinCtx('welcome'))).status).toBe(200);
+    expect(getBuiltInBotForServer).toHaveBeenCalledWith(expect.anything(), SERVER, 'welcome');
   });
 
   it('toggles an existing built-in bot as enable/disable', async () => {

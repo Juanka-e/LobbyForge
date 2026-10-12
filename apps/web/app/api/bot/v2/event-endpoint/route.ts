@@ -15,6 +15,7 @@ import {
   EVENT_ENDPOINT_URL_MAX_LENGTH,
   defaultEndpointEvents,
   generateEndpointSecret,
+  resetEndpointBackoff,
   toEventEndpointJson,
   validateEndpointUrl,
 } from '@/lib/bots/event-delivery';
@@ -52,11 +53,16 @@ async function handleGet(_req: Request, _ctx: unknown, bot: BotRow): Promise<Nex
 
 /**
  * PUT /api/bot/v2/event-endpoint  { url, events? }
- * Set or replace the HTTPS endpoint. The URL must resolve only to public
- * addresses (checked now and on every delivery). Every PUT issues a NEW
- * signing secret, returned in this response only; saving also re-arms an
- * endpoint that was switched off. `events` defaults to everything the
- * bot's permissions allow.
+ * Set or replace the HTTPS endpoint. The URL must have a dotted host name
+ * (or an IP literal) that resolves only to public addresses (checked now
+ * and on every delivery); a refusal says only that, never what the name
+ * resolved to (BOT-004). Every PUT issues a NEW signing secret, returned in
+ * this response only; saving also re-arms an endpoint that was switched
+ * off — including after a token rotate / revoke, which is how the new
+ * token's holder takes it over. `events` defaults to everything the bot's
+ * permissions allow. The save is bound to the token that authenticated it:
+ * if the token was rotated or revoked meanwhile (say while the DNS check
+ * ran), nothing is saved and the answer is 401 (BOT-002).
  */
 async function handlePut(req: Request, _ctx: unknown, bot: BotRow): Promise<NextResponse> {
   const denied = requireBotPermission(bot, 'receive_events');
@@ -71,7 +77,18 @@ async function handlePut(req: Request, _ctx: unknown, bot: BotRow): Promise<Next
 
   const events = parsed.data.events ? Array.from(new Set(parsed.data.events)) : defaultEndpointEvents(bot.permissions);
   const secret = generateEndpointSecret();
-  const row = await upsertBotEventEndpoint(getDb(), { botId: bot.id, url: verdict.url, events, secret });
+  const row = await upsertBotEventEndpoint(getDb(), {
+    botId: bot.id,
+    url: verdict.url,
+    events,
+    secret,
+    // `withBotAuth` only lets a bot with a token through.
+    expectTokenHash: bot.tokenHash ?? '',
+  });
+  if (!row) {
+    return botError(401, 'unauthorized', 'Invalid bot token', {}, { 'WWW-Authenticate': 'Bot' });
+  }
+  resetEndpointBackoff(bot.id);
   invalidateBotEventTargets(bot.serverId);
   audit(bot, 'bot.event_endpoint.set', { host: verdict.hostname, events });
   return NextResponse.json({ endpoint: toEventEndpointJson(row), secret });
@@ -82,6 +99,7 @@ async function handleDelete(_req: Request, _ctx: unknown, bot: BotRow): Promise<
   const denied = requireBotPermission(bot, 'receive_events');
   if (denied) return denied;
   if (!(await deleteBotEventEndpoint(getDb(), bot.id))) return botError(404, 'not_found', 'No event endpoint is set');
+  resetEndpointBackoff(bot.id);
   invalidateBotEventTargets(bot.serverId);
   audit(bot, 'bot.event_endpoint.remove', {});
   return NextResponse.json({ ok: true });

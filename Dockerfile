@@ -70,6 +70,14 @@ USER node
 
 EXPOSE 3000 3001
 
+# libuv's threadpool (default 4 threads) runs scrypt password hashing,
+# zlib, file I/O and dns.lookup (getaddrinfo) for the whole process; a few
+# slow lookups (the plugin installer, the directory, CAPTCHA siteverify)
+# must not stall sign-ins. Bot event deliveries resolve off the pool
+# (c-ares, 2 s deadline), but the web server still gets a bigger pool.
+# Read once at process start; override in .env.prod (env_file) if needed.
+ENV UV_THREADPOOL_SIZE=16
+
 # Start only the Next.js web server (direct node invocation — no pnpm
 # in the runtime image). The ws-gateway runs as a separate Compose
 # service with its own CMD override.

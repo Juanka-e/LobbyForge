@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { getBotById, setBotTokenHash } from '@lobbyforge/db';
+import { changeBotToken, getBotById, type BotRow } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { withApiSecurity } from '@/lib/security-headers';
-import { auditBotAction, jsonErrors, requireBotManager, toBotJson } from '@/lib/bots/admin';
+import { auditBotAction, jsonErrors, refuseHiddenChannelReach, requireBotManager, toBotJson } from '@/lib/bots/admin';
 import { CUSTOM_BOT_TYPE, findUngrantableBotPermissions, isBotPermission } from '@/lib/bots/permissions';
 import { generateBotToken } from '@/lib/bots/token';
 import { notifyBotChanged } from '@/lib/bots/events';
+import { resetEndpointBackoff } from '@/lib/bots/event-delivery';
 import { requireVerifiedEmail } from '@/lib/mail/verification';
 
 export const dynamic = 'force-dynamic';
@@ -30,8 +31,29 @@ const BUILT_IN_HAS_NO_TOKEN = () =>
   );
 
 /**
+ * After a token change (BOT-002): the event stream opened with the old
+ * token closes, the fan-out forgets its copy, and — when the change
+ * switched the outgoing endpoint off — that is audited on its own, like the
+ * switch-off after repeated failures.
+ */
+function afterTokenChange(input: { serverId: string; actorUserId: string; bot: BotRow; endpointDisabled: boolean }): void {
+  notifyBotChanged({ serverId: input.serverId, botId: input.bot.id, reason: 'token_changed' });
+  if (!input.endpointDisabled) return;
+  resetEndpointBackoff(input.bot.id);
+  auditBotAction({
+    serverId: input.serverId,
+    actorUserId: input.actorUserId,
+    action: 'bot.event_endpoint.disable',
+    bot: input.bot,
+    metadata: { reason: 'token_changed' },
+  });
+}
+
+/**
  * POST — issue a token, or rotate it: the previous token stops working
- * the moment this returns. The new token is in the response, once.
+ * the moment this returns, and the bot's outgoing event endpoint is
+ * switched off (`token_changed`) until a holder of the new token saves it
+ * again. The new token is in the response, once.
  */
 async function handlePost(req: Request, ctx: RouteContext): Promise<NextResponse> {
   const { id: serverId, botId } = await ctx.params;
@@ -64,25 +86,33 @@ async function handlePost(req: Request, ctx: RouteContext): Promise<NextResponse
       { status: 403 }
     );
   }
+  // BOT-001: nor for a bot that reaches private channels the caller cannot
+  // see — the token would let them read and post there.
+  const hidden = await refuseHiddenChannelReach(bot, auth.manager);
+  if (hidden) return hidden;
 
   const { token, hash } = generateBotToken(bot.id);
-  const updated = await setBotTokenHash(getDb(), bot.id, hash);
-  if (!updated) return NOT_FOUND();
-  // Bot API v2: an event stream opened with the old token must close.
-  if (bot.tokenHash) notifyBotChanged({ serverId, botId: bot.id, reason: 'token_changed' });
+  const change = await changeBotToken(getDb(), bot.id, hash);
+  if (!change) return NOT_FOUND();
+  const updated = change.bot;
   auditBotAction({
     serverId,
     actorUserId: auth.manager.uid,
     action: bot.tokenHash ? 'bot.token.rotate' : 'bot.token.issue',
     bot: updated,
+    ...(change.endpointDisabled ? { metadata: { endpointDisabled: true } } : {}),
   });
+  afterTokenChange({ serverId, actorUserId: auth.manager.uid, bot: updated, endpointDisabled: change.endpointDisabled });
   return NextResponse.json(
     { bot: toBotJson(updated, { includeSettings: true }), token },
     { headers: { 'Cache-Control': 'no-store' } }
   );
 }
 
-/** DELETE — revoke the token. The bot stays; it just cannot call the API. */
+/**
+ * DELETE — revoke the token. The bot stays; it just cannot call the API,
+ * and its outgoing event endpoint is switched off (`token_changed`).
+ */
 async function handleDelete(req: Request, ctx: RouteContext): Promise<NextResponse> {
   const { id: serverId, botId } = await ctx.params;
   const auth = await requireBotManager(req, serverId);
@@ -92,10 +122,17 @@ async function handleDelete(req: Request, ctx: RouteContext): Promise<NextRespon
   if (!bot) return NOT_FOUND();
   if (builtIn) return BUILT_IN_HAS_NO_TOKEN();
 
-  const updated = await setBotTokenHash(getDb(), bot.id, null);
-  if (!updated) return NOT_FOUND();
-  notifyBotChanged({ serverId, botId: bot.id, reason: 'token_changed' });
-  auditBotAction({ serverId, actorUserId: auth.manager.uid, action: 'bot.token.revoke', bot: updated });
+  const change = await changeBotToken(getDb(), bot.id, null);
+  if (!change) return NOT_FOUND();
+  const updated = change.bot;
+  auditBotAction({
+    serverId,
+    actorUserId: auth.manager.uid,
+    action: 'bot.token.revoke',
+    bot: updated,
+    ...(change.endpointDisabled ? { metadata: { endpointDisabled: true } } : {}),
+  });
+  afterTokenChange({ serverId, actorUserId: auth.manager.uid, bot: updated, endpointDisabled: change.endpointDisabled });
   return NextResponse.json(
     { bot: toBotJson(updated, { includeSettings: true }) },
     { headers: { 'Cache-Control': 'no-store' } }

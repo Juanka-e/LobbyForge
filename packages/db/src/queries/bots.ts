@@ -11,10 +11,18 @@
  * or accepts a raw token; hashing and constant-time comparison live in the
  * web app's `lib/bots/token.ts`.
  */
-import { and, asc, count, eq, inArray, isNull, lt, or } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
-import { bots, channelRoleOverrides, channels, servers, users } from '../schema.js';
+import { botEventEndpoints, bots, channelRoleOverrides, channels, servers, users } from '../schema.js';
 import type { ChannelRow } from './channels.js';
+
+/**
+ * `bot_event_endpoints.disabled_reason` after a token rotate or revoke
+ * (security review BOT-002): whoever set the endpoint held the OLD token,
+ * so it stays off until a holder of the new token saves one again (a PUT
+ * issues a new signing secret). A manager cannot simply switch it back on.
+ */
+export const ENDPOINT_DISABLED_TOKEN_CHANGED = 'token_changed';
 
 /** The built-in bot types — at most one of each per server (0037 index). */
 export const BUILT_IN_BOT_TYPES = ['welcome', 'moderation'] as const;
@@ -262,24 +270,68 @@ export async function updateBot(
   return getBotById(db, botId);
 }
 
+export interface BotTokenChange {
+  bot: BotRow;
+  /** An outgoing event endpoint was switched off by this change (it was on, or off for another reason). */
+  endpointDisabled: boolean;
+}
+
 /**
  * Replace (rotate) or clear (revoke) a bot's token hash. The previous
- * token stops working the moment this commits. Returns null when the bot
- * does not exist.
+ * token stops working the moment this commits — and, in the same
+ * transaction, the bot's outgoing event endpoint is switched off with
+ * `disabled_reason = 'token_changed'` (security review BOT-002): its URL
+ * and signing secret were set by whoever held the old token, so a leaked
+ * token must not leave an attacker's endpoint receiving events and
+ * answering interactions after the rotation. Saving the endpoint again
+ * (Bot API `PUT /event-endpoint`, with the new token) re-arms it.
+ *
+ * The UPDATE locks the bot row, so a concurrent endpoint save that checks
+ * the token under the same lock (`upsertBotEventEndpoint` with
+ * `expectTokenHash`) is ordered before or after this whole change, never
+ * in between. Returns null when the bot does not exist.
  */
+export async function changeBotToken(
+  db: DbClient,
+  botId: string,
+  tokenHash: string | null,
+  now: Date = new Date()
+): Promise<BotTokenChange | null> {
+  const outcome = await db.transaction(async (tx) => {
+    const updated = await tx
+      .update(bots)
+      .set({ tokenHash, tokenIssuedAt: tokenHash ? now : null, updatedAt: now })
+      .where(eq(bots.id, botId))
+      .returning({ id: bots.id });
+    if (updated.length === 0) return null;
+    const disabled = await tx
+      .update(botEventEndpoints)
+      .set({ enabled: false, disabledReason: ENDPOINT_DISABLED_TOKEN_CHANGED, updatedAt: now })
+      .where(
+        and(
+          eq(botEventEndpoints.botId, botId),
+          or(
+            eq(botEventEndpoints.enabled, true),
+            sql`${botEventEndpoints.disabledReason} IS DISTINCT FROM ${ENDPOINT_DISABLED_TOKEN_CHANGED}`
+          )
+        )
+      )
+      .returning({ botId: botEventEndpoints.botId });
+    return { endpointDisabled: disabled.length > 0 };
+  });
+  if (!outcome) return null;
+  const bot = await getBotById(db, botId);
+  return bot ? { bot, endpointDisabled: outcome.endpointDisabled } : null;
+}
+
+/** `changeBotToken` without the endpoint detail (kept for callers that only need the row). */
 export async function setBotTokenHash(
   db: DbClient,
   botId: string,
   tokenHash: string | null,
   now: Date = new Date()
 ): Promise<BotRow | null> {
-  const updated = await db
-    .update(bots)
-    .set({ tokenHash, tokenIssuedAt: tokenHash ? now : null, updatedAt: now })
-    .where(eq(bots.id, botId))
-    .returning({ id: bots.id });
-  if (updated.length === 0) return null;
-  return getBotById(db, botId);
+  return (await changeBotToken(db, botId, tokenHash, now))?.bot ?? null;
 }
 
 /** Delete a bot. Its messages stay (bot_id → NULL, metadata keeps the name). */

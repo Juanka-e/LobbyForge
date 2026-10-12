@@ -444,9 +444,18 @@ export function getBotEventEndpoint(serverId: string, botId: string) {
   return request(botV2Paths.botEventEndpoint(serverId, botId), {}, parseEventEndpoint);
 }
 
-/** Turn a disabled endpoint back on (resets the failure count server-side). */
+/**
+ * Turn a disabled endpoint back on (resets the failure count server-side).
+ * Refused (409 `endpoint_token_changed`) for one switched off by a token
+ * change: only the bot, with its new token, may set that one again.
+ */
 export function reenableBotEventEndpoint(serverId: string, botId: string) {
   return request(botV2Paths.botEventEndpoint(serverId, botId), { method: 'PATCH', body: { enabled: true } }, parseEventEndpoint);
+}
+
+/** Remove the bot's endpoint: deliveries stop at once; the bot can set a new one. */
+export function removeBotEventEndpoint(serverId: string, botId: string) {
+  return request(botV2Paths.botEventEndpoint(serverId, botId), { method: 'DELETE' }, () => ({ ok: true as const }));
 }
 
 // ---------------------------------------------------------------------------
