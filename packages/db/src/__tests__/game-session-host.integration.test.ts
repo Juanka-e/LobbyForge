@@ -19,6 +19,7 @@ import { isPgUniqueViolation } from '../pg-errors.js';
 import {
   createGameSession,
   endGameSession,
+  endOpenGameSessionsForPlugin,
   getActiveGameSessionForChannel,
   getGameSessionById,
   transferGameSessionHost,
@@ -35,6 +36,8 @@ describe.skipIf(!DB_URL)('game session host transfer + channel mutex (integratio
   const serverId = randomUUID();
   const channelId = randomUUID();
   const raceChannelId = randomUUID();
+  const appChannelA = randomUUID();
+  const appChannelB = randomUUID();
   let sessionId = '';
 
   beforeAll(async () => {
@@ -43,7 +46,9 @@ describe.skipIf(!DB_URL)('game session host transfer + channel mutex (integratio
     await sql`
       INSERT INTO channels (id, server_id, name, type) VALUES
         (${channelId}, ${serverId}, 'games', 'voice'),
-        (${raceChannelId}, ${serverId}, 'race', 'voice')`;
+        (${raceChannelId}, ${serverId}, 'race', 'voice'),
+        (${appChannelA}, ${serverId}, 'app-a', 'voice'),
+        (${appChannelB}, ${serverId}, 'app-b', 'voice')`;
     sessionId = (
       await createGameSession(db, { serverId, channelId, pluginId: 'host-test', createdBy: owner, state: { n: 0 } })
     ).id;
@@ -95,5 +100,25 @@ describe.skipIf(!DB_URL)('game session host transfer + channel mutex (integratio
     expect(isPgUniqueViolation(rejected[0]!.reason)).toBe(true);
     const open = await getActiveGameSessionForChannel(db, raceChannelId);
     expect(open).not.toBeNull();
+  });
+
+  it('ends every open session of one plugin in the community (uninstall), and only those', async () => {
+    const mine = await createGameSession(db, {
+      serverId,
+      channelId: appChannelA,
+      pluginId: 'gone-app',
+      createdBy: owner,
+      state: {},
+      timers: [{ id: 't', at: Date.now() + 60_000, action: { type: 'tick' } }],
+    });
+    const other = await createGameSession(db, { serverId, channelId: appChannelB, pluginId: 'kept-app', createdBy: owner, state: {} });
+    const ended = await endOpenGameSessionsForPlugin(db, serverId, 'gone-app');
+    expect(ended.map((row) => row.id)).toEqual([mine.id]);
+    expect(ended[0]).toMatchObject({ status: 'ended', timers: [] });
+    expect(ended[0]!.endedAt).toBeInstanceOf(Date);
+    await expect(getGameSessionById(db, mine.id)).resolves.toBeNull();
+    await expect(getGameSessionById(db, other.id)).resolves.not.toBeNull();
+    // Nothing open any more: a second call ends nothing.
+    await expect(endOpenGameSessionsForPlugin(db, serverId, 'gone-app')).resolves.toEqual([]);
   });
 });

@@ -47,6 +47,7 @@ import {
   type DbClient,
 } from '@lobbyforge/db';
 import { postAppMessage } from './activity-app-chat';
+import { isAppEnabled } from './activity-app-install';
 
 /** What a plugin may do with effects. */
 export interface EffectGrant {
@@ -184,11 +185,27 @@ export interface PostCommitInput {
  *    exceed the limit or the write fails. Values are whole and last write
  *    wins: two sessions updating the same key at once can overwrite each
  *    other.
- *  - chat: each post is rate-limited per session and dropped when over the
- *    limit or when the community chose no channel for the app.
+ *  - chat: each post is rate-limited (per session, and per community and
+ *    plugin), checked by the Moderation Bot's word and link rules, and
+ *    dropped when over the limit, blocked, or when the community chose no
+ *    channel for the app.
+ *  - an app that is no longer installed or enabled in the community (it
+ *    was removed while the call ran) writes nothing: everything is dropped
+ *    (logged), and so is everything when that cannot be checked.
  * Never throws: the caller's request already succeeded.
  */
 export async function applyPostCommitEffects(input: PostCommitInput): Promise<void> {
+  if (input.effects.length === 0) return;
+  let enabled = false;
+  try {
+    enabled = await isAppEnabled(input.db, input.serverId, input.pluginId);
+  } catch (err) {
+    console.warn(`[activity-effects] install check of "${input.pluginId}" failed:`, JSON.stringify((err as Error).message));
+  }
+  if (!enabled) {
+    console.warn(`[activity-effects] effects of "${input.pluginId}" dropped: the app is not installed or enabled in the community`);
+    return;
+  }
   const storageEffects = input.effects.filter((effect) => effect.type.startsWith('storage.'));
   if (storageEffects.length > 0) {
     const planned = applyStorageEffects(input.storage, storageEffects);
@@ -208,7 +225,7 @@ export async function applyPostCommitEffects(input: PostCommitInput): Promise<vo
   }
   for (const text of chatPostsOf(input.effects)) {
     try {
-      await postAppMessage({
+      const outcome = await postAppMessage({
         db: input.db,
         serverId: input.serverId,
         sessionId: input.sessionId,
@@ -216,6 +233,10 @@ export async function applyPostCommitEffects(input: PostCommitInput): Promise<vo
         pluginName: input.pluginName,
         text,
       });
+      // No channel chosen is the default, not worth a line per post.
+      if (outcome && !outcome.posted && outcome.reason !== 'no_channel') {
+        console.warn(`[activity-effects] chat post of "${input.pluginId}" dropped:`, outcome.reason);
+      }
     } catch (err) {
       console.warn(`[activity-effects] chat post of "${input.pluginId}" failed:`, JSON.stringify((err as Error).message));
     }

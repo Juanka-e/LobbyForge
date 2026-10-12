@@ -260,13 +260,29 @@ taşınır.
   - Bahsetmeler: `@` ile başlayabilecek her yerin ardına sıfır genişlikte
     boşluk eklenir. `@everyone`, `@here` ve `@isim` kimseyi çağırmaz.
   - Hız sınırı aşılırsa mesaj **düşer** (günlüğe yazılır), eylem yine
-    uygulanır. Sohbet yan kanal; oyunu durdurmamalı.
+    uygulanır. Sohbet yan kanal; oyunu durdurmamalı. Oturum başına 5 sn'de
+    bir ve saatte 30'un yanında (topluluk, eklenti) başına saatte 60 sınırı
+    var: etkinliği yeniden başlatmak sınırı sıfırlamaz.
+  - Mesaj, topluluğun Moderasyon Botu'nun yasaklı kelime ve bağlantı
+    kurallarından geçer. Engellenen mesaj düşer, `bot.moderation.block`
+    olarak denetim kaydına yazılır (rol kısıtlı kanalda metin olmadan),
+    eylem yine uygulanır.
+  - Rol kısıtlı (özel) bir kanalı seçmek, bir bota o kanalı vermek gibi
+    Kanalları Yönet yetkisi ve kanalı görebilmeyi ister.
 - **Kod ve durum.** Geçersiz ya da izinsiz etki: `422 effect_refused`.
   İstemciden sistem eylemi: `403 system_action`. Sebep yalnız sunucu
   günlüğüne yazılır, istemciye gitmez.
 - **Zamanlayıcı:**
-  - Bir dokunuşta en çok 32 zamanlayıcı ateşlenir. Hâlâ vadesi gelmiş bir
-    zincir sonraki dokunuşta devam eder.
+  - Bir dokunuşta en çok 8 zamanlayıcı ateşlenir ve 500 ms'den sonra yenisine
+    başlanmaz (önceden 32'ydi). Kendini aynı kimlikle yeniden kuran bir
+    zamanlayıcı birikmişse kaçırdığı vadeler tek tek çalışmaz: geçmiş en son
+    vadeye taşınır, bir kez ateşlenir. Hâlâ vadesi gelmiş olan sonraki
+    dokunuşta devam eder; arada gelen eylem yeniden denenebilir 409
+    (`timers_pending`) alır (güvenlik incelemesi, 2026-10-13).
+  - Uygulama topluluktan kaldırılır ya da kapatılırsa açık oturumları biter
+    (`activity.end`, sebep `app_uninstalled` / `app_disabled`). Yarışta açık
+    kalan oturum eylem almaz (`app_not_installed`), vadesi gelen
+    zamanlayıcısı çalışmadan düşer, depo yazımı ve sohbet mesajı düşer.
   - Eylemden önce, o ana kadar vadesi gelenler ateşlenir; eylem onların
     bıraktığı durumda çalışır ve hepsi tek yazımdır. Eylem reddedilirse
     zamanlayıcılar yine yazılır.

@@ -199,7 +199,7 @@ app's origin.
   the plugin's only memory); a host-mediated storage effect can follow
   (it did: phase 3, below).
 - `projectState` gives marketplace plugins the same per-viewer hidden
-  state official plugins have: every read path (REST, SSE, gateway, action
+  state official plugins have: every read path (REST, gateway, action
   response) calls it for the viewer; without it the plugin's state is
   public, and the UI warns the installer.
 - The worker keeps its container hardening (read-only fs, caps dropped,
@@ -240,7 +240,7 @@ Where the implementation refines the points above:
   (JSON, object-shaped states, size cap).
 - **`projectState` ctx** is `{ sessionId, serverId, hostId, now }` — no
   players and no locale, because the gateway knows neither and a
-  projection must not differ between REST, SSE and WebSocket.
+  projection must not differ between REST and WebSocket.
 - **Policies are the web app's reading of the manifest**, validated by
   the installer and on every load from the web app's own copy of the
   files; the worker's `describe` must report the same policies or the

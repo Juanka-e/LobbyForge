@@ -9,6 +9,7 @@ const getUserPermissions = vi.fn();
 const createGameSession = vi.fn();
 const getActiveGameSessionForChannel = vi.fn();
 const getPluginInstall = vi.fn();
+const getActiveMemberTimeout = vi.fn();
 const getMemberRoleIds = vi.fn();
 const listGameSessionsForChannel = vi.fn();
 const getGameSessionById = vi.fn();
@@ -58,6 +59,7 @@ vi.mock('@lobbyforge/db', async () => ({
   createGameSession,
   getActiveGameSessionForChannel,
   getPluginInstall,
+  getActiveMemberTimeout,
   getMemberRoleIds,
   listGameSessionsForChannel,
   getGameSessionById,
@@ -121,6 +123,8 @@ beforeEach(() => {
   getChannelById.mockResolvedValue(mockChannel());
   getActiveGameSessionForChannel.mockResolvedValue(null);
   getPluginInstall.mockResolvedValue(mockPluginInstall());
+  getActiveMemberTimeout.mockReset();
+  getActiveMemberTimeout.mockResolvedValue(null);
   getMemberRoleIds.mockReset();
   getMemberRoleIds.mockResolvedValue([]);
   getPluginServer.mockReset();
@@ -411,6 +415,27 @@ describe('POST /api/servers/{id}/channels/{channelId}/activities', () => {
       { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID }) }
     );
     expect(res.status).toBe(403);
+    expect(((await res.json()) as { code?: string }).code).toBe('app_not_installed');
+  });
+
+  it('returns 403 timed_out when the starter is timed out in the community; nothing is created', async () => {
+    const until = new Date(Date.now() + 600_000);
+    getServerById.mockResolvedValue(mockServer());
+    getUserPermissions.mockResolvedValue(['start_activity']);
+    getActiveMemberTimeout.mockResolvedValue(until);
+    const { POST } = await loadListRoute();
+    const res = await POST(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}/activities`, {
+        method: 'POST',
+        headers: { cookie: makeSessionCookie() },
+        body: JSON.stringify({ pluginId: 'fake' }),
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID }) }
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'timed_out', until: until.toISOString() });
+    expect(getActiveMemberTimeout).toHaveBeenCalledWith(expect.anything(), SERVER_ID, '00000000-0000-0000-0000-000000000001');
+    expect(createGameSession).not.toHaveBeenCalled();
   });
 
   it('returns 400 when the body is malformed', async () => {

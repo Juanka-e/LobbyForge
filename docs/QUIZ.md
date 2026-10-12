@@ -215,7 +215,7 @@ The canonical state has two secrets; everything else is public:
 | `deck` | every question of the game **with** its right answer | nobody — not even the host (who may be playing a pack). Viewers get the open question as `current` (no answer) and `questionTotal`. |
 | `answers` | who picked what on the open question | nobody, in any phase. Each viewer gets `answeredCount` and their own `myAnswer`; the reveal publishes per-option `counts`. |
 
-The projection (`projectActivityState`, used by the REST routes, SSE and the
+The projection (`projectActivityState`, used by the REST routes and the
 ws-gateway alike) also strips a stray `correctIndex` from `current` and
 blanks `reveal` while a question is open. The leaderboard's per-round gains
 are public by design, so it is visible who got the last question right —

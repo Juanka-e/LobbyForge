@@ -5,6 +5,7 @@ import {
   addPlayerToSession,
   createGameSession,
   getActiveGameSessionForChannel,
+  getActiveMemberTimeout,
   getChannelById,
   getMemberRoleIds,
   getPluginInstall,
@@ -171,6 +172,12 @@ async function handlePost(
     if (!hasPermission(permissions, CorePermission.START_ACTIVITY)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
+    // A member who is timed out starts nothing (as they cannot chat, vote
+    // in a poll or run a slash command).
+    const timedOutUntil = await getActiveMemberTimeout(getDb(), serverId, session.uid);
+    if (timedOutUntil) {
+      return activityError(403, 'timed_out', 'You are timed out in this server', { until: timedOutUntil.toISOString() });
+    }
     const channel = await requireVisibleChannelInServer(session.uid, channelId, serverId);
     if (!channel.ok) return channel.response;
     if (channel.channel.type !== 'voice' && channel.channel.type !== 'stage') {
@@ -196,10 +203,7 @@ async function handlePost(
     }
     const install = await getPluginInstall(getDb(), serverId, plugin.manifest.id);
     if (!install || !install.enabled) {
-      return NextResponse.json(
-        { error: 'App is not installed or enabled for this server' },
-        { status: 403 }
-      );
+      return activityError(403, 'app_not_installed', 'App is not installed or enabled for this server');
     }
     // Security follow-up: the /apps settings' allow-lists were stored but
     // never applied. An empty list means "no restriction".

@@ -28,6 +28,12 @@ vi.mock('../security-headers', () => ({
   }),
 }));
 
+/** The Moderation Bot's verdict on the post (lib/bots/moderation.ts has its own tests). */
+const moderateAppMessage = vi.hoisted(() =>
+  vi.fn(async (..._args: unknown[]) => ({ action: 'allow' }) as { action: 'allow' } | { action: 'block'; rule: string; botId: string; botName: string })
+);
+vi.mock('../bots/moderation', () => ({ moderateAppMessage }));
+
 const { neutralizeMentions, postAppMessage } = await import('../activity-app-chat');
 
 const TEXT = '11111111-1111-4111-8111-111111111111';
@@ -46,6 +52,7 @@ beforeEach(() => {
   for (const fn of Object.values(db)) fn.mockReset();
   db.logAction.mockResolvedValue(undefined);
   publishChatMessage.mockReset();
+  moderateAppMessage.mockReset().mockResolvedValue({ action: 'allow' });
   db.getPluginInstall.mockResolvedValue({ enabled: true, settings: { chatChannelId: TEXT } });
   db.getChannelById.mockResolvedValue({ id: TEXT, serverId: 'srv-1', type: 'text' });
   db.createAppMessage.mockImplementation(async (_db: unknown, row: { channelId: string; content: string; metadata: unknown }) => ({
@@ -125,5 +132,46 @@ describe('postAppMessage', () => {
     expect(posted).toBe(30);
     limiter.now += 60 * 60 * 1000;
     expect((await postAppMessage(input())).posted).toBe(true);
+  });
+
+  it('at most 60 posts per hour per community and plugin, however many sessions it restarts (security review)', async () => {
+    // Restarting the activity used to give the app a fresh 30-per-hour budget.
+    let posted = 0;
+    for (let session = 0; session < 4; session++) {
+      for (let i = 0; i < 30; i++) {
+        if ((await postAppMessage({ ...input(), sessionId: `sess-${session}` })).posted) posted += 1;
+        limiter.now += 6_000;
+      }
+    }
+    expect(posted).toBe(60);
+    // Another plugin, or the same plugin in another community, has its own budget.
+    expect((await postAppMessage({ ...input(), sessionId: 'sess-x', pluginId: 'other-app' })).posted).toBe(true);
+    expect((await postAppMessage({ ...input(), sessionId: 'sess-y', serverId: 'srv-2' })).posted).toBe(false); // srv-2 has no channel
+    db.getChannelById.mockResolvedValueOnce({ id: TEXT, serverId: 'srv-2', type: 'text' });
+    expect((await postAppMessage({ ...input(), sessionId: 'sess-z', serverId: 'srv-2' })).posted).toBe(true);
+  });
+
+  it('goes through the Moderation Bot’s rules on the text as written: a blocked post is dropped, nothing stored or sent', async () => {
+    moderateAppMessage.mockResolvedValueOnce({ action: 'block', rule: 'blocked_word', botId: 'b', botName: 'Mod' });
+    expect(await postAppMessage(input('@everyone a bad word'))).toEqual({ posted: false, reason: 'blocked_by_moderation' });
+    expect(moderateAppMessage).toHaveBeenCalledWith({
+      serverId: 'srv-1',
+      channelId: TEXT,
+      pluginId: 'sandbox-buzzer',
+      pluginName: 'Sandbox Buzzer',
+      sessionId: 'sess-1',
+      content: '@everyone a bad word',
+    });
+    expect(db.createAppMessage).not.toHaveBeenCalled();
+    expect(publishChatMessage).not.toHaveBeenCalled();
+    expect(db.logAction).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: 'message.create' }));
+  });
+
+  it('the limits run before moderation, so blocked posts cannot flood the audit log', async () => {
+    moderateAppMessage.mockResolvedValue({ action: 'block', rule: 'link', botId: 'b', botName: 'Mod' });
+    await postAppMessage(input());
+    limiter.now += 1_000;
+    expect(await postAppMessage(input())).toEqual({ posted: false, reason: 'rate_limited' });
+    expect(moderateAppMessage).toHaveBeenCalledTimes(1);
   });
 });

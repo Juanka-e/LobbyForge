@@ -19,6 +19,8 @@ const dbFns = {
   setGameSessionStateCAS: vi.fn(),
   canMemberAccessChannel: vi.fn(),
   withGameSessionWriteLock: vi.fn(),
+  getActiveMemberTimeout: vi.fn(),
+  getPluginInstall: vi.fn(),
 };
 
 class GameSessionBusyError extends Error {}
@@ -153,6 +155,8 @@ beforeEach(() => {
       fn(TX, await dbFns.getGameSessionById(TX, id))
   );
   dbFns.logAction.mockResolvedValue(undefined);
+  dbFns.getActiveMemberTimeout.mockResolvedValue(null);
+  dbFns.getPluginInstall.mockResolvedValue({ enabled: true, settings: {} });
 });
 
 async function post(body: unknown, uid = 'u-host'): Promise<Response> {

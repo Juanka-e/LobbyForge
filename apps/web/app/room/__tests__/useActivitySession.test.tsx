@@ -356,6 +356,20 @@ describe('useActivitySession plugin timers', () => {
     expect(reads).toHaveLength(2);
   }, 15_000);
 
+  it('two due times that stay pending do not make the panel re-read every 1.5 s (security review): it backs off', async () => {
+    // The server keeps reporting two timers already due (it cannot fire them
+    // yet). The old rule alternated between them: a read every 1.5 s, forever.
+    const stuck = [new Date(Date.now() - 5_000).toISOString(), new Date(Date.now() - 2_000).toISOString()];
+    const reads = stubDetails([() => activity({ now: new Date().toISOString(), timersDueAt: stuck })]);
+    renderHook(() => useActivitySession({ serverId: SERVER, sessionId: SESSION, onEnded: () => {} }), { wrapper: wrapper('en') });
+    await waitFor(() => expect(reads).toHaveLength(1));
+    // One immediate re-read for them (after the 1.5 s margin) …
+    await waitFor(() => expect(reads).toHaveLength(2), { timeout: 4_000 });
+    // … then the next waits 2 s more (3.5 s): none at the old 1.5 s cadence.
+    await new Promise((resolve) => setTimeout(resolve, 2_500));
+    expect(reads).toHaveLength(2);
+  }, 15_000);
+
   it('a bus event saying the timers changed re-reads for the new due times', async () => {
     const reads = stubDetails([() => activity({ timersDueAt: [] })]);
     renderHook(() => useActivitySession({ serverId: SERVER, sessionId: SESSION, onEnded: () => {} }), { wrapper: wrapper('en') });

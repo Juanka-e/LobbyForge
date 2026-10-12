@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   addPlayerToSession,
   GameSessionBusyError,
+  getActiveMemberTimeout,
   getGameSessionById,
   getServerById,
   getUserPermissions,
@@ -47,11 +48,13 @@ import {
 import {
   auditSystemActions,
   buildSystemContext,
+  hasDueTimer,
   readStoredTimers,
   runDueTimers,
   timersDueAtJson,
   type FiredTimers,
 } from '@/lib/activity-timers';
+import { isAppEnabled } from '@/lib/activity-app-install';
 import type { PendingTimer, ValidEffect } from '@lobbyforge/plugin-sdk';
 import { distributedRateLimit, rateLimitResponse, type RateLimitConfig } from '@/lib/security-headers';
 
@@ -125,6 +128,22 @@ async function authorizePluginAction(input: {
   // ended session were accepted and broadcast.
   if (isTerminalSessionStatus(input.sessionStatus)) {
     return { ok: false, response: activityError(409, 'session_ended', 'Activity has ended.') };
+  }
+
+  // A member who is timed out in the community does not play — like chat,
+  // poll votes, slash commands and invites. Only an action marked
+  // `allowOutsideVoice` (leaving the game) is still allowed: a timed-out
+  // player can always get out. Host actions are refused too.
+  if (policy.allowOutsideVoice !== true) {
+    const timedOutUntil = await getActiveMemberTimeout(getDb(), input.serverId, input.actorUserId);
+    if (timedOutUntil) {
+      return {
+        ok: false,
+        response: activityError(403, 'timed_out', 'You are timed out in this server', {
+          until: timedOutUntil.toISOString(),
+        }),
+      };
+    }
   }
 
   // LF-014: Phase-based validation — reject actions that don't match the
@@ -370,6 +389,13 @@ async function handlePost(
     });
     if (!actionAuth.ok) return actionAuth.response;
 
+    // The app must still be installed and enabled in the community: removing
+    // it ends its sessions (lib/activity-app-install.ts), and one that is
+    // still open (a race with the removal) takes no more actions.
+    if (!(await isAppEnabled(getDb(), serverId, row.pluginId))) {
+      return activityError(403, 'app_not_installed', 'This app is no longer installed or enabled in this community.');
+    }
+
     // 31st-audit: plugin-specific action fields are NOT covered by the
     // generic { type } schema — they arrive as raw JSON from any client.
     // A plugin-declared validateAction rejects malformed payloads with a
@@ -476,19 +502,24 @@ async function handlePost(
     }
     // Host effects (lib/activity-effects.ts): what this plugin may ask for.
     // Timers that fell due before this action run first, as system actions
-    // with no actor — their ctx is built here, before the lock (it reads
-    // the roster), for a session that has pending timers.
+    // with no actor. Their ctx is built here, before the lock (it reads the
+    // roster), for a plugin that may set timers or a session that has some.
+    // ACT-002: deciding on the row read BEFORE the lock alone let an action
+    // run ahead of a timer another call set in between and that was already
+    // due by the time this one got the lock — so under the lock, a due timer
+    // with no ctx built yet gets one there (read through the lock's own
+    // transaction).
     const grant = effectGrantFor(plugin);
+    const systemCtxInput = {
+      plugin,
+      serverId,
+      sessionId,
+      hostUserId,
+      locale: sandboxLocaleFor(req),
+    };
     const systemCtx =
-      readStoredTimers(row.timers).length > 0
-        ? await buildSystemContext({
-            db: getDb(),
-            plugin,
-            serverId,
-            sessionId,
-            hostUserId,
-            locale: sandboxLocaleFor(req),
-          })
+      grant.permissions.includes('timers') || readStoredTimers(row.timers).length > 0
+        ? await buildSystemContext({ db: getDb(), ...systemCtxInput })
         : null;
     // State versioning: upgrade the persisted row to the plugin's
     // current shape before running the reducer. The reducer only
@@ -530,6 +561,8 @@ async function handlePost(
           audited: string[];
         }
       | { kind: 'refused'; reason: string; storage: Record<string, unknown>; firedCommit: FiredCommit | null }
+      /** More timers were due than one touch fires: what fired committed; the action waits for a retry. */
+      | { kind: 'timers_pending'; storage: Record<string, unknown>; firedCommit: FiredCommit | null }
       | { kind: 'gone' }
       | { kind: 'ended' }
       | { kind: 'conflict'; revision: number };
@@ -554,13 +587,29 @@ async function handlePost(
         const storage = await loadStorageEntries(tx, serverId, row.pluginId, grant);
 
         // 1. Timers that fell due before this action, earliest first.
-        const fired = systemCtx
-          ? await runDueTimers({ plugin, grant, state: currentState, timers: storedTimers, storage, now, ctx: systemCtx })
+        const timerCtx =
+          systemCtx ?? (hasDueTimer(storedTimers, now) ? await buildSystemContext({ db: tx, ...systemCtxInput }) : null);
+        const fired = timerCtx
+          ? await runDueTimers({ plugin, grant, state: currentState, timers: storedTimers, storage, now, ctx: timerCtx })
           : null;
         const baseState = fired?.state ?? currentState;
         const baseTimers = fired?.timers ?? storedTimers;
         const baseStorage = fired?.storage ?? storage;
         const firedCount = fired?.fired ?? 0;
+
+        // A backlog bigger than one touch fires (lib/activity-timers.ts): the
+        // action never runs ahead of a due timer, so it waits — what fired
+        // commits, and the client's retry (a retryable 409) continues.
+        if (fired?.pendingDue) {
+          const casFired = (await setGameSessionStateCAS(tx, sessionId, freshRevision, baseState, undefined, {
+            timers: baseTimers,
+          })) as { ok: boolean; row: CommittedRow | null };
+          return {
+            kind: 'timers_pending',
+            storage,
+            firedCommit: casFired.ok && casFired.row ? { row: casFired.row, fired } : null,
+          };
+        }
 
         // 2. The action, with its effects: all of them or none.
         setCallContext(ctx2, { storage: baseStorage, now });
@@ -640,10 +689,9 @@ async function handlePost(
         { status: 409 }
       );
     }
-    if (outcome.kind === 'refused') {
-      // An invalid or unpermitted effect: the action was not applied at all.
+    if (outcome.kind === 'refused' || outcome.kind === 'timers_pending') {
+      // The action was not applied at all (released: a retry may run it).
       await releaseClaim();
-      logRefusedEffects('action', row.pluginId, outcome.reason);
       const firedCommit = outcome.firedCommit;
       if (firedCommit) {
         // Timers that were due fired and committed before the action.
@@ -665,6 +713,18 @@ async function handlePost(
           effects: firedCommit.fired.effects,
         });
       }
+      if (outcome.kind === 'timers_pending') {
+        return NextResponse.json(
+          {
+            error: 'The app is catching up on its timers. Please retry.',
+            code: 'timers_pending',
+            retryable: true,
+          },
+          { status: 409, headers: { 'Cache-Control': 'no-store' } }
+        );
+      }
+      // An invalid or unpermitted effect.
+      logRefusedEffects('action', row.pluginId, outcome.reason);
       return activityError(422, 'effect_refused', 'The app asked for something it may not do; the action was not applied.');
     }
     // The transaction committed: from here on a failure must keep the claim
@@ -673,7 +733,7 @@ async function handlePost(
     const committedState = outcome.state;
     const stateChanged = outcome.changed;
 
-    // Push the committed state to any open SSE subscriptions on this session.
+    // Tell every open panel (through the ws-gateway) the session changed.
     // Fire-and-forget — a Redis blip must not fail the action.
     // SEC-001: NO state on the bus — subscribers load + project per
     // viewer. The summary carries only public counts (never secret

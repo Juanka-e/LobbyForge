@@ -320,9 +320,9 @@ What your bot posts is your responsibility.
    the reducer returned the *same object*, the action counts as refused:
    the state is still written back, but nothing joins the roster and no
    audit row is written.
-5. A change notice goes out on Redis. It carries no state. The SSE route
-   and the WebSocket gateway then load the row and **project it per
-   viewer** with \`projectActivityState\`
+5. A change notice goes out on Redis. It carries no state. The WebSocket
+   gateway (and a panel's REST re-read) then load the row and **project it
+   per viewer** with \`projectActivityState\`
    (\`packages/core/src/activity-projection.ts\`) — or, for a marketplace
    plugin, with its own \`projectState\` in the plugin worker
    (\`apps/web/lib/plugin-projection.ts\`; the gateway asks the web app).
@@ -712,7 +712,7 @@ are per plugin id in host code, not in the SDK:
 
 | You need | Edit |
 |---|---|
-| Hidden information (roles, hands, answers): strip or rewrite it per viewer | add an \`if (pluginId === 'buzzer')\` branch to \`packages/core/src/activity-projection.ts\` (used by REST, SSE and the WS gateway). Without it, **every viewer receives the whole state**. |
+| Hidden information (roles, hands, answers): strip or rewrite it per viewer | add an \`if (pluginId === 'buzzer')\` branch to \`packages/core/src/activity-projection.ts\` (used by REST and the WS gateway). Without it, **every viewer receives the whole state**. |
 | Secret content loaded on the server (answers, decks) | \`apps/web/lib/prepare-plugin-action.ts\` (as Quiz and Hushle do) and a server-only subpath export ([PLUGIN_SDK.md → Server-only subpath exports](PLUGIN_SDK.md#server-only-subpath-exports-m18)) |
 | Phase checks before the reducer | \`validateActionPhase\` in the actions route |
 | Built-in content (packs, decks) | \`apps/web/lib/component-migrations.ts\` |
@@ -805,7 +805,7 @@ How it runs:
   actions route — read by the web app from its own copy of the files, so
   plugin code cannot widen them; \`validateAction\`; a reducer that returns
   its input is a refused action; and \`projectState\` gives per-viewer
-  hidden state on every read path (GET, SSE, the action response, and the
+  hidden state on every read path (GET, the action response, and the
   WebSocket gateway, which asks web through the signed internal
   \`POST /api/internal/activity-projection\`). Without \`projectState\` the
   state is public and the lobby says so.
@@ -970,7 +970,7 @@ camera or screen share.
 | Activity actions | 30 / min **per client IP**: a LAN party behind one NAT shares it | \`activity-action\` limit in \`actions/route.ts\`; IP key from \`rateLimitKey\` in \`security-headers.ts\` |
 | Concurrent actions | applied one at a time per session; a \`409\` (clients retry) only when the session's write lock is not granted within 10 s | \`GAME_SESSION_LOCK_TIMEOUT_MS\` in \`packages/db/src/queries/gameSessions.ts\` |
 | Activity starts | 10 / min per IP; **one running activity per voice/stage channel** | \`activities-create\` limit and \`getActiveGameSessionForChannel\` check in \`channels/[channelId]/activities/route.ts\` |
-| Activity reads | GET 60 / min, SSE opens 30 / min per IP; SSE poll fallback 5 s | \`activity-get\` in \`[sessionId]/route.ts\`, \`activity-stream\` in \`stream/route.ts\`, \`POLL_FALLBACK_MS\` in \`activity-bus.ts:196\` |
+| Activity reads | GET 60 / min per IP; poll fallback 5 s when the WebSocket is down (the SSE route was removed 2026-10-13) | \`activity-get\` in \`[sessionId]/route.ts\`, \`POLL_INTERVAL_MS\` in \`app/room/useActivitySession.ts\` |
 | Action body | 1 MiB | \`DEFAULT_MAX_BODY_BYTES\` in \`security-headers.ts\` |
 | State size | no explicit cap. Every action rewrites the whole JSONB and every subscriber reloads and projects it, so keep state in kilobytes. | inferred |
 | Players per app | \`defaultMaxPlayers\` 1–500 | \`apps/route.ts:27\` |
@@ -1010,7 +1010,7 @@ platforms' public developer docs. Re-check them before quoting.
   rendered in Discord's client. Discord itself cannot be self-hosted, and
   hiding secrets is up to each app's backend. In LobbyForge the reducer
   and the per-viewer projection run in *your* server, and the same code
-  path serves REST, SSE and WebSocket. A player reading the network tab
+  path serves REST and WebSocket. A player reading the network tab
   sees only their own slice.
 - **Extension ceiling.** Discord's bot platform is far ahead: events,
   commands, components, webhooks, voice and OAuth. Matrix's protocol
@@ -1073,8 +1073,8 @@ Each points to where it is tracked.
 | PLUGIN_PUBLISHING.md | Submit via \`/marketplace\` → "Submit a plugin"; enable via the Apps panel | No submit UI exists; the Apps panel lists compiled-in plugins only. **Fixed 2026-10-03:** doc updated |
 | [PLUGIN_SDK.md](PLUGIN_SDK.md) | \`renderClient: (props) => HushlePanel(props)\` | Must return \`createElement(Panel, props)\` (React #310, see \`plugins/dice-bot/src/index.ts\`) |
 | PLUGIN_SDK.md | \`messages.sendGameMessage\` posts to the channel | It only writes to the server log (\`plugin-context.ts:99-104\`) |
-| PLUGIN_SDK.md | "What M16 doesn't do": no plugin UI, the panel polls every 2 s | Panels render, and updates arrive over SSE/WebSocket |
-| [ACTIVITIES.md](ACTIVITIES.md) | The panel polls every 2 s | SSE/WebSocket push, 5 s poll fallback |
+| PLUGIN_SDK.md | "What M16 doesn't do": no plugin UI, the panel polls every 2 s | Panels render, and updates arrive over the WebSocket |
+| [ACTIVITIES.md](ACTIVITIES.md) | The panel polls every 2 s | WebSocket push, 5 s poll fallback |
 | README | Vampire Village and Watch Party are "planned"; bot-sdk "runtime planned" | Both games ship; the bot SDK has a working HTTP client |
 | \`POST /api/marketplace/install\` error text | "plugins run in-process without isolation" | The worker is mandatory. **Fixed 2026-10-03:** the message now says plugins run only in the plugin-worker, sandboxed in a QuickJS VM (ADR-007) |
 | [BOTS.md](BOTS.md) | (accurate) | Add: switching the Moderation Bot on needs *Manage Messages* unless you are the owner |
@@ -2583,6 +2583,11 @@ type GamePluginActionPolicy = {
   activity's voice room. Set this on an action that must work from outside
   the room — leaving the game is the usual one (Quiz, Vampire Village and
   Watch Party mark \`leave\`). \`host\` actions are never voice-checked.
+  It also marks the one thing a member who is **timed out** in the
+  community may still do: a timed-out member starts no activity and sends
+  no other action, host actions included (\`403\`, \`code: "timed_out"\`,
+  with \`until\`) — as they cannot chat, vote in a poll or run a slash
+  command. Mark leaving, so they can always get out of a game.
 
 Do not trust actor identity fields sent by the browser.
 
@@ -2728,7 +2733,7 @@ plugin and grant nothing.
 | \`timer.clear\` | \`timers\` | \`id\` | clearing a timer that is not pending is fine |
 | \`storage.set\` | \`storage\` | \`key\`, \`value\` | \`key\` is 1–128 of \`a-z A-Z 0-9 . _ : -\` (not \`__proto__\`); \`value\` any JSON; the plugin's storage in a community holds at most **64 KiB** (every key plus its value's JSON, in UTF-8) |
 | \`storage.delete\` | \`storage\` | \`key\` | |
-| \`chat.post\` | \`chat\` | \`text\` | 1–**500** characters after trimming, no control characters but tab and newline; at most **one per 5 s and 30 per hour** per session |
+| \`chat.post\` | \`chat\` | \`text\` | 1–**500** characters after trimming, no control characters but tab and newline; at most **one per 5 s and 30 per hour** per session, and **60 per hour** per community and plugin; checked by the community's Moderation Bot |
 
 At most 32 effects per call; an unknown key on an effect is refused (a
 typo never silently does something else). \`voice.mute\` is a known
@@ -2761,12 +2766,30 @@ nothing runs on a clock.
   an end request — every timer whose due time has passed fires under the
   session's write lock, **earliest first** (ties: the one set first), each
   as its system action through your reducer with \`ctx.now\` = its due time.
-  Its effects apply too, so a timer may set the next one; a chain that is
-  already due keeps firing, up to 32 timers per touch (the rest fires on
-  the next touch).
+  Its effects apply too, so a timer may set the next one, and a chain that
+  is already due keeps firing in the same touch.
+- **Catch-up is bounded.** A session nobody touched for a while can have a
+  backlog: a 1 s timer that re-arms itself and sat idle for an hour is
+  3 600 firings behind. The host does not replay it:
+  - **Missed occurrences collapse.** When a timer's firing sets a timer
+    with the **same id** (it re-arms itself) at a time that is already due,
+    the host moves that timer to the **latest** occurrence of the same
+    period that is due. The idle 1 s ticker fires twice — for its first
+    due time and for the last second that passed — and its next firing is
+    in the future again. Do not count ticks to measure time; read
+    \`ctx.now\` (the due time of the firing) and keep deadlines in your
+    state. A timer set under a **new** id is never moved.
+  - **A touch fires at most 8 timers**, and starts none after 500 ms of
+    wall time (the first always runs). What is still due fires on the next
+    touch: the session GET reports it in \`timersDueAt\`, so an open panel
+    re-reads for it at once.
 - Before an action, the timers due by then fire first and the action runs
   on the state they left — in one write. If the action is then refused,
-  the timers still commit.
+  the timers still commit. If more timers were due than one touch fires,
+  the action does **not** run ahead of them: what fired commits and the
+  action answers \`409\` with \`code: "timers_pending"\` and \`retryable: true\`.
+  The lobby retries it by itself (same \`actionId\`), each retry continuing
+  the catch-up.
 - **Exactly once**: the lock serializes touches and a fired timer is
   removed in the same write as the state it produced, so of two
   concurrent reads the second finds nothing due.
@@ -2780,9 +2803,19 @@ nothing runs on a clock.
   \`apps/web/lib/activity-next-check.ts\`, which also covers the host
   hand-over); setting, clearing or firing a timer tells every open panel
   to re-read (\`publicSummary.timersChanged\` on the activity bus), and an
-  action's answer carries the new \`timersDueAt\`.
-- Ending the activity fires what was already due, then drops every other
-  pending timer.
+  action's answer carries the new \`timersDueAt\`. A due time that is still
+  pending after the panel re-read for it (the server could not fire it
+  yet) is re-read for again after 2 s, then 4 s, 8 s … at most once a
+  minute — never in a loop.
+- Ending the activity fires what was already due (within the per-touch
+  bound above), then drops every other pending timer.
+- **Only while the app is installed.** If the community uninstalls or
+  disables the app (Server settings → Apps), its open sessions end there
+  and then (audited as \`activity.end\` with the reason \`app_uninstalled\` /
+  \`app_disabled\`; nothing fires on the way out). A session that is still
+  open by a race takes no more actions (\`403\`, \`code:
+  "app_not_installed"\`), its due timers are dropped without running, and
+  storage writes and chat lines asked for after the removal are dropped.
 
 So a timer is **never early, and late only when nobody is looking** —
 which is exactly when nobody would notice. Keep the deadline in your state
@@ -2824,6 +2857,11 @@ go to** (shown for apps with the \`chat\` permission). With no channel
 chosen, the default, the post is dropped: a game never writes into a
 channel nobody picked (which could also carry a private voice room's game
 into a public channel). The choice is checked again on every post.
+Choosing a **role-gated** (private) channel takes what granting a bot one
+takes: Manage Channels (owners and administrators have it), and seeing
+the channel — Manage Server alone is refused with \`403\`, \`code:
+"chat_channel_not_allowed"\`. Saving other settings of the app keeps a
+channel someone else chose.
 
 - The message has **no author** (no user, no bot) and \`metadata.app = {
   pluginId, name }\`; the lobby shows it with the plugin's name, an app
@@ -2831,9 +2869,17 @@ into a public channel). The choice is checked again on every post.
   notification says "(APP)". Members cannot set \`metadata.app\`.
 - Mentions are inert: every \`@\` that could start one gets a zero-width
   space after it, so \`@everyone\`, \`@here\` and \`@<name>\` ping nobody.
-- Over the rate (one per 5 s, 30 per hour, per session) a post is
-  **dropped** and logged; the action that asked for it still applies.
-  Chat is a side channel, never part of your game's state.
+- Over the rate (one per 5 s and 30 per hour per session, and 60 per hour
+  per community and plugin, so restarting the activity does not reset it)
+  a post is **dropped** and logged; the action that asked for it still
+  applies. Chat is a side channel, never part of your game's state.
+- **Moderated like everyone's messages.** When the community runs the
+  Moderation Bot, its blocked-word and link rules apply to the line as you
+  wrote it (the mention rule does not: your mentions are inert anyway). A
+  line the rules block is **dropped** and logged, and audited as
+  \`bot.moderation.block\` naming your plugin (without the line's words when
+  the channel is role-gated); the action still applies. No notice is
+  posted and there is no exemption.
 - It is posted after the commit (after the storage batch), published on
   the chat bus like any message and audited as \`message.create\` (actor:
   none, the plugin in the metadata).
@@ -2849,7 +2895,9 @@ names and numbers.
 ([below](#the-createtestharness-test-helper)): \`performAction\` throws an
 \`EffectRefusedError\` where the host would answer \`effect_refused\` (and
 applies nothing), refuses a system action from a client, and
-\`advanceTime(ms)\` fires due timers in order with \`ctx.now\` = each due time.
+\`advanceTime(ms)\` fires due timers in order with \`ctx.now\` = each due time
+— every occurrence, as for a session somebody watches the whole time (the
+host's idle catch-up collapse and per-touch bound above do not apply).
 \`getTimers()\`, \`getStorage()\` and \`getChatPosts()\` show what the host
 would have stored and posted; \`permissions\` and \`storage\` options set the
 plugin's permissions and its storage before the game.
@@ -3606,8 +3654,9 @@ and \`dice-bot\` for small, complete panels.
   [\`docs/HUSHLE.md\`](./HUSHLE.md) for the full Hushle walkthrough.
 - \`apps/web/lib/plugin-registry.ts\` — the host's compiled-in plugin list.
 - \`apps/web/lib/plugin-context.ts\` — the HTTP host's \`buildHttpPluginContext\`.
-- \`apps/web/lib/activity-bus.ts\` — Redis pub/sub for activity state changes (M19).
-- \`apps/web/app/api/servers/[id]/activities/[sessionId]/stream/route.ts\` — SSE route (M19).
+- \`apps/web/lib/activity-bus.ts\` — Redis pub/sub for activity state changes (M19);
+  the WebSocket gateway (\`apps/ws-gateway\`) delivers them to open panels. The
+  M19 SSE route (\`…/activities/{sessionId}/stream\`) was removed: nothing used it.
 `,
   },
   "publishing": {
@@ -3844,8 +3893,8 @@ timer's due time.
 
 \`projectState(state, viewerId, ctx)\` gets only \`ctx.sessionId\`,
 \`ctx.serverId\`, \`ctx.hostId\` and \`ctx.now\` — no players, no locale, no
-random values — because the same projection is served over REST, SSE and
-the WebSocket gateway and must not differ between them. Localise in the
+random values — because the same projection is served over REST and the
+WebSocket gateway and must not differ between them. Localise in the
 UI, not in the projection.
 
 ### Effects: timers, storage and chat
@@ -3876,7 +3925,7 @@ case 'auto-reveal': // "role": "system" in actionPolicies: only the host runs it
 | \`timer.set { id, afterMs \\| at, action }\` | \`timers\` | ≤ 8 pending per session, 1 s – 24 h, same \`id\` replaces; \`action\` is one of your \`system\` actions |
 | \`timer.clear { id }\` | \`timers\` | |
 | \`storage.set { key, value }\`, \`storage.delete { key }\` | \`storage\` | key \`[a-zA-Z0-9._:-]{1,128}\`, ≤ 64 KiB in all per community |
-| \`chat.post { text }\` | \`chat\` | ≤ 500 characters, mentions made inert, ≤ 1 per 5 s and 30 per hour per session |
+| \`chat.post { text }\` | \`chat\` | ≤ 500 characters, mentions made inert, ≤ 1 per 5 s and 30 per hour per session and 60 per hour per community; the community's Moderation Bot word and link rules apply |
 
 - One invalid or unapproved effect refuses the whole action (\`422\`,
   \`code: "effect_refused"\`): nothing of it is applied.
@@ -3884,6 +3933,9 @@ case 'auto-reveal': // "role": "system" in actionPolicies: only the host runs it
   after the due time, the host runs the system action through
   \`handleAction\` with \`ctx.now\` = the due time. Open panels re-read at the
   due time, so it happens on time while anyone is watching; never early.
+  After an idle stretch a timer that re-arms itself fires once for the
+  latest missed occurrence, not once per occurrence, and one touch fires at
+  most 8 timers ([PLUGIN_SDK.md → Timers fire lazily](PLUGIN_SDK.md#timers-fire-lazily)).
 - Storage writes land **after** the state commits, as one batch; a batch
   that no longer fits by then is dropped (logged). Sessions of your plugin
   share the storage: merge with \`ctx.storage\` when you write.
@@ -3896,9 +3948,8 @@ The full rules, ordering and failure cases:
 
 ### Hidden information
 
-Every path a viewer reads state through — the activity GET, the SSE
-snapshot and updates, the response to their own action, the WebSocket
-gateway — calls \`projectState(state, viewerId)\` for that viewer. Put
+Every path a viewer reads state through — the activity GET, the response
+to their own action, the WebSocket gateway — calls \`projectState(state, viewerId)\` for that viewer. Put
 secrets in the state and strip them per viewer in \`projectState\`, the way
 the example hides who buzzed until the host reveals. A failed projection
 fails the request; it never falls back to the full state.

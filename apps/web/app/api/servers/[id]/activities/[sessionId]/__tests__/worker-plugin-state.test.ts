@@ -37,6 +37,8 @@ const dbFns = vi.hoisted(() => ({
   getGameSessionById: vi.fn(async () => structuredClone(store.row)),
   isServerMember: vi.fn(async () => true),
   getUserPermissions: vi.fn(async () => [] as string[]),
+  getActiveMemberTimeout: vi.fn(async () => null),
+  getPluginInstall: vi.fn(async () => ({ enabled: true, settings: {} })),
   listPlayersForSession: vi.fn(async () => [] as Array<{ userId: string }>),
   addPlayerToSession: vi.fn(async () => undefined),
   logAction: vi.fn(async () => undefined),
