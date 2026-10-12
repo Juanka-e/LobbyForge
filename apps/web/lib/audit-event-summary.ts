@@ -86,6 +86,13 @@ export function auditEventSummary(t: Translator, entry: AuditEntryView): AuditSu
       if (fields.length === 0) return { key: 'admin.audit.event.captchaUpdatedNoFields', params, slots };
       return { key: 'admin.audit.event.captchaUpdated', params, slots: { ...slots, fields: listFormat(t.locale, fields) } };
     }
+    case 'instance.default_locale_updated': {
+      // Admin → Overview → Default language (docs/TRANSLATING.md): the
+      // language's name in the READER's language, else its code.
+      const to = typeof meta.to === 'string' && meta.to ? languageName(t.locale, meta.to) : null;
+      if (!to) return { key: 'admin.audit.event.defaultLocaleCleared', params, slots };
+      return { key: 'admin.audit.event.defaultLocaleSet', params, slots: { ...slots, to } };
+    }
     case 'instance.mail_updated': {
       // Email settings (docs/EMAIL.md §5): field NAMES only, never values
       // (the SMTP password among them).
@@ -143,6 +150,15 @@ const MAIL_FIELDS = [
 function knownFields<T extends string>(value: unknown, known: readonly T[]): T[] {
   if (!Array.isArray(value)) return [];
   return known.filter((field) => value.includes(field));
+}
+
+/** "Turkish" for `tr` in an English sentence, "Türkçe" in a Turkish one; the code when unknown. */
+function languageName(locale: string, code: string): string {
+  try {
+    return new Intl.DisplayNames([locale], { type: 'language' }).of(code) ?? code;
+  } catch {
+    return code;
+  }
 }
 
 /** "a, b and c" in the reader's language. */
