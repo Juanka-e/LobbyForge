@@ -219,7 +219,8 @@ English one "Welcome to Oyun Gecesi, Ayşe!". A text or name an admin writes
 is shown to everyone exactly as written.
 
 - The message is stored once. Its `content` is in the instance language
-  (`LOBBYFORGE_DEFAULT_LOCALE`, else English), as the fallback for bots,
+  (the instance default: the admin's choice, else `LOBBYFORGE_DEFAULT_LOCALE`,
+  else English), as the fallback for bots,
   search and older apps. A default text also stores
   `metadata.i18n = { key, params }` (the catalogue key and the cleaned
   names), and the lobby shows `t(key, params)` in the viewer's language. An

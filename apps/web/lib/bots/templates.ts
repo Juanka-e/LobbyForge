@@ -42,9 +42,10 @@ export function cleanBotTemplateValues(values: Record<string, string>): Record<s
 
 /**
  * The language the built-in bots speak when an admin has not written
- * their own text: the instance default (`LOBBYFORGE_DEFAULT_LOCALE`) when
- * it is installed, else English. A bot posts to everyone at once, so it
- * cannot follow any one reader's language.
+ * their own text: the instance default (the admin's choice, else
+ * `LOBBYFORGE_DEFAULT_LOCALE`, else English; lib/i18n/instance-default.ts).
+ * It is the stored fallback; a default text also carries `metadata.i18n`
+ * so each viewer sees their own language.
  */
 export function instanceBotLocale(): string {
   return instanceDefaultLocale();

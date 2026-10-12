@@ -85,8 +85,10 @@ Everything a bot posts carries a **BOT** badge and a robot avatar.
 3. **Moderation Bot:** blocked words (Turkish-aware matching), a link
    policy, a mention cap, flood rules and repeat rules. It checks every
    member message and every edit before the message is stored.
-4. Both bots post in `LOBBYFORGE_DEFAULT_LOCALE` (English if unset) until
-   you write your own text.
+4. With their default texts, both bots show each member their own
+   language (stored with a fallback in the instance default language: the
+   admin's choice, else `LOBBYFORGE_DEFAULT_LOCALE`, else English). A text
+   you write yourself is shown exactly as written.
 
 The full rules are in [BOTS.md → Built-in bots](BOTS.md#built-in-bots).
 

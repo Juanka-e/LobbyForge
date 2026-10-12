@@ -396,9 +396,10 @@ As implemented:
 
 ### 3.5 Languages
 Every `interaction_create` carries **`locale`**: the language of the member
-who ran the command. It's the language their LobbyForge is shown in: their
-choice in Settings, else their browser's (`Accept-Language`), else the
-instance default (`LOBBYFORGE_DEFAULT_LOCALE`), else `en`.
+who ran the command. It's the language their LobbyForge is shown in: the
+language saved on their account, else their choice on this device, else
+their browser's (`Accept-Language`), else the instance default (the
+admin's choice, else `LOBBYFORGE_DEFAULT_LOCALE`), else `en`.
 
 - It's always one of the instance's installed language codes (BCP 47, the
   folder names under `apps/web/messages`): `en`, `tr`, `pt-BR`, …
