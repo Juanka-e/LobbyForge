@@ -1,17 +1,19 @@
 {
   "id": "sandbox-buzzer",
   "name": "Sandbox Buzzer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "sdk": "sandbox-v1",
   "ui": true,
   "minPlayers": 1,
   "maxPlayers": 50,
   "requiresVoiceRoom": true,
   "locales": ["en", "tr"],
+  "permissions": ["timers", "storage"],
   "actionPolicies": {
     "open-round": { "role": "host" },
     "buzz": { "role": "member", "actorFields": ["playerId"], "joinsRoster": true },
     "reveal": { "role": "host" },
+    "auto-reveal": { "role": "system" },
     "reset": { "role": "host" }
   }
 }

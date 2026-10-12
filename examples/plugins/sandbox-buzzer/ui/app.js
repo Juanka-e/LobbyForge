@@ -5,10 +5,12 @@
  * Everything arrives through the frame client:
  *   onInit  → who is looking (viewer), names (players), language, theme
  *   onState → the state PROJECTED for this viewer by server.js projectState:
- *     open round:      { phase: 'open', round, tone, buzzCount, youBuzzed,
- *                        buzzes: null, winner: null, scores }
+ *     open round:      { phase: 'open', round, tone, revealAt, buzzCount,
+ *                        youBuzzed, buzzes: null, winner: null, scores, best }
  *     idle / revealed: { phase, round, tone, buzzCount, youBuzzed,
- *                        buzzes: [{ playerId, ms }], winner, scores }
+ *                        buzzes: [{ playerId, ms }], winner, scores, best }
+ *   `revealAt` is when the round reveals itself (the server's timer); `best`
+ *   the community's fastest reactions (the plugin's storage).
  * While a round is open nobody's screen knows who buzzed — not even the
  * host's: the order is not hidden by this UI, it is simply not sent.
  *
@@ -45,6 +47,8 @@ const STRINGS = {
     nextRound: 'Next round',
     reveal: 'Reveal',
     reset: 'Reset scores',
+    autoReveal: 'Reveals by itself in {s} s',
+    best: 'Fastest reactions',
   },
   tr: {
     title: 'Buzzer',
@@ -73,6 +77,8 @@ const STRINGS = {
     nextRound: 'Sonraki tur',
     reveal: 'Açıkla',
     reset: 'Puanları sıfırla',
+    autoReveal: '{s} sn içinde kendiliğinden açıklanacak',
+    best: 'En hızlı tepkiler',
   },
 };
 
@@ -161,6 +167,22 @@ function render() {
     );
   }
 
+  // The community's fastest reactions (kept across games in the plugin's storage).
+  const best = Array.isArray(s.best) ? s.best : [];
+  const fmtBest = new Intl.NumberFormat(lang, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  $('best').hidden = best.length === 0;
+  $('best-label').textContent = t('best');
+  // The name the record was set under (the player may have left this game).
+  const recordHolder = (e) => {
+    const name = e.name || t('player');
+    return e.playerId === viewer.userId ? t('you', { name }) : name;
+  };
+  $('best-list').replaceChildren(
+    ...best.map((e, i) => li(`${i + 1}. ${recordHolder(e)}`, t('seconds', { s: fmtBest.format(e.ms / 1000) }), 'pts'))
+  );
+
+  renderCountdown();
+
   // Scores, highest first.
   const scores = s.scores && typeof s.scores === 'object' ? Object.entries(s.scores) : [];
   const ranked = scores.filter(([, n]) => typeof n === 'number' && n > 0).sort((a, b) => b[1] - a[1]);
@@ -183,6 +205,23 @@ function render() {
 
   $('app').setAttribute('aria-busy', 'false');
 }
+
+/**
+ * "Reveals by itself in N s" while a round is open. `revealAt` is the
+ * server's clock; this counts on the viewer's, which is close enough for a
+ * hint (the reveal itself happens on the server).
+ */
+function renderCountdown() {
+  const s = current && typeof current === 'object' ? current : {};
+  const el = $('countdown');
+  if (s.phase !== 'open' || typeof s.revealAt !== 'number') {
+    el.textContent = '';
+    return;
+  }
+  const left = Math.max(0, Math.ceil((s.revealAt - Date.now()) / 1000));
+  el.textContent = t('autoReveal', { s: left });
+}
+setInterval(renderCountdown, 1000);
 
 const lf = connect({
   onInit(init) {

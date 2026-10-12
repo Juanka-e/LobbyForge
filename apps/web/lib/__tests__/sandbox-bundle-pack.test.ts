@@ -55,10 +55,10 @@ describe('examples/plugins/sandbox-buzzer/pack.mjs', () => {
     const summary = JSON.parse(run.stdout) as { file: string; sha256: string; sizeBytes: number; entries: string[] };
     expect(summary.entries).toEqual(['./manifest.json', './server.js', './ui/', './ui/assets/', './ui/assets/app.js', './ui/index.html']);
 
-    const tgz = readFileSync(join(out, 'sandbox-buzzer-0.1.0.tgz'));
+    const tgz = readFileSync(join(out, 'sandbox-buzzer-0.2.0.tgz'));
     expect(summary.sizeBytes).toBe(tgz.length);
     expect(createHash('sha256').update(tgz).digest('hex')).toBe(summary.sha256);
-    expect(readFileSync(join(out, 'sandbox-buzzer-0.1.0.tgz.sha256'), 'utf8')).toBe(`${summary.sha256}  sandbox-buzzer-0.1.0.tgz\n`);
+    expect(readFileSync(join(out, 'sandbox-buzzer-0.2.0.tgz.sha256'), 'utf8')).toBe(`${summary.sha256}  sandbox-buzzer-0.2.0.tgz\n`);
 
     const scan = scanTarEntries(tgz);
     expect(scan.ok, scan.ok ? '' : scan.error).toBe(true);
@@ -71,8 +71,8 @@ describe('examples/plugins/sandbox-buzzer/pack.mjs', () => {
     const dir = prepare();
     expect(pack(dir, join(work, 'a')).status).toBe(0);
     expect(pack(dir, join(work, 'b')).status).toBe(0);
-    const a = readFileSync(join(work, 'a', 'sandbox-buzzer-0.1.0.tgz'));
-    const b = readFileSync(join(work, 'b', 'sandbox-buzzer-0.1.0.tgz'));
+    const a = readFileSync(join(work, 'a', 'sandbox-buzzer-0.2.0.tgz'));
+    const b = readFileSync(join(work, 'b', 'sandbox-buzzer-0.2.0.tgz'));
     expect(a.equals(b)).toBe(true);
   });
 
@@ -107,7 +107,7 @@ describe('examples/plugins/sandbox-buzzer/pack.mjs', () => {
       './ui/assets/app.js',
       './ui/index.html',
     ]);
-    const scan = scanTarEntries(readFileSync(join(work, 'dist', 'sandbox-buzzer-0.1.0.tgz')));
+    const scan = scanTarEntries(readFileSync(join(work, 'dist', 'sandbox-buzzer-0.2.0.tgz')));
     expect(scan.ok, scan.ok ? '' : scan.error).toBe(true);
   });
 
@@ -127,6 +127,19 @@ describe('examples/plugins/sandbox-buzzer/pack.mjs', () => {
       expect(run.status, name).toBe(1);
       expect(run.stderr, name).toMatch(message);
     }
+  });
+
+  it('prints the permissions the owner will be asked to approve, and refuses an unknown one', () => {
+    const dir = prepare();
+    const run = pack(dir, join(work, 'dist'));
+    expect(run.status, run.stderr).toBe(0);
+    expect((JSON.parse(run.stdout) as { permissions?: string[] }).permissions).toEqual(['storage', 'timers']);
+
+    const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')) as Record<string, unknown>;
+    writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ ...manifest, permissions: ['timers', 'root'] }));
+    const refused = pack(dir, join(work, 'dist2'));
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toMatch(/unknown permission "root"/);
   });
 
   it('refuses a manifest that says ui: true when ui/index.html is missing', () => {
