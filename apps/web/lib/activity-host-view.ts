@@ -50,27 +50,44 @@ export function parseActivityHost(value: unknown): ActivityHostState | null {
   };
 }
 
+/** The host's due times: `transferAt` and, until the session is abandoned, `abandonAt` (ms). */
+export function hostDueTimes(host: ActivityHostState | null | undefined): number[] {
+  if (!host || host.inVoice) return [];
+  const times: number[] = [];
+  const transferAt = host.transferAt ? Date.parse(host.transferAt) : Number.NaN;
+  if (Number.isFinite(transferAt)) times.push(transferAt);
+  const abandonAt = host.abandonAt ? Date.parse(host.abandonAt) : Number.NaN;
+  if (!host.abandoned && Number.isFinite(abandonAt)) times.push(abandonAt);
+  return times;
+}
+
 /**
- * When to re-read the session next, or null for "nothing is due".
- *
- * The candidates are `transferAt` and, until the session is abandoned,
- * `abandonAt`. A due time already in the past gets one immediate re-read —
- * unless `firedFor` says a timer already re-read for exactly that time
- * (the server could not act on it yet: the next touch will), which is what
- * keeps a stuck transfer from turning into a loop.
+ * The earliest of `times` to re-read for, or null. A due time already in
+ * the past gets one immediate re-read — unless `firedFor` says a timer
+ * already re-read for exactly that time (the server could not act on it
+ * yet: the next touch will), which is what keeps a stuck transfer or timer
+ * from turning into a loop.
+ */
+export function pickNextCheck(
+  times: readonly number[],
+  now: number,
+  firedFor: number | null = null
+): { at: number; delay: number } | null {
+  const due = times.filter((at) => at > now || at !== firedFor).sort((a, b) => a - b)[0];
+  if (due === undefined) return null;
+  return { at: due, delay: Math.max(0, due - now) + HOST_CHECK_MARGIN_MS };
+}
+
+/**
+ * When to re-read the session next for the host alone, or null for
+ * "nothing is due" (`transferAt`, and `abandonAt` until abandoned). The
+ * panel uses `nextActivityCheck` (lib/activity-next-check.ts), which adds
+ * the plugin's timers.
  */
 export function nextHostCheck(
   host: ActivityHostState | null | undefined,
   now: number,
   firedFor: number | null = null
 ): { at: number; delay: number } | null {
-  if (!host || host.inVoice) return null;
-  const times: number[] = [];
-  const transferAt = host.transferAt ? Date.parse(host.transferAt) : Number.NaN;
-  if (Number.isFinite(transferAt)) times.push(transferAt);
-  const abandonAt = host.abandonAt ? Date.parse(host.abandonAt) : Number.NaN;
-  if (!host.abandoned && Number.isFinite(abandonAt)) times.push(abandonAt);
-  const due = times.filter((at) => at > now || at !== firedFor).sort((a, b) => a - b)[0];
-  if (due === undefined) return null;
-  return { at: due, delay: Math.max(0, due - now) + HOST_CHECK_MARGIN_MS };
+  return pickNextCheck(hostDueTimes(host), now, firedFor);
 }

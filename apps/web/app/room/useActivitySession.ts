@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { getRealtimeClient } from '@/lib/realtime-client';
 import { postActivityAction } from '@/lib/activity-action-retry';
 import { activityRefusalMessage, parseActivityRefusal } from '@/lib/activity-refusal';
-import { nextHostCheck, parseActivityHost, type ActivityHostState } from '@/lib/activity-host-view';
+import { parseActivityHost, type ActivityHostState } from '@/lib/activity-host-view';
+import { nextActivityCheck, parseTimersDueAt, serverClockOffset } from '@/lib/activity-next-check';
 import { useT } from '@/lib/i18n/client';
 
 /**
@@ -32,6 +33,9 @@ import { useT } from '@/lib/i18n/client';
  *    keeps no backlog), so the state is re-read whenever the socket
  *    reconnects, the network comes back, or the tab is shown again after
  *    a while in the background (a phone may have frozen the page).
+ *  - Hosting moves and plugin timers fire LAZILY on the server, when
+ *    somebody touches the session. The panel re-reads once at the earliest
+ *    due moment (`nextActivityCheck`), counted on the server's clock.
  */
 
 export interface ActivityDetail {
@@ -44,11 +48,13 @@ export interface ActivityDetail {
   players: Array<{ userId: string; name?: string | null; status: string; score: number }>;
   /** Where the host stands, for games played over voice; absent otherwise. */
   host?: ActivityHostState | null;
+  /** When the plugin's pending timers fall due (ISO, earliest first); never what they do. */
+  timersDueAt?: string[];
 }
 
-/** A session GET body's `activity`, with `host` read defensively. */
-function toDetail(raw: ActivityDetail & { host?: unknown }): ActivityDetail {
-  return { ...raw, host: parseActivityHost(raw.host) };
+/** A session GET body's `activity`, with `host` and `timersDueAt` read defensively. */
+function toDetail(raw: ActivityDetail & { host?: unknown; timersDueAt?: unknown }): ActivityDetail {
+  return { ...raw, host: parseActivityHost(raw.host), timersDueAt: parseTimersDueAt(raw.timersDueAt) };
 }
 
 const POLL_INTERVAL_MS = 5_000;
@@ -86,10 +92,12 @@ export function useActivitySession({
   // when the language changes.
   const tRef = useRef(t);
   tRef.current = t;
-  // The current subscription's re-read, for the host timer below.
+  // The current subscription's re-read, for the due-time timer below.
   const refreshRef = useRef<(() => Promise<void>) | null>(null);
-  // The due time the host timer last re-read for (see nextHostCheck).
-  const hostFiredForRef = useRef<number | null>(null);
+  // The due time the timer last re-read for (see nextActivityCheck).
+  const checkFiredForRef = useRef<number | null>(null);
+  // The server's clock minus this device's, from the last GET's `now`.
+  const clockOffsetRef = useRef(0);
 
   /**
    * A refusal as a sentence in the reader's language (never the server's
@@ -131,8 +139,9 @@ export function useActivitySession({
           if (!cancelled) setError(tRef.current('room.activity.error.load', { status: res.status }));
           return;
         }
-        const data = (await res.json()) as { activity: ActivityDetail };
+        const data = (await res.json()) as { activity: ActivityDetail & { now?: unknown } };
         if (!cancelled) {
+          clockOffsetRef.current = serverClockOffset(data.activity.now, Date.now());
           setDetail(toDetail(data.activity));
           setError(null);
         }
@@ -141,7 +150,7 @@ export function useActivitySession({
       }
     };
     refreshRef.current = fetchOnce;
-    hostFiredForRef.current = null;
+    checkFiredForRef.current = null;
 
     const handleEvent = (raw: unknown) => {
       if (cancelled || !raw || typeof raw !== 'object') return;
@@ -156,6 +165,7 @@ export function useActivitySession({
           players: Array.isArray(event.players) ? event.players : [],
           // A snapshot without `host` keeps the last one the GET reported.
           host: 'host' in event ? parseActivityHost(event.host) : (prev?.host ?? null),
+          timersDueAt: prev?.timersDueAt ?? [],
         }));
         return;
       }
@@ -172,8 +182,17 @@ export function useActivitySession({
       // sit on the old state until the next action.
       // `presenceChanged`: a player or the host left the voice room or came
       // back (the LiveKit webhook) — the session answer says where they stand.
-      const summary = (raw as { publicSummary?: { rosterChanged?: unknown; presenceChanged?: unknown } }).publicSummary;
-      if (summary?.rosterChanged === true || summary?.presenceChanged === true || (event.status && !event.state)) {
+      // `timersChanged`: the plugin set, cleared or fired a timer — the
+      // session answer has the new due times.
+      const summary = (
+        raw as { publicSummary?: { rosterChanged?: unknown; presenceChanged?: unknown; timersChanged?: unknown } }
+      ).publicSummary;
+      if (
+        summary?.rosterChanged === true ||
+        summary?.presenceChanged === true ||
+        summary?.timersChanged === true ||
+        (event.status && !event.state)
+      ) {
         void fetchOnce();
       }
     };
@@ -240,20 +259,26 @@ export function useActivitySession({
     };
   }, [serverId, sessionId, setError]);
 
-  // Hosting moves (and a session becomes abandoned) lazily, when somebody
-  // touches the session. Re-read once at the earliest due moment so the
-  // hand-over happens even if nobody acts. Re-armed after every read (each
-  // read gives a new `host`); never a polling loop (see nextHostCheck).
+  // Hosting moves (and a session becomes abandoned) and plugin timers fire
+  // lazily, when somebody touches the session. Re-read once at the earliest
+  // due moment so they happen even if nobody acts. Re-armed after every
+  // read (each read gives a new `host` / `timersDueAt`); never a polling
+  // loop (see nextActivityCheck).
   const host = detail?.host ?? null;
+  const timersDueAt = detail?.timersDueAt;
   useEffect(() => {
-    const next = nextHostCheck(host, Date.now(), hostFiredForRef.current);
+    const next = nextActivityCheck(
+      { host, timersDueAt },
+      Date.now() + clockOffsetRef.current,
+      checkFiredForRef.current
+    );
     if (!next) return;
     const timer = setTimeout(() => {
-      hostFiredForRef.current = next.at;
+      checkFiredForRef.current = next.at;
       void refreshRef.current?.();
     }, next.delay);
     return () => clearTimeout(timer);
-  }, [host]);
+  }, [host, timersDueAt]);
 
   const dispatch = useCallback(
     async (action: Record<string, unknown>): Promise<boolean> => {
@@ -275,7 +300,8 @@ export function useActivitySession({
             cache: 'no-store',
           });
           if (current.ok) {
-            const data = (await current.json()) as { activity: ActivityDetail };
+            const data = (await current.json()) as { activity: ActivityDetail & { now?: unknown } };
+            clockOffsetRef.current = serverClockOffset(data.activity.now, Date.now());
             setDetail(toDetail(data.activity));
           }
           return true;
@@ -286,9 +312,17 @@ export function useActivitySession({
           else refuse(result.status, result.code);
           return false;
         }
-        const data = result.data as { activity: { state: Record<string, unknown>; status: string } };
+        const data = result.data as { activity: { state: Record<string, unknown>; status: string; timersDueAt?: unknown } };
         setDetail((prev) =>
-          prev ? { ...prev, state: data.activity.state, status: data.activity.status } : prev
+          prev
+            ? {
+                ...prev,
+                state: data.activity.state,
+                status: data.activity.status,
+                // The action may have set or cleared a timer.
+                ...('timersDueAt' in data.activity ? { timersDueAt: parseTimersDueAt(data.activity.timersDueAt) } : {}),
+              }
+            : prev
         );
         return true;
       } catch {

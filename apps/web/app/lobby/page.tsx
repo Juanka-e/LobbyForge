@@ -72,7 +72,7 @@ import { notifyMemberJoined } from '@/lib/bots/welcome';
 import { resolveAutoJoinServerId } from '@/lib/lobby-auto-join';
 import { botMessageForViewer, withDefaultNameFlag } from '@/lib/bots/bot-i18n-server';
 import { botDisplayName } from '@/lib/bots/bot-i18n';
-import { readMessageInteraction, readMessageWebhook } from '@/lib/bots/interaction-meta';
+import { readMessageApp, readMessageInteraction, readMessageWebhook } from '@/lib/bots/interaction-meta';
 import { isPollChannelType, type ChatPollView } from '@/lib/chat-polls';
 import { loadPollViewsForMessages } from '@/lib/chat-polls-server';
 import { botTrustLevel, isBuiltInType } from '@/lib/bots/catalog';
@@ -144,6 +144,8 @@ interface ChatMessage {
   interaction?: { id: string; commandName: string; invokedBy: { id: string | null; name: string | null } } | null;
   /** Bot API v2: a post from an incoming channel webhook (WEBHOOK badge). */
   webhook?: { id: string | null; name: string; displayName: string } | null;
+  /** A game plugin's `chat.post` during an activity (APP badge). */
+  app?: { pluginId: string; name: string } | null;
   /** A poll message: the poll as this viewer sees it (docs/CHAT_POLLS.md). */
   poll?: ChatPollView | null;
 }
@@ -416,6 +418,20 @@ function buildMessages(
         body: m.content,
         pinned: typeof m.metadata.$pinnedAt === 'string',
         webhook,
+      } satisfies ChatMessage;
+    }
+    const app = readMessageApp(m);
+    if (app) {
+      return {
+        id: m.id,
+        authorId: null,
+        // The plugin's own translation of its name (a marketplace bundle's too: this is the server).
+        author: pluginName(app.pluginId, t.locale, app.name),
+        timestamp: formatMessageTimestamp(m.createdAt, t),
+        createdAt: m.createdAt.toISOString(),
+        body: m.content,
+        pinned: typeof m.metadata.$pinnedAt === 'string',
+        app,
       } satisfies ChatMessage;
     }
     const author = m.userId ? authors.get(m.userId) : null;

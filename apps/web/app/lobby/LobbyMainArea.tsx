@@ -11,6 +11,7 @@ import { initialOf } from '@/lib/initial';
 import type { LobbyAdminLinks } from '@/lib/admin-sections';
 import { BotAvatar, BotBadge } from './BotIdentity';
 import { WebhookAvatar, WebhookBadge } from './WebhookIdentity';
+import { AppAvatar, AppBadge } from './AppIdentity';
 import { InteractionAnnouncer, InteractionHeader } from './slash/InteractionRows';
 import { useUserInteractionFeed } from './slash/useUserInteractionFeed';
 import { useEffect, useMemo, useState } from 'react';
@@ -38,6 +39,8 @@ interface ChatMessage {
   interaction?: { id: string; commandName: string; invokedBy: { id: string | null; name: string | null } } | null;
   /** Posted by an incoming channel webhook — rendered with the WEBHOOK badge. */
   webhook?: { id: string | null; name: string; displayName: string } | null;
+  /** Posted by a game plugin during an activity — rendered with the APP badge. */
+  app?: { pluginId: string; name: string } | null;
   /** A poll message: the poll as this viewer sees it. */
   poll?: ChatPollView | null;
 }
@@ -371,11 +374,13 @@ function Message({ message }: { message: ChatMessage }) {
   }
   const authorColorClass = message.authorColor === 'primary' ? 'text-primary' : 'text-text-primary';
   return (
-    <div data-chat-message data-bot-message={message.bot ? 'true' : undefined} data-webhook-message={message.webhook ? 'true' : undefined} className="flex gap-4 group hover:bg-surface-container/30 p-2 -mx-2 rounded-lg transition-colors">
+    <div data-chat-message data-bot-message={message.bot ? 'true' : undefined} data-webhook-message={message.webhook ? 'true' : undefined} data-app-message={message.app ? 'true' : undefined} className="flex gap-4 group hover:bg-surface-container/30 p-2 -mx-2 rounded-lg transition-colors">
       {message.bot ? (
         <BotAvatar size="md" className="mt-1" />
       ) : message.webhook ? (
         <WebhookAvatar className="mt-1" />
+      ) : message.app ? (
+        <AppAvatar className="mt-1" />
       ) : (
         <div data-chat-avatar className="chat-avatar w-10 h-10 rounded-full bg-secondary-container flex-shrink-0 mt-1 flex items-center justify-center font-bold text-text-primary">
           {initialOf(message.author, { locale: t.locale })}
@@ -390,7 +395,13 @@ function Message({ message }: { message: ChatMessage }) {
         ) : null}
         <div className="flex items-baseline gap-2">
           <span className={`font-label-sm font-medium ${authorColorClass} hover:underline cursor-pointer`}>{message.author}</span>
-          {message.bot ? <BotBadge className="self-center" /> : message.webhook ? <WebhookBadge className="self-center" /> : null}
+          {message.bot ? (
+            <BotBadge className="self-center" />
+          ) : message.webhook ? (
+            <WebhookBadge className="self-center" />
+          ) : message.app ? (
+            <AppBadge name={message.author} className="self-center" />
+          ) : null}
           <span className="font-label-xs text-[11px] text-text-secondary">{message.timestamp}</span>
         </div>
         <p className="font-body-md text-text-secondary mt-1 whitespace-pre-wrap">{message.body}</p>

@@ -6,11 +6,20 @@ import { useT } from '@/lib/i18n/client';
 import { initialOf } from '@/lib/initial';
 import { handleEmailUnverified, requestVerificationFocus } from '@/components/email-verification/email-status-store';
 import type { Translator } from '@/lib/i18n/core';
-import { readMessageInteraction, readMessageWebhook, type MessageInteractionInfo, type MessageWebhookInfo } from '@/lib/bots/interaction-meta';
+import {
+  readMessageApp,
+  readMessageInteraction,
+  readMessageWebhook,
+  type MessageAppInfo,
+  type MessageInteractionInfo,
+  type MessageWebhookInfo,
+} from '@/lib/bots/interaction-meta';
+import { pluginName } from '@/lib/plugin-catalog-text';
 import { interactionStore, useInteractionState } from '@/lib/bots/interaction-store';
 import { botDisplayName, localizeBotMessage } from '@/lib/bots/bot-i18n';
 import { BotAvatar, BotBadge } from './BotIdentity';
 import { WebhookAvatar, WebhookBadge } from './WebhookIdentity';
+import { AppAvatar, AppBadge } from './AppIdentity';
 import { EphemeralAnswerRow, InteractionHeader, PendingInteractionRow } from './slash/InteractionRows';
 import { ChatPollCard } from './ChatPollCard';
 import {
@@ -61,6 +70,8 @@ interface ChatMessage {
   interaction?: MessageInteractionInfo | null;
   /** Posted by an incoming channel webhook — rendered with the WEBHOOK badge. */
   webhook?: MessageWebhookInfo | null;
+  /** Posted by a game plugin during an activity (`chat.post`) — rendered with the APP badge. */
+  app?: MessageAppInfo | null;
   /** A poll message (docs/CHAT_POLLS.md): the poll as this viewer sees it. */
   poll?: ChatPollView | null;
 }
@@ -117,15 +128,15 @@ interface ApiMessage {
 
 /**
  * Who wrote a message the API or the realtime feed delivered: a bot (with
- * its interaction header, if it answered a command), a webhook, a member,
- * or nobody any more.
+ * its interaction header, if it answered a command), a webhook, an app (a
+ * game plugin), a member, or nobody any more.
  */
 function describeAuthor(
   message: { userId: string | null; botId?: string | null; bot?: unknown; metadata?: unknown },
   names: Map<string, string>,
   t: Translator,
   unknownMember: string
-): Pick<ChatMessage, 'author' | 'bot' | 'interaction' | 'webhook'> {
+): Pick<ChatMessage, 'author' | 'bot' | 'interaction' | 'webhook' | 'app'> {
   const bot = message.userId ? null : asMessageBot(message.bot);
   if (bot) {
     return {
@@ -133,17 +144,24 @@ function describeAuthor(
       bot,
       interaction: readMessageInteraction({ userId: message.userId, botId: message.botId ?? bot.id, metadata: message.metadata }),
       webhook: null,
+      app: null,
     };
   }
   const webhook = readMessageWebhook(message);
   if (webhook) {
-    return { author: webhook.displayName || t('interactions.webhook.unnamed'), bot: null, interaction: null, webhook };
+    return { author: webhook.displayName || t('interactions.webhook.unnamed'), bot: null, interaction: null, webhook, app: null };
+  }
+  const app = readMessageApp(message);
+  if (app) {
+    // The plugin's own translation of its name when this browser knows it.
+    return { author: pluginName(app.pluginId, t.locale, app.name), bot: null, interaction: null, webhook: null, app };
   }
   return {
     author: message.userId ? (names.get(message.userId) ?? unknownMember) : t('lobbyMain.chat.deletedUser'),
     bot: null,
     interaction: null,
     webhook: null,
+    app: null,
   };
 }
 
@@ -435,13 +453,15 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
         Notification.permission === 'granted' &&
         document.visibilityState !== 'visible'
       ) {
-        // A bot or a webhook is never mistaken for a member — not even in
-        // a desktop notification, which cannot show the badge.
+        // A bot, a webhook or an app is never mistaken for a member — not
+        // even in a desktop notification, which cannot show the badge.
         const titleKey = who.webhook
           ? 'lobbyMain.chat.notificationTitleWebhook'
           : who.bot
             ? 'lobbyMain.chat.notificationTitleBot'
-            : 'lobbyMain.chat.notificationTitle';
+            : who.app
+              ? 'lobbyMain.chat.notificationTitleApp'
+              : 'lobbyMain.chat.notificationTitle';
         new Notification(t(titleKey, { author, channel: data.channelName }), {
           body: prefs.showPreview ? body : t('lobbyMain.chat.notificationBody'),
           silent: prefs.sound === 'none',
@@ -710,11 +730,13 @@ function LiveMessage({ message, invokedByName, currentUserId, serverId, channelI
   }
   const authorColorClass = message.authorColor === 'primary' ? 'text-primary' : 'text-text-primary';
   return (
-    <div data-chat-message data-bot-message={message.bot ? 'true' : undefined} data-webhook-message={message.webhook ? 'true' : undefined} className="flex gap-4 group hover:bg-surface-container/30 p-2 -mx-2 rounded-lg transition-colors animate-fade-in-up relative">
+    <div data-chat-message data-bot-message={message.bot ? 'true' : undefined} data-webhook-message={message.webhook ? 'true' : undefined} data-app-message={message.app ? 'true' : undefined} className="flex gap-4 group hover:bg-surface-container/30 p-2 -mx-2 rounded-lg transition-colors animate-fade-in-up relative">
       {message.bot ? (
         <BotAvatar size="md" className="mt-1" />
       ) : message.webhook ? (
         <WebhookAvatar className="mt-1" />
+      ) : message.app ? (
+        <AppAvatar className="mt-1" />
       ) : (
         <div data-chat-avatar className="chat-avatar w-10 h-10 rounded-full bg-secondary-container flex-shrink-0 mt-1 flex items-center justify-center font-bold text-text-primary">
           {initialOf(message.author, { locale: t.locale })}
@@ -729,7 +751,13 @@ function LiveMessage({ message, invokedByName, currentUserId, serverId, channelI
         ) : null}
         <div className="flex items-baseline gap-2">
           <span className={`font-label-sm font-medium ${authorColorClass}`}>{message.author}</span>
-          {message.bot ? <BotBadge className="self-center" /> : message.webhook ? <WebhookBadge className="self-center" /> : null}
+          {message.bot ? (
+            <BotBadge className="self-center" />
+          ) : message.webhook ? (
+            <WebhookBadge className="self-center" />
+          ) : message.app ? (
+            <AppBadge name={message.author} className="self-center" />
+          ) : null}
           <span
             className="font-label-xs text-[11px] text-text-secondary"
             title={formatFullTimestamp(message.createdAt, t)}
