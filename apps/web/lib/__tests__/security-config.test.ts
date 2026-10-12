@@ -123,10 +123,10 @@ describe('global web security policy', () => {
   });
 
   it('is a Next 16 proxy (always the Node.js runtime: it reads the CAPTCHA settings cache)', async () => {
-    const module = await import('../../proxy');
-    expect(typeof module.proxy).toBe('function');
+    const proxyModule = await import('../../proxy');
+    expect(typeof proxyModule.proxy).toBe('function');
     // A `runtime` option in a proxy file is a build error.
-    expect(module.config).not.toHaveProperty('runtime');
+    expect(proxyModule.config).not.toHaveProperty('runtime');
     expect(existsSync(join(__dirname, '..', '..', 'middleware.ts'))).toBe(false);
   });
 
