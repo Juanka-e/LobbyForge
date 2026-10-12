@@ -26,6 +26,7 @@ const ACTION_LABEL_KEYS: Record<string, string> = {
   'channel.delete': 'admin.audit.action.channel.delete',
   'channel.update': 'admin.audit.action.channel.update',
   'instance.captcha_updated': 'admin.audit.action.instance.captcha_updated',
+  'instance.default_locale_updated': 'admin.audit.action.instance.default_locale_updated',
   'instance.mail_updated': 'admin.audit.action.instance.mail_updated',
   'invite.create': 'admin.audit.action.invite.create',
   'invite.redeem': 'admin.audit.action.invite.redeem',

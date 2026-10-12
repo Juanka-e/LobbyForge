@@ -122,6 +122,49 @@ describe('POST /api/auth/password/forgot', { timeout: 20_000 }, () => {
     expect(mail.vars.linkHours).toBe(1);
   });
 
+  describe('the email’s language', () => {
+    const forgotWith = async (headers: Record<string, string>) =>
+      (await import('../forgot/route')).POST(
+        new Request('https://community.example/api/auth/password/forgot', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...headers },
+          body: JSON.stringify({ email: EMAIL }),
+        }),
+        {}
+      );
+    const resetLocale = () =>
+      ([...h.dispatchMail.mock.calls].reverse().find(([input]) => input.template === 'reset')?.[0] as { locale: string } | undefined)?.locale;
+
+    it('is the account owner’s saved language, not the language of whoever asked', async () => {
+      fake.db.users.get(UID)!.locale = 'tr';
+      expect((await forgotWith({ 'accept-language': 'en-US', cookie: 'lf_locale=en' })).status).toBe(202);
+      await flush();
+      expect(resetLocale()).toBe('tr');
+    });
+
+    it('honours an explicit English choice (NULL, not "en", means unset)', async () => {
+      fake.db.users.get(UID)!.locale = 'en';
+      await forgotWith({ 'accept-language': 'tr-TR' });
+      await flush();
+      expect(resetLocale()).toBe('en');
+    });
+
+    it('falls back to the requester’s language when the owner never chose one', async () => {
+      fake.db.users.get(UID)!.locale = null;
+      await forgotWith({ 'accept-language': 'tr-TR,tr;q=0.9' });
+      await flush();
+      expect(resetLocale()).toBe('tr');
+    });
+
+    it('ends in the instance default when neither says anything', async () => {
+      vi.stubEnv('LOBBYFORGE_DEFAULT_LOCALE', 'tr');
+      fake.db.users.get(UID)!.locale = null;
+      await forgotWith({});
+      await flush();
+      expect(resetLocale()).toBe('tr');
+    });
+  });
+
   it('a guest or deleted account gets nothing, with the same answer', async () => {
     fake.db.users.get(UID)!.deletedAt = new Date();
     expect((await forgot({ email: EMAIL })).status).toBe(202);

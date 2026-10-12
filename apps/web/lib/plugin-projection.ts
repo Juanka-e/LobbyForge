@@ -18,6 +18,7 @@
 import { projectActivityState } from './activity-projection';
 import { isWorkerBackedPlugin, type SandboxReadContext } from './plugin-worker-client';
 import type { RegisteredGamePlugin } from '@lobbyforge/plugin-sdk';
+import { instanceDefaultLocale } from './i18n/instance-default';
 
 export type { SandboxReadContext };
 
@@ -82,8 +83,10 @@ const LOCALE_RE = /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/;
 
 /**
  * The viewer's language for the sandbox ctx: the saved `lf_locale` choice,
- * else the first Accept-Language tag, else English. A hint only — the
- * plugin picks from its own locales.
+ * else the first Accept-Language tag, else the instance default
+ * (`lib/i18n/instance-default.ts`), else English. A hint only — the plugin
+ * picks from its own locales, which may include languages the app itself
+ * does not ship, so the first two are not limited to installed ones.
  */
 export function sandboxLocaleFor(req: Request): string {
   for (const part of (req.headers.get('cookie') ?? '').split(';')) {
@@ -98,5 +101,5 @@ export function sandboxLocaleFor(req: Request): string {
   }
   const first = (req.headers.get('accept-language') ?? '').split(',')[0]?.split(';')[0]?.trim() ?? '';
   const normalized = first.replace(/^([A-Za-z]{2,3})/, (lang) => lang.toLowerCase());
-  return LOCALE_RE.test(normalized) ? normalized : 'en';
+  return LOCALE_RE.test(normalized) ? normalized : instanceDefaultLocale();
 }

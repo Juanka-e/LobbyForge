@@ -146,7 +146,7 @@ async function handlePost(req: Request): Promise<NextResponse> {
   // the new member (never throws, so it cannot fail the registration).
   await notifyMemberJoined({ serverId: result.serverId, userId: result.user.id });
   const verificationEmailSent = await maybeStartSignupVerification(
-    { id: result.user.id, email: result.user.email, locale: preferredMailLocale(req, null) },
+    { id: result.user.id, email: result.user.email, locale: await preferredMailLocale(req, null) },
     { invite: inviteCode !== null }
   );
   return signedInResponse(req, result.user, {
@@ -180,7 +180,7 @@ async function registerOfficialAccount(req: Request, data: RegisterInput): Promi
   }
   // Every hub sign-up is an open sign-up (scope `open_register`).
   const verificationEmailSent = await maybeStartSignupVerification(
-    { id: result.user.id, email: result.user.email, locale: preferredMailLocale(req, null) },
+    { id: result.user.id, email: result.user.email, locale: await preferredMailLocale(req, null) },
     { invite: false }
   );
   return signedInResponse(req, result.user, { user: result.user, ...(verificationEmailSent ? { verificationEmailSent } : {}) });

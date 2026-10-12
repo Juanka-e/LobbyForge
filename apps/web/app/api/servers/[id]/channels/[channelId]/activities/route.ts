@@ -226,7 +226,7 @@ async function handlePost(
     // language in ctx.locale (as its actions get the caller's), so a game
     // that writes text into its state starts in the right language.
     if (isWorkerBackedPlugin(plugin)) {
-      attachSandboxScope(ctx, { locale: localeFromRequest(req) });
+      attachSandboxScope(ctx, { locale: await localeFromRequest(req) });
     }
     const initialState = await callCreateInitialState(plugin, ctx) as Record<string, unknown>;
 

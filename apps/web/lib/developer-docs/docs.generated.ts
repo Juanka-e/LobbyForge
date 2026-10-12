@@ -102,8 +102,10 @@ Everything a bot posts carries a **BOT** badge and a robot avatar.
 3. **Moderation Bot:** blocked words (Turkish-aware matching), a link
    policy, a mention cap, flood rules and repeat rules. It checks every
    member message and every edit before the message is stored.
-4. Both bots post in \`LOBBYFORGE_DEFAULT_LOCALE\` (English if unset) until
-   you write your own text.
+4. With their default texts, both bots show each member their own
+   language (stored with a fallback in the instance default language: the
+   admin's choice, else \`LOBBYFORGE_DEFAULT_LOCALE\`, else English). A text
+   you write yourself is shown exactly as written.
 
 The full rules are in [BOTS.md → Built-in bots](BOTS.md#built-in-bots).
 
@@ -1294,7 +1296,8 @@ English one "Welcome to Oyun Gecesi, Ayşe!". A text or name an admin writes
 is shown to everyone exactly as written.
 
 - The message is stored once. Its \`content\` is in the instance language
-  (\`LOBBYFORGE_DEFAULT_LOCALE\`, else English), as the fallback for bots,
+  (the instance default: the admin's choice, else \`LOBBYFORGE_DEFAULT_LOCALE\`,
+  else English), as the fallback for bots,
   search and older apps. A default text also stores
   \`metadata.i18n = { key, params }\` (the catalogue key and the cleaned
   names), and the lobby shows \`t(key, params)\` in the viewer's language. An
@@ -1889,9 +1892,10 @@ As implemented:
 
 ### 3.5 Languages
 Every \`interaction_create\` carries **\`locale\`**: the language of the member
-who ran the command. It's the language their LobbyForge is shown in: their
-choice in Settings, else their browser's (\`Accept-Language\`), else the
-instance default (\`LOBBYFORGE_DEFAULT_LOCALE\`), else \`en\`.
+who ran the command. It's the language their LobbyForge is shown in: the
+language saved on their account, else their choice on this device, else
+their browser's (\`Accept-Language\`), else the instance default (the
+admin's choice, else \`LOBBYFORGE_DEFAULT_LOCALE\`), else \`en\`.
 
 - It's always one of the instance's installed language codes (BCP 47, the
   folder names under \`apps/web/messages\`): \`en\`, \`tr\`, \`pt-BR\`, …

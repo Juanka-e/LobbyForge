@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const getEffectiveUserSettings = vi.fn();
+const getUserLocale = vi.fn();
+const setUserLocale = vi.fn();
 const updateUserAudio = vi.fn();
 const updateUserKeybinds = vi.fn();
 const updateUserNotifications = vi.fn();
@@ -11,6 +13,8 @@ const recordSession = vi.fn();
 
 vi.mock('@lobbyforge/db', () => ({
   getEffectiveUserSettings,
+  getUserLocale,
+  setUserLocale,
   updateUserAudio,
   updateUserKeybinds,
   updateUserNotifications,
@@ -63,6 +67,8 @@ beforeEach(() => {
     theme,
   }));
   recordSession.mockReset();
+  getUserLocale.mockReset().mockResolvedValue(null);
+  setUserLocale.mockReset().mockImplementation(async (_db, _uid, locale) => locale);
   requireMaterializedSession.mockReset().mockReturnValue({
     ok: true,
     session: {
@@ -136,5 +142,59 @@ describe('PATCH /api/settings/me', () => {
         pushToTalk: { code: 'AltLeft', label: 'Left Alt' },
       }
     );
+  });
+
+  describe('the account language (0048)', () => {
+    const UID = '00000000-0000-0000-0000-000000000001';
+
+    it('saves an installed language, in its installed spelling, and answers it', async () => {
+      const response = await patch({ locale: 'TR' });
+
+      expect(response.status).toBe(200);
+      expect(setUserLocale).toHaveBeenCalledWith(expect.anything(), UID, 'tr');
+      expect((await response.json()).settings.locale).toBe('tr');
+    });
+
+    it('clears it with null — "Match my browser"', async () => {
+      const response = await patch({ locale: null });
+
+      expect(response.status).toBe(200);
+      expect(setUserLocale).toHaveBeenCalledWith(expect.anything(), UID, null);
+      expect((await response.json()).settings.locale).toBeNull();
+    });
+
+    it('refuses a language this instance does not ship, and anything that is not a code', async () => {
+      for (const locale of ['de', 'xx-YY', '../../etc', '', 'e', 42]) {
+        const response = await patch({ locale });
+        expect(response.status).toBe(400);
+      }
+      expect(setUserLocale).not.toHaveBeenCalled();
+    });
+
+    it('leaves the language alone when the body does not mention it', async () => {
+      getUserLocale.mockResolvedValue('tr');
+      const response = await patch({ theme: 'light' });
+
+      expect(response.status).toBe(200);
+      expect(setUserLocale).not.toHaveBeenCalled();
+      expect((await response.json()).settings.locale).toBe('tr');
+    });
+
+    it('accepts a language-only body', async () => {
+      expect((await patch({ locale: 'en' })).status).toBe(200);
+      expect(setUserLocale).toHaveBeenCalledWith(expect.anything(), UID, 'en');
+    });
+  });
+});
+
+describe('GET /api/settings/me', () => {
+  it('answers the account language with the other settings (null = follows the browser)', async () => {
+    const { GET } = await import('../route.js');
+    getUserLocale.mockResolvedValueOnce(null);
+    const unset = await GET(new Request('https://example.test/api/settings/me'), {});
+    expect((await unset.json()).settings.locale).toBeNull();
+    getUserLocale.mockResolvedValueOnce('tr');
+    const chosen = await GET(new Request('https://example.test/api/settings/me'), {});
+    expect((await chosen.json()).settings.locale).toBe('tr');
   });
 });

@@ -185,7 +185,7 @@ async function handlePost(req: Request, ctx: RouteContext): Promise<NextResponse
   const names = await listUserDisplayNames(getDb(), [uid]);
   // The invoker's language — the one their lobby is shown in — so the bot
   // can answer them in it (docs/BOT_API_V2.md, "Languages").
-  const locale = localeFromRequest(req);
+  const locale = await localeFromRequest(req);
   void dispatchInteractionCreate({ bot, interaction, user: { id: uid, displayName: names.get(uid) ?? '' }, locale }).catch(
     (err) => console.error('[bots] interaction dispatch failed:', (err as Error).message)
   );

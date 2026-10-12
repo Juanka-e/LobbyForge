@@ -6,7 +6,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MAIL_TEMPLATES } from '../types';
-import { escapeHtml, maskEmail, mailLocale, preferredMailLocale, renderMail, requestLocale } from '../templates';
+import { __resetInstanceDefaultLocaleForTests } from '@/lib/i18n/instance-default';
+import { escapeHtml, maskEmail, mailLocale, preferredMailLocale, renderMail, savedMailLocale } from '../templates';
 import { DISPOSABLE_LIST_INFO, emailDomain, isDisposableEmail, normaliseDomainEntry } from '../disposable';
 
 afterEach(() => vi.unstubAllEnvs());
@@ -50,18 +51,26 @@ describe('email templates', () => {
     expect(mail.html).not.toContain('href=');
   });
 
-  it('picks the language: users.locale when chosen, else the request, else the instance default', () => {
-    expect(mailLocale('TR')).toBe('tr');
-    expect(mailLocale('xx')).toBe('en');
+  it('picks the language: the saved one when installed, else the request, else the instance default', async () => {
+    // No database here: the instance default comes from the env, then English.
+    __resetInstanceDefaultLocaleForTests();
+    expect(savedMailLocale('TR')).toBe('tr');
+    expect(savedMailLocale('xx')).toBeNull();
+    expect(savedMailLocale(null)).toBeNull();
+    expect(await mailLocale('TR')).toBe('tr');
+    expect(await mailLocale('xx')).toBe('en');
     vi.stubEnv('LOBBYFORGE_DEFAULT_LOCALE', 'tr');
-    expect(mailLocale(null)).toBe('tr');
+    expect(await mailLocale(null)).toBe('tr');
     vi.stubEnv('LOBBYFORGE_DEFAULT_LOCALE', '');
     const req = (headers: Record<string, string>) => new Request('https://x.example/', { headers });
-    expect(requestLocale(req({ cookie: 'lf_locale=tr' }))).toBe('tr');
-    expect(requestLocale(req({ 'accept-language': 'de;q=0.9, tr-TR;q=0.8' }))).toBe('tr');
-    expect(requestLocale(req({}))).toBe('en');
-    expect(preferredMailLocale(req({ cookie: 'lf_locale=tr' }), 'en')).toBe('tr');
-    expect(preferredMailLocale(req({ cookie: 'lf_locale=en' }), 'tr')).toBe('tr');
+    expect(await preferredMailLocale(req({ cookie: 'lf_locale=tr' }), null)).toBe('tr');
+    expect(await preferredMailLocale(req({ 'accept-language': 'de;q=0.9, tr-TR;q=0.8' }), null)).toBe('tr');
+    expect(await preferredMailLocale(req({}), null)).toBe('en');
+    // NULL is "never chose" since 0048, so an explicit English choice counts.
+    expect(await preferredMailLocale(req({ cookie: 'lf_locale=tr' }), 'en')).toBe('en');
+    expect(await preferredMailLocale(req({ cookie: 'lf_locale=en' }), 'tr')).toBe('tr');
+    // A saved language since removed from the instance falls through to the request.
+    expect(await preferredMailLocale(req({ cookie: 'lf_locale=tr' }), 'xx')).toBe('tr');
   });
 
   it('masks addresses', () => {

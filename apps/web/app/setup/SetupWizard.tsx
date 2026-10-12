@@ -1,14 +1,17 @@
 'use client';
 
 import { useMemo, useState, type FormEvent } from 'react';
-import { useT } from '@/lib/i18n/client';
+import { I18nProvider, useT } from '@/lib/i18n/client';
+import type { LocaleInfo, Messages } from '@/lib/i18n/core';
+import { serializeLocaleCookie } from '@/lib/i18n/locale-cookie';
 import { initialOf } from '@/lib/initial';
 import { rich } from '@/lib/i18n/rich';
 
-type Step = 'name' | 'owner' | 'access' | 'seo' | 'review';
+type Step = 'language' | 'name' | 'owner' | 'access' | 'seo' | 'review';
 
 /** Labels are message keys, resolved with `t()` where they render. */
 const STEPS: { id: Step; labelKey: string; descriptionKey: string }[] = [
+  { id: 'language', labelKey: 'auth.setup.steps.language.label', descriptionKey: 'auth.setup.steps.language.description' },
   { id: 'name', labelKey: 'auth.setup.steps.name.label', descriptionKey: 'auth.setup.steps.name.description' },
   { id: 'owner', labelKey: 'auth.setup.steps.owner.label', descriptionKey: 'auth.setup.steps.owner.description' },
   { id: 'access', labelKey: 'auth.setup.steps.access.label', descriptionKey: 'auth.setup.steps.access.description' },
@@ -59,20 +62,83 @@ const ACCESS_OPTIONS: {
   },
 ];
 
-export default function SetupWizard({
-  defaultInstanceName,
-  defaultOwnerDisplayName,
-  setupTokenRequired,
-  instanceId,
-  isOfficialHost,
-}: {
+/**
+ * One installed language as the wizard needs it: its metadata, and its
+ * setup strings already merged over English (`setupLanguages` in
+ * `./setup-languages.ts`). Every language on disk is passed, so one added
+ * later shows up on the first step with no code change.
+ */
+export interface SetupLanguage {
+  info: LocaleInfo;
+  messages: Messages;
+  englishPlurals: string[];
+}
+
+interface WizardProps {
   defaultInstanceName: string;
   defaultOwnerDisplayName: string;
   setupTokenRequired: boolean;
   instanceId: string;
   isOfficialHost: boolean;
-}) {
+}
+
+/**
+ * The first-run wizard. Its first step picks the language, and the wizard
+ * switches to it at once — every step after renders in it — because each
+ * language's setup strings are already on the page. The choice is also
+ * written to the `lf_locale` cookie (a reload keeps it), and on completion
+ * saved as the instance default and as the owner account's language.
+ */
+export default function SetupWizard({
+  languages,
+  initialLocale,
+  ...props
+}: WizardProps & { languages: SetupLanguage[]; initialLocale: string }) {
+  const [locale, setLocale] = useState(
+    () => languages.find((l) => l.info.code === initialLocale)?.info.code ?? languages[0]?.info.code ?? 'en'
+  );
+  const active = languages.find((l) => l.info.code === locale) ?? languages[0];
+
+  function chooseLanguage(code: string) {
+    if (!languages.some((l) => l.info.code === code)) return;
+    setLocale(code);
+    // The wizard is the whole page here (no global header on /setup), so
+    // the document's language is the wizard's: casing and screen readers.
+    document.documentElement.lang = code;
+    document.documentElement.dir = languages.find((l) => l.info.code === code)?.info.dir ?? 'ltr';
+    try {
+      document.cookie = serializeLocaleCookie(code);
+    } catch {
+      // Cookies blocked: the choice still reaches the server with the form.
+    }
+  }
+
+  return (
+    <I18nProvider
+      locale={active?.info.code ?? locale}
+      dir={active?.info.dir ?? 'ltr'}
+      messages={active?.messages ?? {}}
+      englishPlurals={active?.englishPlurals ?? []}
+      locales={languages.map((l) => l.info)}
+      choice={locale}
+    >
+      <WizardBody {...props} languages={languages} locale={locale} onChooseLanguage={chooseLanguage} />
+    </I18nProvider>
+  );
+}
+
+function WizardBody({
+  defaultInstanceName,
+  defaultOwnerDisplayName,
+  setupTokenRequired,
+  instanceId,
+  isOfficialHost,
+  languages,
+  locale,
+  onChooseLanguage,
+}: WizardProps & { languages: SetupLanguage[]; locale: string; onChooseLanguage: (code: string) => void }) {
   const t = useT();
+  const dir = languages.find((l) => l.info.code === locale)?.info.dir ?? 'ltr';
   const [stepIndex, setStepIndex] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -143,6 +209,7 @@ export default function SetupWizard({
           seoIndexingEnabled: form.seoIndexingEnabled,
           seoTitle: form.seoTitle.trim() || null,
           seoDescription: form.seoDescription.trim() || null,
+          locale,
         }),
       });
       if (!res.ok) {
@@ -172,7 +239,11 @@ export default function SetupWizard({
   }
 
   return (
-    <section className="w-full max-w-2xl rounded-lg border border-border-subtle bg-surface-raised shadow-lg overflow-hidden">
+    <section
+      lang={locale}
+      dir={dir}
+      className="w-full max-w-2xl rounded-lg border border-border-subtle bg-surface-raised shadow-lg overflow-hidden"
+    >
       <header className="px-6 py-5 border-b border-border-subtle flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
@@ -215,6 +286,10 @@ export default function SetupWizard({
           </h2>
           <p className="text-sm text-text-secondary">{t(currentStep.descriptionKey)}</p>
         </header>
+
+        {currentStep.id === 'language' && (
+          <LanguageStep languages={languages} locale={locale} onChoose={onChooseLanguage} />
+        )}
 
         {currentStep.id === 'name' && (
           <div className="grid gap-4">
@@ -463,7 +538,9 @@ export default function SetupWizard({
           </div>
         )}
 
-        {currentStep.id === 'review' && <ReviewPanel form={form} />}
+        {currentStep.id === 'review' && (
+          <ReviewPanel form={form} languageName={languages.find((l) => l.info.code === locale)?.info.name ?? locale} />
+        )}
 
         {error && (
           <p
@@ -483,8 +560,12 @@ export default function SetupWizard({
           >
             {t('auth.setup.back')}
           </button>
+          {/* Distinct keys: without them React reuses the Continue button as
+              the submit button, and in a real browser the click that opens
+              the review step turns into a submit before the review shows. */}
           {stepIndex < STEPS.length - 1 ? (
             <button
+              key="continue"
               type="button"
               onClick={next}
               disabled={!canAdvance}
@@ -494,6 +575,7 @@ export default function SetupWizard({
             </button>
           ) : (
             <button
+              key="finish"
               type="submit"
               disabled={submitting}
               className="rounded-md bg-primary-container px-4 py-2 text-sm font-semibold text-on-primary-container hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
@@ -504,6 +586,76 @@ export default function SetupWizard({
         </footer>
       </form>
     </section>
+  );
+}
+
+/**
+ * Step 1: every installed language, each in its own name (with its English
+ * name beside it), so whoever runs setup finds theirs whatever language
+ * the page opened in. Picking one switches the wizard at once.
+ */
+function LanguageStep({
+  languages,
+  locale,
+  onChoose,
+}: {
+  languages: SetupLanguage[];
+  locale: string;
+  onChoose: (code: string) => void;
+}) {
+  const t = useT();
+  return (
+    <div className="flex flex-col gap-2">
+      <div
+        role="radiogroup"
+        aria-label={t('auth.setup.language.legend')}
+        className="overflow-hidden rounded-md border border-border-subtle bg-background"
+      >
+        {languages.map(({ info }) => {
+          const selected = info.code === locale;
+          return (
+            <button
+              key={info.code}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              lang={info.code}
+              dir={info.dir}
+              onClick={() => onChoose(info.code)}
+              className={`flex w-full items-center gap-3 border-b border-border-subtle px-4 py-2.5 text-left last:border-b-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary ${
+                selected ? 'bg-primary/10 text-text-primary' : 'text-text-secondary hover:bg-surface-container hover:text-text-primary'
+              }`}
+            >
+              <span
+                aria-hidden
+                className={`grid size-4 flex-shrink-0 place-items-center rounded-full border ${
+                  selected ? 'border-primary' : 'border-border-subtle'
+                }`}
+              >
+                {selected ? <span className="size-2 rounded-full bg-primary" /> : null}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium">{info.name}</span>
+                {info.englishName && info.englishName !== info.name ? (
+                  <span className="block truncate text-xs text-text-muted" lang="en" dir="ltr">
+                    {info.englishName}
+                  </span>
+                ) : null}
+              </span>
+              {info.status === 'partial' ? (
+                <span
+                  className="flex-shrink-0 rounded border border-border-subtle px-1.5 py-0.5 text-[11px] text-text-muted"
+                  lang={locale}
+                >
+                  {t('auth.setup.language.partial')}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-xs text-text-muted">{t('auth.setup.language.hint')}</p>
+    </div>
   );
 }
 
@@ -568,11 +720,12 @@ function ProgressBar({ stepIndex }: { stepIndex: number }) {
   );
 }
 
-function ReviewPanel({ form }: { form: FormState }) {
+function ReviewPanel({ form, languageName }: { form: FormState; languageName: string }) {
   const t = useT();
   const onOff = (on: boolean) => (on ? t('auth.setup.review.enabled') : t('auth.setup.review.disabled'));
   const accessKey = ACCESS_OPTIONS.find((o) => o.value === form.registrationMode)?.labelKey;
   const rows: { label: string; value: string }[] = [
+    { label: t('auth.setup.review.language'), value: languageName },
     { label: t('auth.setup.instanceName.label'), value: form.instanceName.trim() || '—' },
     { label: t('auth.setup.review.owner'), value: form.ownerDisplayName.trim() || '—' },
     { label: t('auth.setup.ownerEmail.label'), value: form.ownerEmail.trim() || '—' },

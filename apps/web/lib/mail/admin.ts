@@ -420,7 +420,7 @@ async function runTest(config: SmtpConfig, from: string, to: string): Promise<Ma
       from,
       to,
       template: 'test',
-      locale: mailLocale(null),
+      locale: await mailLocale(null),
       vars: { instanceName: await instanceDisplayName() },
     });
     if (!sent.ok) return sent.outcome;

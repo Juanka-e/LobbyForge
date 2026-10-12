@@ -1,7 +1,8 @@
 /**
  * Email templates (docs/EMAIL.md §2.3): plain text plus simple HTML, built
  * from `messages/<locale>/email.json` in the recipient's language (their
- * `users.locale`, else the instance default, else English).
+ * saved `users.locale`, else the triggering request's language, else the
+ * instance default, else English).
  *
  *   - no remote images, no tracking pixels, no external CSS — inline styles;
  *   - the code is never in the subject line (lock-screen previews);
@@ -12,8 +13,9 @@
  * Server-only (reads the catalogues from disk).
  */
 import { translatorFor, getDiscovery } from '@/lib/i18n/catalogue';
-import { SOURCE_LOCALE, negotiateLocale } from '@/lib/i18n/core';
-import { readLocaleCookie } from '@/lib/i18n/locale-cookie';
+import { installedLocale } from '@/lib/i18n/core';
+import { getInstanceDefaultLocale } from '@/lib/i18n/instance-default';
+import { localeFromRequest } from '@/lib/i18n/request-locale';
 import type { MailTemplate } from './types';
 
 export interface MailTemplateVars {
@@ -47,31 +49,25 @@ const PREFIX: Record<MailTemplate, string> = {
 
 const WITH_CODE: ReadonlySet<MailTemplate> = new Set(['verify', 'change-confirm', 'reset']);
 
-/** The language to write in: the given one, else LOBBYFORGE_DEFAULT_LOCALE, else English — whichever is installed. */
-export function mailLocale(userLocale: string | null | undefined): string {
-  const codes = getDiscovery().locales.map((locale) => locale.code);
-  const pick = (value: string | null | undefined) => (value ? codes.find((code) => code.toLowerCase() === value.trim().toLowerCase()) : undefined);
-  return pick(userLocale) ?? pick(process.env.LOBBYFORGE_DEFAULT_LOCALE) ?? SOURCE_LOCALE;
+/** The recipient's saved language when it is still installed; null when unset (or since removed). */
+export function savedMailLocale(userLocale: string | null | undefined): string | null {
+  return installedLocale(userLocale, getDiscovery().locales.map((locale) => locale.code));
 }
 
-/** The language a request's pages render in: the `lf_locale` choice → Accept-Language → the instance default. */
-export function requestLocale(req: Request): string {
-  const codes = getDiscovery().locales.map((locale) => locale.code);
-  const saved = readLocaleCookie(req.headers.get('cookie'), codes);
-  return saved ?? negotiateLocale(req.headers.get('accept-language'), codes, mailLocale(null));
+/** The language to write in: the given one, else the instance default (docs/TRANSLATING.md), else English. */
+export async function mailLocale(userLocale: string | null | undefined): Promise<string> {
+  return savedMailLocale(userLocale) ?? (await getInstanceDefaultLocale());
 }
 
 /**
- * The language of an email the recipient asked for themselves (sign-up,
- * resend, change, forgot password): their saved `users.locale` when it is
- * an explicit choice (anything but the column default `en`), else the
- * language they are using right now — what the request's pages render in.
- * `users.locale` alone would be English for nearly everyone: nothing in
- * the UI writes it yet.
+ * The language of an email triggered by a request: the recipient's saved
+ * `users.locale` when they chose one, else the language of the request
+ * that triggered it (the requester's own saved language → `lf_locale` →
+ * Accept-Language), else the instance default. NULL is "never chose", so
+ * an explicit English choice counts like any other (0048).
  */
-export function preferredMailLocale(req: Request, userLocale: string | null | undefined): string {
-  if (userLocale && userLocale !== SOURCE_LOCALE) return mailLocale(userLocale);
-  return requestLocale(req);
+export async function preferredMailLocale(req: Request, userLocale: string | null | undefined): Promise<string> {
+  return savedMailLocale(userLocale) ?? (await localeFromRequest(req));
 }
 
 export function escapeHtml(value: string): string {

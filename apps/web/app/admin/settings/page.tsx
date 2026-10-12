@@ -12,6 +12,8 @@ import { getDb } from '@/lib/db';
 import type { Translator } from '@/lib/i18n/core';
 import { getTranslator } from '@/lib/i18n/server';
 import InstanceLogoCard from './InstanceLogoCard';
+import DefaultLanguageCard from './DefaultLanguageCard';
+import { getDefaultLocaleAdminView, type DefaultLocaleAdminView } from '@/lib/i18n/instance-default';
 import SettingsShell from '@/app/SettingsShell';
 import { rich } from '@/lib/i18n/rich';
 import { auditActionLabelKey } from '@/lib/audit-action-labels';
@@ -41,7 +43,8 @@ interface Stats {
  * 1:1. If the admin has no servers yet, we render a friendly empty
  * state pointing at the invites / members pages.
  *
- * Instance admin only (it carries the instance logo); anyone else gets a
+ * Instance admin only (it carries the instance logo and the default
+ * language); anyone else gets a
  * 404 from the guard (lib/admin-access.ts).
  */
 export default async function CommunitySettingsOverviewPage() {
@@ -49,6 +52,7 @@ export default async function CommunitySettingsOverviewPage() {
   const t = await getTranslator();
   const setup = await getInstanceSetupStatus(getDb());
   const db = getDb();
+  const language = await getDefaultLocaleAdminView({ fresh: true });
 
   let stats: Stats | null = null;
   let recentAudit: { id: string; action: string; actorLabel: string; createdAt: Date }[] = [];
@@ -94,6 +98,7 @@ export default async function CommunitySettingsOverviewPage() {
         instanceLogoUrl={setup.instanceLogoUrl}
         stats={stats}
         recentAudit={recentAudit}
+        language={language}
       />
     </SettingsShell>
   );
@@ -105,12 +110,14 @@ function OverviewBody({
   instanceLogoUrl,
   stats,
   recentAudit,
+  language,
 }: {
   t: Translator;
   instanceName: string;
   instanceLogoUrl: string | null;
   stats: Stats | null;
   recentAudit: { id: string; action: string; actorLabel: string; createdAt: Date }[];
+  language: DefaultLocaleAdminView;
 }) {
   return (
     <section className="grid gap-8">
@@ -165,6 +172,8 @@ function OverviewBody({
       </section>
 
       <InstanceLogoCard initialLogoUrl={instanceLogoUrl} />
+
+      <DefaultLanguageCard initial={language} />
 
       <section>
         <h3 className="font-label-sm text-text-muted uppercase tracking-wider mb-4">

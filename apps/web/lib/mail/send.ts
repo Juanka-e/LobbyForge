@@ -28,7 +28,7 @@ export type SendMailError = 'mail_unavailable' | 'mail_quota' | 'invalid_recipie
 export interface SendMailInput {
   to: string;
   template: MailTemplate;
-  /** The recipient's `users.locale`; falls back to the instance default. */
+  /** The language, chosen by the caller (see `preferredMailLocale`); unset or not installed → the instance default. */
   locale?: string | null;
   vars?: Omit<MailTemplateVars, 'instanceName'>;
 }
@@ -156,7 +156,7 @@ export async function sendMail(input: SendMailInput, options: { ignoreQuota?: bo
     from: from.header,
     to: recipient.data,
     template: input.template,
-    locale: mailLocale(input.locale),
+    locale: await mailLocale(input.locale),
     vars: { ...input.vars, instanceName: await instanceDisplayName() },
   });
   if (result.ok) {

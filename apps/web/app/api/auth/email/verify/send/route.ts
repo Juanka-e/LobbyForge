@@ -62,7 +62,7 @@ async function handlePost(req: Request): Promise<NextResponse> {
     const address = await hitAddress(req, SENDS_PER_ADDRESS);
     if (address.over) return rateLimitedResponse(address.retryAfter);
 
-    const started = await startEmailVerification({ id: userId, email: user.email, locale: preferredMailLocale(req, user.locale) });
+    const started = await startEmailVerification({ id: userId, email: user.email, locale: await preferredMailLocale(req, user.locale) });
     if (!started.ok) return rateLimitedResponse(started.retryAfter);
     return NextResponse.json({ sent: true, resendAvailableAt: started.resendAvailableAt.toISOString() }, { status: 202, headers: NO_STORE });
   } catch (err) {

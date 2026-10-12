@@ -194,6 +194,26 @@ describe('auditEventSummaryText — email', () => {
   });
 });
 
+// The instance default language (docs/TRANSLATING.md): which language it
+// was set to, named in the reader's language; or that it was cleared.
+describe('auditEventSummaryText — default language', () => {
+  const changed = (metadata: Record<string, unknown>) =>
+    entry({ action: 'instance.default_locale_updated', targetType: 'instance', targetId: 'self-host', targetName: null, actorName: 'Owner', channelName: null, metadata });
+
+  it('names the new default in the reader’s language, or says it was cleared', () => {
+    expect(auditEventSummaryText(en, changed({ from: null, to: 'tr' }))).toBe('Owner set the default language to Turkish.');
+    expect(auditEventSummaryText(tr, changed({ from: null, to: 'tr' }))).toBe('Owner, varsayılan dili Türkçe olarak ayarladı.');
+    expect(auditEventSummaryText(en, changed({ from: 'tr', to: null }))).toBe('Owner cleared the saved default language.');
+    expect(auditEventSummaryText(tr, changed({ from: 'tr', to: null }))).toBe('Owner, kayıtlı varsayılan dili kaldırdı.');
+  });
+
+  it('has a label', async () => {
+    const { auditActionLabelKey } = await import('@/lib/audit-action-labels');
+    expect(en(auditActionLabelKey('instance.default_locale_updated')!)).toBe('changed the default language');
+    expect(tr(auditActionLabelKey('instance.default_locale_updated')!)).toBe('varsayılan dili değiştirdi');
+  });
+});
+
 // Polls in text channels (docs/CHAT_POLLS.md): creating and closing one are
 // audited; votes never are (the log would name who chose what).
 describe('audit labels — polls', () => {

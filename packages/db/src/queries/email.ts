@@ -322,7 +322,8 @@ export interface UserEmailState {
   email: string | null;
   emailVerifiedAt: Date | null;
   isGuest: boolean;
-  locale: string;
+  /** The account's chosen language; null when it never chose one (0048). */
+  locale: string | null;
   displayName: string;
   createdAt: Date;
   deletedAt: Date | null;

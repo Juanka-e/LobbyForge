@@ -113,7 +113,7 @@ async function handlePost(req: Request): Promise<NextResponse> {
     dispatchMail({
       to: newEmail,
       template: 'change-confirm',
-      locale: preferredMailLocale(req, user?.locale),
+      locale: await preferredMailLocale(req, user?.locale),
       vars: {
         code: challenge.code,
         link: appLink('/verify-email', challenge.token),

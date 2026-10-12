@@ -8,7 +8,8 @@
  * cleaned: no control characters and no `@` — a member called
  * "@everyone" must not turn the greeting into a server-wide ping.
  */
-import { getDiscovery, translatorFor } from '@/lib/i18n/catalogue';
+import { translatorFor } from '@/lib/i18n/catalogue';
+import { instanceDefaultLocale } from '@/lib/i18n/instance-default';
 import { MAX_BOT_MESSAGE_LENGTH } from './catalog';
 
 const VALUE_MAX_LENGTH = 100;
@@ -41,15 +42,13 @@ export function cleanBotTemplateValues(values: Record<string, string>): Record<s
 
 /**
  * The language the built-in bots speak when an admin has not written
- * their own text: the instance default (`LOBBYFORGE_DEFAULT_LOCALE`) when
- * it is installed, else English. A bot posts to everyone at once, so it
- * cannot follow any one reader's language.
+ * their own text: the instance default (the admin's choice, else
+ * `LOBBYFORGE_DEFAULT_LOCALE`, else English; lib/i18n/instance-default.ts).
+ * It is the stored fallback; a default text also carries `metadata.i18n`
+ * so each viewer sees their own language.
  */
 export function instanceBotLocale(): string {
-  const configured = process.env.LOBBYFORGE_DEFAULT_LOCALE?.trim().toLowerCase();
-  if (!configured) return 'en';
-  const match = getDiscovery().locales.find((locale) => locale.code.toLowerCase() === configured);
-  return match?.code ?? 'en';
+  return instanceDefaultLocale();
 }
 
 export type BotDefaultTextKey =
