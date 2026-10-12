@@ -24,6 +24,9 @@ tasarımıdır.
   - (3b) ses odasında oyuncuyu susturma, örneğin VV'de ölüler.
 
   Her biri manifestte izin olarak istenir ve kurulumda onaylanır.
+  **3a (zamanlayıcı, depo, sohbet) yapıldı (`feat/plugin-phase3`)**;
+  plandan ayrılan noktalar "Aşama 3 — uygulamada" başlığında. 3b
+  (`voice.mute`) sonra.
 - **Ortak temel:** Aşama 2 ve 3 aynı onay akışını kullanır. Önce temeli kurmak,
   sonra iki aşamayı paralel yürütmek en hızlısı.
 
@@ -237,6 +240,82 @@ olduğu için onay penceresi çıkmaz, ama aynı denetim yolu kullanılır.
 `ctx.timer`, `ctx.messages` ve `ctx.storage` saplamaları (stub) etki modeline
 taşınır.
 
+## Aşama 3 — uygulamada
+
+3a böyle yapıldı. Ayrıntılar `docs/PLUGIN_SDK.md` "Effects" bölümünde.
+
+- **Sohbet mesajı etkinliğin kanalına gitmiyor.** Etkinlik sesli ya da
+  sahne kanalında açılır ve bu kanalların lobide sohbeti yok. Oraya yazılan
+  mesaj saklanır ama hiçbir yerde görünmezdi.
+  - Mesaj, topluluğun uygulama için seçtiği metin ya da duyuru kanalına
+    gider: Sunucu ayarları → Uygulamalar → "Uygulama mesajlarının gideceği
+    kanal" (`settings.chatChannelId`). Seçim yalnız `chat` izni olan
+    uygulamalarda görünür; uygulamalar rotası başka kanalı reddeder.
+  - Varsayılan "hiçbir yere": mesaj düşer. Böylece kimsenin seçmediği bir
+    kanala yazılmaz; özel bir ses odasının oyunu herkese açık kanala da
+    taşınmaz. Kanal her mesajda yeniden denetlenir.
+  - Mesajın yazarı yok (ne kullanıcı ne bot). `metadata.app = { pluginId,
+    name }`; lobi eklentinin adını, uygulama simgesini ve "APP" / "UYGULAMA"
+    rozetini gösterir. Masaüstü bildirimi "(UYGULAMA)" der.
+  - Bahsetmeler: `@` ile başlayabilecek her yerin ardına sıfır genişlikte
+    boşluk eklenir. `@everyone`, `@here` ve `@isim` kimseyi çağırmaz.
+  - Hız sınırı aşılırsa mesaj **düşer** (günlüğe yazılır), eylem yine
+    uygulanır. Sohbet yan kanal; oyunu durdurmamalı.
+- **Kod ve durum.** Geçersiz ya da izinsiz etki: `422 effect_refused`.
+  İstemciden sistem eylemi: `403 system_action`. Sebep yalnız sunucu
+  günlüğüne yazılır, istemciye gitmez.
+- **Zamanlayıcı:**
+  - Bir dokunuşta en çok 32 zamanlayıcı ateşlenir. Hâlâ vadesi gelmiş bir
+    zincir sonraki dokunuşta devam eder.
+  - Eylemden önce, o ana kadar vadesi gelenler ateşlenir; eylem onların
+    bıraktığı durumda çalışır ve hepsi tek yazımdır. Eylem reddedilirse
+    zamanlayıcılar yine yazılır.
+  - Hata atan, etkisi reddedilen ya da artık sistem eylemi olmayan (yeni
+    sürüm değiştirdi) zamanlayıcı düşer.
+  - Sistem eyleminde `ctx.actorUserId === ''` (sandbox'ta `actorId: null`),
+    `ctx.now` vade zamanı. Faz tablosu ve `restartActions` istemciler için;
+    sistem eylemi her zaman reducer'a gider. Örnek buzzer tur numarasını
+    taşır.
+  - GET, vadelerin yanında sunucunun saatini de döner (`now`). Panel cihaz
+    saatine değil sunucu saatine göre sayar; ileri giden bir cihaz saati
+    erken okuyup zamanlayıcıyı kaçırmaz. Kurulan ya da ateşlenen
+    zamanlayıcı bus'ta `timersChanged` olarak duyurulur.
+  - Bitirmede vadesi gelmiş olanlar önce ateşlenir, gerisi düşer.
+  - `createInitialState` de etki döndürebilir: ilk zamanlayıcı satırla
+    birlikte yazılır.
+- **Depo:**
+  - Anlık görüntü yalnız `storage` izniyle, oturum kilidi altında okunur.
+  - 64 KiB sınırı commit'ten **önce** denetlenir (aşarsa çağrı reddedilir).
+  - Yazımlar commit'ten **sonra**, tek parti halinde gider ve (topluluk,
+    eklenti) kilidi altında yeniden ölçülür. Arada başka bir oturum yazmış
+    olabilir. Sığmayan ya da hata veren parti düşer ve günlüğe yazılır;
+    tekrar denenmez. Durum doğruluğun kaynağıdır.
+  - Aynı anahtara iki oturum aynı anda yazarsa son yazan kazanır. Örnek
+    lider tablosu yazarken anlık görüntüyle birleştirir.
+- **Sandbox.** Worker `{ result, effects }` ya da `{ unchanged, effects }`
+  döner. `ctx.storage` yalnız `createInitialState` ve `handleAction`
+  çağrılarında var, `projectState`'te yok. Worker'a giden anlık görüntü
+  256 KiB ile sınırlı (yedek denetim).
+- **İzinler.** Resmî eklenti `manifest.permissions`'a `timers`, `storage`,
+  `chat` yazar; eski adlar (`manage_timer` vb.) bir şey vermez. Pazar yeri
+  eklentisinin etkin izinleri `describeWorkerPlugin`'de hesaplanır:
+  istenen **ve** onaylanan. Kurulum `describe`'a onayı geçirir.
+- **SDK.** `GamePlugin`'e dördüncü bir tür parametresi eklendi: etki
+  döndüren eklenti `GamePlugin<S, A, P, ReducerResult<S>>` yazar; mevcut
+  oyunlar değişmedi. `ctx.storage` artık eşzamanlı anlık görüntü (eski
+  async API'yi hiçbir eklenti kullanmıyordu). `ctx.timer` ve `ctx.messages`
+  kullanımdan kalktı, no-op. Test aracı etkileri uygular ve zamanı ilerletir
+  (`advanceTime`).
+- **Örnek.** `sandbox-buzzer` 0.2.0: tur 30 sn sonra kendiliğinden açıklanır
+  (15 sn uçtan uca testte kısa kalırdı) ve depoda topluluğun en hızlı beş
+  tepkisi tutulur.
+- **`voice.mute`.** Manifestte istenebilir ve onaylanabilir; etki türü henüz
+  yok, reddedilir.
+- **Resmî oyunlar** zamanlayıcıya geçmedi (ayrı iş): VV dürtmesi, Hushle tur
+  saati, Quiz otomatik ilerleme.
+- **Açık:** Uygulama mesajları moderasyon botunun kelime kurallarından
+  geçmiyor. Oyuncunun yazdığı bir takım adı sohbete taşınabilir.
+
 ## Kötüye kullanım açısı
 
 | Niyet | Sonuç |
@@ -258,7 +337,7 @@ taşınır.
 | 1 | Aşama 1 | yapıldı (PR #100) | rota testleri, tarayıcı (`e2e-sandbox`) |
 | 2 | Ortak temel: manifest alanları (ikiz doğrulayıcılar), `approval_required` ve `approve`, onay penceresi (en, tr), `active.json` kaydı, denetim kaydı, yükseltmede fark | ben | doğrulayıcı vaka tablosu, kurulum rotası, pencere bileşeni |
 | 3 | Aşama 2: eklenti başına CSP, middleware `frame-src` önbelleği, `PluginFrame` dış arayüz modu, köken rozeti | yapıldı (`feat/plugin-phase2`) | rota ve middleware testleri; tarayıcı: dış kökenli sahte site protokolü konuşur, kökeni yanlış mesaj reddedilir |
-| 4 | Aşama 3: `withEffects`, `role: system`, zamanlayıcılar (göç + tembel çalışma), depo, sohbet mesajı; SDK test aracı; sandbox eşlemesi | ajan | reducer, rota ve worker testleri; örnek buzzer'a zamanlayıcı ve lider tablosu |
+| 4 | Aşama 3: `withEffects`, `role: system`, zamanlayıcılar (göç + tembel çalışma), depo, sohbet mesajı; SDK test aracı; sandbox eşlemesi | yapıldı (`feat/plugin-phase3`) | reducer, rota ve worker testleri; örnek buzzer'a zamanlayıcı ve lider tablosu |
 | 5 | Aşama 3b: `voice.mute` | sonra | ayrı tasarım incelemesi |
 
 ## Doğrulanamayanlar

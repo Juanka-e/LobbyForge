@@ -28,6 +28,7 @@ dil. "Kanalına katıl", "Ayarlarını kaydet".
 | Moderation | Moderasyon | |
 | Audit log | Denetim kaydı | |
 | App | Uygulama | "Uygulamalar ve etkinlikler" |
+| App message (a game's line in chat) | Uygulama mesajı | Rozet: "UYGULAMA" (BOT ve WEBHOOK gibi büyük harf). "Uygulama mesajlarının gideceği kanal" |
 | Activity | Etkinlik | |
 | Plugin | Eklenti | |
 | Word pack | Kelime paketi | |

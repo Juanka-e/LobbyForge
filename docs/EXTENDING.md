@@ -366,15 +366,20 @@ it also receives `cardPacks` (the `PluginSurface` props in
 `apps/web/app/lobby/LobbyActivityView.tsx`, lines 299-310 today).
 
 **What `ctx` really provides.** On the HTTP host,
-`ctx.players.list()` / `get()` work, and `ctx.storage` is a Postgres
-key-value store scoped to one community and one plugin. It is async,
-while `handleAction` is sync, so it is good for fire-and-forget writes
-only. No official plugin uses it. Several other parts of `ctx` do
-nothing (`apps/web/lib/plugin-context.ts:98-160`):
+`ctx.players.list()` / `get()` work, `ctx.now` is the call's clock, and
+`ctx.storage` is a read-only snapshot (`get`, `keys`) of the plugin's
+Postgres storage in the community (with the `storage` permission). What a
+plugin wants the host to do — fire an action later, write storage, post a
+chat line — it returns as **effects** (`withEffects(state, effects)`;
+[PLUGIN_SDK.md → Effects](PLUGIN_SDK.md#effects-timers-storage-and-chat)),
+under the permissions in its `manifest.permissions`. No official plugin
+uses them yet. Several other parts of `ctx` do nothing
+(`apps/web/lib/plugin-context.ts`):
 
-- `ctx.messages.sendGameMessage` only writes to the server log; it does
-  not post to chat.
-- `ctx.timer`, `cache`, `pubsub`, `votes` and `scores` are empty stubs.
+- `ctx.messages.sendGameMessage` (deprecated) only writes to the server
+  log; return a `chat.post` effect instead.
+- `ctx.timer` (deprecated), `cache`, `pubsub`, `votes` and `scores` are
+  empty stubs.
 - `ctx.voice.getParticipants()` returns the user ids in the activity's
   voice room (from LiveKit, oldest first) for a plugin that requires voice,
   and `[]` for any other.
@@ -746,7 +751,7 @@ anything you compile in the way you review your own code.
 | Name and summary in each viewer's language | `catalog.name` / `catalog.summary` in `locales/<code>.json` | the same keys in the bundle's `locales/<code>.json` ([PLUGIN_PUBLISHING.md](PLUGIN_PUBLISHING.md#locales-optional-your-name-and-description-in-every-language)) |
 | Listed in the Apps page and the activity picker | yes | no: compiled-in lists only (enable and start through the API) |
 | Isolation | none (in-process, trusted code) | QuickJS WebAssembly VM per call, inside a hardened container on a network only web joins ([ADR-007](ARCHITECTURE_DECISIONS.md#adr-007-marketplace-plugins-run-sandboxed-supersedes-the-trust-limits-of-adr-001-and-the-target-of-adr-002)) |
-| Storage, timers, chat messages | `ctx.storage` (async, unused so far); the rest are stubs | none: the state is the plugin's only memory |
+| Storage, timers, chat messages | effects (`timer.set`, `storage.set`, `chat.post`) under `manifest.permissions`; `ctx.storage` is a snapshot | the same effects, once the owner approved the manifest's `permissions` ([PLUGIN_SDK.md → Effects](PLUGIN_SDK.md#effects-timers-storage-and-chat)) |
 | Install | rebuild the image | owner approves and installs at runtime |
 | Status | used by all six official plugins | experimental: unit, route and sandbox tests, no end-to-end test on a running stack |
 
@@ -897,11 +902,11 @@ version plus a record of the active one
 | Trivia with answers that never reach browsers | yes | Path A plus `prepare-plugin-action.ts` (the Quiz pattern) |
 | Polls, buzzers, dice, scoreboards, initiative trackers, brackets | yes | Path A |
 | Synced playback for the room | YouTube only | The Watch Party pattern (server-stamped timeline). Other players need a CSP change. |
-| Rounds with countdowns | yes | Deadline in state plus a `time-up` action. There is no server tick. |
+| Rounds with countdowns | yes | Deadline in state plus a `timer.set` effect that fires a `system` action when it is due (lazily: on the next read, which open panels make at the due time). |
 | Fast real-time games (sub-second input) | no | One HTTPS round trip per action, CAS writes, 30 actions/min per IP |
 | Games that control voice (mute the eliminated, private night rooms) | no | `ctx.voice` is a stub; see [§6](#6-whats-next) |
-| A plugin posting results to chat | no | `ctx.messages` only logs; use a bot that posts instead |
-| Data that outlives a session (season leaderboards) | partly | `ctx.storage` (Postgres, per community and plugin); async, unused so far |
+| A plugin posting results to chat | yes | A `chat.post` effect: an app message with an APP badge, in the text channel the community chose for the app |
+| Data that outlives a session (season leaderboards) | yes | `ctx.storage` snapshot plus `storage.set` effects (Postgres, per community and plugin, 64 KiB) |
 | Chat bots: commands, announcements, relays from game servers, RSS, CI | yes | Bot API v1, polling |
 | Welcome flows and automod | built in | Welcome and Moderation bots |
 | Custom moderation bots (delete, timeout, ban) | no | Bots cannot moderate |
@@ -1032,8 +1037,10 @@ Each points to where it is tracked.
    ([SECURITY_REVIEW_2026-10.md](SECURITY_REVIEW_2026-10.md) §9
    "Öne çıkaracak fikirler" #1). Server mute already flips LiveKit
    permissions live.
-8. **Server-side timers**: `ctx.timer` exists in the SDK but does
-   nothing on the host.
+8. **Server-side timers**: done (2026-10) as `timer.set` effects that
+   fire lazily ([PLUGIN_SDK.md → Effects](PLUGIN_SDK.md#effects-timers-storage-and-chat));
+   the official games do not use them yet (Hushle's turn clock, Quiz's
+   auto-advance, Vampire Village's nudge).
 9. **Developer tooling**: plugin and bot templates, a local playground
    with mock LiveKit, a CLI generator (`22_BACKLOG_IDEAS.md` §9), and
    publishing through the hub account (ADR-006, amended).
