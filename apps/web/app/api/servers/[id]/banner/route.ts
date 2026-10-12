@@ -12,6 +12,7 @@ import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { BANNER_LIMITS, checkImageDataUrl } from '@/lib/image-validation';
 import { checkUserImageQuota, quotaExceededResponse } from '@/lib/upload-quota';
+import { consumeUploadBudget } from '@/lib/upload-budget';
 import { withApiSecurity } from '@/lib/security-headers';
 import { requireVerifiedEmail } from '@/lib/mail/verification';
 
@@ -112,6 +113,9 @@ async function handlePost(
       // (they own the stored bytes); null = removal, frees budget.
       const quota = await checkUserImageQuota(gate.server.ownerUserId, body.dataUrl.length);
       if (!quota.ok) return quotaExceededResponse(quota);
+      // security-review FILE-001: the caller's daily upload byte budget.
+      const overBudget = await consumeUploadBudget(req, body.dataUrl.length);
+      if (overBudget) return overBudget;
     }
 
     const updated = await updateServerBannerUrl(getDb(), serverId, body.dataUrl);

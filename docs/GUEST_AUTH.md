@@ -313,7 +313,15 @@ node scripts/lfctl.mjs user reset-password --email owner@example.com --generate
   permissions, bans, messages, games, and LiveKit voice access.
 - Guest session: a first-party cookie that can be materialized into a local
   user row. Voice and server APIs require the `uid` once membership needs to
-  be checked.
+  be checked. Guests cannot store images (security-review FILE-001):
+  `POST /api/users/me/avatar` and a new banner on `POST /api/users/me/banner`
+  answer 403 `{ "code": "guest_upload_forbidden" }`, and the profile
+  settings hide the upload controls with a short explanation. A guest costs
+  nothing to create, so a per-account image quota did not bound the total.
+  Removing a banner stored earlier stays allowed. Every image upload (all
+  users) also counts against a per-address daily budget of 64 MiB
+  (`lib/upload-budget.ts`; 512 MiB instance-wide when client addresses are
+  unknown), 429 `{ "code": "upload_budget_exceeded" }` past it.
 
 A user may need to register or join separately on different self-host
 instances unless that instance explicitly enables LobbyForge account login.
