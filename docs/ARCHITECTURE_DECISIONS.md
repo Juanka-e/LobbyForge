@@ -280,16 +280,46 @@ Where the implementation refines the points above:
   nothing a script cannot. The app's own CSP gains `frame-src 'self'`.
   (2026-10: phase 1 of the plugin unlock — media, WebAssembly and the
   plugin's own files; the first version had `connect-src 'none'`.)
+- **Approved outside origins** (2026-10, phase 2 of the plugin unlock,
+  docs/PLUGIN_UNLOCK_PLAN.md): a manifest may ask for `network` origins
+  (`connect`, `img`, `media`, `frame`), which take effect only once the
+  instance owner approves them at install (`approved` on the active
+  record). The HTML document's policy then adds the plugin's EFFECTIVE
+  origins — asked for AND approved — to `connect-src`, `img-src`,
+  `media-src` and `frame-src` (no `frame-src` otherwise). A nested frame
+  inherits the sandbox (opaque origin). Because the approval can change for
+  one version, the HTML is `Cache-Control: no-cache`; every other file
+  keeps the base policy (a subresource's CSP does not govern the frame) and
+  stays `immutable`.
+- **The author's own site as the UI** (phase 2): `ui: { url }`, once
+  approved, is framed directly with `sandbox="allow-scripts
+  allow-same-origin allow-forms allow-pointer-lock"` and
+  `referrerpolicy="no-referrer"` — never `allow-top-navigation`,
+  `allow-popups` or `allow-modals`. `allow-same-origin` (the site keeps its
+  own origin, cookies and storage) is safe only because that origin is not
+  the app's, so a URL on the app's host — any port or scheme, since
+  cookies are scoped by host — or on a subdomain either way is refused at
+  install, in the frame info route and in the lobby. The app's pages add
+  the approved sites to `frame-src` (a 30 s per-process cache read from the
+  install root, reset on install; nothing added on error). The lobby shows
+  the site's host above the frame so its content is visibly not the app.
 - **postMessage protocol v1** (all messages carry `lf: 1`): parent →
   frame `init { viewer, players, locale, theme (CSS variables), state }`
   and `state { state, revision }` (the PROJECTED state for that viewer);
   frame → parent `ready`, `action { action }`, `resize { height }`.
-  The parent accepts messages only from that iframe's `contentWindow`,
-  validates shape and size (≤ 64 KiB, ≤ 10 actions/s), and dispatches
-  actions through the normal actions route with the viewer's session —
-  the frame can do nothing the viewer could not do by sending actions.
+  The parent accepts messages only from that iframe's `contentWindow`
+  AND the expected origin (`"null"` for the plugin's files, the approved
+  site's origin for an external UI — the window survives a navigation, the
+  origin does not), validates shape and size (≤ 64 KiB, ≤ 10 actions/s),
+  and dispatches actions through the normal actions route with the
+  viewer's session — the frame can do nothing the viewer could not do by
+  sending actions. It posts to an external site's origin only; to the
+  opaque files frame it must post to `'*'`.
 - `@lobbyforge/plugin-sdk/frame` gives plugin authors a tiny client for
-  this protocol plus the theme variables.
+  this protocol plus the theme variables. On an external site (a real
+  origin of its own, framed by any instance that installed the plugin) it
+  sends only `ready` until the parent's first `init` names the parent's
+  origin, then talks to that origin only.
 
 ### Consequences
 - Review stays (catalog approval, digest pinning), but it is no longer
@@ -298,7 +328,11 @@ Where the implementation refines the points above:
   React panels in the app origin).
 - Remaining risk: a plugin can still waste its own call budget or show
   misleading UI inside its frame; it cannot read other state, sessions or
-  the network. Server side, a busy plugin can occupy the executor threads
+  the network beyond the origins the owner approved (which then see what
+  players see; an approved site can change what it serves at any time).
+  Sibling subdomains of the app's registrable domain cannot be told apart
+  from other sites without the Public Suffix List, so the owner should not
+  approve an external UI on their own domain. Server side, a busy plugin can occupy the executor threads
   for up to one budget per call and so slow other marketplace plugins
   (never official ones, which do not use the worker); a QuickJS or V8
   WebAssembly escape would land in the worker container, which holds only

@@ -27,7 +27,10 @@ marketplace plugin is installed **without trusting its author**:
   network, no file system, no timers, a fresh VM for every call;
 - its UI (`ui/`, optional) runs in `<iframe sandbox="allow-scripts">` with
   an opaque origin and no network beyond its own files (it may load its own
-  sound, video, WebAssembly and data);
+  sound, video, WebAssembly and data) — plus any outside origins the
+  instance owner approved at install; or, with that approval, its UI is the
+  author's own site, framed by the lobby
+  ([Asking for more than the sandbox](#asking-for-more-than-the-sandbox));
 - it gets what official plugins get from the host: action policies
   (`host` / `member` / `player`, `actorFields`, `joinsRoster`, `audit`),
   `validateAction`, and **per-viewer hidden state** through `projectState`.
@@ -82,11 +85,11 @@ The example in the repository is a complete, working plugin to copy:
 | `name` | 1–80 characters. |
 | `version` | strict semver (`1.0.0`, `2.0.0-beta.1`). Must equal the catalog `version`. |
 | `sdk` | exactly `"sandbox-v1"`. |
-| `ui` | `true`, `false`, or `{ "url": "https://…" }`. `true` requires `ui/index.html`. `{ "url" }` names your own page as the UI instead (an https URL on a public host, no credentials or fragment) and needs the owner's approval — see [Asking for more than the sandbox](#asking-for-more-than-the-sandbox). |
+| `ui` | `true`, `false`, or `{ "url": "https://…" }`. `true` requires `ui/index.html`. `{ "url" }` names your own page as the UI instead (an https URL on a public host, no credentials or fragment, never on the instance's own host); the lobby frames it once the owner approves — see [Asking for more than the sandbox](#asking-for-more-than-the-sandbox) and [PLUGIN_SDK.md → Your own site as the UI](PLUGIN_SDK.md#your-own-site-as-the-ui-ui--url-). |
 | `actionPolicies` | an object (may be empty), at most 64 action types of 1–64 characters (`A-Z a-z 0-9 _ . : -`). Each value: `role` (`host`, `member` or `player`), optional `actorFields` (up to 8 field names; not `type`), `joinsRoster` (boolean), `audit` (boolean), `allowOutsideVoice` (boolean). Unknown keys are refused, so a typo cannot silently fall back to host-only. |
 | `minPlayers`, `maxPlayers` | optional integers 1–500, min ≤ max. |
 | `requiresVoiceRoom` | optional `true` / `false` (default `false`). `true`: the game is played over voice — the host refuses `member` / `player` actions from anyone who is not in the activity's voice room (403, `code: "voice_required"`), except actions marked `allowOutsideVoice` (leaving). Reading the state (spectating) is never voice-checked, nor are `host` actions. It also turns on host hand-over when the host leaves the room ([PLUGIN_SDK.md → Voice, hosting and play again](PLUGIN_SDK.md#voice-hosting-and-play-again)). |
-| `network` | optional: outside origins your UI may reach, by kind — `connect`, `img`, `media`, `frame`, up to 8 each. Each is an https origin on a public host (`https://api.example.com`): no path, query, wildcard, IP address, `localhost` or local name (`.local`, `.internal`, `.lan`, `.home.arpa`). Needs the owner's approval. |
+| `network` | optional: outside origins your UI may reach, by kind — `connect`, `img`, `media`, `frame`, up to 8 each. Each is an https origin on a public host (`https://api.example.com`): no path, query, wildcard, IP address, `localhost` or local name (`.local`, `.internal`, `.lan`, `.home.arpa`). Once the owner approves them they join your frame's policy (`connect-src`, `img-src`, `media-src`, `frame-src`; [PLUGIN_SDK.md → What the sandbox is](PLUGIN_SDK.md#what-the-sandbox-is)). |
 | `permissions` | optional: host effects you use — `timers`, `storage`, `chat`, `voice.mute`. Unknown names are refused. Needs the owner's approval. |
 | `locales` | optional, 1–32 language codes (`en`, `pt-BR`); defaults to `["en"]`. With a `locales/` folder the languages come from its files, and a list here must name exactly those codes ([`locales/`](#locales-optional-your-name-and-description-in-every-language)). |
 
@@ -117,14 +120,23 @@ takes effect until the instance owner approves it at install**:
   it is approved.
 
 Ask only for what you use; each item is one more thing the owner has to
-trust. What each request unlocks, and the rollout, is in
-[PLUGIN_UNLOCK_PLAN.md](PLUGIN_UNLOCK_PLAN.md): outside origins and your own
-page as the UI arrive with phase 2, host effects with phase 3. Until then an
-approved request is recorded but has no effect.
+trust. What each approval unlocks:
+
+- **Outside origins** (`network`): your frame's policy adds exactly the
+  approved origins of each kind
+  ([PLUGIN_SDK.md → What the sandbox is](PLUGIN_SDK.md#what-the-sandbox-is)).
+- **Your own page as the UI** (`ui: { "url" }`): the lobby frames that page,
+  with its own origin, and shows players its address
+  ([PLUGIN_SDK.md → Your own site as the UI](PLUGIN_SDK.md#your-own-site-as-the-ui-ui--url-)).
+- **Host effects** (`permissions`) arrive with phase 3 of
+  [PLUGIN_UNLOCK_PLAN.md](PLUGIN_UNLOCK_PLAN.md); until then an approved
+  `permissions` request is recorded but has no effect.
 
 For local development and tests only, `LOBBYFORGE_PLUGIN_ALLOW_LOCAL_ORIGINS=true`
 (ignored when `NODE_ENV=production`, set for both the web app and the
-plugin-worker) also accepts `http:` and local hosts.
+plugin-worker) also accepts `http:` and local hosts. A `ui.url` still may
+not share the instance's host: an instance on `localhost` can frame a page
+on `127.0.0.1`.
 
 Action policies work exactly as for official plugins
 ([EXTENDING.md §3.2](EXTENDING.md#32-the-contract-packagesplugin-sdksrcindexts)):
@@ -485,5 +497,12 @@ migrate:
   in every language it ships. Review the manifest, the `locales/` files
   and `server.js` before approving. A bundle can never rename a
   compiled-in plugin: tables for an official plugin's id are ignored.
+- **What an approved site can change.** The bundle is pinned and reviewed;
+  a site named in `network` or `ui.url` is not — its operator can change
+  what it serves at any time. Approving one trusts that operator with what
+  players see in the game (and, for `ui.url`, with the screen itself). The
+  lobby still keeps it out of the app: its own origin, no popups, dialogs or
+  top navigation, messages checked against its origin, its address shown
+  above the frame.
 - **Your users' data.** The only data your code sees is its own activity
   state, the roster's ids and names, and the ids in `ctx`.

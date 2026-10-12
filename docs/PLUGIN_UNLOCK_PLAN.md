@@ -12,10 +12,11 @@ tasarımıdır.
   ses ve video çalabiliyor, WebAssembly derleyebiliyor ve **yalnızca kendi
   dosyalarını** okuyabiliyor. Uygulamaya, API'ye, başka eklentiye ve dışarıya
   hâlâ erişemiyor.
-- **Aşama 2:** Eklenti dış adresler isteyebilir, ya da arayüzü tamamen kendi
-  sitesinde olabilir (Discord Activities gibi). Bunun için **kurulumda
-  sahibin açık onayı** şart. Onaylanan adresler o sürümün güvenlik
-  politikasına yazılır.
+- **Aşama 2 (yapıldı, `feat/plugin-phase2`):** Eklenti dış adresler
+  isteyebilir, ya da arayüzü tamamen kendi sitesinde olabilir (Discord
+  Activities gibi). Bunun için **kurulumda sahibin açık onayı** şart.
+  Onaylanan adresler o sürümün güvenlik politikasına yazılır. Plandan
+  ayrılan noktalar aşağıda, "Aşama 2 — uygulamada" başlığında.
 - **Aşama 3:** Eklenti sunucuda **etkiler** üretebilir:
   - zamanlayıcı ("30 sn sonra fazı bitir");
   - topluluk başına kalıcı küçük depo (lider tablosu);
@@ -138,6 +139,46 @@ tasarımıdır.
   yapamaz. Eylemler lobiden, izleyicinin oturumuyla, `actionPolicies` altında
   gider.
 
+### Aşama 2 — uygulamada (2026-10-13)
+
+Tasarım yukarıdaki gibi uygulandı. Farklı ya da netleşen noktalar:
+
+- **Köken denetimi daha sıkı.** Yalnız aynı köken değil, kurulumun **host'u
+  (her port ve şema)** ve **alt alan adları (iki yönde)** de reddedilir.
+  - Çerezler port'a değil host'a bağlıdır; aynı host'taki başka bir port
+    uygulamanın çerezlerini okuyup yazabilir.
+  - Alt alan adı, üst alan adı için çerez yazabilir.
+  - Denetim üç yerde: kurulumda (`activateStagedBundle`), çerçeve bilgisi
+    rotasında ve `PluginFrame`'de (`lib/plugin-frame-target.ts`).
+  - Kardeş alt alan adları (`game.example.com` ile `chat.example.com`)
+    Public Suffix List olmadan ayırt edilemez. Onay penceresi siteyi adıyla
+    gösterir; sahip kendi alan adındaki bir siteyi onaylamamalı.
+- **Çerçeve istemcisi ebeveyn kökenini öğrenir.** Dış sitenin kendi kökeni
+  vardır ve eklentiyi kuran her kurulum onu çerçeveleyebilir.
+  - İstemci ilk `init`e kadar yalnız `ready` gönderir (`'*'` ile; içi boş).
+  - İlk `init`i gönderen ebeveyn penceresinin kökenini kaydeder, sonra
+    yalnız o kökenle konuşur (`lf.parentOrigin`).
+  - Protokol v1 aynı. Dosya modunda davranış değişmedi.
+- **Dış sitede sayfa değişimi.** Dosya modunda ikinci yükleme hâlâ hata
+  sayılır. Dış sitede ise sitenin kendi sayfaları arasında gezinmesi
+  serbest: yeni belge `ready` der ve yeni bir `init` alır. Başka bir siteye
+  giden çerçeve zaten duyulmaz ve hiçbir şey almaz (köken denetimi ve
+  `targetOrigin`).
+- **Rozet çerçevenin üst kenarında.** Adres çubuğu gibi: "Runs on
+  game.example.com" ve "Bu ekran uygulamanın kendi web sitesi, LobbyForge
+  değil" uyarısı. Çerçevenin erişilebilir başlığı da host'u söyler.
+- **Önbellek.** HTML `no-cache`, çünkü politikası onaya bağlı ve aynı sürüm
+  için değişebilir. Diğer dosyalar temel politikayla `immutable` kalır:
+  çerçeveyi yalnız belgenin politikası yönetir.
+- **Lobinin `frame-src`'si.** Onaylı siteler yalnız sayfalara eklenir; API
+  rotaları ve statik dosyalar eklenmez. Önbellek 30 sn, kurulumda sıfırlanır,
+  hata olursa hiçbir şey eklenmez.
+- **Tarayıcı testi.** `apps/web/e2e-sandbox/external-ui.spec.ts`, ikinci bir
+  yerel süreçteki (`127.0.0.1:19599–19601`) sahte siteleri kullanır.
+  Chrome'un Local Network Access denetimi, Playwright'ın doldurduğu sayfayı
+  "genel" sayar. Bu yüzden testte `local-network-access` izni verilir;
+  üretimde iki taraf da geneldir.
+
 ## Aşama 3 — sunucu etkileri
 
 **Etki modeli:**
@@ -216,7 +257,7 @@ taşınır.
 |---|---|---|---|
 | 1 | Aşama 1 | yapıldı (PR #100) | rota testleri, tarayıcı (`e2e-sandbox`) |
 | 2 | Ortak temel: manifest alanları (ikiz doğrulayıcılar), `approval_required` ve `approve`, onay penceresi (en, tr), `active.json` kaydı, denetim kaydı, yükseltmede fark | ben | doğrulayıcı vaka tablosu, kurulum rotası, pencere bileşeni |
-| 3 | Aşama 2: eklenti başına CSP, middleware `frame-src` önbelleği, `PluginFrame` dış arayüz modu, başlıkta köken rozeti | ajan | rota ve middleware testleri; tarayıcı: dış kökenli sahte site protokolü konuşur, kökeni yanlış mesaj reddedilir |
+| 3 | Aşama 2: eklenti başına CSP, middleware `frame-src` önbelleği, `PluginFrame` dış arayüz modu, köken rozeti | yapıldı (`feat/plugin-phase2`) | rota ve middleware testleri; tarayıcı: dış kökenli sahte site protokolü konuşur, kökeni yanlış mesaj reddedilir |
 | 4 | Aşama 3: `withEffects`, `role: system`, zamanlayıcılar (göç + tembel çalışma), depo, sohbet mesajı; SDK test aracı; sandbox eşlemesi | ajan | reducer, rota ve worker testleri; örnek buzzer'a zamanlayıcı ve lider tablosu |
 | 5 | Aşama 3b: `voice.mute` | sonra | ayrı tasarım incelemesi |
 
@@ -227,3 +268,7 @@ taşınır.
   depolamaya güvenmemeli. Ayrıca durumu lobiden alır.
 - Masaüstünde (Tauri) dış kökenli iframe'in WebView2 ve WKWebView'da aynı
   davrandığı.
+- Chrome'un Local Network Access denetimi: genel adresteki bir kurulum,
+  yerel ağdaki (ör. geliştiricinin `localhost`'undaki) bir dış arayüzü
+  çerçevelerken izin ister ya da engeller. Üretimde iki taraf da genel
+  olduğu için etkilemez; yerel geliştirmede kurulum da yerel olmalı.
