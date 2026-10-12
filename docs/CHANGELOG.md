@@ -2,6 +2,14 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Marketplace plugin frames: sound, video, WebAssembly and their own files - 2026-10-12
+
+- **Sound and video:** a marketplace plugin's `ui/` may ship `mp3`, `ogg`, `oga`, `opus`, `wav`, `m4a`, `flac`, `webm` and `mp4` files and play them with `<audio>`/`<video>` or the Web Audio API. The asset route answers single `Range` requests with 206, so media can seek (Safari plays nothing without it).
+- **WebAssembly:** the frame's policy adds `'wasm-unsafe-eval'`, and `wasm`, `bin`, `data` and `pck` files are served, so a single-threaded engine build (a Godot web export, an Emscripten build) can run. Workers, `eval` and SharedArrayBuffer stay unavailable.
+- **Its own files, and nothing else:** `fetch()` and media used to be blocked outright (`connect-src 'none'`). They now reach the plugin version's own folder, `https://<instance>/api/plugin-ui/<id>/<version>/`, and nothing else: not the app's pages or API, not another plugin, not the web. The frame still cannot send what it is shown anywhere. The folder is named from the configured public origin (`LOBBYFORGE_APP_ORIGIN`, else `NEXT_PUBLIC_BASE_URL`), never from the request, because the files are cached publicly. Without either (a dev setup) the policy uses `'self'`; the frame reaches the app without cookies there, and every mutating route refuses a cross-site request.
+- **Example:** the sandbox buzzer plays its own `buzz.wav` when you press Buzz.
+- **Tests:** the asset route tests cover the new types, ranges and the policy; the browser suite (`e2e-sandbox`) proves that the frame loads its own sound, data and WebAssembly while the CSP refuses the app, its API, another plugin's folder and outside sound.
+- **Docs:** ADR-007, PLUGIN_SDK.md ("Marketplace plugin UI": the file-type table, limits and what works) and PLUGIN_PUBLISHING.md. This is phase 1 of the plugin unlock plan; installed plugins need no change.
 ## [Unreleased] - Activities catch up after a dropped connection - 2026-10-12
 
 - **Missed updates come back:** the realtime gateway keeps no backlog, so a game panel used to miss whatever happened while its socket was down and show a stale state until the next move. The panel now re-reads the session when its socket reconnects, when the network comes back and when the tab is shown again after at least 5 seconds in the background (a phone may have frozen the page).

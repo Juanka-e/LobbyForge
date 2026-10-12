@@ -268,11 +268,18 @@ Where the implementation refines the points above:
   origin**: it cannot read the app's cookies, storage or DOM, and the
   app's SameSite=Lax session cookie is not sent with its requests.
 - The asset route answers with its own CSP: `default-src 'none';
-  script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'
-  data:; font-src 'self'; connect-src 'none'; frame-ancestors 'self';
-  base-uri 'none'; form-action 'none'` plus `X-Content-Type-Options:
-  nosniff`. No network: the frame cannot exfiltrate what it is shown.
-  The app's own CSP gains `frame-src 'self'`.
+  script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline';
+  img-src 'self' data:; font-src 'self'; media-src <own> data: blob:;
+  connect-src <own>; frame-ancestors 'self'; base-uri 'none'; form-action
+  'none'` plus `X-Content-Type-Options: nosniff`, where `<own>` is the
+  plugin version's own folder on the configured public origin
+  (`https://<instance>/api/plugin-ui/<id>/<version>/`; `'self'` when no
+  origin is configured). No network: `fetch()` and media reach the
+  plugin's own files and nothing else, so the frame cannot exfiltrate what
+  it is shown. WebAssembly compiles (`'wasm-unsafe-eval'`) but reaches
+  nothing a script cannot. The app's own CSP gains `frame-src 'self'`.
+  (2026-10: phase 1 of the plugin unlock — media, WebAssembly and the
+  plugin's own files; the first version had `connect-src 'none'`.)
 - **postMessage protocol v1** (all messages carry `lf: 1`): parent →
   frame `init { viewer, players, locale, theme (CSS variables), state }`
   and `state { state, revision }` (the PROJECTED state for that viewer);

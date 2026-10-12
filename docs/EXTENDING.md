@@ -740,7 +740,7 @@ anything you compile in the way you review your own code.
 | | A: compiled in | B: marketplace (sandbox-v1) |
 |---|---|---|
 | Language and APIs | TypeScript, React, the whole SDK | plain JavaScript in `server.js`, no imports, no Node APIs |
-| Your own UI | a React panel in the app | `ui/` in a sandboxed iframe (no network), postMessage protocol v1 |
+| Your own UI | a React panel in the app | `ui/` in a sandboxed iframe (no network beyond its own files; sound, video and WebAssembly work), postMessage protocol v1 |
 | `actionPolicies`, `validateAction` | yes | yes: policies from `manifest.json`, `validateAction` in the sandbox |
 | Hidden state per viewer | yes, with a core projection branch | yes, with the plugin's own `projectState` |
 | Name and summary in each viewer's language | `catalog.name` / `catalog.summary` in `locales/<code>.json` | the same keys in the bundle's `locales/<code>.json` ([PLUGIN_PUBLISHING.md](PLUGIN_PUBLISHING.md#locales-optional-your-name-and-description-in-every-language)) |

@@ -19,8 +19,8 @@
  *  - only listens to its parent window, on the frame's own host.
  *
  * Security model: this runs inside `<iframe sandbox="allow-scripts">` with an
- * opaque origin and a CSP of `connect-src 'none'` — no cookies, no storage of
- * the app, no network. All the frame learns is what the parent posts (the
+ * opaque origin and a CSP whose `connect-src` is its own folder — no cookies,
+ * no storage of the app, no network beyond its own files. All the frame learns is what the parent posts (the
  * state already projected for this viewer); all it can do is `dispatch`, which
  * the parent sends through the actions route as the viewer, under the plugin's
  * action policies. Do not try to fetch anything: it is blocked by design.

@@ -26,7 +26,8 @@ marketplace plugin is installed **without trusting its author**:
   the `plugin-worker` container: plain JavaScript, no Node APIs, no
   network, no file system, no timers, a fresh VM for every call;
 - its UI (`ui/`, optional) runs in `<iframe sandbox="allow-scripts">` with
-  an opaque origin and no network;
+  an opaque origin and no network beyond its own files (it may load its own
+  sound, video, WebAssembly and data);
 - it gets what official plugins get from the host: action policies
   (`host` / `member` / `player`, `actorFields`, `joinsRoster`, `audit`),
   `validateAction`, and **per-viewer hidden state** through `projectState`.
@@ -196,8 +197,9 @@ talks to the lobby with postMessage protocol v1 (`init`, `state`,
 `action`, `resize`) and always receives the state **already projected**
 for its viewer. Use `@lobbyforge/plugin-sdk/frame`; see "Marketplace
 plugin UI (sandboxed iframe)" in [PLUGIN_SDK.md](PLUGIN_SDK.md). Inside
-the frame there is no network (`connect-src 'none'`) and no external
-script or stylesheet.
+the frame `fetch()` and media reach only your own files under `ui/`
+(sound, video, `.wasm`, data), and there is no external script or
+stylesheet. The file types and limits are listed there.
 
 ### `locales/` (optional): your name and description in every language
 
@@ -237,8 +239,8 @@ my-game/
   is "Anket" in Turkish and Dice Bot is "Zar", while Quiz, Watch Party and
   Hushle stay as they are. The example's Buzzer stays "Buzzer".
 - **Your UI is separate.** The host reads these tables; the iframe does
-  not get them (it has no network, and the asset route serves only
-  `ui/`). Ship your UI's strings under `ui/` and pick them with
+  not get them (it can fetch only its own files, and the asset route
+  serves only `ui/`). Ship your UI's strings under `ui/` and pick them with
   `init.locale`, as the example's `ui/app.js` does.
 
 **Languages.** Name each file by the app's code for the language: a
