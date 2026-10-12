@@ -1368,7 +1368,8 @@ When a message is blocked:
   this community does not allow.");
 - the audit log gets \`bot.moderation.block\` — the bot, the rule, what matched,
   the channel, a trimmed excerpt (120 characters) and a SHA-256 of the full
-  message;
+  message; an audit reader who cannot see that channel gets the row without
+  what matched and without the excerpt;
 - optionally (*Post a notice in the channel*) the bot posts a short neutral
   line such as "A message from Alex was blocked by the moderation filter." —
   at most one per member per channel per minute.
@@ -2132,9 +2133,10 @@ at-most-once; there is no replay. A bot that reconnects backfills with
   message shape (with \`webhook: { id, name }\`). Every post is audited as
   \`message.create\` (\`webhookId\`); a Moderation Bot block is audited as
   \`bot.moderation.block\` with \`targetType: 'webhook'\` (content rules only,
-  no staff exemption — a webhook has no roles). The \`webhook\` and
-  \`interaction\` metadata keys are reserved: the member messages API
-  refuses them.
+  no staff exemption — a webhook has no roles). A member's message carries
+  no client metadata at all — the member messages API refuses \`metadata\`
+  outright (400 \`metadata_not_allowed\`) — so \`webhook\` and \`interaction\`
+  cannot be forged.
 - Managing (Manage Channels + seeing the channel; text / announcement
   channels only; ≤ 10 per channel → 409 \`webhook_limit_reached\`):
   \`GET|POST /api/servers/{id}/channels/{channelId}/webhooks\` (POST

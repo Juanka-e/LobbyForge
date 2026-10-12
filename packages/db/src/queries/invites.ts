@@ -241,7 +241,14 @@ export type RedeemInviteHeld =
   | { ok: false; error: 'join_request_limit'; serverId: string };
 
 export type RedeemInviteResult =
-  | { ok: true; membershipId: string; serverId: string; roleId: string }
+  | {
+      ok: true;
+      membershipId: string;
+      serverId: string;
+      roleId: string;
+      /** The redeemed invite's id — what the audit log records (never the code). */
+      inviteId: string;
+    }
   | { ok: false; error: RedeemInviteError }
   | RedeemInviteHeld;
 
@@ -445,6 +452,7 @@ export async function redeemInvite(
       membershipId: member.id,
       serverId: invite.serverId,
       roleId: everyoneId,
+      inviteId: invite.id,
     };
   });
 }

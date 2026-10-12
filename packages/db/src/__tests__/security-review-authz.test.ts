@@ -221,7 +221,7 @@ describe('moderation state survives the membership — security-review AUTHZ-002
       [], // invite uses
     ]);
     const result = await redeemInvite(db, 'ABCDEFGH2345', 'u-1');
-    expect(result).toEqual({ ok: true, membershipId: 'm-2', serverId: 'srv-1', roleId: 'role-everyone' });
+    expect(result).toEqual({ ok: true, membershipId: 'm-2', serverId: 'srv-1', roleId: 'role-everyone', inviteId: 'inv-1' });
     const insert = chains.find((c) => c[0]!.op === 'insert')!;
     expect(stepArg(insert, 'values')).toEqual({
       serverId: 'srv-1',

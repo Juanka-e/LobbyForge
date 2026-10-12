@@ -24,6 +24,8 @@ interface ApiRoleResponse {
   /** `role_gates_channels` (409): the role is the last gate of `channels`. */
   code?: string;
   channels?: Array<{ id: string; name: string }>;
+  /** How many more of those channels the viewer cannot see (named nowhere). */
+  hiddenChannelCount?: number;
 }
 
 /**
@@ -248,15 +250,28 @@ export default function RolesClient({
       const data = (await response.json().catch(() => ({}))) as ApiRoleResponse;
       // security-review AUTHZ-001: the server refuses to delete a channel's
       // last gating role (the channel would turn public). Name the channels
-      // so the admin knows whose visibility to change first.
+      // so the admin knows whose visibility to change first — the ones they
+      // can see; the rest arrive as a count only.
       if (response.status === 409 && data.code === 'role_gates_channels') {
         const names = (data.channels ?? []).map((channel) => `#${channel.name}`);
-        throw new Error(
-          t('adminSettings.roles.gatesChannels', {
-            count: names.length,
-            channels: new Intl.ListFormat(t.locale, { type: 'conjunction' }).format(names),
-          })
-        );
+        const hidden = typeof data.hiddenChannelCount === 'number' ? data.hiddenChannelCount : 0;
+        const parts: string[] = [];
+        if (names.length > 0) {
+          parts.push(
+            t('adminSettings.roles.gatesChannels', {
+              count: names.length,
+              channels: new Intl.ListFormat(t.locale, { type: 'conjunction' }).format(names),
+            })
+          );
+        }
+        if (hidden > 0) {
+          parts.push(
+            t(names.length > 0 ? 'adminSettings.roles.gatesAlsoHiddenChannels' : 'adminSettings.roles.gatesHiddenChannels', {
+              count: hidden,
+            })
+          );
+        }
+        throw new Error(parts.length > 0 ? parts.join(' ') : (data.error ?? t('adminSettings.roles.deleteFailed')));
       }
       if (!response.ok) throw new Error(data.error ?? t('adminSettings.roles.deleteFailed'));
       setRoles((current) => current.filter((item) => item.id !== role.id));

@@ -22,6 +22,7 @@ import { WebhookAvatar, WebhookBadge } from './WebhookIdentity';
 import { AppAvatar, AppBadge } from './AppIdentity';
 import { EphemeralAnswerRow, InteractionHeader, PendingInteractionRow } from './slash/InteractionRows';
 import { ChatPollCard } from './ChatPollCard';
+import { useBlockList } from './BlockListProvider';
 import {
   applyChatPollUpdate,
   asChatPollUpdate,
@@ -165,6 +166,29 @@ function describeAuthor(
   };
 }
 
+/**
+ * A blocked author's message as the viewer sees it — the same placeholder
+ * the server render (`buildMessages` in page.tsx) and the REST list give:
+ * no author, no words, no poll (security-review AUTHZ-009).
+ */
+function blockedChatMessage(id: string, createdAt: string, t: Translator): ChatMessage {
+  return {
+    id,
+    authorId: null,
+    author: t('lobbyMain.chat.blockedUser'),
+    authorColor: 'default',
+    timestamp: formatMessageTimestamp(createdAt, t),
+    createdAt,
+    body: t('lobbyMain.chat.blockedBody'),
+    blocked: true,
+    bot: null,
+    interaction: null,
+    webhook: null,
+    app: null,
+    poll: null,
+  };
+}
+
 /** A bot author from an API or realtime payload; anything malformed is not a bot. */
 function asMessageBot(value: unknown): MessageBot | null {
   if (!value || typeof value !== 'object') return null;
@@ -258,6 +282,30 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
     (poll: ChatPollView | null): ChatPollView | null => (poll ? catchUpChatPoll(poll, pollUpdatesRef.current.get(poll.id)) : null),
     []
   );
+  /**
+   * security-review AUTHZ-009: the viewer's block list (BlockListProvider).
+   * The server render and the REST list mask a blocked author's messages;
+   * the realtime feed and the local echo now do the same, and a blocked
+   * author never raises a desktop notification. Read through a ref so the
+   * chat subscription does not restart when the list changes.
+   */
+  const { blockedIds } = useBlockList();
+  const blockedIdsRef = useRef(blockedIds);
+  useEffect(() => {
+    blockedIdsRef.current = blockedIds;
+    // Someone blocked while the view is open (or a list that loaded after
+    // the first live message): their messages on screen are masked too.
+    if (blockedIds.size === 0) return;
+    setMessages((prev) => {
+      let changed = false;
+      const next = prev.map((message) => {
+        if (message.blocked || !message.authorId || !blockedIds.has(message.authorId)) return message;
+        changed = true;
+        return blockedChatMessage(message.id, message.createdAt, t);
+      });
+      return changed ? next : prev;
+    });
+  }, [blockedIds, t]);
 
   // Sync name cache when knownNames prop changes (parent re-render with new data).
   useEffect(() => {
@@ -321,8 +369,9 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
             authorColor: message.userId === data.currentUserId ? 'primary' : 'default',
             timestamp: formatMessageTimestamp(message.createdAt, t),
             createdAt: message.createdAt,
-            // A built-in bot's default text in this viewer's language.
-            body: message.blocked ? message.content : localizeBotMessage(message, t),
+            // A built-in bot's default text in this viewer's language; a
+            // blocked author's placeholder in it too, like the server render.
+            body: message.blocked ? t('lobbyMain.chat.blockedBody') : localizeBotMessage(message, t),
             blocked: message.blocked,
             pinned: typeof message.metadata?.$pinnedAt === 'string',
             poll: message.blocked ? null : catchUp(asChatPollView(message.poll)),
@@ -416,6 +465,15 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
       }
       if (env.type !== 'message' || !env.message) return;
       const m = env.message;
+      if (m.userId && blockedIdsRef.current.has(m.userId)) {
+        // AUTHZ-009: the same placeholder the server render shows — no
+        // words, no poll, no author — and no notification.
+        liveIdsRef.current.add(m.id);
+        setMessages((prev) =>
+          prev.some((x) => x.id === m.id) ? prev : [blockedChatMessage(m.id, m.createdAt, t), ...prev]
+        );
+        return;
+      }
       const who = describeAuthor(m, nameCacheRef.current, t, t('lobbyMain.chat.unknownUser'));
       const author = who.author;
       // A built-in bot's default text in this viewer's language.
@@ -490,6 +548,11 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
       liveIdsRef.current.add(m.id);
       setMessages((prev) => {
         if (prev.some((x) => x.id === m.id)) return prev;
+        // The echo is the viewer's own post, but it goes through the same
+        // block rule as the realtime feed (AUTHZ-009).
+        if (m.userId && blockedIdsRef.current.has(m.userId)) {
+          return [blockedChatMessage(m.id, m.createdAt, t), ...prev];
+        }
         const author = m.userId
           ? (nameCacheRef.current.get(m.userId) ?? t('lobbyMain.chat.you'))
           : t('lobbyMain.chat.deletedUser');

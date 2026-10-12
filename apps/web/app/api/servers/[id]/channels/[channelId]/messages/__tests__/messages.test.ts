@@ -221,6 +221,25 @@ describe('GET /api/servers/{id}/channels/{channelId}/messages', () => {
     expect(res.status).toBe(400);
   });
 
+  // The gateway's chat topic asks the same (apps/ws-gateway/src/authorize.ts):
+  // visibility + READ_MESSAGE_HISTORY; manage_channels skips visibility only.
+  it.each([
+    ['a member whose roles revoke history', ['send_messages']],
+    ['manage_channels without history', ['manage_channels', 'send_messages']],
+  ])('403 for %s', async (_label, permissions) => {
+    mockServerAlive();
+    getServerById.mockResolvedValue({ id: SERVER_ID, ownerUserId: '00000000-0000-0000-0000-000000000099', deletedAt: null });
+    getUserPermissions.mockResolvedValue(permissions);
+    const { GET } = await loadListRoute();
+    const req = new Request(
+      `https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}/messages`,
+      { headers: { cookie: makeSessionCookie() } }
+    );
+    const res = await GET(req, { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID }) });
+    expect(res.status).toBe(403);
+    expect(listMessagesForChannel).not.toHaveBeenCalled();
+  });
+
   it('rejects a non-integer `limit` with 400', async () => {
     mockServerAlive();
     const { GET } = await loadListRoute();

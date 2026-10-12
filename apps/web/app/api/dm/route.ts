@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { findOrCreateDmChannel, listDmChannelsForUser, getBlockedUserIds } from '@lobbyforge/db';
+import {
+  findOrCreateDmChannel,
+  getBlockedUserIds,
+  getDmRecipientEligibility,
+  listDmChannelsForUser,
+} from '@lobbyforge/db';
 import { requireMaterializedSession } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
 import { withApiSecurity } from '@/lib/security-headers';
@@ -44,8 +49,15 @@ const CreateDmSchema = z.object({
 }).strict();
 
 /**
- * POST /api/dm — open (or reuse) a DM channel with another user. Returns 403
- * if either party has blocked the other.
+ * POST /api/dm — open (or reuse) a DM channel with another user.
+ *
+ * Security review (needs verification #4): any user id used to work —
+ * a DM with someone the caller shares no community with — and an unknown
+ * id answered 500 (the FK error), which told ids that exist from ids that
+ * do not. The recipient must now be a live user who shares a community
+ * with the caller (both current members, neither banned), or one the
+ * caller already has a conversation with; everything else is the same
+ * 404. Blocks keep their 403, in either direction.
  */
 async function handlePost(req: Request): Promise<NextResponse> {
   const sessionResult = requireMaterializedSession(req);
@@ -67,6 +79,10 @@ async function handlePost(req: Request): Promise<NextResponse> {
 
   try {
     const db = getDb();
+    const eligibility = await getDmRecipientEligibility(db, uid, body.recipientUserId);
+    if (!eligibility.exists || (!eligibility.sharesServer && !eligibility.existingChannelId)) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
     // Block check — either direction blocks the DM.
     const [myBlocks, theirBlocks] = await Promise.all([
       getBlockedUserIds(db, uid),

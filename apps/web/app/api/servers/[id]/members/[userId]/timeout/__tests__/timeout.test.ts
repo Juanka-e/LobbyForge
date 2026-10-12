@@ -10,6 +10,7 @@ import { buildGuestSessionCookie, type GuestIdentity } from '@/lib/guest-session
  */
 
 const dbFns = {
+  getActiveMemberTimeout: vi.fn(),
   getHighestRolePosition: vi.fn(),
   getServerById: vi.fn(),
   getUserPermissions: vi.fn(),
@@ -108,6 +109,30 @@ describe('PUT members/[userId]/timeout — MODERATE_MEMBERS', () => {
     const res = await put({ until: null }, MOD, MEMBER);
     expect(res.status).toBe(200);
     expect(dbFns.setMemberTimeout).toHaveBeenCalledWith(expect.anything(), SERVER_ID, MEMBER, null);
+  });
+
+  // Security review (needs verification #4): a timed-out moderator kept
+  // every moderation power. The gate (lib/member-authorization.ts) covers
+  // kick, ban, timeout, roles, voice mute and disconnect alike.
+  it('403 actor_timed_out: a moderator who is timed out cannot time anyone out (or clear one)', async () => {
+    const until = new Date(Date.now() + 10 * 60_000);
+    dbFns.getActiveMemberTimeout.mockImplementation(async (_db: unknown, _s: string, userId: string) =>
+      userId === MOD ? until : null
+    );
+    const set = await put({ until: new Date(Date.now() + 60_000).toISOString() }, MOD, MEMBER);
+    expect(set.status).toBe(403);
+    expect(await set.json()).toMatchObject({ code: 'actor_timed_out', until: until.toISOString() });
+    const clear = await put({ until: null }, MOD, MEMBER);
+    expect(clear.status).toBe(403);
+    expect(dbFns.setMemberTimeout).not.toHaveBeenCalled();
+    expect(dbFns.getActiveMemberTimeout).toHaveBeenCalledWith(expect.anything(), SERVER_ID, MOD);
+  });
+
+  it('the owner is never refused by the timeout gate (and it is not even asked)', async () => {
+    dbFns.getActiveMemberTimeout.mockResolvedValue(new Date(Date.now() + 60_000));
+    const res = await put({ until: new Date(Date.now() + 60_000).toISOString() }, OWNER, MEMBER);
+    expect(res.status).toBe(200);
+    expect(dbFns.getActiveMemberTimeout).not.toHaveBeenCalledWith(expect.anything(), SERVER_ID, OWNER);
   });
 
   it('clamps an absurd duration to the 28-day cap', async () => {

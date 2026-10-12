@@ -9,12 +9,14 @@ const isDmChannelParticipant = vi.fn();
 const checkDmChannelAccess = vi.fn();
 const listDmMessages = vi.fn();
 const sendDmMessage = vi.fn();
+const getDmRecipientEligibility = vi.fn();
 
 vi.mock('@/lib/api-auth', () => ({ requireMaterializedSession }));
 vi.mock('@lobbyforge/db', () => ({
   listDmChannelsForUser,
   findOrCreateDmChannel,
   getBlockedUserIds,
+  getDmRecipientEligibility,
   isDmChannelParticipant,
   checkDmChannelAccess,
   listDmMessages,
@@ -43,6 +45,8 @@ beforeEach(() => {
     session: { uid: UID, gid: 'g_1', name: 'Caller', exp: 123 },
   });
   getBlockedUserIds.mockResolvedValue(new Set());
+  // Default: a live user who shares a community with the caller.
+  getDmRecipientEligibility.mockReset().mockResolvedValue({ exists: true, sharesServer: true, existingChannelId: null });
 });
 
 describe('GET /api/dm', () => {
@@ -143,6 +147,59 @@ describe('POST /api/dm', () => {
       {}
     );
     expect(res.status).toBe(400);
+  });
+});
+
+// Security review (needs verification #4): any user id used to open a DM,
+// and an unknown one 500'd on the FK — an existence oracle. Now: a shared
+// community or an existing conversation, else one uniform 404.
+describe('POST /api/dm — who may be messaged', () => {
+  async function open(recipientUserId = OTHER_UID) {
+    const { POST } = await import('../route.js');
+    return POST(
+      new Request('https://example.test/api/dm', { method: 'POST', body: JSON.stringify({ recipientUserId }) }),
+      {}
+    );
+  }
+
+  it('404 for an unknown user id, without touching the channel table', async () => {
+    getDmRecipientEligibility.mockResolvedValue({ exists: false, sharesServer: false, existingChannelId: null });
+    const res = await open('00000000-0000-0000-0000-00000000dead');
+    expect(res.status).toBe(404);
+    expect(findOrCreateDmChannel).not.toHaveBeenCalled();
+    expect(getDmRecipientEligibility).toHaveBeenCalledWith({ __mockDb: true }, UID, '00000000-0000-0000-0000-00000000dead');
+  });
+
+  it('the same 404 for a real user who shares no community with the caller', async () => {
+    getDmRecipientEligibility.mockResolvedValue({ exists: false, sharesServer: false, existingChannelId: null });
+    const unknown = await open('00000000-0000-0000-0000-00000000dead');
+    getDmRecipientEligibility.mockResolvedValue({ exists: true, sharesServer: false, existingChannelId: null });
+    const stranger = await open();
+    expect(stranger.status).toBe(404);
+    expect(await stranger.json()).toEqual(await unknown.json());
+    expect(findOrCreateDmChannel).not.toHaveBeenCalled();
+  });
+
+  it('an existing conversation can be reopened after the users stop sharing a community', async () => {
+    getDmRecipientEligibility.mockResolvedValue({ exists: true, sharesServer: false, existingChannelId: CHANNEL_ID });
+    findOrCreateDmChannel.mockResolvedValue({ id: CHANNEL_ID, userAId: OTHER_UID, userBId: UID, createdBy: UID });
+    const res = await open();
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { channel: { id: string } }).channel.id).toBe(CHANNEL_ID);
+  });
+
+  it('a stranger the caller blocked is still a plain 404 (no block oracle for unshared users)', async () => {
+    getDmRecipientEligibility.mockResolvedValue({ exists: true, sharesServer: false, existingChannelId: null });
+    getBlockedUserIds.mockImplementation(async (_db, uid) => (uid === OTHER_UID ? new Set([UID]) : new Set()));
+    const res = await open();
+    expect(res.status).toBe(404);
+  });
+
+  it('blocks keep their 403 for a user who shares a community', async () => {
+    getBlockedUserIds.mockImplementation(async (_db, uid) => (uid === OTHER_UID ? new Set([UID]) : new Set()));
+    const res = await open();
+    expect(res.status).toBe(403);
+    expect(findOrCreateDmChannel).not.toHaveBeenCalled();
   });
 });
 

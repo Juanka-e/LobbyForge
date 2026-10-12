@@ -629,9 +629,10 @@ at-most-once; there is no replay. A bot that reconnects backfills with
   message shape (with `webhook: { id, name }`). Every post is audited as
   `message.create` (`webhookId`); a Moderation Bot block is audited as
   `bot.moderation.block` with `targetType: 'webhook'` (content rules only,
-  no staff exemption — a webhook has no roles). The `webhook` and
-  `interaction` metadata keys are reserved: the member messages API
-  refuses them.
+  no staff exemption — a webhook has no roles). A member's message carries
+  no client metadata at all — the member messages API refuses `metadata`
+  outright (400 `metadata_not_allowed`) — so `webhook` and `interaction`
+  cannot be forged.
 - Managing (Manage Channels + seeing the channel; text / announcement
   channels only; ≤ 10 per channel → 409 `webhook_limit_reached`):
   `GET|POST /api/servers/{id}/channels/{channelId}/webhooks` (POST

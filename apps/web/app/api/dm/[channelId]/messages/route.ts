@@ -13,6 +13,7 @@ import { getDb } from '@/lib/db';
 import { withApiSecurity } from '@/lib/security-headers';
 import { publishDmMessage } from '@/lib/dm-bus';
 import { requireVerifiedEmail } from '@/lib/mail/verification';
+import { MESSAGE_BODY_MAX_BYTES } from '@/lib/message-limits';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -156,6 +157,8 @@ export const GET = withApiSecurity(handleGet, {
 
 export const POST = withApiSecurity(handlePost, {
   allowedMethods: ['POST'],
-  maxBodyBytes: 8192,
+  // The same cap as channel messages (lib/message-limits.ts): the old 8 KiB
+  // refused a legitimate 4000-character message in a 3-byte script.
+  maxBodyBytes: MESSAGE_BODY_MAX_BYTES,
   rateLimit: { identifier: 'dm-messages-send', config: { windowMs: 60_000, maxRequests: 60 } },
 });

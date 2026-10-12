@@ -6,12 +6,16 @@ const getServerById = vi.fn();
 const isServerMember = vi.fn();
 const listAuditLogsForServer = vi.fn();
 const getUserPermissions = vi.fn();
+const listChannelsForServer = vi.fn();
+const listVisibleChannelsForMember = vi.fn();
 
 vi.mock('@lobbyforge/db', () => ({
   getServerById,
   isServerMember,
   listAuditLogsForServer,
   getUserPermissions,
+  listChannelsForServer,
+  listVisibleChannelsForMember,
 }));
 
 vi.mock('@/lib/security-headers', () => ({
@@ -37,6 +41,8 @@ beforeEach(() => {
   isServerMember.mockReset();
   listAuditLogsForServer.mockReset();
   getUserPermissions.mockReset();
+  listChannelsForServer.mockReset();
+  listVisibleChannelsForMember.mockReset();
 });
 
 afterEach(() => {
@@ -161,5 +167,72 @@ describe('GET /api/servers/{id}/audit-logs', () => {
       { params: Promise.resolve({ id: SERVER_ID }) }
     );
     expect(res.status).toBe(400);
+  });
+});
+
+describe('GET /api/servers/{id}/audit-logs — metadata per viewer (security-review AUTHZ-010)', () => {
+  const OPEN = '0a1b2c3d-0000-4000-8000-000000000002';
+  const STAFF = '0a1b2c3d-0000-4000-8000-000000000003';
+  const log = (action: string, targetType: string, targetId: string, metadata: Record<string, unknown>) => ({
+    id: `log-${action}-${targetId}`,
+    serverId: SERVER_ID,
+    actorUserId: OWNER_ID,
+    action,
+    targetType,
+    targetId,
+    metadata,
+    createdAt: new Date('2026-10-01T00:00:00Z'),
+  });
+  const rows = () => [
+    log('invite.create', 'invite', 'inv-1', { code: 'SECRETCODE12', maxUses: null, expiresAt: null }),
+    log('invite.redeem', 'membership', 'mem-1', { code: 'SECRETCODE12', roleId: 'r-1' }),
+    log('channel.update', 'channel', STAFF, { name: 'staff-only', topic: 'raises', visibleToRoleIds: ['r-staff'] }),
+    log('channel.update', 'channel', OPEN, { name: 'lounge' }),
+    log('bot.moderation.block', 'user', MEMBER_ID, { rule: 'blocked_word', detail: 'payroll', channelId: STAFF }),
+  ];
+
+  async function read(uid: string) {
+    const { GET } = await loadRoute();
+    const res = await GET(makeReq(`http://localhost/api/servers/${SERVER_ID}/audit-logs`, makeSessionCookie(uid)), {
+      params: Promise.resolve({ id: SERVER_ID }),
+    });
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { auditLogs: Array<{ metadata: Record<string, unknown> }> }).auditLogs.map((e) => e.metadata);
+  }
+
+  beforeEach(() => {
+    getServerById.mockResolvedValue({ id: SERVER_ID, ownerUserId: OWNER_ID });
+    isServerMember.mockResolvedValue(true);
+    listAuditLogsForServer.mockResolvedValue(rows());
+    listChannelsForServer.mockResolvedValue([
+      { id: OPEN, serverId: SERVER_ID, name: 'lounge' },
+      { id: STAFF, serverId: SERVER_ID, name: 'staff-only' },
+    ]);
+    listVisibleChannelsForMember.mockResolvedValue([{ id: OPEN, serverId: SERVER_ID, name: 'lounge' }]);
+  });
+
+  it('a View Audit Log holder gets no invite code and nothing from a channel they cannot see', async () => {
+    getUserPermissions.mockResolvedValue(['view_audit_log']);
+    const metadata = await read(MEMBER_ID);
+    expect(metadata).toEqual([
+      { maxUses: null, expiresAt: null },
+      { roleId: 'r-1' },
+      {},
+      { name: 'lounge' },
+      { rule: 'blocked_word', channelId: STAFF },
+    ]);
+  });
+
+  it('MANAGE_SERVER sees invite codes; channel metadata still follows channel visibility', async () => {
+    getUserPermissions.mockResolvedValue(['view_audit_log', 'manage_server']);
+    const metadata = await read(MEMBER_ID);
+    expect(metadata[0]).toMatchObject({ code: 'SECRETCODE12' });
+    expect(metadata[1]).toMatchObject({ code: 'SECRETCODE12' });
+    expect(metadata[2]).toEqual({});
+  });
+
+  it('the owner reads every row unchanged', async () => {
+    getUserPermissions.mockResolvedValue(['administrator']);
+    expect(await read(OWNER_ID)).toEqual(rows().map((r) => r.metadata));
   });
 });

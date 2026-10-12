@@ -292,6 +292,7 @@ describe('disconnectErrorMessage', () => {
   it.each([
     ['forbidden', 403, 'lobbyMain.voice.disconnectError.forbidden'],
     ['insufficient_rank', 403, 'lobbyMain.voice.disconnectError.insufficientRank'],
+    ['actor_timed_out', 403, 'lobbyMain.voice.disconnectError.timedOut'],
     ['target_is_owner', 403, 'lobbyMain.voice.disconnectError.owner'],
     ['self_action', 400, 'lobbyMain.voice.disconnectError.self'],
     ['not_in_voice', 404, 'lobbyMain.voice.disconnectError.notInVoice'],

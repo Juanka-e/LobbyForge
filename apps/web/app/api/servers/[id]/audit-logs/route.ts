@@ -9,6 +9,7 @@ import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { authorizeServerPermission } from '@/lib/permissions';
 import { withApiSecurity } from '@/lib/security-headers';
+import { projectAuditMetadata, resolveAuditViewerScope, type AuditViewerScope } from '@/lib/audit-log-view';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -42,7 +43,7 @@ async function resolveSession(req: Request): Promise<
   return { ok: true, uid: session.uid };
 }
 
-function toJson(row: Awaited<ReturnType<typeof listAuditLogsForServer>>[number]) {
+function toJson(row: Awaited<ReturnType<typeof listAuditLogsForServer>>[number], scope: AuditViewerScope) {
   return {
     id: row.id,
     serverId: row.serverId,
@@ -50,7 +51,10 @@ function toJson(row: Awaited<ReturnType<typeof listAuditLogsForServer>>[number])
     action: row.action,
     targetType: row.targetType,
     targetId: row.targetId,
-    metadata: row.metadata,
+    // security-review AUTHZ-010: projected for this viewer — invite codes
+    // for MANAGE_SERVER only, a hidden channel's name / topic / roles and
+    // the Moderation Bot's quote of a hidden channel left out.
+    metadata: projectAuditMetadata(row, scope),
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -94,8 +98,13 @@ async function handleGet(req: Request, ctx: { params: Promise<{ id: string }> })
       ...(before ? { before } : {}),
       limit,
     });
+    const scope = await resolveAuditViewerScope(
+      getDb(),
+      { serverId, ownerUserId: server.ownerUserId ?? null, viewerUserId: session.uid },
+      rows
+    );
     return NextResponse.json(
-      { auditLogs: rows.map(toJson) },
+      { auditLogs: rows.map((row) => toJson(row, scope)) },
       { headers: { 'Cache-Control': 'no-store' } }
     );
   } catch {

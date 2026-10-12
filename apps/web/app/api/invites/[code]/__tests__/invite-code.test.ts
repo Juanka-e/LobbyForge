@@ -298,12 +298,13 @@ describe('POST /api/invites/[code]/redeem', () => {
     expect(res.status).toBe(401);
   });
 
-  it('logs the invite.redeem audit action on success', async () => {
+  it('logs the invite.redeem audit action on success — with the invite id, never the code', async () => {
     redeemInvite.mockResolvedValue({
       ok: true,
       serverId: 'srv-1',
       membershipId: 'mem-1',
       roleId: 'role-1',
+      inviteId: 'inv-1',
     });
     const { POST } = await import('../redeem/route.js');
     const res = await POST(
@@ -316,7 +317,9 @@ describe('POST /api/invites/[code]/redeem', () => {
     expect(res.status).toBe(201);
     expect(logAction).toHaveBeenCalledWith(
       { __mockDb: true },
-      expect.objectContaining({ action: 'invite.redeem' })
+      expect.objectContaining({ action: 'invite.redeem', metadata: { inviteId: 'inv-1', roleId: 'role-1' } })
     );
+    // security-review AUTHZ-010: the audit log is read by every View Audit Log holder.
+    expect(JSON.stringify(logAction.mock.calls)).not.toContain(CODE);
   });
 });

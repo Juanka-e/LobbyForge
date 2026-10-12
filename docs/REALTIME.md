@@ -108,6 +108,15 @@ Every `subscribe` is gated by `authorizeTopicSubscribe(...)`:
 
 - The server's owner always passes (no DB lookup beyond `getServerById`).
 - Everyone else must be a member of `serverId` (`isServerMember`).
+- `chat` and `activity-state` topics also need the channel to exist in
+  that server and to be visible to the member (role-gated channels;
+  `administrator` / `manage_channels` skip the visibility check).
+- A `chat` topic additionally needs **`read_message_history`**
+  (`administrator` implies it; `manage_channels` does not) — the same rule
+  as reading the channel over REST (`authorizeChannelMessageAccess`,
+  operation `read`). A role that revokes history used to keep the live
+  feed. Role changes re-run this check on live subscriptions (access
+  invalidation), so revoking the permission also ends the subscription.
 
 A non-member's subscribe receives `{type: 'error', code: 'forbidden'}` —
 the connection stays open so the client can retry with a different topic

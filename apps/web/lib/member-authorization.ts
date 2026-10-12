@@ -9,6 +9,7 @@
  * through ONE helper so the semantics cannot diverge again:
  *
  *   owner actor        → bypasses hierarchy (but never acts on the owner)
+ *   timed-out actor    → rejected (403 `actor_timed_out`); never the owner
  *   target is owner    → rejected for every non-owner actor
  *   actor === target   → rejected EXCEPT kick's self-leave path (the
  *                        kick route handles self-leave before calling)
@@ -20,6 +21,7 @@
 import { NextResponse } from 'next/server';
 import { CorePermission, hasPermission } from '@lobbyforge/core';
 import {
+  getActiveMemberTimeout,
   getHighestRolePosition,
   getServerById,
   getUserPermissions,
@@ -63,7 +65,8 @@ export type ModerationRefusalCode =
   | 'target_is_owner'
   | 'user_not_found'
   | 'target_not_member'
-  | 'insufficient_rank';
+  | 'insufficient_rank'
+  | 'actor_timed_out';
 
 function refuse(error: string, code: ModerationRefusalCode, status: number): { ok: false; response: NextResponse } {
   return { ok: false, response: NextResponse.json({ error, code }, { status }) };
@@ -121,6 +124,23 @@ export async function authorizeModerationTarget(input: {
   const permissions = await getUserPermissions(getDb(), actorUserId, serverId);
   if (!actorIsOwner && !hasPermission(permissions, OPERATION_PERMISSION[operation])) {
     return refuse('Forbidden', 'forbidden', 403);
+  }
+
+  // Security review (needs verification #4): a timed-out moderator could
+  // still kick, ban, time out, mute, disconnect and re-role others — a
+  // timeout silences a member in every other way (messages, invites,
+  // voice). The owner cannot be timed out by anyone, so is never refused.
+  if (!actorIsOwner) {
+    const timedOutUntil = await getActiveMemberTimeout(getDb(), serverId, actorUserId);
+    if (timedOutUntil) {
+      return {
+        ok: false,
+        response: NextResponse.json(
+          { error: 'You are timed out in this server', code: 'actor_timed_out', until: timedOutUntil.toISOString() },
+          { status: 403 }
+        ),
+      };
+    }
   }
 
   // Self-action: never moderate yourself through these routes (kick's

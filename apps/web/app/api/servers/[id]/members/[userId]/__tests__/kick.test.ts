@@ -10,6 +10,7 @@ import { buildGuestSessionCookie, type GuestIdentity } from '@/lib/guest-session
  */
 
 const dbFns = {
+  getActiveMemberTimeout: vi.fn(),
   getHighestRolePosition: vi.fn(),
   getServerById: vi.fn(),
   getUserPermissions: vi.fn(),

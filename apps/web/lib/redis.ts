@@ -277,16 +277,30 @@ export async function setTyping(serverId: string, channelId: string, userId: str
   await redis.set(typingKey(serverId, channelId, userId), displayName, 'EX', TYPING_TTL_SEC);
 }
 
-export async function getTypingUsers(serverId: string, channelId: string, excludeUserId?: string): Promise<string[]> {
+/**
+ * Who is typing in a channel, by user id (the last segment of the key) and
+ * display name. The typing route filters these per viewer — blocks and
+ * online-status privacy — before any name leaves the server.
+ */
+export async function getTypingEntries(
+  serverId: string,
+  channelId: string
+): Promise<Array<{ userId: string; displayName: string }>> {
   const keys = await scanKeys(typingPattern(serverId, channelId));
   if (keys.length === 0) return [];
   const values = await redis.mget(...keys);
-  const names = values.filter(Boolean).map(v => v as string);
-  // Extract userId from key to filter self
-  if (excludeUserId) {
-    const selfKey = typingKey(serverId, channelId, excludeUserId);
-    const selfIdx = keys.indexOf(selfKey);
-    if (selfIdx >= 0) names.splice(selfIdx, 1);
-  }
-  return [...new Set(names)];
+  const prefix = typingKey(serverId, channelId, '');
+  const entries: Array<{ userId: string; displayName: string }> = [];
+  keys.forEach((key, index) => {
+    const displayName = values[index];
+    // An expired key reads as null; index by key, so names never shift.
+    if (!displayName || !key.startsWith(prefix)) return;
+    entries.push({ userId: key.slice(prefix.length), displayName });
+  });
+  return entries;
+}
+
+export async function getTypingUsers(serverId: string, channelId: string, excludeUserId?: string): Promise<string[]> {
+  const entries = await getTypingEntries(serverId, channelId);
+  return [...new Set(entries.filter((entry) => entry.userId !== excludeUserId).map((entry) => entry.displayName))];
 }

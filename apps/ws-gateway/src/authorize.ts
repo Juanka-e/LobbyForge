@@ -113,7 +113,17 @@ export async function authorizeTopicSubscribe(
     }
     if (!isOwner) {
       const perms = await getUserPermissions(db as never, userId, parsed.serverId);
-      const canManage = perms.includes('administrator') || perms.includes('manage_channels');
+      const isAdmin = perms.includes('administrator');
+      // security-review (needs-verification #3): a chat topic delivers the
+      // channel's messages, so it takes what reading them over REST takes
+      // (apps/web/lib/message-authorization.ts, `read`): visibility AND
+      // READ_MESSAGE_HISTORY. A role that revokes history (a write-only
+      // channel) used to keep the live feed. manage_channels bypasses
+      // visibility only, never the history permission — the REST rule too.
+      if (parsed.kind === 'chat' && !isAdmin && !perms.includes('read_message_history')) {
+        return { ok: false, reason: 'forbidden' };
+      }
+      const canManage = isAdmin || perms.includes('manage_channels');
       if (!canManage) {
         const visible = await canMemberAccessChannel(
           db as never,

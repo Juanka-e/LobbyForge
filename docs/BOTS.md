@@ -284,7 +284,8 @@ When a message is blocked:
   this community does not allow.");
 - the audit log gets `bot.moderation.block` — the bot, the rule, what matched,
   the channel, a trimmed excerpt (120 characters) and a SHA-256 of the full
-  message;
+  message; an audit reader who cannot see that channel gets the row without
+  what matched and without the excerpt;
 - optionally (*Post a notice in the channel*) the bot posts a short neutral
   line such as "A message from Alex was blocked by the moderation filter." —
   at most one per member per channel per minute.

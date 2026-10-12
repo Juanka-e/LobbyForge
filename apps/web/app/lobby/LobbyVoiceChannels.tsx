@@ -81,6 +81,8 @@ export function disconnectErrorMessage(
       return { key: 'lobbyMain.voice.disconnectError.forbidden' };
     case 'insufficient_rank':
       return { key: 'lobbyMain.voice.disconnectError.insufficientRank' };
+    case 'actor_timed_out':
+      return { key: 'lobbyMain.voice.disconnectError.timedOut' };
     case 'target_is_owner':
       return { key: 'lobbyMain.voice.disconnectError.owner' };
     case 'self_action':

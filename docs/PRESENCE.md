@@ -62,6 +62,18 @@ The response is a public snapshot, not the raw Redis value:
 - `showServerNameInActivity` controls whether `activity.serverName` is present.
 - `friends` visibility is treated as self-only until a friends graph exists.
 
+### Typing indicator
+
+`GET /api/servers/{id}/channels/{channelId}/typing` (`{ typers: string[] }`,
+polled every 3 s by the open channel) says "online, right now, here", so it
+follows the presence rules: a typer is left out when the viewer blocked
+them, when they blocked the viewer, or when their *Online status*
+visibility hides them from the viewer (`canViewOnlineStatus` in
+`lib/presence-privacy.ts` — the same test that turns a presence into
+`status: "hidden"`). Typing keys keep the user id (`getTypingEntries`), so
+the route filters by id before any display name is returned; when nobody
+else is typing it asks the database nothing.
+
 ## Heartbeat contract
 
 The voice-room UI (`apps/web/app/room/[roomName]/page.tsx`) posts a heartbeat every 5 seconds:

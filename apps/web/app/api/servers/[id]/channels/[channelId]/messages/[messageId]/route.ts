@@ -24,6 +24,7 @@ import { publishChatMessageDelete, publishChatMessageUpdate } from '@/lib/chat-b
 import { requireVerifiedEmail } from '@/lib/mail/verification';
 import { readMessagePollId } from '@/lib/chat-polls';
 import { loadPollViewsForMessages } from '@/lib/chat-polls-server';
+import { MESSAGE_BODY_MAX_BYTES } from '@/lib/message-limits';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -382,6 +383,7 @@ export const GET = withApiSecurity(handleGet, {
 
 export const PATCH = withApiSecurity(handlePatch, {
   allowedMethods: ['PATCH'],
+  maxBodyBytes: MESSAGE_BODY_MAX_BYTES,
   rateLimit: { identifier: 'messages-patch', config: { windowMs: 60_000, maxRequests: 30 } },
 });
 
