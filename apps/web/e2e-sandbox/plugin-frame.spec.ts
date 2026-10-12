@@ -144,7 +144,14 @@ test('the asset route answers with the sandbox policy, and nothing that forbids 
   expect(headerValues(all, 'x-content-type-options')).toEqual(['nosniff']);
   expect(headerValues(all, 'cross-origin-resource-policy')).toEqual(['cross-origin']);
   expect(headerValues(all, 'access-control-allow-origin')).toEqual(['*']);
-  expect(headerValues(all, 'cache-control')).toEqual(['public, max-age=31536000, immutable']);
+  // The document's policy carries the owner's approval (phase 2), which can
+  // change for one version; every other file is immutable.
+  expect(headerValues(all, 'cache-control')).toEqual(['no-cache']);
+  const script = await request.get('/api/plugin-ui/probe/1.0.0/probe.js', {
+    headers: { 'sec-fetch-dest': 'script', 'sec-fetch-site': 'cross-site', 'sec-fetch-mode': 'cors' },
+  });
+  expect(script.status()).toBe(200);
+  expect(headerValues(script.headersArray(), 'cache-control')).toEqual(['public, max-age=31536000, immutable']);
   expect(headerValues(all, 'vary').join(',')).toContain('Sec-Fetch-Dest');
   expect(headerValues(all, 'set-cookie')).toEqual([]);
 
