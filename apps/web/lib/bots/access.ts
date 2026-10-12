@@ -16,6 +16,7 @@ import { CorePermission, hasPermission } from '@lobbyforge/core';
 import {
   getBotChannelAccessState,
   getBotReachableChannel,
+  getChannelOpenToBots,
   listBotAccessibleChannels,
   listBotReachableChannels,
   listChannelsForServer,
@@ -38,6 +39,17 @@ export async function botCanAccessChannel(bot: BotAccessSubject, channelId: stri
 /** Every channel this bot reaches, in channel-list order. */
 export async function listBotChannels(bot: BotAccessSubject): Promise<ChannelRow[]> {
   return listBotReachableChannels(getDb(), { id: bot.id, serverId: bot.serverId });
+}
+
+/**
+ * For a bot that has no row yet (a built-in bot's first save): the channel
+ * if the bot will reach it once created — it starts in mode `all`, so an
+ * open text / announcement channel of the server. Takes no bot id on
+ * purpose: `botCanAccessChannel` with a made-up id (`'welcome'`) is a
+ * uuid-column query error, not "no access".
+ */
+export async function channelOpenToNewBot(serverId: string, channelId: string): Promise<ChannelRow | null> {
+  return getChannelOpenToBots(getDb(), serverId, channelId);
 }
 
 /** Only the literal `'all'` uses the v1 rule; anything else (unknown, missing) is `selected`. */

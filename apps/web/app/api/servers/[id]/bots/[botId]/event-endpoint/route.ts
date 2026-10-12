@@ -1,10 +1,17 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { deleteBotEventEndpoint, getBotById, getBotEventEndpoint, reenableBotEventEndpoint, type BotRow } from '@lobbyforge/db';
+import {
+  ENDPOINT_DISABLED_TOKEN_CHANGED,
+  deleteBotEventEndpoint,
+  getBotById,
+  getBotEventEndpoint,
+  reenableBotEventEndpoint,
+  type BotRow,
+} from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { withApiSecurity } from '@/lib/security-headers';
 import { auditBotAction, invalidBody, jsonErrors, requireBotManager } from '@/lib/bots/admin';
-import { toEventEndpointJson } from '@/lib/bots/event-delivery';
+import { resetEndpointBackoff, toEventEndpointJson } from '@/lib/bots/event-delivery';
 import { invalidateBotEventTargets } from '@/lib/bots/events';
 
 export const dynamic = 'force-dynamic';
@@ -38,10 +45,22 @@ async function handleGet(req: Request, ctx: RouteContext): Promise<NextResponse>
   return NextResponse.json({ endpoint: row ? toEventEndpointJson(row) : null }, noStore);
 }
 
+const TOKEN_CHANGED = () =>
+  NextResponse.json(
+    {
+      error: 'This endpoint was switched off because the bot token changed; the bot must set it again with its new token',
+      code: 'endpoint_token_changed',
+    },
+    { status: 409 }
+  );
+
 /**
  * PATCH …/event-endpoint  { enabled: true } — switch an endpoint that was
  * disabled after repeated failures back on (counter reset). The URL and
- * secret are the bot's to set (Bot API `PUT /event-endpoint`).
+ * secret are the bot's to set (Bot API `PUT /event-endpoint`) — so an
+ * endpoint switched off by a token rotate / revoke (`token_changed`) is
+ * NOT re-enabled here: whoever held the old token chose its URL and knows
+ * its secret (BOT-002). 409 `endpoint_token_changed`; remove it instead.
  */
 async function handlePatch(req: Request, ctx: RouteContext): Promise<NextResponse> {
   const { id: serverId, botId } = await ctx.params;
@@ -51,8 +70,13 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
   if (!bot) return NOT_FOUND('Bot');
   const parsed = PatchSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return invalidBody(parsed.error.issues);
+  const current = await getBotEventEndpoint(getDb(), bot.id);
+  if (!current) return NOT_FOUND('Event endpoint');
+  if (current.disabledReason === ENDPOINT_DISABLED_TOKEN_CHANGED) return TOKEN_CHANGED();
+  // The query refuses a token_changed endpoint too (a rotation in between).
   const row = await reenableBotEventEndpoint(getDb(), bot.id);
-  if (!row) return NOT_FOUND('Event endpoint');
+  if (!row) return (await getBotEventEndpoint(getDb(), bot.id)) ? TOKEN_CHANGED() : NOT_FOUND('Event endpoint');
+  resetEndpointBackoff(bot.id);
   invalidateBotEventTargets(serverId);
   auditBotAction({ serverId, actorUserId: auth.manager.uid, action: 'bot.event_endpoint.enable', bot });
   return NextResponse.json({ endpoint: toEventEndpointJson(row) }, noStore);
@@ -66,6 +90,7 @@ async function handleDelete(req: Request, ctx: RouteContext): Promise<NextRespon
   const bot = await loadServerBot(serverId, botId);
   if (!bot) return NOT_FOUND('Bot');
   if (!(await deleteBotEventEndpoint(getDb(), bot.id))) return NOT_FOUND('Event endpoint');
+  resetEndpointBackoff(bot.id);
   invalidateBotEventTargets(serverId);
   auditBotAction({ serverId, actorUserId: auth.manager.uid, action: 'bot.event_endpoint.remove', bot });
   return NextResponse.json({ ok: true }, noStore);

@@ -6,8 +6,10 @@ import { withApiSecurity } from '@/lib/security-headers';
 import {
   auditBotAction,
   BotNameSchema,
+  CHANNEL_REACH_PERMISSIONS,
   invalidBody,
   jsonErrors,
+  refuseHiddenChannelReach,
   requireBotManager,
   toBotJson,
 } from '@/lib/bots/admin';
@@ -99,6 +101,13 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
     }
     const added = next.filter((p) => !bot.permissions.includes(p));
     const removed = bot.permissions.filter((p) => !next.includes(p as (typeof next)[number]));
+    // BOT-001: a new channel permission widens what the bot does in the
+    // private channels it was granted — not for a manager who cannot see
+    // them (removing one, or keeping it, is always allowed).
+    if (added.some((p) => CHANNEL_REACH_PERMISSIONS.includes(p))) {
+      const hidden = await refuseHiddenChannelReach(bot, manager);
+      if (hidden) return hidden;
+    }
     if (added.length > 0 || removed.length > 0) {
       patch.permissions = next;
       changes.permissions = { added, removed };

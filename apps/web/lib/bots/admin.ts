@@ -15,9 +15,10 @@ import { getServerById, logAction, type BotRow } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { requireMaterializedSession, type ApiResult } from '@/lib/api-auth';
 import { authorizeServerPermission } from '@/lib/permissions';
-import { BOT_NAME_MAX_LENGTH, botTrustLevel, isBuiltInType, type BotTrustLevel } from './catalog';
+import { BOT_NAME_MAX_LENGTH, botTrustLevel, isBuiltInType, type BotPermissionId, type BotTrustLevel } from './catalog';
 import { parseModerationSettings, parseWelcomeSettings } from './settings';
 import { isDefaultBuiltInBotName, normalizeBuiltInSettings } from './bot-i18n-server';
+import { canGrantGatedChannels, loadChannelAccessView } from './access';
 
 /**
  * A bot's display name: 1–32 characters, whitespace collapsed, no control
@@ -140,6 +141,46 @@ export async function requireBotManager(req: Request, serverId: string): Promise
 
 export function canManageBots(permissions: readonly string[]): boolean {
   return hasPermission([...permissions], CorePermission.MANAGE_SERVER);
+}
+
+/**
+ * The bot permissions that act IN the bot's channels: reading and posting
+ * there, hearing its events (message events, interactions) and answering
+ * commands run there.
+ */
+export const CHANNEL_REACH_PERMISSIONS: readonly BotPermissionId[] = [
+  'read_messages',
+  'send_messages',
+  'receive_events',
+  'slash_commands',
+];
+
+/**
+ * Security review BOT-001: a bot granted role-gated channels this manager
+ * cannot see (a "hidden grant", made by someone with Manage Channels) must
+ * not become the manager's way in. Taking its token hands them everything
+ * the bot reaches, and adding a channel permission widens what it does
+ * there — so both are refused (403 `cannot_take_hidden_access`) unless the
+ * manager may grant gated channels themselves (owner, administrators,
+ * Manage Channels — who see every channel, so they have no hidden grants).
+ * The same rule as the channel-access routes' `cannot_change_hidden_access`.
+ * null = allowed.
+ */
+export async function refuseHiddenChannelReach(
+  bot: Pick<BotRow, 'id' | 'serverId'>,
+  manager: BotManager
+): Promise<NextResponse | null> {
+  const subject = { uid: manager.uid, isOwner: manager.isOwner, permissions: manager.permissions };
+  if (canGrantGatedChannels(subject)) return null;
+  const view = await loadChannelAccessView({ id: bot.id, serverId: bot.serverId }, subject);
+  if (view.hiddenGrantCount === 0) return null;
+  return NextResponse.json(
+    {
+      error: 'This bot can reach private channels you cannot see; only someone who can manage channels can do this',
+      code: 'cannot_take_hidden_access',
+    },
+    { status: 403 }
+  );
 }
 
 /** One audit row per bot change. Never carries a token or its hash. */

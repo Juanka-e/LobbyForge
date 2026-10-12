@@ -562,6 +562,47 @@ describe('event endpoint (bot side)', () => {
     expect(db.upsertBotEventEndpoint).not.toHaveBeenCalled();
   });
 
+  it('BOT-004: the refusal names no IP, host name or resolver error (those are logged), and a dotless host is refused', async () => {
+    const { endpoint } = await routes();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bodies: string[] = [];
+    for (const failure of [
+      new Error('Target resolves to a blocked address: 172.20.0.4'),
+      new Error('getaddrinfo ENOTFOUND db.internal-net.example'),
+      new Error('DNS resolution of "slow.example.org" exceeded 2000 ms'),
+    ]) {
+      resolvePublicAddresses.mockRejectedValueOnce(failure);
+      const res = await endpoint.PUT(request('PUT', '/event-endpoint', { body: { url: 'https://hook.attacker-dns.example/x' } }), noCtx);
+      expect(res.status).toBe(400);
+      bodies.push(JSON.stringify(await res.json()));
+    }
+    expect(new Set(bodies).size).toBe(1);
+    expect(JSON.parse(bodies[0]!)).toMatchObject({ code: 'invalid_endpoint' });
+    expect(bodies[0]).not.toMatch(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|ENOTFOUND|internal-net|attacker-dns|slow\.example|blocked/);
+    expect(warn.mock.calls.flat().join(' ')).toContain('172.20.0.4');
+    warn.mockRestore();
+
+    // A single label only resolves inside a private network (Docker service names).
+    for (const url of ['https://postgres/hook', 'https://redis./']) {
+      const res = await endpoint.PUT(request('PUT', '/event-endpoint', { body: { url } }), noCtx);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ code: 'invalid_endpoint' });
+    }
+    expect(resolvePublicAddresses).toHaveBeenCalledTimes(3);
+    expect(db.upsertBotEventEndpoint).not.toHaveBeenCalled();
+  });
+
+  it('BOT-002: the save is bound to the token that authenticated it — rotated meanwhile → 401, nothing saved or audited', async () => {
+    const { endpoint } = await routes();
+    db.upsertBotEventEndpoint.mockResolvedValueOnce(null);
+    const res = await endpoint.PUT(request('PUT', '/event-endpoint', { body: { url: 'https://bot.example.com/hook' } }), noCtx);
+    expect(res.status).toBe(401);
+    expect(await res.json()).toMatchObject({ code: 'unauthorized' });
+    expect(res.headers.get('www-authenticate')).toBe('Bot');
+    expect(db.upsertBotEventEndpoint.mock.calls[0]![1]).toMatchObject({ expectTokenHash: hashBotToken(token) });
+    expect(db.logAction).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: 'bot.event_endpoint.set' }));
+  });
+
   it('validates the event list and the body', async () => {
     const { endpoint } = await routes();
     for (const body of [{ url: 'https://bot.example.com', events: ['ready'] }, { url: 'https://bot.example.com', events: [] }, { url: 'https://bot.example.com', secret: 'mine' }]) {

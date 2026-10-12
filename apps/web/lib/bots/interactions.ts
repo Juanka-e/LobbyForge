@@ -102,22 +102,24 @@ export async function dispatchInteractionCreate(input: {
   // One payload for both paths: the event stream and the signed endpoint.
   const data = interactionCreateData(interaction, input.user, input.locale);
   if (botHasPermission(bot, 'receive_events')) await publishBotEvent(bot.id, data);
-  let current: BotRow | null = null;
   deliverToEndpoint({
     botId: bot.id,
     serverId: bot.serverId,
     event: 'interaction_create',
     data,
     priority: 'high',
-    authorize: async (latest) => {
-      current = latest;
-      return botHasPermission(latest, 'slash_commands') && (await botCanAccessChannel(latest, interaction.channelId)) !== null;
-    },
-    onResponse: async ({ body }) => {
+    // Run before every attempt AND again before a synchronous answer is
+    // applied (event-delivery re-authorizes the bot and its endpoint too).
+    authorize: async (latest) =>
+      botHasPermission(latest, 'slash_commands') && (await botCanAccessChannel(latest, interaction.channelId)) !== null,
+    // `latest` is the bot re-read right after the answer arrived: a token
+    // rotated (endpoint switched off), a lost permission or channel in the
+    // meantime means no answer is posted as the bot.
+    onResponse: async ({ body, bot: latest }) => {
       const answer = parseSynchronousAnswer(body);
-      if (!answer || !current) return;
+      if (!answer) return;
       const result = await answerInteraction({
-        bot: current,
+        bot: latest,
         interactionId: interaction.id,
         content: answer.content,
         ephemeral: answer.ephemeral,

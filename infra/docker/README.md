@@ -58,6 +58,21 @@ explicit goal is to erase all local data.
 The release smoke sequence is documented in
 [`docs/MANUAL_TEST_CHECKLIST.md`](../../docs/MANUAL_TEST_CHECKLIST.md).
 
+## Node threadpool (`UV_THREADPOOL_SIZE`)
+
+The image sets `UV_THREADPOOL_SIZE=16` (the [`Dockerfile`](../../Dockerfile)
+runtime stage, right before the web server's `CMD`). libuv's threadpool —
+4 threads by default — runs scrypt password hashing, zlib, file I/O and
+`dns.lookup` for the whole process, so a handful of slow DNS lookups could
+otherwise stall sign-ins. Bot event deliveries resolve their hosts off the
+pool with a 2 s deadline ([BOT_API_V2.md §5.2](../../docs/BOT_API_V2.md));
+the installer, the directory and CAPTCHA siteverify still use the system
+resolver. Node reads the variable once at start: to change it, set
+`UV_THREADPOOL_SIZE` in `.env.prod` (the `web` service's `env_file`) and
+recreate the container. The other services built from the same image
+(`ws-gateway`, `plugin-worker`, `migrate`) inherit it; the threads are only
+created when the pool is first used.
+
 ## Cross-platform notes
 
 - The compose file uses **standard compose syntax** with no `&&` or shell fragments, so the same `docker compose -f … up -d` works on Windows PowerShell, Windows CMD, macOS, and Linux.

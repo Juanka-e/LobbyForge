@@ -139,6 +139,28 @@ describe('BotsClient', () => {
     expect(calls[0]).toMatchObject({ url: `/api/servers/${SERVER}/bots/bot-1/token`, method: 'POST' });
   });
 
+  it('BOT-002: the rotate confirmation says the event endpoint is switched off too', () => {
+    renderPage([bot()]);
+    fireEvent.click(screen.getByRole('button', { name: 'New token' }));
+    expect(screen.getByRole('dialog', { name: 'Create a new token for Announcer?' })).toHaveTextContent(
+      'its event endpoint is switched off until the bot sets it again with the new token'
+    );
+  });
+
+  it('BOT-001: a token refused over private channels the manager cannot see is explained, and no token is shown', async () => {
+    respond = (call) =>
+      call.url.endsWith('/token') && call.method === 'POST'
+        ? Response.json({ error: 'This bot can reach private channels you cannot see', code: 'cannot_take_hidden_access' }, { status: 403 })
+        : Response.json({}, { status: 500 });
+    renderPage([bot()]);
+    fireEvent.click(screen.getByRole('button', { name: 'New token' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Create new token' }));
+    await screen.findByText(
+      'This bot can reach private channels you cannot see. Only someone who can manage channels can give it a new token or more permissions.'
+    );
+    expect(screen.queryByRole('dialog', { name: 'Token for Announcer' })).toBeNull();
+  });
+
   it('revokes after confirmation', async () => {
     respond = (call) =>
       call.url.endsWith('/token') && call.method === 'DELETE'
