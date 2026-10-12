@@ -93,6 +93,13 @@ describe('validateAction — the raw HTTP payload guard', () => {
     expect(quizValidateAction({ type: 'answer', index: -1, playerId: 'p1' })).toMatch(/index/);
     expect(quizValidateAction({ type: 'answer', index: 1.5, playerId: 'p1' })).toMatch(/index/);
     expect(quizValidateAction({ type: 'answer', index: '1', playerId: 'p1' })).toMatch(/index/);
+    // B-06: the question an answer is for, when given, is a question number.
+    expect(quizValidateAction({ type: 'answer', index: 1, playerId: 'p1', questionIndex: 0 })).toBeNull();
+    expect(quizValidateAction({ type: 'answer', index: 1, playerId: 'p1', questionIndex: 7 })).toBeNull();
+    expect(quizValidateAction({ type: 'answer', index: 1, playerId: 'p1', questionIndex: null })).toBeNull();
+    for (const questionIndex of [-1, 0.5, '0', Number.NaN, {}]) {
+      expect(quizValidateAction({ type: 'answer', index: 1, playerId: 'p1', questionIndex })).toMatch(/questionIndex/);
+    }
   });
 
   it('play-again needs nothing but its type', () => {

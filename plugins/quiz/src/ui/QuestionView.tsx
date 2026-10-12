@@ -6,7 +6,15 @@ import { QUIZ_ANSWER_GRACE_MS } from '../state';
 import { isEligible } from '../roster';
 import { AnswerGrid } from './AnswerGrid';
 import type { ViewProps } from './context';
-import { isTypingTarget, optionIndexForKey, optionLetter, secondsLeft, staggerFor, timeFraction } from './helpers';
+import {
+  answerAction,
+  isTypingTarget,
+  optionIndexForKey,
+  optionLetter,
+  secondsLeft,
+  staggerFor,
+  timeFraction,
+} from './helpers';
 import { JoinBar } from './JoinBar';
 import { DISPLAY_FONT, MONO_FONT, SR_ONLY } from './palette';
 
@@ -81,7 +89,9 @@ export function QuestionView({ state, ui }: ViewProps) {
   const choose = (choice: number) => {
     if (locked) return;
     setPending({ index, choice, at: Date.now() });
-    ui.dispatch({ type: 'answer', index: choice });
+    // `index` is the question this render shows: an answer that reaches the
+    // server after the host moved on is ignored, not given to the next one.
+    ui.dispatch(answerAction(choice, index));
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {

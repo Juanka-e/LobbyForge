@@ -179,6 +179,12 @@ export function quizValidateAction(action: unknown): string | null {
         return 'answer requires a non-negative integer index.';
       }
       if (!isNonEmptyString(action.playerId)) return 'answer requires a playerId string.';
+      if (
+        action.questionIndex != null &&
+        (typeof action.questionIndex !== 'number' || !Number.isSafeInteger(action.questionIndex) || action.questionIndex < 0)
+      ) {
+        return 'answer: questionIndex must be a non-negative integer when present.';
+      }
       return null;
     case 'time-up':
     case 'reveal':
@@ -441,6 +447,11 @@ function leave(state: QuizState, action: Extract<QuizAction, { type: 'leave' }>)
 
 function answer(state: QuizState, action: Extract<QuizAction, { type: 'answer' }>, env: QuizEnv): QuizState {
   if (state.phase !== 'playing') return state;
+  // Stale intent (B-06): an answer that names another question — sent for
+  // question N, arriving after `next` opened N+1 — is ignored, never
+  // recorded against the question on screen now. Without a questionIndex
+  // (an older panel) it answers the open question.
+  if (action.questionIndex != null && action.questionIndex !== state.currentIndex) return state;
   const question = state.deck[state.currentIndex];
   if (!question || action.index >= question.options.length) return state;
   const player = state.players.find((p) => p.id === action.playerId);

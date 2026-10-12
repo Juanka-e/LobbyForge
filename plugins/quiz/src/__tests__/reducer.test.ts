@@ -213,6 +213,50 @@ describe('answering', () => {
   });
 });
 
+describe('stale answers (B-06): an answer names its question', () => {
+  const answerFor = (playerId: string, index: number, questionIndex: number | null): QuizAction => ({
+    type: 'answer',
+    playerId,
+    index,
+    questionIndex,
+  });
+
+  it('an answer naming the open question counts; one without a question number counts as before', () => {
+    const env = makeEnv();
+    let state = customGame(['ana', 'ben'], env);
+    state = quizReducer(state, answerFor('ana', 1, 0), env);
+    expect(state.answers.ana).toEqual({ choice: 1, at: T0 });
+    state = quizReducer(state, answer('ben', 0), env);
+    expect(state.answers.ben).toEqual({ choice: 0, at: T0 });
+    state = quizReducer(state, answerFor('host', 2, null), env);
+    // Everyone answered question 1: revealed, scored as usual.
+    expect(state.phase).toBe('reveal');
+    expect(state.reveal).toMatchObject({ index: 0, counts: [1, 1, 1], answered: 3 });
+  });
+
+  it('an answer for question N that arrives after `next` is ignored — never recorded against N+1', () => {
+    const env = makeEnv();
+    let state = quizReducer(customGame(['ana', 'ben'], env), { type: 'reveal' }, env);
+    env.clock.advance(5_000);
+    state = quizReducer(state, { type: 'next' }, env);
+    expect(state.currentIndex).toBe(1);
+    // Ana tapped option B on question 1 (index 0); her retry lands now.
+    const late = quizReducer(state, answerFor('ana', 1, 0), env);
+    expect(late).toBe(state);
+    expect(late.answers).toEqual({});
+    // Her answer for the open question still counts afterwards.
+    const fresh = quizReducer(late, answerFor('ana', 2, 1), env);
+    expect(fresh.answers.ana).toEqual({ choice: 2, at: T0 + 5_000 });
+  });
+
+  it('an answer for a question not open yet is ignored too', () => {
+    const env = makeEnv();
+    const state = customGame(['ana'], env);
+    expect(quizReducer(state, answerFor('ana', 1, 1), env)).toBe(state);
+    expect(quizReducer(state, answerFor('ana', 1, 99), env)).toBe(state);
+  });
+});
+
 describe('time-up and reveal', () => {
   it('time-up does nothing until the deadline (plus grace) has passed on the SERVER clock', () => {
     const env = makeEnv();

@@ -1,11 +1,21 @@
 /** Pure helpers for the panel — no React, so they are unit-tested directly. */
 
-import type { QuizPlayer } from '../state';
+import type { QuizClientAction, QuizPlayer } from '../state';
 
 export const OPTION_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'] as const;
 
 export function optionLetter(index: number): string {
   return OPTION_LETTERS[index] ?? String(index + 1);
+}
+
+/**
+ * The `answer` a tile sends: the option, and the question the tiles were
+ * drawn for. Pass the question number of the render, not one read at click
+ * time — the reducer ignores an answer for a question that is no longer
+ * open, so a late or retried answer can never land on the next one.
+ */
+export function answerAction(choice: number, questionIndex: number): QuizClientAction {
+  return { type: 'answer', index: choice, questionIndex };
 }
 
 /**

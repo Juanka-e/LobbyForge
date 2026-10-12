@@ -218,7 +218,14 @@ export type QuizAction =
   | { type: 'set-questions'; questions: QuizQuestion[] }
   | { type: 'join'; playerId: string }
   | { type: 'leave'; playerId: string }
-  | { type: 'answer'; playerId: string; index: number }
+  /**
+   * `index` is the option. `questionIndex` is the question it answers (the
+   * 0-based `currentIndex` the tiles were drawn for): when present and no
+   * longer the open question, the answer is ignored — a late or retried
+   * answer never lands on the next question. Absent (or null), it answers
+   * whatever question is open, as panels from before it did.
+   */
+  | { type: 'answer'; playerId: string; index: number; questionIndex?: number | null }
   /** Anyone may call time once the deadline has passed — the reducer checks the clock. */
   | { type: 'time-up' }
   | { type: 'reveal' }
@@ -233,7 +240,7 @@ export type QuizClientAction =
   | { type: 'set-questions'; questions: QuizQuestion[] }
   | { type: 'join' }
   | { type: 'leave' }
-  | { type: 'answer'; index: number }
+  | { type: 'answer'; index: number; questionIndex?: number }
   | { type: 'time-up' }
   | { type: 'reveal' }
   | { type: 'next' }
