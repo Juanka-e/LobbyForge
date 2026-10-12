@@ -255,6 +255,37 @@ describe('stale answers (B-06): an answer names its question', () => {
     expect(quizReducer(state, answerFor('ana', 1, 1), env)).toBe(state);
     expect(quizReducer(state, answerFor('ana', 1, 99), env)).toBe(state);
   });
+
+  it('a late Reveal now for question N does not reveal question N+1 early', () => {
+    const env = makeEnv();
+    // The host pressed Reveal now on question 1 (index 0) just as the last
+    // answer came in: the question revealed itself, and the host moved on.
+    let state = run(customGame(['ana'], env), [answer('host', 1), answer('ana', 0)], env);
+    expect(state.phase).toBe('reveal');
+    state = quizReducer(state, { type: 'next', questionIndex: 0 }, env);
+    expect(state).toMatchObject({ phase: 'playing', currentIndex: 1 });
+    // …then the Reveal now for question 1 lands.
+    expect(quizReducer(state, { type: 'reveal', questionIndex: 0 }, env)).toBe(state);
+    // Naming the open question, it reveals; without a question number, as before.
+    expect(quizReducer(state, { type: 'reveal', questionIndex: 1 }, env).phase).toBe('reveal');
+    expect(quizReducer(state, { type: 'reveal' }, env).phase).toBe('reveal');
+  });
+
+  it('Next pressed twice (or by the host and a moderator) moves on ONE question', () => {
+    const env = makeEnv();
+    let state = quizReducer(customGame(['ana'], env), { type: 'reveal', questionIndex: 0 }, env);
+    const next = { type: 'next' as const, questionIndex: state.currentIndex };
+    state = quizReducer(state, next, env);
+    expect(state.currentIndex).toBe(1);
+    // Everyone answers question 2 at once: it is revealed before the second Next lands.
+    state = run(state, [answer('host', 1), answer('ana', 1)], env);
+    expect(state).toMatchObject({ phase: 'reveal', currentIndex: 1 });
+    // The second Next names question 1: ignored, question 2's reveal stays on screen.
+    expect(quizReducer(state, next, env)).toBe(state);
+    // A Next for question 2 moves on; without a question number, as before.
+    expect(quizReducer(state, { type: 'next', questionIndex: 1 }, env).currentIndex).toBe(2);
+    expect(quizReducer(state, { type: 'next' }, env).currentIndex).toBe(2);
+  });
 });
 
 describe('time-up and reveal', () => {

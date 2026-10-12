@@ -243,8 +243,8 @@ text is reachable.
 | `leave` | member, `playerId` injected, `allowOutsideVoice` | — | any but ended |
 | `answer` | member, `playerId` injected | `index`; optional `questionIndex` | playing |
 | `time-up` | member | — | playing, after the deadline |
-| `reveal` | host | — | playing |
-| `next` | host | — | reveal |
+| `reveal` | host | optional `questionIndex` | playing |
+| `next` | host | optional `questionIndex` | reveal |
 | `end` | host | — | playing, reveal |
 | `play-again` | host | — | ended (→ lobby) |
 
@@ -264,6 +264,16 @@ number is public (`currentIndex`, `current.index`), so sending it reveals
 nothing. An answer for question N that arrives during N's reveal was
 already refused (409 `wrong_phase` from the host, and the reducer only
 takes answers while a question is open).
+
+The host's **Reveal now** and **Next question** name their question the
+same way (`reveal` and `next` with `questionIndex`, the question on screen
+when the button was drawn). A Reveal now that lands after the host moved on
+does not reveal the next question early, and a second Next — a double tap,
+or the host and a moderator together — does not skip a question that was
+answered and revealed in the meantime. Without a `questionIndex` they act on
+the current question, as before. `questionIndex` restarts at 0 with every
+game (`play-again`), so it does not guard against a press that arrives a
+whole game late.
 
 ## State
 

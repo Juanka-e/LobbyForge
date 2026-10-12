@@ -8,6 +8,7 @@ import { AnswerGrid } from './AnswerGrid';
 import type { ViewProps } from './context';
 import {
   answerAction,
+  hostStepAction,
   isTypingTarget,
   optionIndexForKey,
   optionLetter,
@@ -186,7 +187,7 @@ export function QuestionView({ state, ui }: ViewProps) {
           <Button variant="danger" onClick={() => ui.dispatch({ type: 'end' })}>
             {t('quiz.host.end')}
           </Button>
-          <Button variant="secondary" onClick={() => ui.dispatch({ type: 'reveal' })}>
+          <Button variant="secondary" onClick={() => ui.dispatch(hostStepAction('reveal', index))}>
             {t('quiz.host.revealNow')}
           </Button>
         </Row>

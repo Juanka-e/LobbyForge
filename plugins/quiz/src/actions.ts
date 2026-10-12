@@ -161,6 +161,15 @@ function validateStart(action: Record<string, unknown>): string | null {
   return null;
 }
 
+/** `questionIndex` names the question an action is for: absent (or null), or a non-negative integer. */
+function questionIndexProblem(action: Record<string, unknown>): string | null {
+  const value = action.questionIndex;
+  if (value == null) return null;
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? null
+    : `${String(action.type)}: questionIndex must be a non-negative integer when present.`;
+}
+
 /** Runtime guard for raw HTTP payloads (31st-audit contract). */
 export function quizValidateAction(action: unknown): string | null {
   if (!isRecord(action)) return 'Action must be an object.';
@@ -179,16 +188,11 @@ export function quizValidateAction(action: unknown): string | null {
         return 'answer requires a non-negative integer index.';
       }
       if (!isNonEmptyString(action.playerId)) return 'answer requires a playerId string.';
-      if (
-        action.questionIndex != null &&
-        (typeof action.questionIndex !== 'number' || !Number.isSafeInteger(action.questionIndex) || action.questionIndex < 0)
-      ) {
-        return 'answer: questionIndex must be a non-negative integer when present.';
-      }
-      return null;
-    case 'time-up':
+      return questionIndexProblem(action);
     case 'reveal':
     case 'next':
+      return questionIndexProblem(action);
+    case 'time-up':
     case 'end':
     case 'play-again':
       return null;
@@ -445,13 +449,22 @@ function leave(state: QuizState, action: Extract<QuizAction, { type: 'leave' }>)
   return next.phase === 'playing' && everyoneAnswered(next) ? revealQuestion(next) : next;
 }
 
+/**
+ * Stale intent (B-06): true when an action names a question that is not
+ * the current one — sent for question N, arriving after the game moved on.
+ * An action without a `questionIndex` (an older panel) names none.
+ */
+function isStaleQuestionStep(state: QuizState, action: { questionIndex?: number | null }): boolean {
+  return action.questionIndex != null && action.questionIndex !== state.currentIndex;
+}
+
 function answer(state: QuizState, action: Extract<QuizAction, { type: 'answer' }>, env: QuizEnv): QuizState {
   if (state.phase !== 'playing') return state;
   // Stale intent (B-06): an answer that names another question — sent for
   // question N, arriving after `next` opened N+1 — is ignored, never
   // recorded against the question on screen now. Without a questionIndex
   // (an older panel) it answers the open question.
-  if (action.questionIndex != null && action.questionIndex !== state.currentIndex) return state;
+  if (isStaleQuestionStep(state, action)) return state;
   const question = state.deck[state.currentIndex];
   if (!question || action.index >= question.options.length) return state;
   const player = state.players.find((p) => p.id === action.playerId);
@@ -502,8 +515,15 @@ export function quizReducer(state: QuizState, action: QuizAction, env: QuizEnv =
       if (env.now() < state.deadline + QUIZ_ANSWER_GRACE_MS) return state;
       return revealQuestion(state);
     case 'reveal':
+      // A Reveal now meant for an earlier question (arriving after the host
+      // moved on) must not reveal the open one early.
+      if (isStaleQuestionStep(state, action)) return state;
       return revealQuestion(state);
     case 'next': {
+      // Two presses of Next (or the host and a moderator) name the same
+      // revealed question: the second must not skip the following one,
+      // which may already have been answered and revealed.
+      if (isStaleQuestionStep(state, action)) return state;
       if (state.phase !== 'reveal') return state;
       const now = env.now();
       const nextIndex = state.currentIndex + 1;

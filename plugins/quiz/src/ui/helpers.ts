@@ -19,6 +19,15 @@ export function answerAction(choice: number, questionIndex: number): QuizClientA
 }
 
 /**
+ * The host's Reveal now / Next question, naming the question the button was
+ * drawn for (the same rule as `answerAction`): a late Reveal cannot reveal
+ * the next question early, and a second Next cannot skip one.
+ */
+export function hostStepAction(type: 'reveal' | 'next', questionIndex: number): QuizClientAction {
+  return { type, questionIndex };
+}
+
+/**
  * The answer a key picks while the question has focus: `1`–`6` or `A`–`F`
  * (either case), limited to the options on screen. Anything else — and any
  * key held with Ctrl, Alt or Meta — is not ours.

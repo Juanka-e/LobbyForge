@@ -4,7 +4,7 @@ import { useEffect, useId, useRef } from 'react';
 import { Button, Callout, Panel, SectionLabel, Stack, lf, tone } from '@lobbyforge/plugin-sdk/ui';
 import { rankQuizPlayers } from '../roster';
 import type { ViewProps } from './context';
-import { optionLetter } from './helpers';
+import { hostStepAction, optionLetter } from './helpers';
 import { JoinBar } from './JoinBar';
 import { Leaderboard } from './Leaderboard';
 import { DISPLAY_FONT, ON_SWATCH, SR_ONLY, optionSwatch } from './palette';
@@ -135,7 +135,12 @@ export function RevealView({ state, ui }: ViewProps) {
           <Leaderboard ranked={rankQuizPlayers(state.players)} ui={ui} showGains label={t('quiz.leaderboard.title')} />
           {ui.isHost ? (
             <Stack gap={10}>
-              <Button variant="primary" size="lg" block onClick={() => ui.dispatch({ type: 'next' })}>
+              <Button
+                variant="primary"
+                size="lg"
+                block
+                onClick={() => ui.dispatch(hostStepAction('next', state.currentIndex))}
+              >
                 {last ? t('quiz.host.finish') : t('quiz.host.next')}
               </Button>
               {last ? null : (

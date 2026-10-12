@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   answerAction,
+  hostStepAction,
   isTypingTarget,
   nativeLanguageName,
   optionIndexForKey,
@@ -56,6 +57,23 @@ describe('the answer a tile sends', () => {
     // The host injects playerId; the panel never sends it.
     expect(quizReducer(moved, { ...tapped, playerId: 'ana' } as never, env)).toBe(moved);
     expect(quizReducer(open, { ...tapped, playerId: 'ana' } as never, env).answers.ana?.choice).toBe(1);
+  });
+});
+
+describe("the host's Reveal now and Next question", () => {
+  it('name the question the buttons were drawn for (B-06)', () => {
+    expect(hostStepAction('reveal', 2)).toEqual({ type: 'reveal', questionIndex: 2 });
+    expect(hostStepAction('next', 2)).toEqual({ type: 'next', questionIndex: 2 });
+  });
+
+  it('a second Next built from the same reveal is ignored', () => {
+    const env = makeEnv();
+    const revealed = quizReducer(customGame(['ana'], env), hostStepAction('reveal', 0) as never, env);
+    const next = hostStepAction('next', revealed.currentIndex);
+    const moved = quizReducer(revealed, next as never, env);
+    expect(moved.currentIndex).toBe(1);
+    const shown = quizReducer(moved, { type: 'reveal' }, env);
+    expect(quizReducer(shown, next as never, env)).toBe(shown);
   });
 });
 
