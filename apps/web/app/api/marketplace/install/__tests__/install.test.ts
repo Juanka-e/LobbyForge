@@ -5,9 +5,11 @@ const requireAdminHealthToken = vi.fn();
 const getCatalogEntry = vi.fn();
 const incrementDownloadCount = vi.fn();
 const installPluginBundle = vi.fn();
+const logAction = vi.fn();
+const getInstanceBootstrapStatus = vi.fn();
 
 vi.mock('@/lib/admin-auth', () => ({ requireAdminHealthToken }));
-vi.mock('@lobbyforge/db', () => ({ getCatalogEntry, incrementDownloadCount }));
+vi.mock('@lobbyforge/db', () => ({ getCatalogEntry, incrementDownloadCount, logAction, getInstanceBootstrapStatus }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
 vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));
 vi.mock('@/lib/plugin-installer', () => ({ installPluginBundle }));
@@ -22,6 +24,8 @@ beforeEach(() => {
   installPluginBundle.mockReset();
   requireAdminHealthToken.mockResolvedValue(null);
   incrementDownloadCount.mockResolvedValue(undefined);
+  logAction.mockReset().mockResolvedValue(undefined);
+  getInstanceBootstrapStatus.mockReset().mockResolvedValue({ firstServerId: 'srv-1', instanceId: 'self-host' });
 });
 
 describe('POST /api/marketplace/install', () => {
@@ -43,8 +47,14 @@ describe('POST /api/marketplace/install', () => {
     expect(res.status).toBe(200);
     expect(installPluginBundle).toHaveBeenCalledWith(
       'cool-game', 'https://cdn.example.dev/cool-game-1.0.0.tgz', '1.0.0',
-      { sha256: 'b'.repeat(64), sizeBytes: 2048 }
+      { sha256: 'b'.repeat(64), sizeBytes: 2048 },
+      null
     );
+    // Filed in the audit log under the instance's community.
+    expect(logAction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      serverId: 'srv-1', action: 'plugin.install', targetType: 'plugin', targetId: 'cool-game',
+      metadata: { version: '1.0.0', approved: null },
+    }));
   });
 
   it('14th-audit: FAILS CLOSED on an approved row with no pin (re-review required)', async () => {
@@ -85,7 +95,8 @@ describe('POST /api/marketplace/install', () => {
       'pinned-game',
       'https://cdn.example.dev/pinned-2.0.0.tgz',
       '2.0.0',
-      { sha256: 'a'.repeat(64), sizeBytes: 4096 }
+      { sha256: 'a'.repeat(64), sizeBytes: 4096 },
+      null
     );
   });
 
@@ -164,6 +175,58 @@ describe('POST /api/marketplace/install', () => {
       {}
     );
     expect(res.status).toBe(503);
+  });
+
+  describe('a bundle that asks for more than the sandbox', () => {
+    const ENTRY = {
+      pluginId: 'net-game', name: 'Net Game', version: '1.2.0',
+      reviewStatus: 'approved', manifestUrl: 'https://cdn.example.dev/net-game-1.2.0.tgz',
+      bundleSha256: 'c'.repeat(64), bundleSizeBytes: 1024, id: 'n',
+    };
+    const REQUESTED = { network: { connect: ['https://api.example.com'] }, permissions: ['timers'] };
+    const post = async (body: unknown) => {
+      const { POST } = await import('../route.js');
+      return POST(new Request('https://example.test/api/marketplace/install', { method: 'POST', body: JSON.stringify(body) }), {});
+    };
+
+    it('answers 409 approval_required with what it asks for, and installs nothing', async () => {
+      getCatalogEntry.mockResolvedValue(ENTRY);
+      installPluginBundle.mockResolvedValue({
+        ok: false,
+        error: 'This plugin asks for access beyond the sandbox; the instance owner must approve it.',
+        approvalRequired: { requested: REQUESTED, added: REQUESTED, previous: null },
+      });
+      const res = await post({ pluginId: 'net-game' });
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({
+        code: 'approval_required', pluginId: 'net-game', version: '1.2.0',
+        requested: REQUESTED, added: REQUESTED, previous: null,
+      });
+      expect(incrementDownloadCount).not.toHaveBeenCalled();
+      expect(logAction).not.toHaveBeenCalled();
+    });
+
+    it('passes the owner’s approval to the installer, read with the manifest rules, and audits it', async () => {
+      getCatalogEntry.mockResolvedValue(ENTRY);
+      installPluginBundle.mockResolvedValue({ ok: true, path: '/x', approved: REQUESTED });
+      const res = await post({ pluginId: 'net-game', approve: { permissions: ['timers'], network: { connect: ['https://api.example.com/'] } } });
+      expect(res.status).toBe(200);
+      expect(installPluginBundle.mock.calls[0]![4]).toEqual(REQUESTED);
+      expect(await res.json()).toMatchObject({ ok: true, approved: REQUESTED });
+      expect(logAction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+        action: 'plugin.install', metadata: { version: '1.2.0', approved: REQUESTED },
+      }));
+    });
+
+    it('refuses a malformed approval outright (400), before downloading anything', async () => {
+      getCatalogEntry.mockResolvedValue(ENTRY);
+      for (const approve of [{ network: { connect: ['https://localhost'] } }, ['timers'], { permissions: ['root'] }]) {
+        const res = await post({ pluginId: 'net-game', approve });
+        expect(res.status).toBe(400);
+        expect(await res.json()).toMatchObject({ code: 'invalid_approval' });
+      }
+      expect(installPluginBundle).not.toHaveBeenCalled();
+    });
   });
 
   it('rejects when admin token is missing', async () => {

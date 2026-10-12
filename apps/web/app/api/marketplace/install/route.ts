@@ -1,17 +1,45 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { getCatalogEntry, incrementDownloadCount } from '@lobbyforge/db';
+import { getCatalogEntry, getInstanceBootstrapStatus, incrementDownloadCount, logAction } from '@lobbyforge/db';
+import { readGuestSession } from '@/lib/guest-session';
 import { requireAdminHealthToken } from '@/lib/admin-auth';
 import { getDb } from '@/lib/db';
 import { withApiSecurity } from '@/lib/security-headers';
 import { installPluginBundle } from '@/lib/plugin-installer';
+import { parseApprovals, sandboxManifestOptions, type PluginApprovals } from '@/lib/plugin-approvals';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 const InstallSchema = z.object({
   pluginId: z.string().min(2).max(128).regex(/^[a-z0-9][a-z0-9-_]*$/i, 'Plugin ID must be alphanumeric with dashes/underscores only'),
+  /** What the owner approved: exactly what the bundle asks for (plugin-approvals.ts). */
+  approve: z.unknown().optional(),
 }).strict();
+
+function actorUserId(req: Request): string | null {
+  const secret = process.env.LOBBYFORGE_SESSION_SECRET;
+  if (!secret || secret.length < 32) return null;
+  // Null for the emergency admin token: there is no account behind it.
+  return readGuestSession(req.headers.get('cookie'), secret)?.uid ?? null;
+}
+
+/** Filed under the instance's community (the first server), like the other instance settings. */
+async function auditInstall(req: Request, pluginId: string, version: string, approved: PluginApprovals | null): Promise<void> {
+  try {
+    const setup = await getInstanceBootstrapStatus(getDb());
+    await logAction(getDb(), {
+      serverId: setup.firstServerId ?? null,
+      actorUserId: actorUserId(req),
+      action: 'plugin.install',
+      targetType: 'plugin',
+      targetId: pluginId,
+      metadata: { version, approved },
+    });
+  } catch (err) {
+    console.error('[marketplace/install] audit log write failed', JSON.stringify((err as Error).message));
+  }
+}
 
 /**
  * POST /api/marketplace/install — download, extract, and validate an
@@ -24,6 +52,13 @@ const InstallSchema = z.object({
  * The plugin-worker must load that exact version before it is recorded
  * as active; the registry then serves it and older versions are deleted
  * (plugin-installer.ts, plugin-install-layout.ts).
+ *
+ * A bundle that asks for more than the sandbox (outside origins, its own
+ * site as the UI, host effects) is refused with 409 `approval_required`
+ * and what it asks for (`requested`, plus `added`: what the active version
+ * had not approved). The owner's screen shows that and sends the request
+ * again with `approve` naming exactly the same — nothing is approved
+ * silently, and an upgrade that asks for more asks again.
  */
 async function handlePost(req: Request): Promise<NextResponse> {
   const denied = await requireAdminHealthToken(req);
@@ -44,6 +79,10 @@ async function handlePost(req: Request): Promise<NextResponse> {
     body = InstallSchema.parse(await req.json());
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  }
+  const approve = parseApprovals(body.approve, sandboxManifestOptions());
+  if (body.approve !== undefined && body.approve !== null && !approve) {
+    return NextResponse.json({ error: 'Invalid approval', code: 'invalid_approval' }, { status: 400 });
   }
 
   try {
@@ -82,11 +121,19 @@ async function handlePost(req: Request): Promise<NextResponse> {
       entry.version,
       entry.bundleSha256 && entry.bundleSizeBytes != null
         ? { sha256: entry.bundleSha256, sizeBytes: entry.bundleSizeBytes }
-        : undefined
+        : undefined,
+      approve
     );
+    if (!result.ok && result.approvalRequired) {
+      return NextResponse.json(
+        { error: result.error, code: 'approval_required', pluginId: body.pluginId, version: entry.version, ...result.approvalRequired },
+        { status: 409 }
+      );
+    }
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 500 });
     }
+    await auditInstall(req, body.pluginId, entry.version, result.approved ?? null);
 
     // Bump the download count for analytics.
     await incrementDownloadCount(db, body.pluginId);
@@ -96,6 +143,7 @@ async function handlePost(req: Request): Promise<NextResponse> {
       pluginId: body.pluginId,
       version: entry.version,
       path: result.path,
+      approved: result.approved ?? null,
       message: 'Plugin installed. It will be available for server-level enable.',
     });
   } catch (err) {
@@ -106,6 +154,7 @@ async function handlePost(req: Request): Promise<NextResponse> {
 
 export const POST = withApiSecurity(handlePost, {
   allowedMethods: ['POST'],
-  maxBodyBytes: 512,
+  // The approval repeats what the bundle asks for: up to 32 origins and a URL.
+  maxBodyBytes: 16 * 1024,
   rateLimit: { identifier: 'marketplace-install', config: { windowMs: 60_000, maxRequests: 5 } },
 });

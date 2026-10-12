@@ -50,6 +50,14 @@ import {
   type SandboxLocaleTable,
   type SandboxManifest,
 } from './sandbox-manifest';
+import {
+  newApprovals,
+  parseApprovals,
+  requestedApprovals,
+  sameApprovals,
+  sandboxManifestOptions,
+  type PluginApprovals,
+} from './plugin-approvals';
 
 export const DEFAULT_PLUGIN_INSTALL_DIR = '/app/plugins/installed';
 export const ACTIVE_POINTER_FILE = 'active.json';
@@ -176,7 +184,7 @@ export function checkSandboxBundle(
   }
   const locales = readLocaleFiles(dir);
   if (!locales.ok) return locales;
-  const parsed = parseSandboxBundle(readFileSync(join(dir, 'manifest.json')), locales.files);
+  const parsed = parseSandboxBundle(readFileSync(join(dir, 'manifest.json')), locales.files, sandboxManifestOptions());
   if (!parsed.ok) return { ok: false, error: parsed.error };
   if (parsed.manifest.id !== pluginId) {
     return { ok: false, error: `Bundle manifest id "${parsed.manifest.id}" does not match the catalog id "${pluginId}".` };
@@ -228,6 +236,9 @@ export interface ActivePluginVersion {
   pluginId: string;
   version: string;
   digest: string;
+  /** What the owner approved at install (plugin-approvals.ts); absent when the bundle asked for nothing. */
+  approved?: PluginApprovals;
+  approvedAt?: string;
 }
 
 /**
@@ -265,10 +276,22 @@ export function readActivePointer(root: string, pluginId: string): ActivePluginV
   const path = join(root, pluginId, ACTIVE_POINTER_FILE);
   if (!existsSync(path)) return null;
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as { version?: unknown; digest?: unknown };
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
+      version?: unknown;
+      digest?: unknown;
+      approved?: unknown;
+      approvedAt?: unknown;
+    };
     if (typeof parsed.version !== 'string' || !VERSION_RE.test(parsed.version)) return null;
     if (typeof parsed.digest !== 'string' || !DIGEST_RE.test(parsed.digest)) return null;
-    return { pluginId, version: parsed.version, digest: parsed.digest };
+    const pointer: ActivePluginVersion = { pluginId, version: parsed.version, digest: parsed.digest };
+    // A malformed approval approves nothing (the plugin then asks again).
+    const approved = parseApprovals(parsed.approved, sandboxManifestOptions());
+    if (approved && Object.keys(approved).length > 0) {
+      pointer.approved = approved;
+      if (typeof parsed.approvedAt === 'string') pointer.approvedAt = parsed.approvedAt;
+    }
+    return pointer;
   } catch {
     return null;
   }
@@ -280,11 +303,16 @@ export function writeActivePointer(root: string, pointer: ActivePluginVersion): 
   const tmp = join(dir, `.${ACTIVE_POINTER_FILE}.${process.pid}.${Date.now()}`);
   // `wx`: create exclusively (never follow or overwrite something already
   // at that name); 0600 — only the web process reads it back.
-  writeFileSync(
-    tmp,
-    `${JSON.stringify({ version: pointer.version, digest: pointer.digest, activatedAt: new Date().toISOString() })}\n`,
-    { flag: 'wx', mode: 0o600 }
-  );
+  const record: Record<string, unknown> = {
+    version: pointer.version,
+    digest: pointer.digest,
+    activatedAt: new Date().toISOString(),
+  };
+  if (pointer.approved) {
+    record.approved = pointer.approved;
+    record.approvedAt = pointer.approvedAt ?? new Date().toISOString();
+  }
+  writeFileSync(tmp, `${JSON.stringify(record)}\n`, { flag: 'wx', mode: 0o600 });
   renameSync(tmp, join(dir, ACTIVE_POINTER_FILE));
 }
 
@@ -324,9 +352,38 @@ export interface DescribedPlugin {
   name: string;
 }
 
+/**
+ * The bundle asks for more than the sandbox and the install did not approve
+ * exactly that. `requested` is everything it asks for; `added` the part the
+ * active version had not approved (an upgrade asks only about that).
+ */
+export interface ApprovalRequired {
+  requested: PluginApprovals;
+  added: PluginApprovals | null;
+  previous: PluginApprovals | null;
+}
+
 export type ActivationResult<T extends DescribedPlugin> =
-  | { ok: true; path: string; digest: string; info: T }
-  | { ok: false; error: string };
+  | { ok: true; path: string; digest: string; info: T; approved: PluginApprovals | null }
+  | { ok: false; error: string; approvalRequired?: ApprovalRequired };
+
+/**
+ * Compare what the staged bundle asks for with what the install approved.
+ * The approval must name the request exactly — not more (nothing to grant
+ * that the bundle does not use), not less.
+ */
+export function checkApproval(
+  manifest: SandboxManifest,
+  approve: PluginApprovals | null | undefined,
+  previous: ActivePluginVersion | null
+): { ok: true; approved: PluginApprovals | null } | { ok: false; approvalRequired: ApprovalRequired } {
+  const requested = requestedApprovals(manifest);
+  if (!requested) return { ok: true, approved: null };
+  // Read with the manifest's rules, so a hand-written approval compares like the request.
+  if (sameApprovals(requested, parseApprovals(approve, sandboxManifestOptions()))) return { ok: true, approved: requested };
+  const prior = previous?.approved ?? null;
+  return { ok: false, approvalRequired: { requested, added: newApprovals(prior, requested), previous: prior } };
+}
 
 /**
  * Move an extracted bundle into `<root>/<pluginId>/<version>`, have the
@@ -341,6 +398,8 @@ export async function activateStagedBundle<T extends DescribedPlugin>(input: {
   version: string;
   stagingDir: string;
   describe: (ref: ActivePluginVersion) => Promise<T>;
+  /** What the owner approved for this install (the `approve` of the request). */
+  approve?: PluginApprovals | null;
 }): Promise<ActivationResult<T>> {
   const { root, pluginId, version, stagingDir } = input;
   const pluginDir = join(root, pluginId);
@@ -355,8 +414,18 @@ export async function activateStagedBundle<T extends DescribedPlugin>(input: {
     rmSync(stagingDir, { recursive: true, force: true });
     return { ok: false, error: bundleCheck.error };
   }
-  const digest = computeBundleDigest(stagingDir);
   const previous = readActivePointer(root, pluginId);
+  // Nothing moves before the owner has approved what the bundle asks for.
+  const approval = checkApproval(bundleCheck.manifest, input.approve, previous);
+  if (!approval.ok) {
+    rmSync(stagingDir, { recursive: true, force: true });
+    return {
+      ok: false,
+      error: 'This plugin asks for access beyond the sandbox; the instance owner must approve it.',
+      approvalRequired: approval.approvalRequired,
+    };
+  }
+  const digest = computeBundleDigest(stagingDir);
 
   let createdTarget = false;
   let setAside: string | null = null;
@@ -407,12 +476,14 @@ export async function activateStagedBundle<T extends DescribedPlugin>(input: {
     return { ok: false, error: `Bundle manifest id "${info.id}" does not match the catalog id "${pluginId}".` };
   }
   try {
-    writeActivePointer(root, { pluginId, version, digest });
+    const pointer: ActivePluginVersion = { pluginId, version, digest };
+    if (approval.approved) pointer.approved = approval.approved;
+    writeActivePointer(root, pointer);
   } catch (err) {
     rollback();
     return { ok: false, error: `Could not record the active version: ${(err as Error).message}` };
   }
-  return { ok: true, path: targetDir, digest, info };
+  return { ok: true, path: targetDir, digest, info, approved: approval.approved };
 }
 
 function safeDigest(dir: string): string | null {

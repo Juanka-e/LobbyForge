@@ -57,6 +57,7 @@
   "admin.audit.action.message.pin": "pinned a message",
   "admin.audit.action.message.unpin": "unpinned a message",
   "admin.audit.action.message.update": "edited a message",
+  "admin.audit.action.plugin.install": "installed a plugin",
   "admin.audit.action.poll.close": "closed a poll",
   "admin.audit.action.poll.create": "created a poll",
   "admin.audit.action.role.create": "created a role",
