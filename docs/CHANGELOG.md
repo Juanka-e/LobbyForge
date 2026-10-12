@@ -2,6 +2,16 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Voice: back after a reload or a dropped connection - 2026-10-12
+
+- **One click back to voice:** reloading the page used to drop you out of voice with nothing to bring you back. Now the lobby shows "You dropped out of voice. [Back to #channel]" across the top of the centre column. It appears after a reload that comes within 2 minutes of being in voice, and whenever LiveKit gives up reconnecting. It also shows on phones, where the voice footer sits in the closed drawer. Inside a game's activities view the strip is part of the panel. Dismissing it forgets the channel.
+- **Automatic return:** after a reload, the lobby rejoins on its own only when the microphone permission is already granted. It joins with the microphone off. Otherwise it waits for the click.
+- **No undoing:** leaving voice, joining another channel, another tab taking over, a moderator removing you, the room being deleted, or the server refusing voice (for example a voice block) all clear the way back. Only one tab of a browser rejoins on its own: the tab in voice holds the `lf-voice` Web Lock, so a duplicated tab can't kick it out.
+- **Longer reconnecting:** LiveKit now keeps trying for about 2 minutes instead of about 45 seconds. After it gives up, the lobby tries once more when the network comes back and once when you return to the tab.
+- **The view comes back:** a reload reopens the activities view you had open instead of the chat.
+- **Join from the game:** in a game played over voice (Hushle, Quiz, Vampire Village, Watch Party, voice-only marketplace apps), a viewer outside the voice channel sees "Join the voice channel to play [Join]". A move refused with `voice_required` gets the same Join button. Watching still needs no voice.
+- **For developers:** the rules live in `apps/web/lib/voice-resume.ts` (pure and unit-tested). `useActivitySession` also returns `errorCode`, the refusal code behind `error`. Lobby installed apps carry `requiresVoice`. Details are in `docs/VOICE_ROOM.md` → "Coming back after a reload or a drop" and `docs/ACTIVITIES.md` → "Voice in the lobby's activities view".
+- **Upgrade notes:** no migration, no new dependency, no server change. Everything is stored in the tab's `sessionStorage` (`lf.voice.resume.v1`, `lf.view.v1`).
 ## [Unreleased] - Activities: a late press no longer lands on the next card, question or poll - 2026-10-12
 
 - **Hushle:** Got it, Skip, Penalty and Next card name the card they were pressed for. If an opponent's BUST (or a second moderator) moved the card on first, the host's press is ignored instead of scoring a card nobody explained. Every draw now bumps a public deal number, `cardSeq`, and those four actions carry the `cardSeq` of the state the button was drawn from. A counter rather than the card id, because the host who does not play and the explaining team never receive the card; `cardSeq` says how many cards were dealt, never which. BUST keeps its `cardId`.
