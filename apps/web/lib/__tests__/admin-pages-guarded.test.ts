@@ -24,6 +24,9 @@ function pageFiles(dir: string): string[] {
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) {
       if (entry === '__tests__') continue;
+      // A catch-all is the @modal interceptor's canonical fallback (it only
+      // redirects or 404s), not an admin section.
+      if (entry.startsWith('[...') || entry.startsWith('[[...')) continue;
       out.push(...pageFiles(full));
     } else if (entry === 'page.tsx') {
       out.push(full);

@@ -95,7 +95,8 @@ function pageFiles(dir: string): string[] {
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) {
-      if (entry !== '__tests__') out.push(...pageFiles(full));
+      // Catch-alls are the @modal interceptor's canonical fallbacks, not sections.
+      if (entry !== '__tests__' && !entry.startsWith('[...') && !entry.startsWith('[[...')) out.push(...pageFiles(full));
     } else if (entry === 'page.tsx') {
       out.push(full);
     }

@@ -25,6 +25,8 @@ function routeKeys(dir: string, prefix = ''): string[] {
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
     if (!statSync(full).isDirectory()) continue;
+    // A catch-all is the interceptor's canonical fallback, not a page to register.
+    if (entry.startsWith('[...') || entry.startsWith('[[...')) continue;
     // Route groups `(x)` and parallel slots `@x` don't appear in the URL.
     if (entry.startsWith('(') || entry.startsWith('@')) {
       out.push(...routeKeys(full, prefix));

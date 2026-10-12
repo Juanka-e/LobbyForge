@@ -15,7 +15,7 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: t('emailVerification.link.metaTitle'),
     // The token is in this page's URL: never send it on as a Referer
-    // (the response header says the same, see middleware.ts).
+    // (the response header says the same, see proxy.ts).
     referrer: 'no-referrer',
     robots: { index: false, follow: false },
   };
