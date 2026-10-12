@@ -1,0 +1,14 @@
+{
+  "desktop.connect.button": "Connect",
+  "desktop.connect.connecting": "Connecting…",
+  "desktop.connect.hint": "Don't have an instance yet? LobbyForge is self-hosted: run it on your own machine with Docker, or ask your community's admin for the address.",
+  "desktop.connect.label": "Instance address",
+  "desktop.connect.subtitle": "Connect to your self-hosted LobbyForge instance to join voice rooms and live activities.",
+  "desktop.error.failed": "Could not connect. Check the address and try again.",
+  "desktop.error.httpsRequired": "The address must start with https://.",
+  "desktop.error.invalidUrl": "That isn't a valid address.",
+  "desktop.error.noExtras": "Use the address only: no user name, password, query or # part.",
+  "desktop.error.originOnly": "Use the address only, without a path (for example https://chat.example.com).",
+  "desktop.tray.quit": "Quit",
+  "desktop.tray.show": "Show LobbyForge"
+}

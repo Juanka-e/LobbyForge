@@ -134,20 +134,20 @@
         <div class="logo-mark">L</div>
         <h1>LobbyForge</h1>
       </div>
-      <p class="subtitle">
+      <p class="subtitle" data-i18n="desktop.connect.subtitle">
         Connect to your self-hosted LobbyForge instance to join voice rooms and live activities.
       </p>
       <form id="connect-form">
-        <label for="instance-url">Instance URL</label>
+        <label for="instance-url" data-i18n="desktop.connect.label">Instance address</label>
         <div class="url-row">
           <input id="instance-url" type="url" placeholder="https://my.lobbyforge.dev" autocomplete="url" autofocus required />
-          <button type="submit" id="connect-btn">Connect</button>
+          <button type="submit" id="connect-btn" data-i18n="desktop.connect.button">Connect</button>
         </div>
-        <div class="error" id="error-msg"></div>
+        <div class="error" id="error-msg" role="alert"></div>
       </form>
-      <p class="hint">
-        Don't have an instance yet? LobbyForge is self-hosted — run it on your own
-        server with Docker, or ask your community admin for the instance URL.
+      <p class="hint" data-i18n="desktop.connect.hint">
+        Don't have an instance yet? LobbyForge is self-hosted: run it on your own
+        machine with Docker, or ask your community's admin for the address.
       </p>
     </div>
   </div>
@@ -156,6 +156,7 @@
        This avoids CSP/X-Frame-Options conflicts. The Rust side calls
        window.__lobbyforgeNavigate(url) to navigate. -->
 
+  <script src="locales.js"></script>
   <script src="shell.js"></script>
 </body>
 </html>

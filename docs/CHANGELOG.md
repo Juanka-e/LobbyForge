@@ -2,6 +2,13 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - The desktop app and its installer speak every shipped language - 2026-10-12
+
+- **Connect screen and tray:** their text now lives in `apps/web/messages/<code>/desktop.json` (en, tr). The app picks the system's language and falls back to English. The tray menu gets its labels from the connect screen and keeps them for the next launch.
+- **Errors:** the Rust side refuses an address with a stable code (`invalid_url`, `https_required`, `no_extras`, `origin_only`) and the screen shows it as a sentence in the user's language. Anything else shows a generic message.
+- **Windows installer:** its NSIS language list is generated from the language folders, for every language Tauri's installer can translate. English stays first, as the fallback.
+- **No code to add a language:** `pnpm i18n:sync` (run by `pnpm i18n:add`) writes `apps/desktop/dist-shell/locales.js` and the installer list. `pnpm i18n:status` and the desktop tests fail when either is stale.
+
 ## [Unreleased] - Choose who can create polls from the Poll app's card - 2026-10-10
 
 - **Poll app card:** Community settings → Apps → Poll now has "Who can create polls in text channels": a box per role, highest first. Each box is the role's `create_polls` permission, saved through the role API, so the role editors show the same thing and the role API's checks (Manage Roles, hierarchy, no granting what you lack) apply. Administrator roles show ticked and locked; without Manage Roles the card is read-only and says why. A refusal is explained inline.

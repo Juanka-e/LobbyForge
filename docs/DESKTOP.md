@@ -58,6 +58,12 @@ the signing setup.
    for next launch.
 4. To switch instances later, click **"Switch instance"** in the top-right.
 
+The connect screen, its error messages and the tray menu follow the
+system's language when the instance ships it (`apps/web/messages/<code>/desktop.json`),
+otherwise English. The Windows installer offers the same languages, as far
+as Tauri's installer translations go. Adding a language needs no code; see
+[TRANSLATING.md](TRANSLATING.md#the-desktop-app).
+
 ## Native capabilities
 
 | Capability | Behavior |

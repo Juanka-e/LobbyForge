@@ -29,7 +29,12 @@ export interface StatusReport {
   englishOnlyPlugins: string[];
 }
 
-export function paths(root?: string): { appMessages: string; plugins: string };
+export function paths(root?: string): {
+  appMessages: string;
+  plugins: string;
+  desktopShellLocales: string;
+  desktopTauriConf: string;
+};
 export function placeholders(text: string): string;
 export function messageArguments(text: string): string[];
 export function messageProblems(text: string): string[];
@@ -54,3 +59,11 @@ export function readPlugins(root?: string): {
   withTables: Array<{ id: string; dir: string; localesDir: string; tables: Record<string, Table> }>;
   englishOnly: string[];
 };
+
+export const DESKTOP_AREA: 'desktop.json';
+/** Locale code → the NSIS language name Tauri's bundler ships a translation for. */
+export const NSIS_LANGUAGES: Record<string, string>;
+export function nsisLanguagesFor(codes: string[]): string[];
+export function desktopLocalesSource(
+  locales: Array<{ code: string; meta: Record<string, unknown>; files: Record<string, Table> }>
+): string;

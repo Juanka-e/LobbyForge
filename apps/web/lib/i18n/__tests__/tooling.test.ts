@@ -72,6 +72,29 @@ describe('pnpm i18n:add', () => {
     expect(report.englishOnlyPlugins).toEqual(['plain']);
   });
 
+  it('reaches the desktop app too: its connect screen strings and its installer languages', () => {
+    scaffoldRepo();
+    writeJson('apps/web/messages/en/desktop.json', { 'desktop.connect.button': 'Connect' });
+    mkdirSync(join(root, 'apps/desktop/dist-shell'), { recursive: true });
+    writeFileSync(join(root, 'apps/desktop/dist-shell/locales.js'), '');
+    mkdirSync(join(root, 'apps/desktop/src-tauri'), { recursive: true });
+    writeFileSync(
+      join(root, 'apps/desktop/src-tauri/tauri.conf.json'),
+      '{ "bundle": { "windows": { "nsis": { "languages": ["English"] } } } }\n'
+    );
+    expect(status(root).problems.some((p) => p.startsWith('desktop:'))).toBe(true);
+
+    addLanguage({ root, code: 'de', name: 'Deutsch', englishName: 'German' });
+    expect(status(root).problems).toEqual([]);
+    const shell = readFileSync(join(root, 'apps/desktop/dist-shell/locales.js'), 'utf8');
+    // Untranslated yet: the German table shows English until someone fills it in.
+    expect(shell).toContain('"de": {');
+    expect(shell).toContain('"desktop.connect.button": "Connect"');
+    expect(readFileSync(join(root, 'apps/desktop/src-tauri/tauri.conf.json'), 'utf8')).toContain(
+      '"languages": ["English", "German"]'
+    );
+  });
+
   it('records a right-to-left language as such', () => {
     scaffoldRepo();
     addLanguage({ root, code: 'ar', name: 'العربية', englishName: 'Arabic', rtl: true });
