@@ -75,6 +75,7 @@ interface LobbyData {
     maxPlayers: number | null;
     trustLevel: string | null;
     sandboxed?: boolean;
+    requiresVoice?: boolean;
   }>;
   members?: Array<{
     id: string;

@@ -64,6 +64,27 @@ import {
   isRemotePublicationAllowed,
   isTrackKindAllowedForSource,
 } from '@/lib/voice-track-policy';
+import {
+  VOICE_RESUME_HEARTBEAT_MS,
+  VoiceReconnectPolicy,
+  clearLobbyView,
+  clearVoiceResume,
+  holdVoiceLock,
+  isVoiceLockHeldElsewhere,
+  planVoiceResume,
+  readLobbyView,
+  readMicrophonePermission,
+  readNavigationType,
+  readVoiceResume,
+  touchVoiceResume,
+  tryAcquireVoiceLock,
+  voiceResumeClearsOnDisconnect,
+  voiceResumeClearsOnRefusal,
+  writeLobbyView,
+  writeVoiceResume,
+  type VoiceLock,
+  type VoiceResumeOffer,
+} from '@/lib/voice-resume';
 
 /**
  * M21.4a - LiveKit voice connection scoped to the standalone lobby.
@@ -197,6 +218,16 @@ export interface LobbyVoiceContextValue {
   /** The browser blocked audio playback; `startAudio` must run from a click. */
   audioBlocked?: boolean;
   startAudio?: () => Promise<void>;
+  /**
+   * The voice channel this tab dropped out of (a reload, or LiveKit gave
+   * up reconnecting) and can go back to; null while in voice or joining.
+   * docs/ACTIVITY_INTEGRITY_AND_RESILIENCE.md §3.2.
+   */
+  voiceResume?: VoiceResumeOffer | null;
+  /** Go back to `voiceResume`'s channel. Run it from a click. */
+  resumeVoice?: () => Promise<void>;
+  /** Not going back: forget the offer. */
+  dismissVoiceResume?: () => void;
 }
 
 // Exported so component tests can wrap consumers (e.g. LobbyVoiceFooter) in
@@ -445,6 +476,11 @@ export interface LobbyVoiceProviderProps {
   initialTextChannelName?: string;
   /** Conversation to open on first paint (a /dm/<id> deep link). */
   initialDm?: ActiveDm | null;
+  /**
+   * The voice channels this viewer can see. Names the channel to go back
+   * to after a reload, and a channel that is no longer here is not offered.
+   */
+  voiceChannels?: ReadonlyArray<{ id: string; name: string }>;
   children: ReactNode;
 }
 
@@ -456,6 +492,7 @@ export function LobbyVoiceProvider({
   initialTextChannelId,
   initialTextChannelName,
   initialDm,
+  voiceChannels,
   children,
 }: LobbyVoiceProviderProps) {
   const t = useT();
@@ -525,6 +562,42 @@ export function LobbyVoiceProvider({
     setActiveActivityChannel(channel);
     setMainViewMode('activity');
   }, []);
+
+  // Coming back to voice (docs/ACTIVITY_INTEGRITY_AND_RESILIENCE.md §3.2;
+  // the rules are in lib/voice-resume.ts): the channel this tab dropped out
+  // of and may go back to, the voice lock it holds while in voice, and the
+  // single retry a returning network and a returning tab each get.
+  const [resumeOffer, setResumeOffer] = useState<VoiceResumeOffer | null>(null);
+  const voiceLockRef = useRef<VoiceLock | null>(null);
+  const retryArmedRef = useRef({ online: false, visible: false });
+  const voiceChannelsRef = useRef(voiceChannels);
+  voiceChannelsRef.current = voiceChannels;
+  const activeChannelIdRef = useRef(activeChannelId);
+  activeChannelIdRef.current = activeChannelId;
+  const channelNameFor = useCallback(
+    (channelId: string): string | null => voiceChannelsRef.current?.find((c) => c.id === channelId)?.name ?? null,
+    []
+  );
+  /** Nothing to go back to: forget the record, the offer and the retries. */
+  const dropVoiceResume = useCallback(() => {
+    clearVoiceResume();
+    setResumeOffer(null);
+    retryArmedRef.current = { online: false, visible: false };
+  }, []);
+  /**
+   * Out of voice without leaving (LiveKit gave up, the server restarted,
+   * the page was frozen): offer the way back while the record stands, and
+   * try once more when the network or the tab comes back.
+   */
+  const offerVoiceResume = useCallback(() => {
+    const saved = readVoiceResume();
+    if (!saved || saved.serverId !== serverId) return;
+    setResumeOffer({
+      channelId: saved.channelId,
+      channelName: channelNameFor(saved.channelId) ?? saved.channelName,
+    });
+    retryArmedRef.current = { online: true, visible: true };
+  }, [serverId, channelNameFor]);
   const [guest, setGuest] = useState<Guest | null>(null);
   // The latest guest known to this provider, written as soon as a lookup or
   // the bot check settles — before React re-renders with `guest`.
@@ -884,7 +957,12 @@ export function LobbyVoiceProvider({
   const connectTokenRef = useRef(0);
 
   const connectToChannel = useCallback(
-    async (channelId: string) => {
+    /**
+     * `automatic`: a return nobody clicked for (after a reload, or when the
+     * network comes back). It joins with the microphone off — nothing is
+     * sent until the person unmutes.
+     */
+    async (channelId: string, { automatic = false }: { automatic?: boolean } = {}) => {
       if (activeChannelId === channelId && roomRef.current) return;
       if (!guest?.uid && !guestRef.current?.uid) {
         let ready = false;
@@ -914,6 +992,8 @@ export function LobbyVoiceProvider({
         if (!ready) {
           // The bot check is on screen: it is already asking the person.
           if (guestCheckRef.current === 'open') return;
+          // An automatic return never reopens a bot check the person closed.
+          if (automatic && guestCheckRef.current === 'dismissed') return;
           // The session waits on the bot check the person closed: offer it again.
           if (guestCheckRef.current === 'dismissed') {
             setGuestCheck('open');
@@ -928,6 +1008,10 @@ export function LobbyVoiceProvider({
       // Race guard: increment a token; if a newer connect call started
       // before we finish, bail out so we don't orphan rooms.
       const myToken = ++connectTokenRef.current;
+
+      // Switching channel ends the way back to the old one.
+      if (readVoiceResume()?.channelId !== channelId) clearVoiceResume();
+      setResumeOffer((offer) => (offer && offer.channelId !== channelId ? null : offer));
 
       // Tear down any existing room first.
       if (roomRef.current) {
@@ -966,6 +1050,9 @@ export function LobbyVoiceProvider({
         }
         if (!res.ok) {
           const detail = (await res.json().catch(() => ({}))) as { error?: string };
+          // Refused (a voice block, a lost permission…), not dropped:
+          // there is nothing to go back to.
+          if (voiceResumeClearsOnRefusal(res.status, detail)) dropVoiceResume();
           // EMAIL.md §4.2: no voice token without a verified email. Said in
           // the viewer's language; the shared status locks the channel list.
           if (handleEmailUnverified(res.status, detail)) {
@@ -981,7 +1068,9 @@ export function LobbyVoiceProvider({
         }
         const token = (await res.json()) as TokenResponse;
 
-        const room = new Room({ adaptiveStream: true, dynacast: true });
+        // LiveKit's own reconnecting goes on for about two minutes (its
+        // default gives up after ~45 s) — long enough for a lift or a tunnel.
+        const room = new Room({ adaptiveStream: true, dynacast: true, reconnectPolicy: new VoiceReconnectPolicy() });
         roomRef.current = room;
 
         const applyDefaultSubscription = (publication: RemoteTrackPublication) => {
@@ -1054,6 +1143,11 @@ export function LobbyVoiceProvider({
           setJoinedScreenShares(new Set());
           setDeafenEnabled(false);
           setConnectionState(ConnectionState.Disconnected);
+          // Another tab took over, a moderator removed us, the room is gone:
+          // coming back on our own would undo that. Anything else offers
+          // the way back (lib/voice-resume.ts).
+          if (voiceResumeClearsOnDisconnect(reason)) dropVoiceResume();
+          else offerVoiceResume();
         });
         room.on(RoomEvent.ParticipantConnected, () => collectParticipants(room));
         // A name that arrives or changes after the participant joined.
@@ -1191,7 +1285,8 @@ export function LobbyVoiceProvider({
         // up front instead of leaving three dead buttons unexplained.
         if (joinPublishState.reason === 'timeout') setError(TIMED_OUT_NOTICE);
         const moderatorMuted = joinBlock !== 'none';
-        const shouldStartMic = !moderatorMuted && !serverStartMuted && effectiveInputMode === 'voice_activity';
+        const shouldStartMic =
+          !automatic && !moderatorMuted && !serverStartMuted && effectiveInputMode === 'voice_activity';
         voicePrefsRef.current = voicePrefs;
         setAudioBlocked(!room.canPlaybackAudio);
         // beta-review: output device preference applies to the call, not
@@ -1258,6 +1353,8 @@ export function LobbyVoiceProvider({
       loadVoicePreferences,
       setPublishState,
       resetPublishState,
+      dropVoiceResume,
+      offerVoiceResume,
     ]
   );
 
@@ -1265,6 +1362,8 @@ export function LobbyVoiceProvider({
     const r = roomRef.current;
     ++connectTokenRef.current;
     roomRef.current = null;
+    // Left on purpose: nothing to come back to after a reload.
+    dropVoiceResume();
     stopHeartbeat();
     setActiveChannelId(null);
     // A connect this cancels (still fetching a token, or waiting for the
@@ -1290,7 +1389,7 @@ export function LobbyVoiceProvider({
     } catch {
       /* swallow */
     }
-  }, [stopHeartbeat, resetPublishState]);
+  }, [stopHeartbeat, resetPublishState, dropVoiceResume]);
 
   const toggleMic = useCallback(async () => {
     const r = roomRef.current;
@@ -1765,8 +1864,9 @@ export function LobbyVoiceProvider({
       resetPublishState();
       setAudioBlocked(false);
       setConnectionState(ConnectionState.Disconnected);
+      dropVoiceResume();
     }
-  }, [serverId, stopHeartbeat, resetPublishState]);
+  }, [serverId, stopHeartbeat, resetPublishState, dropVoiceResume]);
 
   // Reset camera/screen-share state on disconnect so the footer UI
   // doesn't show stale "on" state when the user reconnects.
@@ -1787,6 +1887,153 @@ export function LobbyVoiceProvider({
     if (!r) return;
     applyRemoteAudio(r, !deafenEnabled);
   }, [deafenEnabled, applyRemoteAudio]);
+
+  // ── Coming back to voice (docs/ACTIVITY_INTEGRITY_AND_RESILIENCE.md §3.2)
+
+  // In the room — connected, or LiveKit still reconnecting — and not in
+  // the middle of a join.
+  const voiceLive =
+    !!activeChannelId &&
+    !connecting &&
+    (connectionState === ConnectionState.Connected ||
+      connectionState === ConnectionState.Reconnecting ||
+      connectionState === ConnectionState.SignalReconnecting);
+
+  // Remember the channel while this tab is in it, refreshed every 5 s (also
+  // while LiveKit reconnects, so a drop it gives up on is still fresh), and
+  // hold the voice lock: a duplicated tab must not come back into the same
+  // room and kick this one out.
+  useEffect(() => {
+    if (!voiceLive || !activeChannelId) return;
+    writeVoiceResume({ serverId, channelId: activeChannelId, channelName: channelNameFor(activeChannelId) ?? '' });
+    setResumeOffer(null);
+    retryArmedRef.current = { online: false, visible: false };
+    if (!voiceLockRef.current) voiceLockRef.current = holdVoiceLock();
+    const beat = setInterval(() => touchVoiceResume(), VOICE_RESUME_HEARTBEAT_MS);
+    return () => {
+      clearInterval(beat);
+      // Out of the room (left, dropped, switching): another tab may go now.
+      voiceLockRef.current?.release();
+      voiceLockRef.current = null;
+    };
+  }, [voiceLive, activeChannelId, serverId, channelNameFor]);
+
+  // The latest join, for the returns below (their listeners are bound once).
+  const connectRef = useRef(connectToChannel);
+  connectRef.current = connectToChannel;
+
+  /**
+   * Go back without a click: only with the voice lock (no other tab of
+   * this browser is in voice) and with the microphone off. True when it
+   * joined.
+   */
+  const returnToVoice = useCallback(async (): Promise<boolean> => {
+    const saved = readVoiceResume();
+    if (!saved || saved.serverId !== serverId) {
+      setResumeOffer(null);
+      return false;
+    }
+    const lock = await tryAcquireVoiceLock();
+    if (!lock) {
+      // Another tab is in voice now: this one stays out and stops offering.
+      dropVoiceResume();
+      return false;
+    }
+    voiceLockRef.current?.release();
+    voiceLockRef.current = lock;
+    await connectRef.current(saved.channelId, { automatic: true });
+    if (roomRef.current) return true;
+    if (voiceLockRef.current === lock) voiceLockRef.current = null;
+    lock.release();
+    return false;
+  }, [serverId, dropVoiceResume]);
+  const returnToVoiceRef = useRef(returnToVoice);
+  returnToVoiceRef.current = returnToVoice;
+
+  // After a reload: offer the channel this tab was in, or go straight back
+  // when that is safe (planVoiceResume in lib/voice-resume.ts).
+  const resumeCheckedRef = useRef(false);
+  useEffect(() => {
+    if (resumeCheckedRef.current) return;
+    resumeCheckedRef.current = true;
+    void (async () => {
+      const saved = readVoiceResume();
+      if (!saved) return;
+      // A channel clicked while this is being worked out wins.
+      const joinsBefore = connectTokenRef.current;
+      const navigationType = readNavigationType();
+      const [lockHeldElsewhere, microphone] = await Promise.all([
+        isVoiceLockHeldElsewhere(),
+        navigationType === 'reload' ? readMicrophonePermission() : Promise.resolve('unknown' as const),
+      ]);
+      if (connectTokenRef.current !== joinsBefore) return;
+      const plan = planVoiceResume({
+        record: saved,
+        serverId,
+        now: Date.now(),
+        channels: voiceChannelsRef.current ?? null,
+        lockHeldElsewhere,
+        navigationType,
+        microphone,
+      });
+      if (plan.kind === 'clear') clearVoiceResume();
+      if (plan.kind !== 'offer') return;
+      setResumeOffer({ channelId: plan.channelId, channelName: plan.channelName });
+      if (!plan.auto) return;
+      // Offline at the moment of the reload: once more when it comes back.
+      if (!(await returnToVoiceRef.current()) && readVoiceResume()) {
+        retryArmedRef.current = { online: true, visible: true };
+      }
+    })();
+  }, [serverId]);
+
+  // LiveKit gave up: one more try when the network comes back, and one when
+  // the person comes back to the tab — while the record stands.
+  useEffect(() => {
+    const retry = (which: 'online' | 'visible') => {
+      if (!retryArmedRef.current[which]) return;
+      // Back in voice, or joining, already.
+      if (roomRef.current || activeChannelIdRef.current) return;
+      retryArmedRef.current = { ...retryArmedRef.current, [which]: false };
+      void returnToVoiceRef.current();
+    };
+    const onOnline = () => retry('online');
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') retry('visible');
+    };
+    window.addEventListener('online', onOnline);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
+
+  /** "Back to #channel". The click is also the gesture browsers want before they play audio. */
+  const resumeVoice = useCallback(async () => {
+    if (resumeOffer) await connectToChannel(resumeOffer.channelId);
+  }, [resumeOffer, connectToChannel]);
+
+  // A reload reopens the activities view this tab was showing (lf.view.v1);
+  // going anywhere else forgets it. A /dm/<id> link opens what it names.
+  const viewRestoredRef = useRef(false);
+  useEffect(() => {
+    if (!viewRestoredRef.current) {
+      viewRestoredRef.current = true;
+      const saved = initialDm ? null : readLobbyView();
+      const channelName = saved ? channelNameFor(saved.channelId) : null;
+      if (saved && channelName !== null) {
+        setActiveActivityChannel({ channelId: saved.channelId, channelName });
+        setMainViewMode('activity');
+        return;
+      }
+    }
+    if (mainViewMode === 'activity' && activeActivityChannel) {
+      writeLobbyView({ mode: 'activity', channelId: activeActivityChannel.channelId });
+    } else {
+      clearLobbyView();
+    }
+  }, [mainViewMode, activeActivityChannel, initialDm, channelNameFor]);
 
   /**
    * Don't let someone drop out of a call by accident.
@@ -1885,6 +2132,9 @@ export function LobbyVoiceProvider({
       publishBlockedReason: publishState.reason,
       audioBlocked,
       startAudio,
+      voiceResume: activeChannelId ? null : resumeOffer,
+      resumeVoice,
+      dismissVoiceResume: dropVoiceResume,
     }),
     [
       serverId,
@@ -1930,6 +2180,9 @@ export function LobbyVoiceProvider({
       publishState.reason,
       audioBlocked,
       startAudio,
+      resumeOffer,
+      resumeVoice,
+      dropVoiceResume,
     ]
   );
 

@@ -42,6 +42,7 @@ import { getUserPresenceInChannel, getUserPresenceInServer, setUserPresence } fr
 import { LobbyVoiceProvider } from './LobbyVoiceProvider';
 import { LobbyVoiceChannels } from './LobbyVoiceChannels';
 import { LobbyVoiceFooter } from './LobbyVoiceFooter';
+import { VoiceResumeStrip } from './VoiceResumeStrip';
 import { LobbyTextChannels } from './LobbyTextChannels';
 import { LobbyMainArea } from './LobbyMainArea';
 import { LobbyMembersClient } from './LobbyMembersClient';
@@ -206,6 +207,8 @@ export interface InstalledApp {
   trustLevel: string | null;
   /** Installed from the marketplace: it runs in the sandbox (ADR-007). */
   sandboxed?: boolean;
+  /** `catalog.requiresVoiceRoom`: players must be in the activity's voice room. */
+  requiresVoice?: boolean;
 }
 
 // ---- Demo fallback (preserves the M19 standalone lobby visual reference) ----
@@ -650,6 +653,7 @@ async function loadLiveData(
             // badge says where it came from, not what it claims to be.
             trustLevel: sandboxed ? null : (summary.catalog?.trustLevel ?? null),
             sandboxed,
+            requiresVoice: summary.catalog?.requiresVoiceRoom === true,
           },
         ];
       });
@@ -1052,6 +1056,10 @@ function LobbyShell({
           own `flex-1` working exactly as before. */}
       <div className="flex min-w-0 flex-1 flex-col">
         {hasUser ? <EmailVerificationBanner enabled variant="lobby" /> : null}
+        {/* "You dropped out of voice. [Back to #channel]" after a reload or a
+            connection LiveKit gave up on. Here, not in the voice footer: on
+            a phone the footer is inside the closed drawer. */}
+        {canVoiceConnect ? <VoiceResumeStrip placement="lobby" /> : null}
         <div className="flex min-h-0 flex-1">
           <LobbyMainArea data={data} canVoice={canVoiceConnect} />
         </div>
@@ -1086,6 +1094,7 @@ function LobbyShell({
             initialTextChannelId={data.activeTextChannel?.id ?? null}
             initialTextChannelName={data.activeTextChannel?.name ?? 'general'}
             initialDm={initialDm}
+            voiceChannels={data.voiceChannels.map((c) => ({ id: c.id, name: c.name }))}
           >
             {shell}
           </LobbyVoiceProvider>

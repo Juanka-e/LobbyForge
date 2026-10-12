@@ -22,10 +22,23 @@ vi.mock('@/lib/realtime-client', () => ({
 }));
 vi.mock('@/lib/plugin-registry', () => ({ getPlugin: () => null }));
 vi.mock('../PluginFrame', () => ({
-  PluginFrameSurface: ({ appName, players }: { appName: string; players: Array<{ userId: string; name: string | null }> }) => (
-    <div data-testid="frame">
-      {appName}:{players.map((p) => `${p.userId}=${p.name ?? 'null'}`).join(',')}
-    </div>
+  PluginFrameSurface: ({
+    appName,
+    players,
+    dispatch,
+  }: {
+    appName: string;
+    players: Array<{ userId: string; name: string | null }>;
+    dispatch: (action: Record<string, unknown>) => unknown;
+  }) => (
+    <>
+      <div data-testid="frame">
+        {appName}:{players.map((p) => `${p.userId}=${p.name ?? 'null'}`).join(',')}
+      </div>
+      <button type="button" onClick={() => void dispatch({ type: 'vote' })}>
+        make a move
+      </button>
+    </>
   ),
 }));
 vi.mock('next/link', () => ({
@@ -239,6 +252,141 @@ describe('LobbyActivityView host left', () => {
     serveSession(undefined);
     renderSession(makeVoice(), { canStartActivities: true });
     expect(await screen.findByRole('button', { name: 'End' }, { timeout: 5000 })).toBeInTheDocument();
+  });
+});
+
+/**
+ * `voice_required` is not a dead end (docs/ACTIVITY_INTEGRITY_AND_
+ * RESILIENCE.md §3.2): in a game played over voice, a viewer outside the
+ * channel's voice room gets a standing Join, and a move the server refused
+ * for that reason has the same Join beside it. Spectating needs no voice:
+ * the panel stays usable either way.
+ */
+describe('LobbyActivityView joining voice', () => {
+  const VOICE_APPS: InstalledApp[] = [
+    { id: 'vampire-village', name: 'Vampire Village', summary: null, minPlayers: 5, maxPlayers: 12, trustLevel: 'official', requiresVoice: true },
+    { id: 'poll', name: 'Anket', summary: null, minPlayers: null, maxPlayers: null, trustLevel: 'official', requiresVoice: false },
+  ];
+  let actionResponse: () => Response;
+
+  function serveGame(pluginId: string) {
+    actionResponse = () => Response.json({ error: 'Join the voice channel', code: 'voice_required' }, { status: 403 });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url === LIST_URL) return Response.json({ activities: [{ id: 's-3', pluginId, status: 'running' }] });
+        if (url === `/api/servers/${SERVER}/activities/s-3`) {
+          return Response.json({
+            activity: { id: 's-3', pluginId, status: 'running', state: {}, createdBy: 'u-host', players: [] },
+          });
+        }
+        if (url === `/api/servers/${SERVER}/activities/s-3/actions`) return actionResponse();
+        return Response.json({}, { status: 404 });
+      })
+    );
+  }
+
+  function renderGame(voice = makeVoice(), locale = 'en') {
+    return render(
+      <I18nProvider {...providerPropsFor(locale)}>
+        <LobbyVoiceContext.Provider value={voice}>
+          <LobbyActivityView
+            serverId={SERVER}
+            channelId={CHANNEL}
+            channelName="Lounge"
+            apps={VOICE_APPS}
+            currentUserId="u-me"
+            appSettingsHref={null}
+          />
+        </LobbyVoiceContext.Provider>
+      </I18nProvider>
+    );
+  }
+
+  it('shows a standing Join to a viewer outside the voice room, and joins this channel', async () => {
+    serveGame('vampire-village');
+    const voice = makeVoice();
+    const user = userEvent.setup();
+    renderGame(voice);
+    const bar = await screen.findByTestId('activity-voice-join', {}, { timeout: 5000 });
+    expect(bar).toHaveAttribute('role', 'status');
+    expect(bar).toHaveTextContent('Join the voice channel to play');
+    // The game stays on screen: spectating needs no voice.
+    expect(screen.getByTestId('frame')).toBeInTheDocument();
+
+    await user.click(within(bar).getByRole('button', { name: 'Join #Lounge' }));
+    expect(voice.connectToChannel).toHaveBeenCalledWith(CHANNEL);
+  });
+
+  it('says it in Turkish', async () => {
+    serveGame('vampire-village');
+    renderGame(makeVoice(), 'tr');
+    const bar = await screen.findByTestId('activity-voice-join', {}, { timeout: 5000 });
+    expect(bar).toHaveTextContent('Oynamak için sesli kanala katıl');
+    expect(within(bar).getByRole('button', { name: '#Lounge kanalına katıl' })).toHaveTextContent('Katıl');
+  });
+
+  it('shows nothing to a viewer in the voice room, or for a game that needs no voice', async () => {
+    serveGame('vampire-village');
+    const { unmount } = renderGame(makeVoice({ activeChannelId: CHANNEL, connectionState: ConnectionState.Connected }));
+    await screen.findByTestId('frame', {}, { timeout: 5000 });
+    expect(screen.queryByTestId('activity-voice-join')).toBeNull();
+    unmount();
+
+    serveGame('poll');
+    renderGame();
+    await screen.findByTestId('frame', {}, { timeout: 5000 });
+    expect(screen.queryByTestId('activity-voice-join')).toBeNull();
+  });
+
+  it('says it is joining while the join is under way', async () => {
+    serveGame('vampire-village');
+    renderGame(makeVoice({ activeChannelId: CHANNEL, connecting: true }));
+    const bar = await screen.findByTestId('activity-voice-join', {}, { timeout: 5000 });
+    expect(within(bar).getByRole('button', { name: 'Joining…' })).toBeDisabled();
+  });
+
+  it('puts Join beside a move refused with voice_required', async () => {
+    serveGame('vampire-village');
+    const voice = makeVoice();
+    const user = userEvent.setup();
+    renderGame(voice);
+    await user.click(await screen.findByRole('button', { name: 'make a move' }, { timeout: 5000 }));
+    const alert = await screen.findByRole('alert', {}, { timeout: 5000 });
+    expect(alert).toHaveTextContent('Join the voice channel to play.');
+    const beside = alert.parentElement!;
+    await user.click(within(beside).getByRole('button', { name: 'Join #Lounge' }));
+    expect(voice.connectToChannel).toHaveBeenCalledWith(CHANNEL);
+  });
+
+  it('puts no Join beside any other refusal', async () => {
+    serveGame('poll');
+    actionResponse = () => Response.json({ error: 'host only', code: 'not_host' }, { status: 403 });
+    const user = userEvent.setup();
+    renderGame();
+    await user.click(await screen.findByRole('button', { name: 'make a move' }, { timeout: 5000 }));
+    const alert = await screen.findByRole('alert', {}, { timeout: 5000 });
+    expect(alert).toHaveTextContent('Only the host can do that.');
+    expect(within(alert.parentElement!).queryByRole('button')).toBeNull();
+  });
+
+  it('offers the way back after a drop instead, when it is for this channel', async () => {
+    serveGame('vampire-village');
+    const voice = makeVoice({
+      voiceResume: { channelId: CHANNEL, channelName: 'Lounge' },
+      resumeVoice: vi.fn(async () => {}),
+      dismissVoiceResume: vi.fn(),
+    });
+    const user = userEvent.setup();
+    renderGame(voice);
+    const strip = await screen.findByTestId('voice-resume-strip', {}, { timeout: 5000 });
+    expect(strip).toHaveAttribute('data-placement', 'activity');
+    expect(strip).toHaveTextContent('You dropped out of voice.');
+    await screen.findByTestId('frame', {}, { timeout: 5000 });
+    // One strip, not two.
+    expect(screen.queryByTestId('activity-voice-join')).toBeNull();
+    await user.click(within(strip).getByRole('button', { name: 'Back to #Lounge' }));
+    expect(voice.resumeVoice).toHaveBeenCalled();
   });
 });
 

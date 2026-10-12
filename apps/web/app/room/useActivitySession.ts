@@ -69,7 +69,14 @@ export function useActivitySession({
 }) {
   const t = useT();
   const [detail, setDetail] = useState<ActivityDetail | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setErrorText] = useState<string | null>(null);
+  // The refusal `code` behind `error`, when there is one: a surface can
+  // offer the way out (`voice_required` → join the voice channel).
+  const [errorCode, setErrorCode] = useState<string | null>(null);
+  const setError = useCallback((message: string | null, code: string | null = null) => {
+    setErrorText(message);
+    setErrorCode(code);
+  }, []);
   const [busy, setBusy] = useState(false);
   // `onEnded` is usually an inline arrow; keep it out of the effect deps
   // so a parent re-render doesn't tear down the subscription.
@@ -91,9 +98,9 @@ export function useActivitySession({
    */
   const refuse = useCallback((status: number, code: string | null) => {
     const message = activityRefusalMessage({ status, code }, 'session');
-    setError(t(message.key, message.params));
+    setError(t(message.key, message.params), code);
     if (code === 'session_ended') onEndedRef.current();
-  }, [t]);
+  }, [t, setError]);
 
   useEffect(() => {
     if (!serverId || !sessionId) {
@@ -231,7 +238,7 @@ export function useActivitySession({
       clearInterval(transportTimer);
       if (pollTimer) clearInterval(pollTimer);
     };
-  }, [serverId, sessionId]);
+  }, [serverId, sessionId, setError]);
 
   // Hosting moves (and a session becomes abandoned) lazily, when somebody
   // touches the session. Re-read once at the earliest due moment so the
@@ -292,7 +299,7 @@ export function useActivitySession({
         setBusy(false);
       }
     },
-    [serverId, sessionId, t, refuse]
+    [serverId, sessionId, t, refuse, setError]
   );
 
   const end = useCallback(async (): Promise<boolean> => {
@@ -317,9 +324,9 @@ export function useActivitySession({
     } finally {
       setBusy(false);
     }
-  }, [serverId, sessionId, t, refuse]);
+  }, [serverId, sessionId, t, refuse, setError]);
 
-  return { detail, error, busy, setError, dispatch, end };
+  return { detail, error, errorCode, busy, setError, dispatch, end };
 }
 
 /**
