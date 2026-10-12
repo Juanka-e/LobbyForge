@@ -31,6 +31,7 @@ vi.mock('@/lib/security-headers', () => ({
 vi.mock('@/lib/permissions', () => ({ authorizeSessionChannelVisibility: async () => ({ ok: true }) }));
 vi.mock('@/lib/plugin-projection', () => ({
   projectStateForViewer: async (input: { state: unknown }) => input.state,
+  sandboxLocaleFor: () => 'en',
 }));
 
 const getVoiceRoomSnapshot = vi.fn();

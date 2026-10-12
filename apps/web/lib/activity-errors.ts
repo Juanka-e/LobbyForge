@@ -20,6 +20,11 @@
  *                    every 429)
  *   wrong_phase      the action does not fit the game's current phase
  *   not_player       a `player` action from someone not on the roster
+ *   system_action    a client sent a `role: "system"` action (only the
+ *                    host runs those, when a plugin timer falls due)
+ *   effect_refused   the plugin's reducer asked for an effect that is
+ *                    invalid or that it has no permission for: nothing of
+ *                    the action was applied (docs/PLUGIN_SDK.md "Effects")
  */
 import { NextResponse } from 'next/server';
 
@@ -30,7 +35,9 @@ export type ActivityErrorCode =
   | 'activity_exists'
   | 'rate_limited'
   | 'wrong_phase'
-  | 'not_player';
+  | 'not_player'
+  | 'system_action'
+  | 'effect_refused';
 
 export function activityError(
   status: number,

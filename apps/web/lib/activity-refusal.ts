@@ -15,8 +15,10 @@
  *   activity_exists  one is already running in this channel (`sessionId`)
  *   rate_limited     too many requests; wait a moment
  *   bot_offline      the bot behind it is offline
- * Activity-only codes: wrong_phase, not_player, and the start route's
- * app allow-list codes. Anything else falls back to a translated generic
+ * Activity-only codes: wrong_phase, not_player, system_action (a client
+ * sent an action only the app itself runs), effect_refused (the app asked
+ * for an effect it may not use, so nothing was applied), and the start
+ * route's app allow-list codes. Anything else falls back to a translated generic
  * sentence chosen by HTTP status.
  */
 
@@ -73,6 +75,8 @@ export const SHARED_REFUSAL_KEYS: Record<SharedRefusalCode, string> = {
 const ACTIVITY_ONLY_KEYS: Record<string, string> = {
   wrong_phase: 'room.activity.error.wrongPhase',
   not_player: 'room.activity.error.notPlayer',
+  system_action: 'room.activity.error.systemAction',
+  effect_refused: 'room.activity.error.effectRefused',
   app_channel_not_allowed: 'lobbyMain.activities.channelNotAllowed',
   app_role_not_allowed: 'lobbyMain.activities.roleNotAllowed',
   network: 'room.activity.error.network',

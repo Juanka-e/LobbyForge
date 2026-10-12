@@ -92,7 +92,18 @@ describe('agreement with the server-side builder (lib/activity-errors.ts)', () =
 
   it('covers the agreed set: the activity codes plus the slash route’s bot_offline', () => {
     expect([...new Set([...serverCodes, 'bot_offline'])].sort()).toEqual(
-      ['activity_exists', 'bot_offline', 'not_host', 'not_player', 'rate_limited', 'session_ended', 'voice_required', 'wrong_phase']
+      [
+        'activity_exists',
+        'bot_offline',
+        'effect_refused',
+        'not_host',
+        'not_player',
+        'rate_limited',
+        'session_ended',
+        'system_action',
+        'voice_required',
+        'wrong_phase',
+      ]
     );
   });
 });

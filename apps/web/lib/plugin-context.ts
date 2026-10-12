@@ -2,31 +2,28 @@
  * HTTP context builder for plugins.
  *
  * The plugin SDK defines a rich `GamePluginContext` (players, messages,
- * state, cache, pubsub, timer, votes, scores, voice). For the M16
- * HTTP-host scenario, most of these are no-op stubs — the host
- * persists state via `setGameSessionState` after `handleAction`
- * returns, so the plugin's `state.save` is a write-back no-op; the
- * timer / cache / pubsub / scores sub-contexts are exposed but not
- * wired to anything (M17+ will add Redis-backed implementations).
+ * state, cache, pubsub, timer, votes, scores, voice, storage). Reducers
+ * are pure and synchronous, so what a plugin wants the host to DO goes
+ * through effects (`withEffects`, lib/activity-effects.ts), not through
+ * ctx methods:
  *
- * The `messages.sendGameMessage` is a console.log stub so a plugin
- * that wants to post to the channel during M16 has a non-throwing
- * surface to call.
+ *  - `ctx.storage` is a read-only snapshot of the plugin's storage in the
+ *    community (`get`, `keys`); the routes fill it for the call
+ *    (`setCallContext`) when the plugin has the `storage` permission, and
+ *    writes are `storage.set` / `storage.delete` effects.
+ *  - `ctx.timer` and `ctx.messages` are deprecated no-op stubs: timers are
+ *    `timer.set` / `timer.clear` effects, chat lines `chat.post` effects.
+ *  - `state.save`, cache, pubsub, votes and scores are no-ops — the host
+ *    persists the returned state itself.
+ *  - `ctx.now` is the call's clock (a timer's due time for a system action).
  */
-import type {
-  GamePluginContext,
-  RegisteredGamePlugin,
+import {
+  createStorageSnapshot,
+  type GamePluginContext,
+  type RegisteredGamePlugin,
 } from '@lobbyforge/plugin-sdk';
 import type { DbClient } from '@lobbyforge/db';
-import {
-  clearPluginData,
-  deletePluginData,
-  getPluginData,
-  listPluginData,
-  listPlayersForSession,
-  setPluginData,
-  users,
-} from '@lobbyforge/db';
+import { listPlayersForSession, users } from '@lobbyforge/db';
 import { inArray } from 'drizzle-orm';
 
 export interface BuildPluginContextInput {
@@ -38,7 +35,7 @@ export interface BuildPluginContextInput {
    * while it runs, before the host has written them to the roster.
    */
   pendingPlayerId?: string;
-  /** Faz E: scopes ctx.storage to (serverId, pluginId). */
+  /** The community and plugin the call runs for (the sandbox envelope's scope). */
   serverId?: string;
   pluginId?: string;
   /**
@@ -101,11 +98,13 @@ export async function buildHttpPluginContext(
   };
 
   const messagesContext = {
+    // Deprecated: a reducer returns a `chat.post` effect instead. Logged so
+    // the plugin's intent is visible in server output.
     sendGameMessage: async (message: string): Promise<void> => {
-      // M16 stub: the route layer would call `createMessage` here
-      // once M17 lands message-writeback. For M16 we just log so
-      // the plugin's intent is visible in server output.
-      console.warn(`[plugin:activity] ${input.sessionId} says: ${message}`);
+      console.warn(
+        `[plugin:activity] ${input.sessionId}: ctx.messages.sendGameMessage is deprecated (return a chat.post effect):`,
+        JSON.stringify(String(message).slice(0, 200))
+      );
     },
   };
 
@@ -137,6 +136,7 @@ export async function buildHttpPluginContext(
     },
   };
 
+  // Deprecated no-ops: a reducer returns `timer.set` / `timer.clear` effects instead.
   const timerContext = {
     start: async (_seconds: number): Promise<void> => {
       // intentionally empty
@@ -166,32 +166,10 @@ export async function buildHttpPluginContext(
     getParticipants: (): string[] => [...voiceSnapshot],
   };
 
-  // Faz E — persistent Postgres storage, scoped to (serverId, pluginId).
-  // When a route can't scope (no serverId/pluginId given) the plugin
-  // gets an explicit in-memory fallback so it degrades visibly instead
-  // of silently writing to another plugin's keyspace.
-  const memoryBacking = new Map<string, unknown>();
-  const scoped = input.serverId && input.pluginId;
-  const storageContext = scoped
-    ? {
-        get: (key: string) => getPluginData(input.db, input.serverId!, input.pluginId!, key),
-        set: (key: string, value: unknown) =>
-          setPluginData(input.db, input.serverId!, input.pluginId!, key, value),
-        delete: (key: string) => deletePluginData(input.db, input.serverId!, input.pluginId!, key),
-        list: () => listPluginData(input.db, input.serverId!, input.pluginId!),
-        clear: () => clearPluginData(input.db, input.serverId!, input.pluginId!),
-      }
-    : {
-        get: async (key: string) => memoryBacking.get(key),
-        set: async (key: string, value: unknown) => {
-          memoryBacking.set(key, value);
-        },
-        delete: async (key: string) => memoryBacking.delete(key),
-        list: async () => [...memoryBacking.entries()].map(([key, value]) => ({ key, value })),
-        clear: async () => {
-          memoryBacking.clear();
-        },
-      };
+  // The plugin's storage: empty until the route fills the call's snapshot
+  // (lib/activity-effects.ts setCallContext — only with the `storage`
+  // permission). A reducer cannot await a database; it writes with effects.
+  const storageContext = createStorageSnapshot({});
 
   const ctx: GamePluginContext = {
     actorUserId: input.actorUserId,
@@ -205,12 +183,11 @@ export async function buildHttpPluginContext(
     scores: scoresContext,
     voice: voiceContext,
     storage: storageContext,
+    now: Date.now(),
   };
-  // LF-SEC-010: non-enumerable scoping for the isolated worker runtime —
-  // the worker-backed plugin packages (serverId, pluginId) into its RPC
-  // envelope so ctx.storage proxies execute against the plugin's OWN
-  // keyspace. Invisible to in-process plugins (not enumerable, not in
-  // the SDK contract).
+  // Non-enumerable scope for the isolated worker runtime: the worker-backed
+  // plugin packages (serverId, pluginId) into its RPC envelope. Invisible to
+  // in-process plugins (not enumerable, not in the SDK contract).
   Object.defineProperty(ctx, '__lfScope', {
     value: { serverId: input.serverId, pluginId: input.pluginId },
     enumerable: false,

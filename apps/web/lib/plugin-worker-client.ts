@@ -17,21 +17,36 @@
  *  - A reducer that returns its input state (a refused action) is reported
  *    by the worker as `unchanged`; handleAction then returns the SAME state
  *    object, so the actions route records nothing (no roster join, no audit).
+ *  - Host effects (docs/PLUGIN_SDK.md "Effects"): the worker answers
+ *    `{ result, effects }` (or `{ unchanged, effects }`) when the reducer
+ *    returned `{ __lf: 1, state, effects }`; createInitialState and
+ *    handleAction then return the SDK envelope (`withEffects`), which the
+ *    routes unwrap and validate like an official plugin's. The plugin's
+ *    `manifest.permissions` here are its EFFECTIVE effect permissions: what
+ *    its manifest asks for AND the instance owner approved.
  *
  * The plugin sees plain data only: `ctx` = { players, now, random(),
- * locale, sessionId, serverId, hostId, actorId }. No storage in sandbox v1.
+ * locale, sessionId, serverId, hostId, actorId, storage }, where `storage`
+ * is the snapshot of its storage in the community (sent as JSON; the VM
+ * gives the plugin `ctx.storage.get(key)` / `ctx.storage.keys()`).
  */
 import { createHmac } from 'node:crypto';
-import type { GamePluginActionPolicy, GamePluginContext, RegisteredGamePlugin } from '@lobbyforge/plugin-sdk';
+import {
+  storageSnapshotEntries,
+  type GamePluginActionPolicy,
+  type GamePluginContext,
+  type RegisteredGamePlugin,
+} from '@lobbyforge/plugin-sdk';
 import { pluginInstallDir, readInstalledSandboxBundle } from './plugin-install-layout';
-import { SANDBOX_SDK } from './sandbox-manifest';
+import { effectiveApprovals, type PluginApprovals } from './plugin-approvals';
+import { SANDBOX_SDK, type SandboxPermission } from './sandbox-manifest';
 
 /**
  * Scoped plugin-storage capability: HMAC(serverId|pluginId|expiry) over
  * LOBBYFORGE_PLUGIN_STORAGE_TOKEN, verified by /api/internal/plugin-storage.
- * Not used by sandbox v1 (plugins have no storage and the worker makes no
- * outbound calls); kept for that endpoint until a host-mediated storage
- * effect replaces it.
+ * Not used by sandbox v1: the worker makes no outbound calls, and storage
+ * is a host effect (`storage.set`) plus a snapshot sent with each call.
+ * Kept for that endpoint until it is removed.
  */
 const CAPABILITY_TTL_SECONDS = 120;
 
@@ -83,6 +98,8 @@ export interface WorkerBundleRef {
   pluginId: string;
   version: string;
   digest: string;
+  /** What the owner approved for this version (active.json); absent: nothing beyond the sandbox. */
+  approved?: PluginApprovals;
 }
 
 export interface WorkerPluginInfo {
@@ -110,6 +127,11 @@ export interface WorkerPluginInfo {
   ui: boolean;
   /** manifest.json `requiresVoiceRoom`: players must be in the activity's voice room. */
   requiresVoiceRoom?: boolean;
+  /**
+   * The host-effect permissions the plugin may use: what manifest.json asks
+   * for AND the active record approved (`effectiveApprovals`).
+   */
+  permissions?: SandboxPermission[];
   /** Which optional functions server.js defines (reported by the worker). */
   hasValidateAction: boolean;
   hasProjection: boolean;
@@ -199,6 +221,9 @@ export async function describeWorkerPlugin(ref: WorkerBundleRef, root: string = 
   if (manifest.maxPlayers !== undefined) info.maxPlayers = manifest.maxPlayers;
   if (manifest.requiresVoiceRoom !== undefined) info.requiresVoiceRoom = manifest.requiresVoiceRoom;
   if (Object.keys(localeTables).length > 0) info.localeTables = localeTables;
+  // Only what was asked for AND approved: an unapproved permission grants nothing.
+  const granted = effectiveApprovals(manifest, ref.approved).permissions;
+  if (granted && granted.length > 0) info.permissions = granted;
   return info;
 }
 
@@ -239,12 +264,28 @@ function extractEnvelope(ctx: GamePluginContext, opts: { hostDefaultsToActor: bo
   return {
     actorId: ctx.actorUserId,
     players,
-    now: typeof extra.now === 'number' ? extra.now : Date.now(),
+    now: typeof extra.now === 'number' ? extra.now : typeof ctx.now === 'number' ? ctx.now : Date.now(),
     locale: extra.locale ?? 'en',
     sessionId: extra.sessionId ?? '',
     serverId: scope.serverId ?? '',
     hostId,
+    storage: storageSnapshotEntries(ctx.storage),
   };
+}
+
+/** The worker's answer to createInitialState / handleAction. */
+interface ReducerReply {
+  result?: unknown;
+  unchanged?: boolean;
+  effects?: unknown;
+}
+
+/** A reducer reply as the routes consume it: the state, wrapped with its effects when it has any. */
+function reducerResult(reply: ReducerReply, state: unknown): unknown {
+  const next = reply.unchanged === true ? state : reply.result;
+  if (reply.effects === undefined) return next;
+  // Validated by the routes (validateEffects): here it only travels.
+  return { __lf: 1, state: next, effects: reply.effects };
 }
 
 /**
@@ -277,7 +318,9 @@ export function buildWorkerPlugin(info: WorkerPluginInfo): WorkerBackedPlugin {
       version: info.version,
       type: 'game' as const,
       minAppVersion: '0.0.0',
-      permissions: [],
+      // The EFFECTIVE effect permissions (asked for and approved): what the
+      // routes check before applying an effect (lib/activity-effects.ts).
+      permissions: [...(info.permissions ?? [])],
       locales: info.locales,
       entryClient: '',
       ...(catalog ? { catalog } : {}),
@@ -289,23 +332,24 @@ export function buildWorkerPlugin(info: WorkerPluginInfo): WorkerBackedPlugin {
     hasProjection: info.hasProjection,
     bundle: { version: info.version, digest: info.digest },
     createInitialState: async (ctx: GamePluginContext): Promise<unknown> => {
-      const { result } = await workerRpc<{ result: unknown }>({
+      const reply = await workerRpc<ReducerReply>({
         op: 'createInitialState',
         ...bundle,
         ctx: extractEnvelope(ctx, { hostDefaultsToActor: true }),
       });
-      return result;
+      return reducerResult(reply, undefined);
     },
     handleAction: async (ctx: GamePluginContext, state: unknown, action: unknown): Promise<unknown> => {
-      const reply = await workerRpc<{ result?: unknown; unchanged?: boolean }>({
+      const reply = await workerRpc<ReducerReply>({
         op: 'handleAction',
         ...bundle,
         ctx: extractEnvelope(ctx, { hostDefaultsToActor: false }),
         state,
         action,
       });
-      // The reducer returned its input: hand back the SAME object (refused).
-      return reply.unchanged === true ? state : reply.result;
+      // The reducer returned its input: hand back the SAME object (refused),
+      // with its effects when it asked for some.
+      return reducerResult(reply, state);
     },
     validateAction: info.hasValidateAction
       ? async (action: unknown): Promise<string | null> => {

@@ -16,6 +16,8 @@ import { publishActivityStateChange } from '@/lib/activity-bus';
 import { activityError } from '@/lib/activity-errors';
 import { getVoiceRoomSnapshot, isInVoice, pluginRequiresVoice } from '@/lib/activity-voice';
 import { hostViewJson, resolveActivityHost } from '@/lib/activity-host';
+import { fireDueSessionTimers } from '@/lib/activity-timers';
+import { sandboxLocaleFor } from '@/lib/plugin-projection';
 import { getPluginServer } from '@/lib/plugin-server-registry';
 
 export const dynamic = 'force-dynamic';
@@ -128,6 +130,16 @@ async function handlePost(
       }
     }
 
+    // Timers that fell due before the end still fire (their final word —
+    // a result, a chat line — is part of the game); every other pending
+    // timer is dropped with the session (endGameSession empties the list).
+    await fireDueSessionTimers({
+      db: getDb(),
+      row,
+      plugin: getPluginServer(row.pluginId),
+      hostUserId: row.createdBy ?? null,
+      locale: sandboxLocaleFor(req),
+    });
     const ended = await endGameSession(getDb(), sessionId);
     if (ended) {
       publishActivityStateChange({

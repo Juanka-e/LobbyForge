@@ -34,6 +34,25 @@ import {
 import { activityError } from '@/lib/activity-errors';
 import { getVoiceRoomSnapshot, isInVoice, pluginRequiresVoice, type VoiceRoomSnapshot } from '@/lib/activity-voice';
 import { resolveActivityHost } from '@/lib/activity-host';
+import {
+  applyPostCommitEffects,
+  effectGrantFor,
+  interpretReducerResult,
+  loadStorageEntries,
+  logRefusedEffects,
+  planEffects,
+  postCommitEffects,
+  setCallContext,
+} from '@/lib/activity-effects';
+import {
+  auditSystemActions,
+  buildSystemContext,
+  readStoredTimers,
+  runDueTimers,
+  timersDueAtJson,
+  type FiredTimers,
+} from '@/lib/activity-timers';
+import type { PendingTimer, ValidEffect } from '@lobbyforge/plugin-sdk';
 import { distributedRateLimit, rateLimitResponse, type RateLimitConfig } from '@/lib/security-headers';
 
 export const dynamic = 'force-dynamic';
@@ -93,6 +112,12 @@ async function authorizePluginAction(input: {
 }): Promise<{ ok: true; action: Record<string, unknown> } | { ok: false; response: NextResponse }> {
   const actionType = String(input.action.type);
   const policy = actionPolicyFor(input.plugin, actionType);
+
+  // A system action is the plugin's own (a timer fires it, lib/activity-timers.ts):
+  // no client may send one, whoever they are.
+  if (policy.role === 'system') {
+    return { ok: false, response: activityError(403, 'system_action', 'Only the app itself runs this action.') };
+  }
 
   // LF-014: Reject actions on ended sessions.
   // beta-review: read the ROW status. The old check read
@@ -435,17 +460,36 @@ async function handlePost(
       pendingPlayerId: joiningPlayer ? session.uid : undefined,
       voiceParticipantIds: voice?.available ? voice.participants.map((p) => p.userId) : undefined,
     });
-    // ADR-007: the sandbox ctx also carries the session, its host, the
-    // caller's language and ONE clock for the call and its CAS retries.
+    // ONE clock for the call: the reducer's `ctx.now`, the timers due by
+    // now and the base of every `afterMs`. ADR-007: the sandbox ctx also
+    // carries the session, its host and the caller's language.
+    const now = Date.now();
+    ctx2.now = now;
     const sandboxed = isWorkerBackedPlugin(plugin);
     if (sandboxed) {
       attachSandboxScope(ctx2, {
         sessionId,
         hostUserId,
         locale: sandboxLocaleFor(req),
-        now: Date.now(),
+        now,
       });
     }
+    // Host effects (lib/activity-effects.ts): what this plugin may ask for.
+    // Timers that fell due before this action run first, as system actions
+    // with no actor — their ctx is built here, before the lock (it reads
+    // the roster), for a session that has pending timers.
+    const grant = effectGrantFor(plugin);
+    const systemCtx =
+      readStoredTimers(row.timers).length > 0
+        ? await buildSystemContext({
+            db: getDb(),
+            plugin,
+            serverId,
+            sessionId,
+            hostUserId,
+            locale: sandboxLocaleFor(req),
+          })
+        : null;
     // State versioning: upgrade the persisted row to the plugin's
     // current shape before running the reducer. The reducer only
     // accepts the current shape, so without this step a session
@@ -469,8 +513,23 @@ async function handlePost(
     // skips the lock.
     const expectedRevision = (row as { revision?: number }).revision ?? 0;
     type CommittedRow = { id: string; state: Record<string, unknown>; status: string; revision: number };
+    /** Timers that fired in this call and committed (their storage and chat effects still to apply). */
+    type FiredCommit = { row: CommittedRow; fired: FiredTimers };
     type LockedOutcome =
-      | { kind: 'committed'; state: Record<string, unknown>; changed: boolean; row: CommittedRow }
+      | {
+          kind: 'committed';
+          state: Record<string, unknown>;
+          changed: boolean;
+          row: CommittedRow;
+          timers: PendingTimer[];
+          timersChanged: boolean;
+          /** The storage the effects were checked against (loaded under the lock). */
+          storage: Record<string, unknown>;
+          /** Storage and chat effects of the fired timers and the action, in order. */
+          effects: ValidEffect[];
+          audited: string[];
+        }
+      | { kind: 'refused'; reason: string; storage: Record<string, unknown>; firedCommit: FiredCommit | null }
       | { kind: 'gone' }
       | { kind: 'ended' }
       | { kind: 'conflict'; revision: number };
@@ -490,14 +549,65 @@ async function handlePost(
             : plugin.migrateState
               ? ((await plugin.migrateState(fresh.state)) as Record<string, unknown>)
               : fresh.state;
-        const nextState = (await callHandleAction(plugin, ctx2, currentState, prepared.action)) as Record<string, unknown>;
-        const cas = (await setGameSessionStateCAS(tx, sessionId, freshRevision, nextState)) as {
+        const storedTimers = readStoredTimers(fresh.timers);
+        // The plugin's storage as it stands now (empty without the permission).
+        const storage = await loadStorageEntries(tx, serverId, row.pluginId, grant);
+
+        // 1. Timers that fell due before this action, earliest first.
+        const fired = systemCtx
+          ? await runDueTimers({ plugin, grant, state: currentState, timers: storedTimers, storage, now, ctx: systemCtx })
+          : null;
+        const baseState = fired?.state ?? currentState;
+        const baseTimers = fired?.timers ?? storedTimers;
+        const baseStorage = fired?.storage ?? storage;
+        const firedCount = fired?.fired ?? 0;
+
+        // 2. The action, with its effects: all of them or none.
+        setCallContext(ctx2, { storage: baseStorage, now });
+        const result = await callHandleAction(plugin, ctx2, baseState, prepared.action);
+        const step = interpretReducerResult(result, baseState, { ...grant, now });
+        const planned = step.ok ? planEffects(step.effects, baseTimers, baseStorage) : null;
+        if (!step.ok || !planned || !planned.ok) {
+          const reason = !step.ok ? step.reason : planned && !planned.ok ? planned.reason : 'refused';
+          if (!fired || firedCount === 0) return { kind: 'refused', reason, storage, firedCommit: null };
+          // The timers fired all the same: commit them, refuse only the action.
+          const casFired = (await setGameSessionStateCAS(tx, sessionId, freshRevision, baseState, undefined, {
+            timers: baseTimers,
+          })) as { ok: boolean; row: CommittedRow | null };
+          return {
+            kind: 'refused',
+            reason,
+            storage,
+            firedCommit: casFired.ok && casFired.row ? { row: casFired.row, fired } : null,
+          };
+        }
+
+        const nextState = step.state;
+        const timersChanged = firedCount > 0 || planned.timersChanged;
+        const cas = (await setGameSessionStateCAS(
+          tx,
+          sessionId,
+          freshRevision,
+          nextState,
+          undefined,
+          timersChanged ? { timers: planned.timers } : {}
+        )) as {
           ok: boolean;
           row: CommittedRow | null;
         };
         if (cas.ok && cas.row) {
-          // Reducers return the SAME object for a refused or no-op action.
-          return { kind: 'committed', state: nextState, changed: nextState !== currentState, row: cas.row };
+          // "Same state and no effects" (a refused or no-op action) is no change.
+          return {
+            kind: 'committed',
+            state: nextState,
+            changed: step.changed,
+            row: cas.row,
+            timers: planned.timers,
+            timersChanged,
+            storage,
+            effects: [...(fired?.effects ?? []), ...postCommitEffects(step.effects)],
+            audited: fired?.audited ?? [],
+          };
         }
         if (!cas.row) return { kind: 'gone' };
         if (isTerminalSessionStatus(cas.row.status)) return { kind: 'ended' };
@@ -530,6 +640,33 @@ async function handlePost(
         { status: 409 }
       );
     }
+    if (outcome.kind === 'refused') {
+      // An invalid or unpermitted effect: the action was not applied at all.
+      await releaseClaim();
+      logRefusedEffects('action', row.pluginId, outcome.reason);
+      const firedCommit = outcome.firedCommit;
+      if (firedCommit) {
+        // Timers that were due fired and committed before the action.
+        publishActivityStateChange({
+          serverId,
+          sessionId,
+          status: firedCommit.row.status,
+          revision: firedCommit.row.revision,
+          publicSummary: { timersChanged: true },
+        });
+        auditSystemActions(getDb(), { serverId, sessionId, pluginId: row.pluginId, types: firedCommit.fired.audited });
+        await applyPostCommitEffects({
+          db: getDb(),
+          serverId,
+          pluginId: row.pluginId,
+          pluginName: plugin.manifest.name,
+          sessionId,
+          storage: outcome.storage,
+          effects: firedCommit.fired.effects,
+        });
+      }
+      return activityError(422, 'effect_refused', 'The app asked for something it may not do; the action was not applied.');
+    }
     // The transaction committed: from here on a failure must keep the claim
     // (V5-007) so a retry reconciles instead of re-running the reducer.
     committed = true;
@@ -546,6 +683,20 @@ async function handlePost(
     const deckSize = !sandboxed && Array.isArray((committedState as { deck?: unknown }).deck)
       ? ((committedState as { deck?: unknown[] }).deck as unknown[]).length
       : undefined;
+    // Storage writes and chat posts, after the commit (lib/activity-effects.ts
+    // explains the ordering and what a failure there means).
+    if (outcome.effects.length > 0) {
+      await applyPostCommitEffects({
+        db: getDb(),
+        serverId,
+        pluginId: row.pluginId,
+        pluginName: plugin.manifest.name,
+        sessionId,
+        storage: outcome.storage,
+        effects: outcome.effects,
+      });
+    }
+    auditSystemActions(getDb(), { serverId, sessionId, pluginId: row.pluginId, types: outcome.audited });
     let rosterChanged = false;
     if (joiningPlayer && stateChanged) {
       try {
@@ -557,10 +708,12 @@ async function handlePost(
     }
 
     // `rosterChanged` tells subscribers to re-read the player list (names
-    // included) — the bus itself never carries identities.
+    // included) — the bus itself never carries identities. `timersChanged`:
+    // re-read for the new due times (open panels re-read at the earliest).
     const publicSummary: Record<string, unknown> = {};
     if (deckSize !== undefined) publicSummary.deckSize = deckSize;
     if (rosterChanged) publicSummary.rosterChanged = true;
+    if (outcome.timersChanged) publicSummary.timersChanged = true;
     publishActivityStateChange({
       serverId,
       sessionId,
@@ -611,7 +764,7 @@ async function handlePost(
       );
     }
     return NextResponse.json(
-      { activity: { id: row.id, state: viewerState, status: row.status } },
+      { activity: { id: row.id, state: viewerState, status: row.status, timersDueAt: timersDueAtJson(outcome.timers) } },
       { headers: { 'Cache-Control': 'no-store' } }
     );
   } catch {

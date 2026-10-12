@@ -24,6 +24,17 @@ import { localeFromRequest } from '@/lib/i18n/server';
 import { withApiSecurity } from '@/lib/security-headers';
 import { authorizeChannelVisibility } from '@/lib/permissions';
 import { requireVisibleChannelInServer } from '@/lib/api-auth';
+import { activityError } from '@/lib/activity-errors';
+import {
+  applyPostCommitEffects,
+  effectGrantFor,
+  interpretReducerResult,
+  loadStorageEntries,
+  logRefusedEffects,
+  planEffects,
+  postCommitEffects,
+  setCallContext,
+} from '@/lib/activity-effects';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -228,7 +239,20 @@ async function handlePost(
     if (isWorkerBackedPlugin(plugin)) {
       attachSandboxScope(ctx, { locale: await localeFromRequest(req) });
     }
-    const initialState = await callCreateInitialState(plugin, ctx) as Record<string, unknown>;
+    // createInitialState may return effects too (docs/PLUGIN_SDK.md
+    // "Effects"): a first timer, a storage write, a chat line. Validated like
+    // an action's — one bad effect refuses the start, nothing is created.
+    const now = Date.now();
+    const grant = effectGrantFor(plugin);
+    const storage = await loadStorageEntries(getDb(), serverId, plugin.manifest.id, grant);
+    setCallContext(ctx, { storage, now });
+    const step = interpretReducerResult(await callCreateInitialState(plugin, ctx), undefined, { ...grant, now });
+    const planned = step.ok ? planEffects(step.effects, [], storage) : null;
+    if (!step.ok || !planned || !planned.ok) {
+      logRefusedEffects('start', plugin.manifest.id, !step.ok ? step.reason : planned && !planned.ok ? planned.reason : 'refused');
+      return activityError(422, 'effect_refused', 'The app asked for something it may not do; the activity was not started.');
+    }
+    const initialState = step.state;
 
     let created: Awaited<ReturnType<typeof createGameSession>>;
     try {
@@ -238,6 +262,7 @@ async function handlePost(
         pluginId: plugin.manifest.id,
         createdBy: session.uid,
         state: initialState,
+        timers: planned.timers,
       });
     } catch (err) {
       // Two starts at once: both passed the check above, and the partial
@@ -252,6 +277,19 @@ async function handlePost(
     // player list stays empty and player-role action policies (and the
     // room panel's player count) see nobody.
     await addPlayerToSession(getDb(), created.id, session.uid);
+    // Storage writes and chat posts after the row exists (lib/activity-effects.ts).
+    const afterCommit = postCommitEffects(step.effects);
+    if (afterCommit.length > 0) {
+      await applyPostCommitEffects({
+        db: getDb(),
+        serverId,
+        pluginId: plugin.manifest.id,
+        pluginName: plugin.manifest.name,
+        sessionId: created.id,
+        storage,
+        effects: afterCommit,
+      });
+    }
     void logAction(getDb(), {
       serverId,
       actorUserId: session.uid,
