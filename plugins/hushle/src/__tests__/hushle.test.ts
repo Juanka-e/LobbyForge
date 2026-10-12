@@ -250,6 +250,15 @@ describe('@lobbyforge/hushle', () => {
     expect(harness.getState().currentExplainerId).toBe('p3');
     await harness.performAction('p1', { type: 'end-turn' });
     expect(harness.getState().currentExplainerId).toBe('p4');
+
+    // A late pick names the turn it was meant for: once that turn is over
+    // it changes nothing; the current turn's number still works.
+    const turn = harness.getState().turnNumber;
+    const before = harness.getState();
+    await harness.performAction('p1', { type: 'set-explainer', explainerId: 'p5', turnNumber: turn - 1 });
+    expect(harness.getState()).toBe(before);
+    await harness.performAction('p1', { type: 'set-explainer', explainerId: 'p5', turnNumber: turn });
+    expect(harness.getState().currentExplainerId).toBe('p5');
   });
 
   it('end-game blocks new turns but preserves scores', async () => {

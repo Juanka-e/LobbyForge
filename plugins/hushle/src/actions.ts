@@ -304,7 +304,7 @@ const CARD_ID_MAX_LENGTH = 128;
 /** The host's card moves, which may name the deal they are for (`cardSeq`). */
 const CARD_MOVES = new Set(['next-card', 'correct-guess', 'pass', 'penalty']);
 /** The host's turn moves, which may name the turn they are for (`turnNumber`). */
-const TURN_MOVES = new Set(['start-turn', 'end-turn']);
+const TURN_MOVES = new Set(['start-turn', 'end-turn', 'set-explainer']);
 
 /** A key a stale-intent check compares: absent (or null), or a non-negative integer. */
 function isIntentKeyProblem(value: unknown): boolean {
@@ -457,6 +457,9 @@ export function hushleReducer(state: HushleState, action: HushleAction): HushleS
     }
 
     case 'set-explainer': {
+      // A late pick (a double tap, host and moderator together) must not
+      // change the explainer of the turn after the one it was meant for.
+      if (isStaleTurnMove(state, action)) return state;
       if (state.phase !== 'playing' && state.phase !== 'team_setup') return state;
       // The host hands the turn to someone else; the team's rotation then
       // continues after whoever explains now.

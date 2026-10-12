@@ -474,7 +474,7 @@ describe('a running turn, seat by seat', () => {
     await panel.click(panel.button('End game'));
     expect(panel.actions).toEqual([
       { type: 'next-card', cardSeq: state.cardSeq },
-      { type: 'set-explainer', explainerId: THEO },
+      { type: 'set-explainer', explainerId: THEO, turnNumber: state.turnNumber },
       { type: 'end-turn', turnNumber: state.turnNumber },
       { type: 'end-game' },
     ]);

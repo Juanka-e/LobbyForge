@@ -481,7 +481,7 @@ function HostTools({
               label={t('hushle.host.explainer')}
               value={state.currentExplainerId ?? ''}
               onChange={(explainerId) => {
-                if (explainerId !== state.currentExplainerId) void dispatch({ type: 'set-explainer', explainerId });
+                if (explainerId !== state.currentExplainerId) void dispatch({ type: 'set-explainer', explainerId, ...turnMoveIntent(state) });
               }}
               options={candidates.map((userId) => ({ value: userId, label: playerName(players, userId, t) }))}
             />
