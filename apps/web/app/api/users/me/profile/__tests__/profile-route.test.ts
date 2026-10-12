@@ -44,6 +44,15 @@ describe('PATCH /api/users/me/profile', () => {
     expect(updateUserProfile).not.toHaveBeenCalled();
   });
 
+  it('refuses control characters in a display name, as sign-up does', async () => {
+    // (Leading and trailing whitespace, CR/LF included, is trimmed first.)
+    for (const displayName of ['Ow\nner', 'Own\u0085er', 'O\u0000wner', 'Own\u0007er']) {
+      const response = await patch({ displayName });
+      expect(response.status).toBe(400);
+    }
+    expect(updateUserProfile).not.toHaveBeenCalled();
+  });
+
   it('updates display name and status text for the current user', async () => {
     const response = await patch({ displayName: 'Updated', statusText: 'Ready' });
 

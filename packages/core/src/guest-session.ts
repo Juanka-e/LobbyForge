@@ -17,8 +17,13 @@
  *     auth_time: 1717444800    // when the SESSION was first issued (seconds)
  *   }
  *
- * The TTL defaults to 1 hour, matching the LiveKit access token TTL so the
- * two systems age out together.
+ * The TTL is 7 days and slides: every API request and page load re-signs a
+ * cookie whose remaining lifetime has dropped below half the TTL
+ * (`guestSessionNeedsRefresh`; the web app does it in `withApiSecurity` and
+ * the request proxy). Until 2026-10-13 the TTL was 1 hour and nothing
+ * refreshed a still-valid cookie, so a signed-in user was signed out after
+ * an hour. Revocation (sign out everywhere, password change) is checked
+ * server-side on every request, so a long cookie does not outlive it.
  *
  * Absolute lifetime (security follow-up 2026-10): a refresh re-signs the
  * cookie with a fresh `iat`/`exp` but copies `auth_time` unchanged, and
@@ -38,7 +43,8 @@ import {
 import { randomBytes } from 'node:crypto';
 
 export const GUEST_COOKIE_NAME = 'lf_guest';
-export const GUEST_SESSION_TTL_SECONDS = 60 * 60; // 1 hour
+/** How long a cookie stays valid without a request: 7 days (sliding). */
+export const GUEST_SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 /** Default absolute session lifetime: 30 days from `auth_time`. */
 export const GUEST_SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 
@@ -97,6 +103,23 @@ export interface GuestSessionCookieOptions {
   authTime?: number;
   /** Absolute lifetime from `authTime`. Defaults to 30 days. */
   maxAgeSeconds?: number;
+}
+
+/**
+ * Does this valid session's cookie deserve a fresh one? When less than half
+ * of the TTL is left — and only if re-signing would actually move `exp`
+ * (a session at its absolute lifetime cannot be extended).
+ */
+export function guestSessionNeedsRefresh(
+  payload: Pick<GuestPayload, 'exp' | 'auth_time'>,
+  options: { now?: number; ttlSeconds?: number; maxAgeSeconds?: number } = {}
+): boolean {
+  const now = options.now ?? Math.floor(Date.now() / 1000);
+  const ttl = options.ttlSeconds ?? GUEST_SESSION_TTL_SECONDS;
+  if (payload.exp - now >= ttl / 2) return false;
+  const maxAge = options.maxAgeSeconds ?? GUEST_SESSION_MAX_AGE_SECONDS;
+  const authTime = payload.auth_time ?? now;
+  return Math.min(now + ttl, authTime + maxAge) > payload.exp;
 }
 
 /**

@@ -78,6 +78,7 @@ import {
   readVoiceResume,
   touchVoiceResume,
   tryAcquireVoiceLock,
+  voiceAutoRetryAllowed,
   voiceResumeClearsOnDisconnect,
   voiceResumeClearsOnRefusal,
   writeLobbyView,
@@ -1995,6 +1996,9 @@ export function LobbyVoiceProvider({
       // Back in voice, or joining, already.
       if (roomRef.current || activeChannelIdRef.current) return;
       retryArmedRef.current = { ...retryArmedRef.current, [which]: false };
+      // Only shortly after the drop: a tab focused half an hour later offers
+      // the one-click return instead of joining by itself.
+      if (!voiceAutoRetryAllowed(readVoiceResume())) return;
       void returnToVoiceRef.current();
     };
     const onOnline = () => retry('online');

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { sanitizeOAuthRedirect } from '@/lib/oauth-redirect';
 import { withApiSecurity } from '@/lib/security-headers';
 import { buildGoogleAuthUrl, isGoogleOAuthConfigured } from '@/lib/oauth-google';
+import { oauthStateCookieName } from '@/lib/oauth-state-cookie';
 import { randomBytes } from 'node:crypto';
 
 export const dynamic = 'force-dynamic';
@@ -23,7 +24,7 @@ async function handleGet(req: Request): Promise<NextResponse> {
 
   const res = NextResponse.redirect(authUrl);
   // Store state + redirect target in a short-lived cookie for the callback.
-  res.cookies.set('lf_oauth_state', state, {
+  res.cookies.set(oauthStateCookieName(), state, {
     httpOnly: true,
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',

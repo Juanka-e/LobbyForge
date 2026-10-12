@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { refreshedSessionCookie } from '@/lib/session-refresh';
 import type { NextRequest } from 'next/server';
 
 /**
@@ -191,6 +192,13 @@ export async function proxy(request: NextRequest) {
   response.headers.set('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=(), payment=()');
   if (isProduction) {
     response.headers.set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+  }
+  // The sliding session on page loads (lib/session-refresh.ts). API routes
+  // refresh in withApiSecurity, which sees the answer — a sign-out must not
+  // get its cleared cookie overwritten here.
+  if (!rawUrl.pathname.startsWith('/api/')) {
+    const refreshed = refreshedSessionCookie(request.headers.get('cookie'));
+    if (refreshed) response.headers.append('Set-Cookie', refreshed);
   }
 
   return response;

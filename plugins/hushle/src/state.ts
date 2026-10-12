@@ -183,7 +183,7 @@ export type HushleAction =
    * on the turn as it stands, as older panels sent it.
    */
   | { type: 'start-turn'; teamId: string; explainerId: string | null; turnNumber?: number | null }
-  | { type: 'set-explainer'; explainerId: string | null }
+  | { type: 'set-explainer'; explainerId: string | null; turnNumber?: number | null }
   /**
    * The host's card moves. `cardSeq` is the `state.cardSeq` the button was
    * drawn for: when present and no longer current, the action is ignored

@@ -372,20 +372,35 @@ Cookie properties:
 | `SameSite` | `Lax` |
 | `Secure` | yes in production |
 | `Path` | `/` |
-| `Max-Age` | 3600 s (less when the session nears its absolute lifetime) |
+| `Max-Age` | 7 days, sliding (less when the session nears its absolute lifetime) |
 | Secret | `LOBBYFORGE_SESSION_SECRET`, at least 32 characters |
 
 `readGuestSession` verifies expiry and the HMAC using timing-safe comparison.
 Tampered or expired cookies return `null`.
 
-### Absolute session lifetime
+### Lifetime: sliding, with an absolute limit
 
-A cookie lives one hour and `POST /api/auth/guest` refreshes it. A session
-can be refreshed for at most `LOBBYFORGE_SESSION_MAX_AGE_DAYS` (default
+A cookie stays valid for **7 days without a request**, and slides: every API
+request (`withApiSecurity`, after the revocation check) and every page load
+(the request proxy) that carries a valid cookie with less than half of that
+left gets a re-signed one with the same session id (`gid`) and `auth_time`
+(`apps/web/lib/session-refresh.ts`). A refused answer, and the sign-in,
+guest and logout routes (which set or clear the cookie themselves), never
+get one. So an open tab never signs anyone out, and closing the browser for
+up to a week does not either.
+
+Until 2026-10-13 the cookie lived one hour and nothing re-signed a cookie
+that was still valid (`POST /api/auth/guest` only ran once the cookie was
+gone), so signed-in users were signed out after an hour and guests lost
+their identity.
+
+Signing out everywhere, a password change and an operator reset revoke the
+session server-side; every reader checks that, so a long cookie does not
+outlive a revocation. A session can be refreshed for at most `LOBBYFORGE_SESSION_MAX_AGE_DAYS` (default
 **30**; fractions allowed, clamped to 1 hour … 365 days; anything that is not
 a positive number falls back to 30 with a warning) after its `auth_time`:
 
-- A refresh signs `exp = min(now + 1 h, auth_time + max age)`, so no cookie
+- A refresh signs `exp = min(now + 7 days, auth_time + max age)`, so no cookie
   ever outlives the limit. Readers that only check `exp` — the ws-gateway —
   enforce it without knowing the setting.
 - The web app's `readGuestSession` (`apps/web/lib/guest-session.ts`) also
