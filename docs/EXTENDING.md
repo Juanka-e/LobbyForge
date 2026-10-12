@@ -741,6 +741,7 @@ anything you compile in the way you review your own code.
 | Your own UI | a React panel in the app | `ui/` in a sandboxed iframe (no network), postMessage protocol v1 |
 | `actionPolicies`, `validateAction` | yes | yes: policies from `manifest.json`, `validateAction` in the sandbox |
 | Hidden state per viewer | yes, with a core projection branch | yes, with the plugin's own `projectState` |
+| Name and summary in each viewer's language | `catalog.name` / `catalog.summary` in `locales/<code>.json` | the same keys in the bundle's `locales/<code>.json` ([PLUGIN_PUBLISHING.md](PLUGIN_PUBLISHING.md#locales-optional-your-name-and-description-in-every-language)) |
 | Listed in the Apps page and the activity picker | yes | no: compiled-in lists only (enable and start through the API) |
 | Isolation | none (in-process, trusted code) | QuickJS WebAssembly VM per call, inside a hardened container on a network only web joins ([ADR-007](ARCHITECTURE_DECISIONS.md#adr-007-marketplace-plugins-run-sandboxed-supersedes-the-trust-limits-of-adr-001-and-the-target-of-adr-002)) |
 | Storage, timers, chat messages | `ctx.storage` (async, unused so far); the rest are stubs | none: the state is the plugin's only memory |
@@ -760,8 +761,8 @@ operator's view.
 What exists: a **per-instance** catalog. Users submit an entry, the
 instance owner reviews it, and approval downloads the bundle and pins its
 SHA-256 and size. Install verifies those bytes, refuses anything but a
-`sdk: "sandbox-v1"` bundle (`manifest.json` + `server.js`, optional `ui/`)
-whose id and version match the entry, extracts it, and has the
+`sdk: "sandbox-v1"` bundle (`manifest.json` + `server.js`, optional `ui/`
+and `locales/`) whose id and version match the entry, extracts it, and has the
 `plugin-worker` load that exact version before recording it as active.
 
 How it runs:

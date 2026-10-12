@@ -758,6 +758,7 @@ anything you compile in the way you review your own code.
 | Your own UI | a React panel in the app | \`ui/\` in a sandboxed iframe (no network), postMessage protocol v1 |
 | \`actionPolicies\`, \`validateAction\` | yes | yes: policies from \`manifest.json\`, \`validateAction\` in the sandbox |
 | Hidden state per viewer | yes, with a core projection branch | yes, with the plugin's own \`projectState\` |
+| Name and summary in each viewer's language | \`catalog.name\` / \`catalog.summary\` in \`locales/<code>.json\` | the same keys in the bundle's \`locales/<code>.json\` ([PLUGIN_PUBLISHING.md](PLUGIN_PUBLISHING.md#locales-optional-your-name-and-description-in-every-language)) |
 | Listed in the Apps page and the activity picker | yes | no: compiled-in lists only (enable and start through the API) |
 | Isolation | none (in-process, trusted code) | QuickJS WebAssembly VM per call, inside a hardened container on a network only web joins ([ADR-007](ARCHITECTURE_DECISIONS.md#adr-007-marketplace-plugins-run-sandboxed-supersedes-the-trust-limits-of-adr-001-and-the-target-of-adr-002)) |
 | Storage, timers, chat messages | \`ctx.storage\` (async, unused so far); the rest are stubs | none: the state is the plugin's only memory |
@@ -777,8 +778,8 @@ operator's view.
 What exists: a **per-instance** catalog. Users submit an entry, the
 instance owner reviews it, and approval downloads the bundle and pins its
 SHA-256 and size. Install verifies those bytes, refuses anything but a
-\`sdk: "sandbox-v1"\` bundle (\`manifest.json\` + \`server.js\`, optional \`ui/\`)
-whose id and version match the entry, extracts it, and has the
+\`sdk: "sandbox-v1"\` bundle (\`manifest.json\` + \`server.js\`, optional \`ui/\`
+and \`locales/\`) whose id and version match the entry, extracts it, and has the
 \`plugin-worker\` load that exact version before recording it as active.
 
 How it runs:
@@ -2366,6 +2367,7 @@ import {
   tFor,
   loadPluginLocale,
   registerPluginLocale,
+  replacePluginLocale, // the host, for a marketplace bundle's locales/
   listPluginLocales,
   detectLocale,
   pickBestLocale,
@@ -2771,6 +2773,12 @@ The whole pattern is:
    manifest can read its English from the same file —
    \`summary: LOCALE_TABLES.en[CATALOG_SUMMARY_KEY]\`. A plugin's locale test
    treats both keys as rendered (by the host).
+   Marketplace (\`sandbox-v1\`) plugins use the same two keys: they ship
+   the same tables as \`locales/<code>.json\` in their bundle, and the host
+   validates them and registers them under the plugin's id when the
+   plugin loads (\`replacePluginLocale\`, which also drops what an older
+   version shipped). See
+   [PLUGIN_PUBLISHING.md → \`locales/\`](PLUGIN_PUBLISHING.md#locales-optional-your-name-and-description-in-every-language).
 4. \`listPluginLocales(pluginId)\` returns the locales the plugin
    actually supports in registration order (so the first registered
    is the primary fallback when the user's preference isn't shipped).
@@ -2799,6 +2807,13 @@ Why a per-plugin registry and not a single shared JSON bundle?
 
 The plugin-sdk subpath \`@lobbyforge/plugin-sdk/locale\` exports the
 same surface for callers who prefer the dedicated import path.
+
+The registry is one per process: it lives on \`globalThis\`, not in the
+module. Next evaluates the SDK once per server chunk (instrumentation,
+route handlers, pages), and the host registers a marketplace plugin's
+tables from whichever chunk loaded it; every copy of \`tFor\` sees them.
+\`replacePluginLocale(pluginId, tables)\` swaps all of a plugin's tables at
+once (\`{}\` forgets them); compiled-in plugins keep \`loadPluginLocale\`.
 
 ## Per-plugin renderClient
 
@@ -2927,12 +2942,20 @@ sandbox:
 my-plugin/
 ├── manifest.json        # … "sdk": "sandbox-v1", "ui": true
 ├── server.js            # globalThis.plugin = { createInitialState, handleAction, projectState?, … }
+├── locales/             # optional: en.json, tr.json … — catalog.name / catalog.summary for the host's screens
 └── ui/
     ├── index.html       # the entry; everything under ui/ is served
     ├── app.js
     ├── style.css
     └── lobbyforge-frame.js   # the frame client, copied in (no CDN in the sandbox)
 \`\`\`
+
+\`locales/\` is read by the host, not served to the frame: it names and
+describes the plugin in each viewer's language in the lobby, the app lists
+and the marketplace. The frame translates its own UI from strings it ships
+under \`ui/\`, in the language \`init.locale\` gives it (the example's
+\`ui/app.js\` does). See
+[PLUGIN_PUBLISHING.md → \`locales/\`](PLUGIN_PUBLISHING.md#locales-optional-your-name-and-description-in-every-language).
 
 ### What the sandbox is
 
@@ -3252,6 +3275,9 @@ test on a running stack yet.
 my-game/
   manifest.json   ← metadata + action policies (data the host enforces)
   server.js       ← the game logic: plain JavaScript, no imports
+  locales/        ← optional: your name and description in each language
+    en.json
+    tr.json
   ui/             ← optional: index.html + assets for the sandboxed iframe
     index.html
 \`\`\`
@@ -3291,7 +3317,7 @@ The example in the repository is a complete, working plugin to copy:
 | \`actionPolicies\` | an object (may be empty), at most 64 action types of 1–64 characters (\`A-Z a-z 0-9 _ . : -\`). Each value: \`role\` (\`host\`, \`member\` or \`player\`), optional \`actorFields\` (up to 8 field names; not \`type\`), \`joinsRoster\` (boolean), \`audit\` (boolean), \`allowOutsideVoice\` (boolean). Unknown keys are refused, so a typo cannot silently fall back to host-only. |
 | \`minPlayers\`, \`maxPlayers\` | optional integers 1–500, min ≤ max. |
 | \`requiresVoiceRoom\` | optional \`true\` / \`false\` (default \`false\`). \`true\`: the game is played over voice — the host refuses \`member\` / \`player\` actions from anyone who is not in the activity's voice room (403, \`code: "voice_required"\`), except actions marked \`allowOutsideVoice\` (leaving). Reading the state (spectating) is never voice-checked, nor are \`host\` actions. It also turns on host hand-over when the host leaves the room ([PLUGIN_SDK.md → Voice, hosting and play again](PLUGIN_SDK.md#voice-hosting-and-play-again)). |
-| \`locales\` | optional, 1–32 language codes (\`en\`, \`pt-BR\`); defaults to \`["en"]\`. |
+| \`locales\` | optional, 1–32 language codes (\`en\`, \`pt-BR\`); defaults to \`["en"]\`. With a \`locales/\` folder the languages come from its files, and a list here must name exactly those codes ([\`locales/\`](#locales-optional-your-name-and-description-in-every-language)). |
 
 Unknown top-level keys are ignored. The manifest is validated by the
 installer and again every time the plugin loads; the host enforces **the
@@ -3372,7 +3398,7 @@ Rules the sandbox enforces:
 | \`hostId\` | the activity's host (its creator) |
 | \`now\` | the server clock, ms |
 | \`random()\` | CSPRNG floats, see above |
-| \`locale\` | the caller's language as a hint (\`en\`, \`tr\`, …) |
+| \`locale\` | the caller's language as a hint (\`en\`, \`tr\`, …); in \`createInitialState\`, the language of whoever started the activity |
 | \`sessionId\`, \`serverId\` | ids of the activity and the community |
 
 \`projectState(state, viewerId, ctx)\` gets only \`ctx.sessionId\`,
@@ -3405,6 +3431,75 @@ plugin UI (sandboxed iframe)" in [PLUGIN_SDK.md](PLUGIN_SDK.md). Inside
 the frame there is no network (\`connect-src 'none'\`) and no external
 script or stylesheet.
 
+### \`locales/\` (optional): your name and description in every language
+
+The host names your plugin in the lobby's activity list and header, the
+community's app list, the room picker and the marketplace page. To have
+it do that in each viewer's language, ship one table per language, the
+same files official plugins ship:
+
+\`\`\`
+my-game/
+  locales/
+    en.json
+    tr.json
+\`\`\`
+
+\`\`\`json
+{
+  "catalog.name": "Buzzer",
+  "catalog.summary": "A reaction race for voice rooms: the host opens a round, the fastest buzz wins."
+}
+\`\`\`
+
+- **\`catalog.name\`** is what the host calls your plugin; **\`catalog.summary\`**
+  is the one-line description under it. Other keys are allowed; the host
+  ignores them.
+- **Fallback:** the viewer's language, then your \`en.json\`, then
+  \`manifest.json\`'s \`name\`. A summary falls back to the text you submitted
+  with the marketplace entry on the marketplace page, and to none
+  elsewhere (the manifest has no summary). A blank value means "not
+  translated yet" and falls back the same way.
+- **When:** the tables are read when the plugin loads (install, upgrade,
+  restart). The marketplace page shows them for plugins installed on the
+  instance; an entry that is approved but not installed shows its
+  submitted text.
+- **Names:** translate a name only when the language has a natural word
+  for it and the English name has not taken hold — LobbyForge's own Poll
+  is "Anket" in Turkish and Dice Bot is "Zar", while Quiz, Watch Party and
+  Hushle stay as they are. The example's Buzzer stays "Buzzer".
+- **Your UI is separate.** The host reads these tables; the iframe does
+  not get them (it has no network, and the asset route serves only
+  \`ui/\`). Ship your UI's strings under \`ui/\` and pick them with
+  \`init.locale\`, as the example's \`ui/app.js\` does.
+
+**Languages.** Name each file by the app's code for the language: a
+viewer whose LobbyForge language is \`pt-BR\` gets \`pt-BR.json\`, not
+\`pt.json\`. The plugin's languages are the files you ship. \`"locales"\`
+in the manifest is optional: leave it out, or list exactly the codes of
+your files (in any order) — a listed language without a file, or a file
+the list leaves out, is refused, so a forgotten file shows up at install
+time. Without a \`locales/\` folder the manifest's list (default \`["en"]\`)
+stands as before.
+
+**What the installer accepts** (it checks again every time the plugin
+loads, and the worker applies the same rules):
+
+| Rule | Limit |
+|------|-------|
+| File names | \`<code>.json\` directly in \`locales/\`, the code in the app's format: \`tr\`, \`pt-BR\`, \`zh-Hans\` (lower-case language, then \`-\` subtags). Nothing else may sit in the folder: no sub-folders, no \`README\`, no dot files. One file per language (\`pt-BR.json\` and \`pt-br.json\` together are refused). |
+| Files | at most 32, each at most 128 KiB, 1 MiB together |
+| Content | a JSON object of \`"key": "text"\` pairs: flat, every value a string (a UTF-8 byte-order mark is ignored) |
+| Keys | at most 1000 per file, 1–128 characters of \`A-Z a-z 0-9 _ . : - $\` (\`$status\`-style keys are metadata and never shown); never \`__proto__\`, \`constructor\` or \`prototype\` |
+| Values | at most 4096 characters; no control characters except tab and newline; the message format of the app's catalogues (\`{name}\`, \`{count, plural, one {…} other {…}}\`) |
+| \`catalog.name\` | one line, at most 80 characters (like \`name\`) |
+| \`catalog.summary\` | at most 200 characters (like the marketplace summary) |
+
+A bundle that breaks any rule is **refused as a whole** with the file and
+the problem in the message (\`locales/tr.json: "catalog.name" must be a
+string …\`); a malformed file is never silently dropped. \`pack.mjs\` checks
+the common mistakes before it packs.
+
 ## Limits
 
 | What | Limit |
@@ -3417,6 +3512,7 @@ script or stylesheet.
 | Random values | 1024 per \`createInitialState\` / \`handleAction\` call (\`PLUGIN_RANDOM_VALUES\`) |
 | \`server.js\` | 2 MiB |
 | \`manifest.json\` | 64 KiB |
+| \`locales/\` | 32 files, 128 KiB each, 1 MiB together, 1000 keys per file (the full rules are under [\`locales/\`](#locales-optional-your-name-and-description-in-every-language)) |
 | Archive | 10 MB compressed, 50 MB unpacked, 500 entries, regular files and folders only |
 
 Keep state in kilobytes: every action and every read passes it through the
@@ -3463,8 +3559,8 @@ node examples/plugins/sandbox-buzzer/pack.mjs path/to/my-game --out dist
 \`\`\`
 
 \`pack.mjs\` has no dependencies; copy it into your project. It checks the
-manifest basics, puts \`./manifest.json\`, \`./server.js\` and \`./ui/…\` in a
-reproducible archive (same sources, same bytes, so a reviewer can rebuild
+manifest basics and the \`locales/\` files, puts \`./manifest.json\`,
+\`./server.js\`, \`./locales/…\` and \`./ui/…\` in a reproducible archive (same sources, same bytes, so a reviewer can rebuild
 the digest), and prints the SHA-256. The installer extracts with
 \`--strip-components=1\`, so the files must sit one level down, as
 \`./server.js\` — which is what \`tar -czf my-game-1.0.0.tgz -C my-game .\`
@@ -3580,8 +3676,10 @@ migrate:
 - **What review is still for.** A plugin can show misleading text inside
   its own frame, waste its own call budget (and slow other marketplace
   plugins while it does), or leak its own game's secrets through a careless
-  \`projectState\`. Review the manifest and read \`server.js\` before
-  approving.
+  \`projectState\`. Its \`locales/\` tables name it on the host's own screens
+  in every language it ships. Review the manifest, the \`locales/\` files
+  and \`server.js\` before approving. A bundle can never rename a
+  compiled-in plugin: tables for an official plugin's id are ignored.
 - **Your users' data.** The only data your code sees is its own activity
   state, the roster's ids and names, and the ids in \`ctx\`.
 `,
