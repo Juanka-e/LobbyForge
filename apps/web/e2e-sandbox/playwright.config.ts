@@ -29,13 +29,16 @@ function installUi(
   version: string,
   manifest: Record<string, unknown>,
   serverJs: string,
-  uiSource: string
+  uiSource: string,
+  localesSource?: string
 ) {
   const versionDir = join(INSTALL_DIR, pluginId, version);
   mkdirSync(join(versionDir, 'ui'), { recursive: true });
   writeFileSync(join(versionDir, 'manifest.json'), JSON.stringify(manifest));
   writeFileSync(join(versionDir, 'server.js'), serverJs);
   cpSync(uiSource, join(versionDir, 'ui'), { recursive: true });
+  // The bundle's translation tables (validated with the manifest on every read).
+  if (localesSource) cpSync(localesSource, join(versionDir, 'locales'), { recursive: true });
   writeFileSync(join(INSTALL_DIR, pluginId, 'active.json'), JSON.stringify({ version, digest: DIGEST }));
 }
 
@@ -59,7 +62,8 @@ installUi(
   BUZZER_VERSION,
   buzzerManifest,
   readFileSync(join(buzzerDir, 'server.js'), 'utf8'),
-  join(buzzerDir, 'ui')
+  join(buzzerDir, 'ui'),
+  join(buzzerDir, 'locales')
 );
 
 export default defineConfig({

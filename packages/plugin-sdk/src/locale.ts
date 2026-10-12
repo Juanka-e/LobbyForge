@@ -73,9 +73,33 @@ export type PluginLocaleLoader = () => LocaleTable;
  * The first call to `tFor(pluginId, ...)` for a given pluginId
  * materializes the plugin's tables by running every registered
  * loader. After that the cache is hot.
+ *
+ * The registry lives on `globalThis`, not in module scope. A bundler may
+ * evaluate this module more than once in one process — Next compiles it
+ * into its instrumentation, route-handler and page chunks, each with its
+ * own copy of module-level variables — and the host registers a
+ * marketplace plugin's tables from whichever chunk loaded the plugin
+ * (`replacePluginLocale`). One process-wide registry means every copy of
+ * `tFor` sees them.
  */
-const localeTables = new Map<string, Map<LocaleId, LocaleTable>>();
-const localeLoaders = new Map<string, Map<LocaleId, PluginLocaleLoader[]>>();
+interface LocaleRegistry {
+  tables: Map<string, Map<LocaleId, LocaleTable>>;
+  loaders: Map<string, Map<LocaleId, PluginLocaleLoader[]>>;
+  /** Which (pluginId, locale) slots each table object was loaded into. */
+  loaded: WeakMap<LocaleTable, Set<string>>;
+}
+
+const REGISTRY_KEY = Symbol.for('lobbyforge.plugin-sdk.locale-registry.v1');
+
+function registry(): LocaleRegistry {
+  const holder = globalThis as unknown as Record<symbol, LocaleRegistry | undefined>;
+  let current = holder[REGISTRY_KEY];
+  if (!current) {
+    current = { tables: new Map(), loaders: new Map(), loaded: new WeakMap() };
+    holder[REGISTRY_KEY] = current;
+  }
+  return current;
+}
 
 /**
  * Register a loader for a (pluginId, locale) pair. Multiple loaders
@@ -89,10 +113,11 @@ export function registerPluginLocale(
   locale: LocaleId,
   loader: PluginLocaleLoader
 ): void {
-  let perLocale = localeLoaders.get(pluginId);
+  const { loaders, tables } = registry();
+  let perLocale = loaders.get(pluginId);
   if (!perLocale) {
     perLocale = new Map();
-    localeLoaders.set(pluginId, perLocale);
+    loaders.set(pluginId, perLocale);
   }
   let arr = perLocale.get(locale);
   if (!arr) {
@@ -102,7 +127,30 @@ export function registerPluginLocale(
   arr.push(loader);
   // Tables are materialized lazily and cached; a registration after the
   // first lookup must be seen, not silently ignored.
-  localeTables.delete(pluginId);
+  tables.delete(pluginId);
+}
+
+/**
+ * Replace EVERY table registered for `pluginId` with `tables` — what the
+ * host does when it loads a marketplace plugin's `locales/*.json` from its
+ * bundle, and again when a new version replaces it: keys and languages the
+ * new bundle no longer ships disappear instead of lingering from the old
+ * one. `replacePluginLocale(id, {})` forgets the plugin's tables.
+ *
+ * Compiled-in plugins keep using `loadPluginLocale`, which adds to what
+ * is registered.
+ */
+export function replacePluginLocale(
+  pluginId: string,
+  tables: Partial<Record<LocaleId, LocaleTable>>
+): void {
+  const state = registry();
+  state.loaders.delete(pluginId);
+  state.tables.delete(pluginId);
+  for (const [locale, table] of Object.entries(tables)) {
+    if (!table) continue;
+    registerPluginLocale(pluginId, locale, () => table);
+  }
 }
 
 /**
@@ -118,27 +166,27 @@ export function loadPluginLocale(
   pluginId: string,
   tables: Partial<Record<LocaleId, LocaleTable>>
 ): void {
+  const { loaded } = registry();
   for (const [locale, table] of Object.entries(tables)) {
     if (!table) continue;
     // Idempotent per table: a plugin registers from its entry module
     // (evaluated on the server) AND its client panel (a 'use client'
     // module the server never runs), so the browser sees both calls.
-    const seen = loadedTables.get(table) ?? new Set<string>();
+    const seen = loaded.get(table) ?? new Set<string>();
     const slot = `${pluginId}\u0000${locale}`;
     if (seen.has(slot)) continue;
     seen.add(slot);
-    loadedTables.set(table, seen);
+    loaded.set(table, seen);
     registerPluginLocale(pluginId, locale, () => table);
   }
 }
 
-let loadedTables = new WeakMap<LocaleTable, Set<string>>();
-
 function materializeLocaleTables(pluginId: string): Map<LocaleId, LocaleTable> {
-  const cached = localeTables.get(pluginId);
+  const { tables, loaders: allLoaders } = registry();
+  const cached = tables.get(pluginId);
   if (cached) return cached;
   const next = new Map<LocaleId, LocaleTable>();
-  const loaders = localeLoaders.get(pluginId);
+  const loaders = allLoaders.get(pluginId);
   if (loaders) {
     for (const [locale, fns] of loaders.entries()) {
       const merged: LocaleTable = {};
@@ -162,7 +210,7 @@ function materializeLocaleTables(pluginId: string): Map<LocaleId, LocaleTable> {
       next.set(locale, merged);
     }
   }
-  localeTables.set(pluginId, next);
+  tables.set(pluginId, next);
   return next;
 }
 
@@ -179,7 +227,7 @@ function materializeLocaleTables(pluginId: string): Map<LocaleId, LocaleTable> {
  * surface here.
  */
 export function listPluginLocales(pluginId: string): LocaleId[] {
-  const loaders = localeLoaders.get(pluginId);
+  const loaders = registry().loaders.get(pluginId);
   if (loaders) return Array.from(loaders.keys());
   const tables = materializeLocaleTables(pluginId);
   return Array.from(tables.keys());
@@ -276,7 +324,8 @@ export function pickBestLocale(
  * plugin registrations. Production code should not call it.
  */
 export function __resetPluginLocaleRegistry(): void {
-  localeTables.clear();
-  localeLoaders.clear();
-  loadedTables = new WeakMap();
+  const state = registry();
+  state.tables.clear();
+  state.loaders.clear();
+  state.loaded = new WeakMap();
 }

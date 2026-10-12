@@ -44,6 +44,7 @@ import {
   tFor,
   loadPluginLocale,
   registerPluginLocale,
+  replacePluginLocale, // the host, for a marketplace bundle's locales/
   listPluginLocales,
   detectLocale,
   pickBestLocale,
@@ -449,6 +450,12 @@ The whole pattern is:
    manifest can read its English from the same file —
    `summary: LOCALE_TABLES.en[CATALOG_SUMMARY_KEY]`. A plugin's locale test
    treats both keys as rendered (by the host).
+   Marketplace (`sandbox-v1`) plugins use the same two keys: they ship
+   the same tables as `locales/<code>.json` in their bundle, and the host
+   validates them and registers them under the plugin's id when the
+   plugin loads (`replacePluginLocale`, which also drops what an older
+   version shipped). See
+   [PLUGIN_PUBLISHING.md → `locales/`](PLUGIN_PUBLISHING.md#locales-optional-your-name-and-description-in-every-language).
 4. `listPluginLocales(pluginId)` returns the locales the plugin
    actually supports in registration order (so the first registered
    is the primary fallback when the user's preference isn't shipped).
@@ -477,6 +484,13 @@ Why a per-plugin registry and not a single shared JSON bundle?
 
 The plugin-sdk subpath `@lobbyforge/plugin-sdk/locale` exports the
 same surface for callers who prefer the dedicated import path.
+
+The registry is one per process: it lives on `globalThis`, not in the
+module. Next evaluates the SDK once per server chunk (instrumentation,
+route handlers, pages), and the host registers a marketplace plugin's
+tables from whichever chunk loaded it; every copy of `tFor` sees them.
+`replacePluginLocale(pluginId, tables)` swaps all of a plugin's tables at
+once (`{}` forgets them); compiled-in plugins keep `loadPluginLocale`.
 
 ## Per-plugin renderClient
 
@@ -605,12 +619,20 @@ sandbox:
 my-plugin/
 ├── manifest.json        # … "sdk": "sandbox-v1", "ui": true
 ├── server.js            # globalThis.plugin = { createInitialState, handleAction, projectState?, … }
+├── locales/             # optional: en.json, tr.json … — catalog.name / catalog.summary for the host's screens
 └── ui/
     ├── index.html       # the entry; everything under ui/ is served
     ├── app.js
     ├── style.css
     └── lobbyforge-frame.js   # the frame client, copied in (no CDN in the sandbox)
 ```
+
+`locales/` is read by the host, not served to the frame: it names and
+describes the plugin in each viewer's language in the lobby, the app lists
+and the marketplace. The frame translates its own UI from strings it ships
+under `ui/`, in the language `init.locale` gives it (the example's
+`ui/app.js` does). See
+[PLUGIN_PUBLISHING.md → `locales/`](PLUGIN_PUBLISHING.md#locales-optional-your-name-and-description-in-every-language).
 
 ### What the sandbox is
 

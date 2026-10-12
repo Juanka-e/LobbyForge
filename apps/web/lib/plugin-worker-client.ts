@@ -23,7 +23,7 @@
  */
 import { createHmac } from 'node:crypto';
 import type { GamePluginActionPolicy, GamePluginContext, RegisteredGamePlugin } from '@lobbyforge/plugin-sdk';
-import { pluginInstallDir, readInstalledSandboxManifest } from './plugin-install-layout';
+import { pluginInstallDir, readInstalledSandboxBundle } from './plugin-install-layout';
 import { SANDBOX_SDK } from './sandbox-manifest';
 
 /**
@@ -98,7 +98,14 @@ export interface WorkerPluginInfo {
   actionPolicies: Record<string, GamePluginActionPolicy>;
   minPlayers?: number;
   maxPlayers?: number;
+  /** The plugin's languages: its locales/ files' codes, else manifest.json `locales` (default ["en"]). */
   locales: string[];
+  /**
+   * The bundle's `locales/<code>.json` tables (validated by the web app),
+   * present when it ships any. The loader registers them under the plugin's
+   * id, so `catalog.name` / `catalog.summary` translate on the host's screens.
+   */
+  localeTables?: Record<string, Record<string, string>>;
   /** The bundle ships ui/index.html for the sandboxed iframe. */
   ui: boolean;
   /** manifest.json `requiresVoiceRoom`: players must be in the activity's voice room. */
@@ -159,7 +166,7 @@ function stableJson(value: unknown): string {
  * refuses a missing version or a digest mismatch; it never picks a version.
  */
 export async function describeWorkerPlugin(ref: WorkerBundleRef, root: string = pluginInstallDir()): Promise<WorkerPluginInfo> {
-  const manifest = readInstalledSandboxManifest(root, ref.pluginId, ref.version);
+  const { manifest, localeTables } = readInstalledSandboxBundle(root, ref.pluginId, ref.version);
   const { plugin } = await workerRpc<{ plugin?: Record<string, unknown> }>({
     op: 'describe',
     pluginId: ref.pluginId,
@@ -191,6 +198,7 @@ export async function describeWorkerPlugin(ref: WorkerBundleRef, root: string = 
   if (manifest.minPlayers !== undefined) info.minPlayers = manifest.minPlayers;
   if (manifest.maxPlayers !== undefined) info.maxPlayers = manifest.maxPlayers;
   if (manifest.requiresVoiceRoom !== undefined) info.requiresVoiceRoom = manifest.requiresVoiceRoom;
+  if (Object.keys(localeTables).length > 0) info.localeTables = localeTables;
   return info;
 }
 

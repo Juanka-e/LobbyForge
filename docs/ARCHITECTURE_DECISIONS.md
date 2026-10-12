@@ -245,6 +245,13 @@ Where the implementation refines the points above:
   files; the worker's `describe` must report the same policies or the
   plugin does not load. A VM escape therefore cannot widen who may send
   which action.
+- **Translations** (added 2026-10-12): a bundle may ship
+  `locales/<code>.json`, flat string tables validated with the manifest
+  (`parseSandboxBundle`, same caps in the installer and the worker). The
+  web app registers them with the plugin SDK's process-wide locale
+  registry under the plugin's id, so the host's own screens show its
+  `catalog.name` / `catalog.summary` in each viewer's language; never
+  for the id of a compiled-in plugin. The iframe does not receive them.
 - **The gateway** (which cannot reach the worker) projects only the
   official plugins itself (`isCoreProjectedPlugin`) and asks the web app
   for every other id through `POST /api/internal/activity-projection`,

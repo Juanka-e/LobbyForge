@@ -130,6 +130,31 @@ describe('resolveBundle (sandbox-v1)', () => {
     }
   });
 
+  it('loads a bundle with valid locale tables and takes its languages from them', () => {
+    const digest = install('1.0.0', {
+      ...bundleFiles('1.0.0'),
+      'locales/en.json': JSON.stringify({ 'catalog.name': 'Game' }),
+      'locales/tr.json': JSON.stringify({ 'catalog.name': 'Oyun' }),
+    });
+    const result = resolveBundle(root, { pluginId: 'game', version: '1.0.0', digest }, new Map());
+    expect(result).toMatchObject({ ok: true });
+    if (result.ok) expect(result.manifest.locales).toEqual(['en', 'tr']);
+  });
+
+  it('refuses the locale tables the installer refuses (422), so worker and installer agree', () => {
+    const cases: Array<[string, Record<string, string>, RegExp]> = [
+      ['1.0.0', { 'locales/en.json': '{"catalog.name": 5}' }, /locales\/en\.json: "catalog\.name" must be a string/],
+      ['1.0.1', { 'locales/en_US.json': '{}' }, /locales\/en_US\.json: only <language code>\.json/],
+      ['1.0.2', { 'locales/nested/en.json': '{}' }, /locales\/nested\/en\.json/],
+    ];
+    for (const [version, files, message] of cases) {
+      const digest = install(version, { ...bundleFiles(version), ...files });
+      const result = resolveBundle(root, { pluginId: 'game', version, digest }, new Map());
+      expect(result).toMatchObject({ ok: false, status: 422 });
+      if (!result.ok) expect(result.error).toMatch(message);
+    }
+  });
+
   it('refuses a server.js over the size cap (422)', () => {
     const digest = install('1.0.0', bundleFiles('1.0.0', 'x'.repeat(MAX_SOURCE_BYTES + 1)));
     expect(resolveBundle(root, { pluginId: 'game', version: '1.0.0', digest }, new Map())).toMatchObject({ ok: false, status: 422 });

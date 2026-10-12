@@ -48,12 +48,20 @@ export default async function MarketplacePage({
   }
 
   const t = await getTranslator();
+  // An installed plugin names and describes itself in the viewer's language
+  // (its bundle's locales/ tables, registered when it loaded); anything else
+  // shows the text it was submitted with.
+  const localized = plugins.map((plugin) => ({
+    ...plugin,
+    name: pluginName(plugin.pluginId, t.locale, plugin.name),
+    summary: pluginSummary(plugin.pluginId, t.locale, plugin.summary),
+  }));
   const filtered = Boolean(category || query);
   const catalog = (
     <>
       <Controls t={t} category={category} query={query} />
-      <p className="text-sm text-text-muted mb-4">{t('hub.marketplace.count', { count: plugins.length })}</p>
-      <MarketplaceGrid plugins={plugins} filtered={filtered} />
+      <p className="text-sm text-text-muted mb-4">{t('hub.marketplace.count', { count: localized.length })}</p>
+      <MarketplaceGrid plugins={localized} filtered={filtered} />
     </>
   );
 

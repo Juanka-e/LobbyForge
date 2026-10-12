@@ -94,6 +94,28 @@ describe('describeWorkerPlugin', () => {
     });
   });
 
+  it('carries the bundle’s locales/ tables, validated from the web app’s own copy', async () => {
+    const dir = join(root, 'buzzer', '1.2.0');
+    mkdirSync(join(dir, 'locales'), { recursive: true });
+    writeFileSync(join(dir, 'locales', 'tr.json'), JSON.stringify({ 'catalog.name': 'Zil', 'catalog.summary': 'Hızlı bir oyun.' }));
+    writeFileSync(join(dir, 'locales', 'en.json'), JSON.stringify({ 'catalog.name': 'Buzzer' }));
+    const info = await describeWorkerPlugin(REF, root);
+    expect(info.locales).toEqual(['en', 'tr']);
+    expect(info.localeTables).toEqual({
+      en: { 'catalog.name': 'Buzzer' },
+      tr: { 'catalog.name': 'Zil', 'catalog.summary': 'Hızlı bir oyun.' },
+    });
+    expect(buildWorkerPlugin(info).manifest.locales).toEqual(['en', 'tr']);
+  });
+
+  it('a malformed locale file fails before the worker is asked', async () => {
+    const dir = join(root, 'buzzer', '1.2.0');
+    mkdirSync(join(dir, 'locales'), { recursive: true });
+    writeFileSync(join(dir, 'locales', 'tr.json'), JSON.stringify({ 'catalog.name': { nested: true } }));
+    await expect(describeWorkerPlugin(REF, root)).rejects.toThrow(/locales\/tr\.json/);
+    expect(calls).toHaveLength(0);
+  });
+
   it('refuses a worker that reports wider policies than the manifest (a VM escape cannot grant roles)', async () => {
     describeReply = {
       plugin: { ...(describeReply.plugin as object), actionPolicies: { ...POLICIES, reset: { role: 'member' } } },

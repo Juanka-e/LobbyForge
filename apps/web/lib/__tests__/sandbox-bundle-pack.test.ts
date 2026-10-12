@@ -88,6 +88,47 @@ describe('examples/plugins/sandbox-buzzer/pack.mjs', () => {
     expect(missingSandboxRootFiles([entry('./index.js', '0')])).toMatch(/legacy Node bundle/);
   });
 
+  it('packs the example’s locales/ tables next to the manifest', () => {
+    const dir = prepare();
+    mkdirSync(join(dir, 'locales'));
+    copyFileSync(join(EXAMPLE, 'locales', 'en.json'), join(dir, 'locales', 'en.json'));
+    copyFileSync(join(EXAMPLE, 'locales', 'tr.json'), join(dir, 'locales', 'tr.json'));
+    const run = pack(dir, join(work, 'dist'));
+    expect(run.status, run.stderr).toBe(0);
+    const summary = JSON.parse(run.stdout) as { entries: string[] };
+    expect(summary.entries).toEqual([
+      './manifest.json',
+      './server.js',
+      './locales/',
+      './locales/en.json',
+      './locales/tr.json',
+      './ui/',
+      './ui/assets/',
+      './ui/assets/app.js',
+      './ui/index.html',
+    ]);
+    const scan = scanTarEntries(readFileSync(join(work, 'dist', 'sandbox-buzzer-0.1.0.tgz')));
+    expect(scan.ok, scan.ok ? '' : scan.error).toBe(true);
+  });
+
+  it('refuses a locales/ folder the installer would refuse', () => {
+    const cases: Array<[string, Record<string, string>, RegExp]> = [
+      ['a file that is not <code>.json', { 'notes.txt': 'x' }, /only <language code>\.json/],
+      ['a nested table', { 'en.json': '{"catalog": {"name": "x"}}' }, /"catalog" must be a string/],
+      ['invalid JSON', { 'en.json': '{' }, /not valid JSON/],
+      // The example manifest lists ["en", "tr"].
+      ['a language the manifest does not list', { 'en.json': '{}', 'tr.json': '{}', 'de.json': '{}' }, /must list exactly the languages in locales\//],
+    ];
+    for (const [name, files, message] of cases) {
+      const dir = prepare();
+      mkdirSync(join(dir, 'locales'));
+      for (const [file, content] of Object.entries(files)) writeFileSync(join(dir, 'locales', file), content);
+      const run = pack(dir, join(work, 'dist'));
+      expect(run.status, name).toBe(1);
+      expect(run.stderr, name).toMatch(message);
+    }
+  });
+
   it('refuses a manifest that says ui: true when ui/index.html is missing', () => {
     const run = pack(prepare(false), join(work, 'dist'));
     expect(run.status).toBe(1);

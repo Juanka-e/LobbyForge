@@ -9,7 +9,7 @@ import {
 } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { getPluginServer, listPluginSummariesServer } from '@/lib/plugin-server-registry';
-import { pluginName } from '@/lib/plugin-catalog-text';
+import { pluginName, pluginSummary } from '@/lib/plugin-catalog-text';
 import { localeFromRequest } from '@/lib/i18n/server';
 import {
   CorePermission,
@@ -44,10 +44,15 @@ function appSummary(input: {
   install: Awaited<ReturnType<typeof getPluginInstall>>;
   locale: string;
 }) {
+  // The description in the viewer's language, resolved HERE: the clients
+  // that render this list run pluginSummary in the browser, which knows the
+  // compiled-in plugins' tables but not a marketplace bundle's locales/.
+  const summary = pluginSummary(input.plugin.id, input.locale, input.plugin.catalog?.summary ?? null);
   return {
     ...input.plugin,
     // The plugin's own catalog.name in the viewer's language ("Poll" → "Anket").
     name: pluginName(input.plugin.id, input.locale, input.plugin.name),
+    catalog: summary !== null ? { ...(input.plugin.catalog ?? {}), summary } : input.plugin.catalog,
     installed: Boolean(input.install),
     enabled: input.install?.enabled ?? false,
     settings: input.install?.settings ?? {},

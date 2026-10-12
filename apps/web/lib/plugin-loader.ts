@@ -36,6 +36,7 @@ import {
   type WorkerPluginInfo,
 } from './plugin-worker-client';
 import { listActivePlugins, pluginInstallDir, readActivePointer } from './plugin-install-layout';
+import { registerSandboxPluginLocales } from './sandbox-plugin-locales';
 
 /**
  * Loader state, kept on `globalThis` — NOT in module scope. Next compiles
@@ -117,11 +118,17 @@ export async function warmInstalledPlugins(): Promise<void> {
   }
 }
 
-/** Put (or replace) a worker-described plugin in the registry. */
+/**
+ * Put (or replace) a worker-described plugin in the registry, with its
+ * `locales/` tables: from here on its `catalog.name` / `catalog.summary`
+ * name it in each viewer's language wherever the host shows it (an older
+ * version's tables are replaced).
+ */
 export function registerDynamicPlugin(info: WorkerPluginInfo): void {
   const state = loaderState();
   state.plugins.set(info.id, buildWorkerPlugin(info));
   if (!state.loadedIds.includes(info.id)) state.loadedIds.push(info.id);
+  registerSandboxPluginLocales(info.id, info.localeTables);
 }
 
 /**

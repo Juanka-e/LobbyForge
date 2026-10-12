@@ -12,7 +12,10 @@ export const CATALOG_NAME_KEY = 'catalog.name';
  * A plugin's catalogue summary in `locale`: the plugin's own translation
  * (`catalog.summary` in its `locales/*.json`) when it ships one, else the
  * manifest's text. The plugin's tables are registered when its module
- * loads — for compiled-in plugins, via `lib/plugin-registry`.
+ * loads — for compiled-in plugins, via `lib/plugin-registry`; for
+ * marketplace plugins, from the bundle's `locales/` when the loader loads
+ * it (`lib/sandbox-plugin-locales`, server-side only: a browser caller
+ * gets the fallback it passes, so the server resolves those first).
  */
 export function pluginSummary(pluginId: string, locale: string, manifestSummary: string | null): string | null {
   const text = tFor(pluginId, locale, CATALOG_SUMMARY_KEY);

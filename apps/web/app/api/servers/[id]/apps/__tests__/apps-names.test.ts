@@ -71,3 +71,56 @@ describe('GET /api/servers/{id}/apps — app names', () => {
     expect((await names({ lang: 'de-DE' })).poll).toBe('Poll');
   });
 });
+
+describe('GET /api/servers/{id}/apps — a marketplace plugin', () => {
+  async function apps(cookie: string) {
+    const route = await import('../route.js');
+    const res = await route.GET(
+      new Request(`https://chat.example.test/api/servers/${SERVER}/apps`, {
+        headers: { cookie: [sessionCookie(), cookie].join('; ') },
+      }),
+      { params: Promise.resolve({ id: SERVER }) }
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { apps: Array<{ id: string; name: string; catalog: { summary?: string } | null }> };
+    return new Map(body.apps.map((app) => [app.id, app]));
+  }
+
+  beforeEach(async () => {
+    delete (globalThis as Record<string, unknown>).__lobbyforgeDynamicPlugins__;
+    const { registerDynamicPlugin } = await import('@/lib/plugin-loader');
+    registerDynamicPlugin({
+      id: 'market-buzzer',
+      name: 'Market Buzzer',
+      version: '1.0.0',
+      digest: 'd'.repeat(64),
+      sdk: 'sandbox-v1',
+      actionPolicies: {},
+      locales: ['en', 'tr'],
+      localeTables: {
+        en: { 'catalog.name': 'Buzzer', 'catalog.summary': 'A fast buzzer game.' },
+        tr: { 'catalog.name': 'Zil', 'catalog.summary': 'Hızlı bir zil oyunu.' },
+      },
+      ui: true,
+      hasValidateAction: false,
+      hasProjection: true,
+      hasMigrateState: false,
+    });
+  });
+
+  it('is named and described from its bundle’s locales/, resolved on the server for the browser', async () => {
+    const tr = (await apps('lf_locale=tr')).get('market-buzzer');
+    expect(tr?.name).toBe('Zil');
+    // The room picker and the server settings run pluginSummary in the
+    // browser, which never sees a marketplace bundle's tables.
+    expect(tr?.catalog?.summary).toBe('Hızlı bir zil oyunu.');
+    const en = (await apps('lf_locale=en')).get('market-buzzer');
+    expect(en?.name).toBe('Buzzer');
+    expect(en?.catalog?.summary).toBe('A fast buzzer game.');
+  });
+
+  it('keeps an official plugin’s own summary in the viewer’s language', async () => {
+    const poll = (await apps('lf_locale=tr')).get('poll');
+    expect(poll?.catalog?.summary).toMatch(/anket/i);
+  });
+});

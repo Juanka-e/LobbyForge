@@ -2,6 +2,17 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Marketplace plugins: names and summaries in every language - 2026-10-12
+
+- **Marketplace plugins:** a sandbox-v1 bundle can ship `locales/<code>.json`, the same tables official plugins ship. Its `catalog.name` and `catalog.summary` name and describe the plugin in each viewer's language in the lobby's activity list and header, the community app list, the room picker and the instance's marketplace page. `manifest.json`'s `name` stays the fallback. Adding a language to a marketplace plugin is one more file, no code. See `docs/PLUGIN_PUBLISHING.md` → `locales/`.
+- **Validation:** the installer refuses a bundle with a malformed locale file as a whole and names the file and the problem. Only `<code>.json` files directly in `locales/`, flat string values, at most 32 files of 128 KiB (1 MiB together) and 1000 keys each; `catalog.name` is one line of at most 80 characters, `catalog.summary` at most 200. The same check runs on every load and in the plugin worker; both manifest validators share one case table. `"locales"` in `manifest.json` is optional with locale files, and when given must list exactly their codes.
+- **Safety:** a bundle can never rename a compiled-in plugin: tables for an official plugin's id are ignored. A new version's tables replace the old version's.
+- **Activities:** a marketplace plugin's `createInitialState` now gets the starter's language in `ctx.locale`. It always got `en`.
+- **Plugin SDK:** the locale registry is one per process (it lives on `globalThis`), so tables the host registers in one Next chunk are seen in every other. New `replacePluginLocale(pluginId, tables)` swaps all of a plugin's tables at once.
+- **API:** `GET /api/servers/{id}/apps` returns each app's `catalog.summary` already in the viewer's language. The room picker and the server settings translate in the browser, which never sees a marketplace bundle's tables.
+- **Example:** `examples/plugins/sandbox-buzzer` ships `locales/en.json` and `locales/tr.json` ("Buzzer" in both; the summary is translated). `pack.mjs` packs `locales/` and checks it first.
+- **Upgrade notes:** no migration. Bundles without `locales/` show as before. An installed bundle that already has a `locales/` folder is now validated when it loads; if it breaks a rule it stops loading, and the log says why.
+
 ## [Unreleased] - Bots speak each viewer's language - 2026-10-12
 
 - **Built-in bots:** the Welcome Bot's default greeting, the Moderation Bot's default notice and both bots' default names now show in each member's own language. A Turkish member reads "Ayşe, Oyun Gecesi sunucusuna hoş geldin!" while an English member reads "Welcome to Oyun Gecesi, Ayşe!" in the same channel. A greeting, notice or name an admin writes is shown to everyone exactly as written. Before, the bots spoke only the instance language.

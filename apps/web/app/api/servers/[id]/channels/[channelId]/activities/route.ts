@@ -19,6 +19,8 @@ import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { getPluginServer } from '@/lib/plugin-server-registry';
 import { callCreateInitialState, buildHttpPluginContext } from '@/lib/plugin-context';
+import { attachSandboxScope, isWorkerBackedPlugin } from '@/lib/plugin-worker-client';
+import { localeFromRequest } from '@/lib/i18n/server';
 import { withApiSecurity } from '@/lib/security-headers';
 import { authorizeChannelVisibility } from '@/lib/permissions';
 import { requireVisibleChannelInServer } from '@/lib/api-auth';
@@ -220,6 +222,12 @@ async function handlePost(
       serverId,
       pluginId: plugin.manifest.id,
     });
+    // ADR-007: a marketplace plugin's createInitialState gets the starter's
+    // language in ctx.locale (as its actions get the caller's), so a game
+    // that writes text into its state starts in the right language.
+    if (isWorkerBackedPlugin(plugin)) {
+      attachSandboxScope(ctx, { locale: localeFromRequest(req) });
+    }
     const initialState = await callCreateInitialState(plugin, ctx) as Record<string, unknown>;
 
     let created: Awaited<ReturnType<typeof createGameSession>>;

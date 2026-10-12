@@ -295,13 +295,14 @@ export function registerGamePlugin<TState, TAction, TProps>(
 
 // Re-export the shared locale helper so consumers can `import { tFor,
 // loadPluginLocale, detectLocale, pickBestLocale, listPluginLocales,
-// registerPluginLocale } from '@lobbyforge/plugin-sdk'`. The dedicated
+// registerPluginLocale, replacePluginLocale } from '@lobbyforge/plugin-sdk'`. The dedicated
 // subpath `@lobbyforge/plugin-sdk/locale` exports the same surface
 // for callers who want the import path to scream "this is locale code".
 export {
   tFor,
   loadPluginLocale,
   registerPluginLocale,
+  replacePluginLocale,
   listPluginLocales,
   detectLocale,
   pickBestLocale,
