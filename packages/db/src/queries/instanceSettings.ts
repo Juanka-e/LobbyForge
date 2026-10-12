@@ -523,6 +523,53 @@ export async function setInstanceMaintenance(
   return toMaintenanceStatus(inserted);
 }
 
+// ---- Default language (0048, docs/TRANSLATING.md) ---------------------------
+
+/**
+ * The instance's saved default language, or null when none was chosen
+ * (no settings row yet included). Stored as given; the web app validates
+ * it against the installed languages on every read, so a language
+ * removed from disk later is simply ignored.
+ */
+export async function getInstanceDefaultLocaleSetting(
+  db: DbClient,
+  instanceId = DEFAULT_INSTANCE_ID
+): Promise<string | null> {
+  const [row] = await db
+    .select({ defaultLocale: instanceSettings.defaultLocale })
+    .from(instanceSettings)
+    .where(eq(instanceSettings.instanceId, instanceId))
+    .limit(1);
+  return row?.defaultLocale ?? null;
+}
+
+/**
+ * Save (or clear, with null) the instance default language. Creates the
+ * settings row when there is none, like the other instance setters.
+ * Returns the value before and after, for the audit log.
+ */
+export async function setInstanceDefaultLocale(
+  db: DbClient,
+  locale: string | null,
+  instanceId = DEFAULT_INSTANCE_ID
+): Promise<{ previous: string | null; current: string | null }> {
+  const previous = await getInstanceDefaultLocaleSetting(db, instanceId);
+  const now = new Date();
+  const [updated] = await db
+    .update(instanceSettings)
+    .set({ defaultLocale: locale, updatedAt: now })
+    .where(eq(instanceSettings.instanceId, instanceId))
+    .returning({ defaultLocale: instanceSettings.defaultLocale });
+  if (updated) return { previous, current: updated.defaultLocale };
+  const [inserted] = await db
+    .insert(instanceSettings)
+    .values({ instanceId, instanceName: DEFAULT_INSTANCE_NAME, defaultLocale: locale })
+    .onConflictDoUpdate({ target: instanceSettings.instanceId, set: { defaultLocale: locale, updatedAt: now } })
+    .returning({ defaultLocale: instanceSettings.defaultLocale });
+  if (!inserted) throw new Error('setInstanceDefaultLocale: insert returned no rows');
+  return { previous, current: inserted.defaultLocale };
+}
+
 // ---- /setup wizard (M21) -------------------------------------------------
 
 export interface InstanceSetupStatus {
@@ -617,6 +664,12 @@ export interface CompleteInstanceSetupInput {
   seoIndexingEnabled: boolean;
   seoTitle?: string | null;
   seoDescription?: string | null;
+  /**
+   * The language picked on the wizard's first step, saved as the instance
+   * default (0048). The caller validates it against the installed
+   * languages. Undefined leaves the column as it is.
+   */
+  defaultLocale?: string | null;
   now?: Date;
 }
 
@@ -649,6 +702,7 @@ export async function completeInstanceSetup(
       seoIndexingEnabled: input.seoIndexingEnabled,
       seoTitle,
       seoDescription,
+      ...(input.defaultLocale !== undefined ? { defaultLocale: input.defaultLocale } : {}),
       setupCompletedAt: now,
       bootstrapVersion: 2,
       updatedAt: now,
@@ -675,6 +729,7 @@ export async function completeInstanceSetup(
       seoIndexingEnabled: input.seoIndexingEnabled,
       seoTitle,
       seoDescription,
+      ...(input.defaultLocale !== undefined ? { defaultLocale: input.defaultLocale } : {}),
       setupCompletedAt: now,
       bootstrapVersion: 2,
     })
@@ -699,6 +754,8 @@ export interface CompleteInitialBootstrapInput extends Omit<CompleteInstanceSetu
   ownerDisplayName: string;
   ownerEmail: string;
   ownerPasswordHash: string;
+  /** The owner account's language (0048) — the wizard saves its first step here too. */
+  ownerLocale?: string | null;
 }
 
 export interface CompleteInitialBootstrapResult {
@@ -763,6 +820,7 @@ export async function completeInitialBootstrap(
           passwordHash: input.ownerPasswordHash,
           isGuest: false,
           signupChannel: 'setup',
+          ...(input.ownerLocale !== undefined ? { locale: input.ownerLocale } : {}),
           updatedAt: input.now ?? new Date(),
         })
         .where(eq(users.id, legacyOwner.id))
@@ -778,6 +836,7 @@ export async function completeInitialBootstrap(
           passwordHash: input.ownerPasswordHash,
           isGuest: false,
           signupChannel: 'setup',
+          locale: input.ownerLocale ?? null,
         })
         .returning({ id: users.id, displayName: users.displayName, email: users.email });
       if (!createdOwner?.email) throw new Error('Owner creation returned no row.');
@@ -798,6 +857,7 @@ export async function completeInitialBootstrap(
       seoIndexingEnabled: input.seoIndexingEnabled,
       seoTitle: input.seoTitle,
       seoDescription: input.seoDescription,
+      defaultLocale: input.defaultLocale,
       now: input.now,
     });
     return { setup, owner, server };
@@ -835,7 +895,7 @@ export async function getOrCreateOwnerUser(
     .values({
       displayName: trimmed,
       isGuest: false,
-      locale: input.locale ?? 'en',
+      locale: input.locale ?? null,
     })
     .returning({ id: users.id, displayName: users.displayName });
   if (!created) throw new Error('getOrCreateOwnerUser: insert returned no rows');

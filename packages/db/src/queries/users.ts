@@ -18,7 +18,8 @@ export interface UserRow {
   displayName: string;
   avatarUrl: string | null;
   bannerUrl: string | null;
-  locale: string;
+  /** The language the account chose; null = follow the browser (0048). */
+  locale: string | null;
   isGuest: boolean;
   guestKey: string | null;
   statusText: string | null;
@@ -79,7 +80,9 @@ export async function findOrCreateGuestUser(
     displayName: input.displayName,
     isGuest: true as const,
     guestKey: input.guestKey,
-    locale: input.locale ?? 'en',
+    // Null unless the caller knows an explicit choice: a guest follows its
+    // browser until it picks a language (0048).
+    locale: input.locale ?? null,
     ...(input.signupChannel ? { signupChannel: input.signupChannel } : {}),
   };
 
@@ -122,6 +125,40 @@ export async function findOrCreateGuestUser(
 export async function getUserById(db: DbClient, id: string): Promise<UserRowWithoutImages | null> {
   const found = await db.select(userColumnsWithoutImages).from(users).where(eq(users.id, id)).limit(1);
   return found[0] ?? null;
+}
+
+/**
+ * The language a live account chose (0048), or null when it never chose
+ * one, or the account is deleted or missing. One primary-key read of one
+ * column: the web app runs it once per signed-in page render to pick the
+ * page's language, so it must stay this cheap.
+ */
+export async function getUserLocale(db: DbClient, id: string): Promise<string | null> {
+  const [row] = await db
+    .select({ locale: users.locale })
+    .from(users)
+    .where(and(eq(users.id, id), isNull(users.deletedAt)))
+    .limit(1);
+  return row?.locale ?? null;
+}
+
+/**
+ * Save (or clear, with null) the language an account chose. The caller
+ * validates the code against the installed languages; this only stores
+ * it. Returns the stored value, or undefined when no live account has
+ * that id.
+ */
+export async function setUserLocale(
+  db: DbClient,
+  id: string,
+  locale: string | null
+): Promise<string | null | undefined> {
+  const [row] = await db
+    .update(users)
+    .set({ locale, updatedAt: new Date() })
+    .where(and(eq(users.id, id), isNull(users.deletedAt)))
+    .returning({ locale: users.locale });
+  return row ? row.locale : undefined;
 }
 
 /**

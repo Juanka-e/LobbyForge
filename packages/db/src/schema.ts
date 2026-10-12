@@ -30,7 +30,13 @@ export const users = pgTable('users', {
   // re-download a multi-MB image.
   avatarVersion: integer('avatar_version').default(0).notNull(),
   bannerVersion: integer('banner_version').default(0).notNull(),
-  locale: text('locale').default('en').notNull(),
+  // 0048 (docs/TRANSLATING.md): the language the account chose in
+  // Settings → Appearance, or at /setup for the owner. NULL = never chose —
+  // the account follows its browser (the lf_locale cookie, then
+  // Accept-Language), then the instance default. Before 0048 the column was
+  // NOT NULL DEFAULT 'en' and nothing wrote it, so every 'en' meant "unset"
+  // and the migration cleared them; an 'en' now is an explicit choice.
+  locale: text('locale'),
   isGuest: boolean('is_guest').default(false).notNull(),
   // Stable per-guest identifier (e.g. "g_<32hex>"). Unique so a returning
   // guest can be looked up idempotently when a server API mints a real
@@ -118,6 +124,10 @@ export const servers = pgTable('servers', {
   ownerUserId: uuid('owner_user_id').notNull().references(() => users.id),
   iconUrl: text('icon_url'),
   bannerUrl: text('banner_url'),
+  // Set on create and returned by the servers API, but read by nothing:
+  // the language a page renders in comes from the account, the browser and
+  // the INSTANCE default (instance_settings.default_locale), never from
+  // this column. Kept so the API shape does not change.
   defaultLocale: text('default_locale').default('en').notNull(),
   isPublic: boolean('is_public').default(false).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -665,6 +675,11 @@ export const instanceSettings = pgTable('instance_settings', {
   emailVerificationExistingDeadline: timestamp('email_verification_existing_deadline', { withTimezone: true }),
   disposableEmailBlock: boolean('disposable_email_block').default(false).notNull(),
   disposableEmailOverrides: jsonb('disposable_email_overrides').default({ allow: [], block: [] }).notNull(),
+  // 0048 (docs/TRANSLATING.md): the instance's default language, chosen at
+  // /setup or in Admin → Overview. NULL = not chosen: LOBBYFORGE_DEFAULT_LOCALE,
+  // then English. Read through apps/web/lib/i18n/instance-default.ts, which
+  // also ignores a code that is no longer installed.
+  defaultLocale: text('default_locale'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });

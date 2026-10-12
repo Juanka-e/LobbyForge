@@ -4,7 +4,8 @@ export interface User {
   passwordHash: string | null;
   displayName: string;
   avatarUrl: string | null;
-  locale: string;
+  /** The language the account chose; null = follow the browser (0048). */
+  locale: string | null;
   isGuest: boolean;
   statusText: string | null;
   createdAt: Date;
