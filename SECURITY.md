@@ -30,6 +30,14 @@ should keep up to date via the built-in update system (Admin → Updates).
 LobbyForge implements defense-in-depth:
 
 - **Session cookies**: HMAC-SHA256 signed, HttpOnly, SameSite=Lax, Secure in production.
+  web and the realtime gateway refuse to start with a missing, short or
+  published placeholder session secret (only the local dev stack, with
+  `LOBBYFORGE_DEV_STACK=true`, may use one); the dev stack binds `127.0.0.1` only.
+- **Image uploads**: content-sniffed format and dimensions (every GIF frame
+  inside the image), a per-user stored quota, a per-address daily byte
+  budget, and no uploads for guest accounts.
+- **Desktop app**: the window only shows the connected instance and its own
+  connect screen; other pages open in the system browser.
 - **Guest IDs**: 128-bit cryptographic randomness (`crypto.randomBytes`).
 - **Admin auth**: owner session or constant-time emergency token (≥32 chars).
 - **CSRF protection**: Fetch Metadata headers + Origin validation on all mutations.
