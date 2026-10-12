@@ -1,6 +1,17 @@
 import { ReactNode } from 'react';
+import type { ReducerResult, StorageSnapshot } from './effects.js';
 
-// Plugin Permissions as both enum-like object and union type
+/**
+ * Plugin permissions, as both an enum-like object and a union type.
+ *
+ * TIMERS, STORAGE, CHAT and VOICE_MUTE are the host-effect permissions
+ * (`./effects.ts`, docs/PLUGIN_SDK.md "Effects"): the host checks them
+ * before it applies an effect. A compiled-in plugin declares them in
+ * `manifest.permissions` (it is trusted: no approval dialog); a marketplace
+ * plugin asks for them in manifest.json and gets them only once the
+ * instance owner approved them at install. The other names describe what
+ * a plugin does and are not enforced.
+ */
 export const PluginPermission = {
   READ_ROOM_PARTICIPANTS: 'read_room_participants',
   SEND_ROOM_MESSAGE: 'send_room_message',
@@ -13,6 +24,14 @@ export const PluginPermission = {
   PLAY_AUDIO_AS_BOT: 'play_audio_as_bot',
   READ_PLUGIN_SETTINGS: 'read_plugin_settings',
   WRITE_PLUGIN_SETTINGS: 'write_plugin_settings',
+  /** Host effects `timer.set` / `timer.clear`. */
+  TIMERS: 'timers',
+  /** Host effects `storage.set` / `storage.delete`, and the `ctx.storage` snapshot. */
+  STORAGE: 'storage',
+  /** Host effect `chat.post`. */
+  CHAT: 'chat',
+  /** Reserved for the voice mute effect (not available yet). */
+  VOICE_MUTE: 'voice.mute',
 } as const;
 
 export type PluginPermission = typeof PluginPermission[keyof typeof PluginPermission];
@@ -64,6 +83,10 @@ export interface PlayersSubContext {
 }
 
 export interface MessagesSubContext {
+  /**
+   * @deprecated Only logs on the server. Return a `chat.post` effect
+   * instead: `withEffects(next, [{ type: 'chat.post', text }])`.
+   */
   sendGameMessage: (message: string) => Promise<void>;
 }
 
@@ -81,6 +104,11 @@ export interface PubSubSubContext {
   subscribe: (topic: string, callback: (data: unknown) => void) => Promise<void>;
 }
 
+/**
+ * @deprecated Does nothing. Return a `timer.set` / `timer.clear` effect
+ * instead (permission `timers`): the host fires a `role: "system"` action
+ * of the plugin when the timer is due.
+ */
 export interface TimerSubContext {
   start: (seconds: number) => Promise<void>;
   stop: () => Promise<void>;
@@ -99,22 +127,14 @@ export interface VoiceSubContext {
 }
 
 /**
- * Faz E — persistent key-value storage scoped to (server, plugin).
- * The HOST executes every operation on the plugin's behalf; community
- * plugins never receive SQL or a DbClient. Keys are
- * [a-zA-Z0-9._:-]{1,128}. Values are JSON; `set` replaces the whole
- * value (no merge). Durability: PostgreSQL, not Redis — data survives
- * restarts, and uninstall cleanup is `clear()`.
+ * Persistent key-value storage scoped to (community, plugin), as the
+ * reducer sees it: a read-only snapshot taken before the call. A reducer
+ * is synchronous, so it cannot await a database; it reads the snapshot and
+ * writes with `storage.set` / `storage.delete` effects, applied by the host
+ * once the action has committed. Empty unless the plugin has the `storage`
+ * permission.
  */
-export interface StorageSubContext {
-  get: (key: string) => Promise<unknown>;
-  set: (key: string, value: unknown) => Promise<void>;
-  delete: (key: string) => Promise<boolean>;
-  /** Every key->value in this plugin's scope (bounded by the plugin's own keyspace). */
-  list: () => Promise<Array<{ key: string; value: unknown }>>;
-  /** Wipe every key of this plugin on this server (uninstall/cleanup). */
-  clear: () => Promise<void>;
-}
+export type StorageSubContext = StorageSnapshot;
 
 // Injected by the host
 export interface GamePluginContext<TState = unknown> {
@@ -128,12 +148,28 @@ export interface GamePluginContext<TState = unknown> {
   votes: VotesSubContext;
   scores: ScoresSubContext;
   voice: VoiceSubContext;
-  /** Persistent per-(server, plugin) storage (Faz E). */
+  /** This plugin's storage in this community: a snapshot (`get`, `keys`). Write with storage effects. */
   storage: StorageSubContext;
+  /**
+   * The server clock of this call (ms). For a `role: "system"` action fired
+   * by a timer it is the timer's due time, which may lie a little in the
+   * past. Prefer it to `Date.now()` when it is set.
+   */
+  now?: number;
 }
 
 export interface GamePluginActionPolicy {
-  role: 'host' | 'member' | 'player';
+  /**
+   * Who may send the action: the session's `host` (or anyone with Start
+   * Activities), any `member` of the community, a `player` on the roster —
+   * or nobody: a `system` action is only ever run by the host itself, when
+   * a timer the plugin set is due (`timer.set`). The actions route refuses
+   * a system action from any client (403, `code: 'system_action'`); the
+   * reducer sees it with `ctx.actorUserId === ''` and `ctx.now` = the due
+   * time. `actorFields`, `joinsRoster` and `allowOutsideVoice` do not apply
+   * to it; `audit` defaults to false.
+   */
+  role: 'host' | 'member' | 'player' | 'system';
   actorFields?: string[];
   /**
    * The actor joins the session roster (`game_session_players`) when this
@@ -189,12 +225,23 @@ export function shouldAuditAction(policy: Pick<GamePluginActionPolicy, 'role' | 
   return policy.audit ?? policy.role === 'host';
 }
 
-// Main Interface GamePlugin
-export interface GamePlugin<TState = unknown, TAction = unknown, TProps = unknown> {
+/**
+ * Main interface. `TReturn` is what the two reducer functions return: the
+ * state by default; a plugin that returns host effects declares
+ * `GamePlugin<State, Action, Props, ReducerResult<State>>` and returns
+ * `withEffects(next, effects)` where it needs them (docs/PLUGIN_SDK.md,
+ * "Effects").
+ */
+export interface GamePlugin<
+  TState = unknown,
+  TAction = unknown,
+  TProps = unknown,
+  TReturn extends ReducerResult<TState> = TState,
+> {
   manifest: PluginManifest;
   actionPolicies?: Record<string, GamePluginActionPolicy>;
-  createInitialState: (ctx: GamePluginContext<TState>) => TState;
-  handleAction: (ctx: GamePluginContext<TState>, state: TState, action: TAction) => TState;
+  createInitialState: (ctx: GamePluginContext<TState>) => TReturn;
+  handleAction: (ctx: GamePluginContext<TState>, state: TState, action: TAction) => TReturn;
   /**
    * 31st-audit: OPTIONAL runtime action guard. The host's activity API
    * only validates `{ type: string }` at its boundary — plugin-specific
@@ -267,8 +314,8 @@ export interface RegisteredGamePlugin {
   renderClient: (props: unknown) => ReactNode;
 }
 
-export function registerGamePlugin<TState, TAction, TProps>(
-  plugin: GamePlugin<TState, TAction, TProps>
+export function registerGamePlugin<TState, TAction, TProps, TReturn extends ReducerResult<TState> = TState>(
+  plugin: GamePlugin<TState, TAction, TProps, TReturn>
 ): RegisteredGamePlugin {
   return {
     manifest: plugin.manifest,
@@ -292,6 +339,40 @@ export function registerGamePlugin<TState, TAction, TProps>(
     renderClient: (props) => plugin.renderClient(props as TProps),
   };
 }
+
+// Host effects: the envelope, the limits and the pure rules the host and
+// the testing harness share.
+export {
+  EFFECT_PERMISSIONS,
+  EFFECT_LIMITS,
+  TIMER_ID_RE,
+  STORAGE_KEY_RE,
+  isEffectPermission,
+  withEffects,
+  isEffectsEnvelope,
+  unwrapReducerResult,
+  validateEffects,
+  applyTimerEffects,
+  applyStorageEffects,
+  nextDueTimer,
+  chatPostsOf,
+  storageBytes,
+  createStorageSnapshot,
+  storageSnapshotEntries,
+  type EffectPermission,
+  type PluginEffect,
+  type ValidEffect,
+  type TimerAction,
+  type EffectsEnvelope,
+  type ReducerResult,
+  type PendingTimer,
+  type EffectRules,
+  type EffectsValidation,
+  type TimersResult,
+  type StorageWrite,
+  type StorageResult,
+  type StorageSnapshot,
+} from './effects.js';
 
 // Re-export the shared locale helper so consumers can `import { tFor,
 // loadPluginLocale, detectLocale, pickBestLocale, listPluginLocales,

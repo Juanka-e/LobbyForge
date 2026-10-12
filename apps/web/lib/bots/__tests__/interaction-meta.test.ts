@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readMessageInteraction, readMessageWebhook } from '../interaction-meta';
+import { readMessageApp, readMessageInteraction, readMessageWebhook } from '../interaction-meta';
 
 const botMeta = { bot: { id: 'b1', name: 'Dice', type: 'custom' } };
 
@@ -41,5 +41,23 @@ describe('readMessageWebhook', () => {
     expect(readMessageWebhook({ userId: null, botId: 'b1', metadata: { webhook } })).toBeNull();
     expect(readMessageWebhook({ userId: null, metadata: { ...botMeta, webhook } })).toBeNull();
     expect(readMessageWebhook({ userId: null, metadata: {} })).toBeNull();
+  });
+});
+
+describe('readMessageApp', () => {
+  const app = { pluginId: 'sandbox-buzzer', name: 'Sandbox Buzzer' };
+
+  it('reads the plugin of an author-less message', () => {
+    expect(readMessageApp({ userId: null, botId: null, metadata: { app } })).toEqual(app);
+    expect(readMessageApp({ userId: null, metadata: { app: { pluginId: 'quiz' } } })).toEqual({ pluginId: 'quiz', name: 'quiz' });
+  });
+
+  it('refuses what a member, a bot or a webhook post could carry', () => {
+    expect(readMessageApp({ userId: 'u1', metadata: { app } })).toBeNull();
+    expect(readMessageApp({ userId: null, botId: 'b1', metadata: { app } })).toBeNull();
+    expect(readMessageApp({ userId: null, metadata: { app, bot: { id: 'b1', name: 'B' } } })).toBeNull();
+    expect(readMessageApp({ userId: null, metadata: { app, webhook: { id: 'w', name: 'W' } } })).toBeNull();
+    expect(readMessageApp({ userId: null, metadata: { app: { name: 'no id' } } })).toBeNull();
+    expect(readMessageApp({ userId: null, metadata: {} })).toBeNull();
   });
 });

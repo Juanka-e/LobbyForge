@@ -63,17 +63,19 @@ The example in the repository is a complete, working plugin to copy:
 {
   "id": "sandbox-buzzer",
   "name": "Sandbox Buzzer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "sdk": "sandbox-v1",
   "ui": true,
   "minPlayers": 1,
   "maxPlayers": 50,
   "requiresVoiceRoom": true,
   "locales": ["en", "tr"],
+  "permissions": ["timers", "storage"],
   "actionPolicies": {
     "open-round": { "role": "host" },
     "buzz": { "role": "member", "actorFields": ["playerId"], "joinsRoster": true },
     "reveal": { "role": "host" },
+    "auto-reveal": { "role": "system" },
     "reset": { "role": "host" }
   }
 }
@@ -86,11 +88,11 @@ The example in the repository is a complete, working plugin to copy:
 | `version` | strict semver (`1.0.0`, `2.0.0-beta.1`). Must equal the catalog `version`. |
 | `sdk` | exactly `"sandbox-v1"`. |
 | `ui` | `true`, `false`, or `{ "url": "https://…" }`. `true` requires `ui/index.html`. `{ "url" }` names your own page as the UI instead (an https URL on a public host, no credentials or fragment, never on the instance's own host); the lobby frames it once the owner approves — see [Asking for more than the sandbox](#asking-for-more-than-the-sandbox) and [PLUGIN_SDK.md → Your own site as the UI](PLUGIN_SDK.md#your-own-site-as-the-ui-ui--url-). |
-| `actionPolicies` | an object (may be empty), at most 64 action types of 1–64 characters (`A-Z a-z 0-9 _ . : -`). Each value: `role` (`host`, `member` or `player`), optional `actorFields` (up to 8 field names; not `type`), `joinsRoster` (boolean), `audit` (boolean), `allowOutsideVoice` (boolean). Unknown keys are refused, so a typo cannot silently fall back to host-only. |
+| `actionPolicies` | an object (may be empty), at most 64 action types of 1–64 characters (`A-Z a-z 0-9 _ . : -`). Each value: `role` (`host`, `member`, `player` or `system`), optional `actorFields` (up to 8 field names; not `type`), `joinsRoster` (boolean), `audit` (boolean), `allowOutsideVoice` (boolean). A `system` action is never sent by a client — only the host runs it, when a timer you set falls due — so it takes no `actorFields`, `joinsRoster` or `allowOutsideVoice`. Unknown keys are refused, so a typo cannot silently fall back to host-only. |
 | `minPlayers`, `maxPlayers` | optional integers 1–500, min ≤ max. |
 | `requiresVoiceRoom` | optional `true` / `false` (default `false`). `true`: the game is played over voice — the host refuses `member` / `player` actions from anyone who is not in the activity's voice room (403, `code: "voice_required"`), except actions marked `allowOutsideVoice` (leaving). Reading the state (spectating) is never voice-checked, nor are `host` actions. It also turns on host hand-over when the host leaves the room ([PLUGIN_SDK.md → Voice, hosting and play again](PLUGIN_SDK.md#voice-hosting-and-play-again)). |
 | `network` | optional: outside origins your UI may reach, by kind — `connect`, `img`, `media`, `frame`, up to 8 each. Each is an https origin on a public host (`https://api.example.com`): no path, query, wildcard, IP address, `localhost` or local name (`.local`, `.internal`, `.lan`, `.home.arpa`). Once the owner approves them they join your frame's policy (`connect-src`, `img-src`, `media-src`, `frame-src`; [PLUGIN_SDK.md → What the sandbox is](PLUGIN_SDK.md#what-the-sandbox-is)). |
-| `permissions` | optional: host effects you use — `timers`, `storage`, `chat`, `voice.mute`. Unknown names are refused. Needs the owner's approval. |
+| `permissions` | optional: host effects you use — `timers`, `storage`, `chat` ([Effects](#effects-timers-storage-and-chat)); `voice.mute` is reserved (accepted, but its effect does not exist yet). Unknown names are refused. Needs the owner's approval. |
 | `locales` | optional, 1–32 language codes (`en`, `pt-BR`); defaults to `["en"]`. With a `locales/` folder the languages come from its files, and a list here must name exactly those codes ([`locales/`](#locales-optional-your-name-and-description-in-every-language)). |
 
 Unknown top-level keys are ignored. The manifest is validated by the
@@ -128,9 +130,13 @@ trust. What each approval unlocks:
 - **Your own page as the UI** (`ui: { "url" }`): the lobby frames that page,
   with its own origin, and shows players its address
   ([PLUGIN_SDK.md → Your own site as the UI](PLUGIN_SDK.md#your-own-site-as-the-ui-ui--url-)).
-- **Host effects** (`permissions`) arrive with phase 3 of
-  [PLUGIN_UNLOCK_PLAN.md](PLUGIN_UNLOCK_PLAN.md); until then an approved
-  `permissions` request is recorded but has no effect.
+- **Host effects** (`permissions`): your reducers may return the effects
+  each approved permission covers — `timers` (`timer.set` /
+  `timer.clear`), `storage` (`storage.set` / `storage.delete`, and the
+  `ctx.storage` snapshot), `chat` (`chat.post`) — see
+  [Effects](#effects-timers-storage-and-chat). An effect whose permission
+  was not approved refuses the action (`effect_refused`). `voice.mute` can
+  be asked for and approved, but its effect does not exist yet.
 
 For local development and tests only, `LOBBYFORGE_PLUGIN_ALLOW_LOCAL_ORIGINS=true`
 (ignored when `NODE_ENV=production`, set for both the web app and the
@@ -189,7 +195,8 @@ Rules the sandbox enforces:
   `globalThis.plugin`). Do not bundle `react` or `@lobbyforge/plugin-sdk`
   into `server.js`; neither is usable there.
 - **Synchronous.** Return values, never Promises (a Promise fails the
-  call). There are no timers.
+  call). There is no `setTimeout`: to act later, return a `timer.set`
+  effect ([Effects](#effects-timers-storage-and-chat)).
 - **JSON in, JSON out.** Arguments arrive as parsed JSON and results are
   serialised with `JSON.stringify`. `createInitialState`, `handleAction`,
   `migrateState` and `projectState` must return an **object**.
@@ -202,7 +209,8 @@ Rules the sandbox enforces:
   they run out the call fails, so shuffle large decks in one pass.
 - **Nothing persists between calls.** Each call runs in a fresh VM:
   top-level variables are re-initialised every time. The state is your
-  only memory. There is no plugin storage in sandbox v1.
+  memory; with the `storage` permission, the community's storage of your
+  plugin outlives sessions (read `ctx.storage`, write with effects).
 
 `ctx` in `createInitialState` and `handleAction`:
 
@@ -215,12 +223,62 @@ Rules the sandbox enforces:
 | `random()` | CSPRNG floats, see above |
 | `locale` | the caller's language as a hint (`en`, `tr`, …); in `createInitialState`, the language of whoever started the activity |
 | `sessionId`, `serverId` | ids of the activity and the community |
+| `storage` | `get(key)` / `keys()`: a read-only snapshot of your plugin's storage in this community (empty without the `storage` permission) |
+
+For a `system` action (a timer firing) `actorId` is `null` and `now` is the
+timer's due time.
 
 `projectState(state, viewerId, ctx)` gets only `ctx.sessionId`,
 `ctx.serverId`, `ctx.hostId` and `ctx.now` — no players, no locale, no
 random values — because the same projection is served over REST, SSE and
 the WebSocket gateway and must not differ between them. Localise in the
 UI, not in the projection.
+
+### Effects: timers, storage and chat
+
+`server.js` stays pure; what it wants the host to do it returns beside the
+state. There are no imports, so write the envelope yourself:
+
+```js
+function withEffects(state, effects) {
+  return { __lf: 1, state: state, effects: effects };
+}
+
+// in handleAction:
+case 'open-round': {
+  var round = state.round + 1;
+  return withEffects(
+    Object.assign({}, state, { phase: 'open', round: round, revealAt: ctx.now + 30000 }),
+    [{ type: 'timer.set', id: 'auto-reveal', afterMs: 30000, action: { type: 'auto-reveal', round: round } }]
+  );
+}
+case 'auto-reveal': // "role": "system" in actionPolicies: only the host runs it
+  if (state.phase !== 'open' || action.round !== state.round) return state;
+  return reveal(ctx, state); // may return withEffects(next, [{ type: 'storage.set', key: 'best', value: board }])
+```
+
+| Effect | Permission | Limits |
+|---|---|---|
+| `timer.set { id, afterMs \| at, action }` | `timers` | ≤ 8 pending per session, 1 s – 24 h, same `id` replaces; `action` is one of your `system` actions |
+| `timer.clear { id }` | `timers` | |
+| `storage.set { key, value }`, `storage.delete { key }` | `storage` | key `[a-zA-Z0-9._:-]{1,128}`, ≤ 64 KiB in all per community |
+| `chat.post { text }` | `chat` | ≤ 500 characters, mentions made inert, ≤ 1 per 5 s and 30 per hour per session |
+
+- One invalid or unapproved effect refuses the whole action (`422`,
+  `code: "effect_refused"`): nothing of it is applied.
+- Timers fire **lazily**: when somebody reads, acts on or ends the session
+  after the due time, the host runs the system action through
+  `handleAction` with `ctx.now` = the due time. Open panels re-read at the
+  due time, so it happens on time while anyone is watching; never early.
+- Storage writes land **after** the state commits, as one batch; a batch
+  that no longer fits by then is dropped (logged). Sessions of your plugin
+  share the storage: merge with `ctx.storage` when you write.
+- Chat lines go to the text channel the community chose for your app in
+  its settings (voice channels have no chat); with none chosen they are
+  dropped. They show your plugin's name and an APP badge.
+
+The full rules, ordering and failure cases:
+[PLUGIN_SDK.md → Effects](PLUGIN_SDK.md#effects-timers-storage-and-chat).
 
 ### Hidden information
 
@@ -471,8 +529,10 @@ migrate:
    `--format=iife --platform=neutral` if you used modules.
 3. Replace `ctx.players.list()` / `get()` with the `ctx.players` array,
    `Date.now()` with `ctx.now`, `Math.random()` with `ctx.random()`.
-   `ctx.storage`, `ctx.messages`, `ctx.timer` and the other stubs do not
-   exist in the sandbox.
+   `ctx.messages`, `ctx.timer` and the other stubs do not exist in the
+   sandbox: return `chat.post` / `timer.set` effects instead, and read
+   `ctx.storage` (a snapshot) where you awaited `ctx.storage.get()`
+   ([Effects](#effects-timers-storage-and-chat)).
 4. Make every function synchronous and return objects.
 5. If your state has secrets, add `projectState`.
 6. Drop `renderClient` and React; if you want a UI, ship `ui/` (above).

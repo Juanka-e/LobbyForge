@@ -44,7 +44,7 @@ const OWNER_PASSWORD = 'compose-e2e-owner-pw';
 const ORIGIN = { Origin: baseUrl };
 const RUN = Date.now().toString(36);
 const PLUGIN_ID = 'sandbox-buzzer';
-const PLUGIN_VERSION = '0.1.0';
+const PLUGIN_VERSION = '0.2.0';
 const APP_NAME = 'Sandbox Buzzer';
 /** How a browser fetches a frame document (the asset route checks Fetch Metadata). */
 const FRAME_FETCH = { 'Sec-Fetch-Dest': 'iframe', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Site': 'same-origin' };

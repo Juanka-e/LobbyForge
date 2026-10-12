@@ -1,0 +1,16 @@
+-- Pending timers of an activity session (docs/PLUGIN_SDK.md "Effects",
+-- docs/PLUGIN_UNLOCK_PLAN.md phase 3).
+--
+-- A plugin with the `timers` permission returns `timer.set` effects; the
+-- host keeps the pending ones here as a JSON array of
+-- { "id": text, "at": epoch ms, "action": { "type": … } } — at most 8 per
+-- session, the host enforces it. The column is written in the SAME
+-- compare-and-swap update as `state`, so a timer and the state that set it
+-- commit together. Nothing schedules them: due timers are fired lazily
+-- under the session's write lock when somebody reads, acts on or ends the
+-- session, and ending a session empties the list.
+--
+-- Expand-only and idempotent: a new column with a default, nothing dropped
+-- or rewritten. Rollback: the previous image never reads the column, so
+-- pending timers simply never fire.
+ALTER TABLE "game_sessions" ADD COLUMN IF NOT EXISTS "timers" jsonb DEFAULT '[]'::jsonb NOT NULL;

@@ -142,7 +142,11 @@ but a malicious caller shouldn't be able to cross-invoke). 60
 req/min. For a plugin that requires voice the read also applies the host
 hand-over rule and adds `host: { userId, inVoice, awaySince, transferAt,
 abandonAt, abandoned }` — see [PLUGIN_SDK.md → Voice, hosting and play
-again](./PLUGIN_SDK.md#voice-hosting-and-play-again).
+again](./PLUGIN_SDK.md#voice-hosting-and-play-again). A read also fires the
+plugin's timers that are due (under the session lock, earliest first), and
+always returns `timersDueAt` (ISO due times of the pending timers, never
+their actions) and `now` (the server clock), so an open panel re-reads at
+the earliest — see [PLUGIN_SDK.md → Effects](./PLUGIN_SDK.md#effects-timers-storage-and-chat).
 
 ### `POST /api/servers/{id]/activities/{sessionId]/actions` — dispatch
 
@@ -170,6 +174,15 @@ Before `handleAction` runs, the host evaluates the plugin's action policy:
   `voice_required`), unless the policy says `allowOutsideVoice`.
 - an ended session is 409 `session_ended`; so is any action on a finished
   game (`phase: 'ended'`) that is not one of the plugin's `restartActions`.
+- `system`: never from a client (403 `system_action`); the host runs it when
+  one of the plugin's timers falls due.
+
+The reducer may return effects with the state (`withEffects`): timers,
+storage writes, chat lines. An invalid or unpermitted one refuses the whole
+action (422 `effect_refused`). Timers that fell due before the action fire
+first, in the same write; storage writes and chat lines go after the
+commit. The response carries the new `timersDueAt`. Details:
+[PLUGIN_SDK.md → Effects](./PLUGIN_SDK.md#effects-timers-storage-and-chat).
 
 If the policy has `actorFields`, the host overwrites those fields with the
 local `session.uid`. For example, `vote.voterId`, `join.playerId`, and
@@ -184,8 +197,10 @@ the longest-present participant in the room (who may then end it as host),
 and once the session is abandoned (host gone 3 min, or 60 s with nobody to
 take over) any voice participant may end it — someone outside the room
 gets 403 `voice_required`, a participant who may not end it yet 403
-`not_host` with the `host` object. Audit `activity.end` with `{ pluginId,
-wasHost }` (+ `reason: 'abandoned'`). 10 req/min.
+`not_host` with the `host` object. Plugin timers that were already due fire
+first; every other pending timer is dropped with the session. Audit
+`activity.end` with `{ pluginId, wasHost }` (+ `reason: 'abandoned'`). 10
+req/min.
 
 ### `GET /api/plugins` — registry listing
 

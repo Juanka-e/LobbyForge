@@ -421,7 +421,7 @@ describe('locales/<code>.json in a bundle', () => {
     expect(readActivePointer(root, 'game')).toBeNull();
   });
 
-  it('activation accepts the example plugin with its English and Turkish tables', async () => {
+  it('activation accepts the example plugin with its English and Turkish tables (and its approved permissions)', async () => {
     const example = resolve(__dirname, '..', '..', '..', '..', 'examples', 'plugins', 'sandbox-buzzer');
     const files: Record<string, string> = {
       'manifest.json': readFileSync(join(example, 'manifest.json'), 'utf8'),
@@ -433,8 +433,20 @@ describe('locales/<code>.json in a bundle', () => {
     }
     const version = (JSON.parse(files['manifest.json']!) as { version: string }).version;
     const stagingDir = stage('sandbox-buzzer', files);
-    const result = await activateStagedBundle({ root, pluginId: 'sandbox-buzzer', version, stagingDir, describe: describeOk('Sandbox Buzzer') });
+    // The example asks for host effects (timers, storage): the owner approves them.
+    const describe = describeOk('Sandbox Buzzer');
+    const result = await activateStagedBundle({
+      root,
+      pluginId: 'sandbox-buzzer',
+      version,
+      stagingDir,
+      describe,
+      approve: { permissions: ['timers', 'storage'] },
+    });
     expect(result.ok, result.ok ? '' : result.error).toBe(true);
+    // The worker-backed plugin is described WITH the approval, so it grants exactly that.
+    expect(describe).toHaveBeenCalledWith(expect.objectContaining({ approved: { permissions: ['storage', 'timers'] } }));
+    expect(readActivePointer(root, 'sandbox-buzzer')?.approved).toEqual({ permissions: ['storage', 'timers'] });
     const bundle = readInstalledSandboxBundle(root, 'sandbox-buzzer', version);
     expect(Object.keys(bundle.localeTables)).toEqual(['en', 'tr']);
     expect(bundle.localeTables.tr?.['catalog.name']).toBe('Buzzer');

@@ -12,7 +12,9 @@
 #      user (tar --no-same-owner --no-same-permissions, like the installer);
 #   3. compute the bundle digest with the worker's own computeBundleDigest
 #      (per-file sha256 lines, sorted by path) and write active.json
-#      ({version, digest, activatedAt}, mode 0600);
+#      ({version, digest, activatedAt}, mode 0600), with `approved` = the
+#      permissions the manifest asks for, as the owner's approval in the
+#      marketplace would record them;
 #   4. restart web (the worker must already be healthy).
 #
 # Requires the stack started with docker-compose.e2e-plugins.yml.
@@ -31,17 +33,27 @@ docker inspect "$WORKER" --format '{{.State.Health.Status}}' | grep -q healthy \
   || { echo "plugin worker is not healthy — start the stack with docker-compose.e2e-plugins.yml" >&2; exit 1; }
 
 node "$ROOT/examples/plugins/$PLUGIN/pack.mjs" "$ROOT/examples/plugins/$PLUGIN" --out "$ROOT/examples/plugins/$PLUGIN/dist" >/dev/null
-TGZ=$(ls "$ROOT/examples/plugins/$PLUGIN/dist/"*.tgz | head -1)
 VERSION=$(node -e "console.log(require('$ROOT/examples/plugins/$PLUGIN/manifest.json').version)")
+# This version's tarball (dist/ may still hold an older one).
+TGZ="$ROOT/examples/plugins/$PLUGIN/dist/$PLUGIN-$VERSION.tgz"
+
+# What the owner's approval in the marketplace would record: the host
+# effects the manifest asks for (plugin-approvals.ts), or nothing.
+APPROVED=$(node -e "const p=[...new Set(require('$ROOT/examples/plugins/$PLUGIN/manifest.json').permissions||[])].sort(); process.stdout.write(p.length ? JSON.stringify({permissions:p}) : '')")
 docker cp "$TGZ" "$WEB:/tmp/$PLUGIN.tgz"
 
-docker exec -u node -e PLUGIN="$PLUGIN" -e VERSION="$VERSION" -e INSTALL="$INSTALL" "$WEB" sh -ec '
+docker exec -u node -e PLUGIN="$PLUGIN" -e VERSION="$VERSION" -e INSTALL="$INSTALL" -e APPROVED="$APPROVED" "$WEB" sh -ec '
   dir="$INSTALL/$PLUGIN/$VERSION"
   rm -rf "$INSTALL/$PLUGIN"
   mkdir -p "$dir"
   tar -xzf "/tmp/$PLUGIN.tgz" -C "$dir" --no-same-owner --no-same-permissions
   digest=$(node -e "import(\"/app/apps/plugin-worker/dist/bundle.js\").then(async (m) => console.log(await m.computeBundleDigest(process.argv[1])))" "$dir")
-  printf "{\"version\":\"%s\",\"digest\":\"%s\",\"activatedAt\":\"%s\"}\n" "$VERSION" "$digest" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$INSTALL/$PLUGIN/active.json.tmp"
+  now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  if [ -n "$APPROVED" ]; then
+    printf "{\"version\":\"%s\",\"digest\":\"%s\",\"activatedAt\":\"%s\",\"approved\":%s,\"approvedAt\":\"%s\"}\n" "$VERSION" "$digest" "$now" "$APPROVED" "$now" > "$INSTALL/$PLUGIN/active.json.tmp"
+  else
+    printf "{\"version\":\"%s\",\"digest\":\"%s\",\"activatedAt\":\"%s\"}\n" "$VERSION" "$digest" "$now" > "$INSTALL/$PLUGIN/active.json.tmp"
+  fi
   chmod 600 "$INSTALL/$PLUGIN/active.json.tmp"
   mv "$INSTALL/$PLUGIN/active.json.tmp" "$INSTALL/$PLUGIN/active.json"
   echo "installed $PLUGIN@$VERSION digest=$digest"

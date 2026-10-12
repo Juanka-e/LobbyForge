@@ -77,6 +77,31 @@ globalThis.plugin = {
   migrateState: function (raw) { return Object.assign({ schema: 2 }, raw); },
 };`;
 
+/** Host effects: reducers return `{ __lf: 1, state, effects }` and read the ctx.storage snapshot. */
+const EFFECTS = `
+function withEffects(state, effects) { return { __lf: 1, state: state, effects: effects }; }
+globalThis.plugin = {
+  createInitialState: function (ctx) {
+    var best = ctx.storage.get('best');
+    if (best) best.mutated = true;
+    return withEffects(
+      { best: ctx.storage.get('best') || null, keys: ctx.storage.keys(), missing: ctx.storage.get('nope') === undefined,
+        proto: ctx.storage.get('__proto__') === undefined, frozen: Object.isFrozen(ctx.storage) },
+      [{ type: 'timer.set', id: 'reveal', afterMs: 5000, action: { type: 'auto-reveal' } }]
+    );
+  },
+  handleAction: function (ctx, state, action) {
+    if (action.type === 'post') return withEffects(state, [{ type: 'chat.post', text: 'hi' }]);
+    if (action.type === 'score') {
+      return withEffects(Object.assign({}, state, { n: (state.n || 0) + 1, seen: ctx.storage.keys() }), [{ type: 'storage.set', key: 'best', value: { n: 1 } }]);
+    }
+    if (action.type === 'bad-effects') return { __lf: 1, state: Object.assign({}, state, { x: 1 }), effects: 'nope' };
+    if (action.type === 'plain') return Object.assign({}, state, { plain: true });
+    if (action.type === 'empty') return withEffects(state, []);
+    return state;
+  },
+};`;
+
 const MINIMAL = `globalThis.plugin = {
   createInitialState: function () { return { n: 0 }; },
   handleAction: function (ctx, state) { return state; },
@@ -94,6 +119,7 @@ beforeAll(async () => {
   rmSync(pluginsDir, { recursive: true, force: true });
   writePlugin('fixture-plugin', FIXTURE);
   writePlugin('minimal-plugin', MINIMAL);
+  writePlugin('effects-plugin', EFFECTS);
   writePlugin('versioned-plugin', versioned('1.9.0'), '1.9.0');
   writePlugin('versioned-plugin', versioned('1.10.0'), '1.10.0');
   writePlugin('no-reducer-plugin', 'globalThis.plugin = { createInitialState: function () { return {}; } };');
@@ -423,6 +449,68 @@ describe('plugin-worker RPC', () => {
     expect(res.status).toBe(400);
     expect((await rpc({ op: 'explode', ...bundle('fixture-plugin') })).status).toBe(400);
     expect((await rpc({ op: 'list' })).status).toBe(400);
+  });
+});
+
+describe('host effects through the sandbox', () => {
+  const STORAGE = { best: { name: 'Ayşe', ms: 312 }, 'a:key': 1 };
+
+  it('createInitialState: the envelope comes back as result + effects; ctx.storage is a read-only snapshot', async () => {
+    const { status, body } = await rpcJson<{ result: Record<string, unknown>; effects: unknown[] }>({
+      op: 'createInitialState',
+      ...bundle('effects-plugin'),
+      ctx: { ...CTX, storage: STORAGE },
+    });
+    expect(status).toBe(200);
+    // get() hands out copies: mutating one does not change the next read.
+    expect(body.result).toEqual({ best: { name: 'Ayşe', ms: 312 }, keys: ['a:key', 'best'], missing: true, proto: true, frozen: true });
+    expect(body.effects).toEqual([{ type: 'timer.set', id: 'reveal', afterMs: 5000, action: { type: 'auto-reveal' } }]);
+  });
+
+  it('handleAction: a new state with effects, the same state with effects, and a plain state', async () => {
+    const scored = await rpcJson<{ result: Record<string, unknown>; effects: unknown[] }>({
+      op: 'handleAction',
+      ...bundle('effects-plugin'),
+      ctx: { ...CTX, storage: STORAGE },
+      state: { n: 1 },
+      action: { type: 'score' },
+    });
+    expect(scored.body).toEqual({ result: { n: 2, seen: ['a:key', 'best'] }, effects: [{ type: 'storage.set', key: 'best', value: { n: 1 } }] });
+
+    const posted = await rpcJson({ op: 'handleAction', ...bundle('effects-plugin'), ctx: CTX, state: { n: 1 }, action: { type: 'post' } });
+    expect(posted).toEqual({ status: 200, body: { unchanged: true, effects: [{ type: 'chat.post', text: 'hi' }] } });
+
+    const empty = await rpcJson({ op: 'handleAction', ...bundle('effects-plugin'), ctx: CTX, state: { n: 1 }, action: { type: 'empty' } });
+    expect(empty).toEqual({ status: 200, body: { unchanged: true, effects: [] } });
+
+    const plain = await rpcJson({ op: 'handleAction', ...bundle('effects-plugin'), ctx: CTX, state: { n: 1 }, action: { type: 'plain' } });
+    expect(plain).toEqual({ status: 200, body: { result: { n: 1, plain: true } } });
+
+    const refused = await rpcJson({ op: 'handleAction', ...bundle('effects-plugin'), ctx: CTX, state: { n: 1 }, action: { type: 'other' } });
+    expect(refused).toEqual({ status: 200, body: { unchanged: true } });
+  });
+
+  it('effects that are not an array fail the call (the web app validates the rest)', async () => {
+    const { status, body } = await rpcJson<{ error: string }>({
+      op: 'handleAction',
+      ...bundle('effects-plugin'),
+      ctx: CTX,
+      state: {},
+      action: { type: 'bad-effects' },
+    });
+    expect(status).toBe(500);
+    expect(body.error).toMatch(/effects must be an array/);
+  });
+
+  it('a ctx.storage over the size cap is refused (413) before any code runs', async () => {
+    const huge = { blob: 'x'.repeat(300 * 1024) };
+    const res = await rpc({ op: 'handleAction', ...bundle('effects-plugin'), ctx: { ...CTX, storage: huge }, state: {}, action: { type: 'plain' } });
+    expect(res.status).toBe(413);
+  });
+
+  it('a plugin without the snapshot in ctx still gets an empty ctx.storage', async () => {
+    const { body } = await rpcJson<{ result: Record<string, unknown> }>({ op: 'createInitialState', ...bundle('effects-plugin'), ctx: CTX });
+    expect(body.result).toMatchObject({ best: null, keys: [], missing: true });
   });
 });
 

@@ -12,9 +12,10 @@ import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
 import { authorizeSessionChannelVisibility } from '@/lib/permissions';
 import { getPluginServer } from '@/lib/plugin-server-registry';
-import { projectStateForViewer } from '@/lib/plugin-projection';
+import { projectStateForViewer, sandboxLocaleFor } from '@/lib/plugin-projection';
 import { getVoiceRoomSnapshot, pluginRequiresVoice } from '@/lib/activity-voice';
 import { hostViewJson, resolveActivityHost } from '@/lib/activity-host';
+import { fireDueSessionTimers, readStoredTimers, timersDueAtJson } from '@/lib/activity-timers';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -133,9 +134,26 @@ async function handleGet(
     // client as `{}`).
     // After a host change the plugin's own state may have moved too
     // (`onHostChange`): read it again rather than serve the stale row.
-    const stateRow =
+    let stateRow =
       hostUserId !== (row.createdBy ?? null) ? ((await getGameSessionById(getDb(), sessionId)) ?? row) : row;
-    const state = plugin?.migrateState ? await plugin.migrateState(stateRow.state) : stateRow.state;
+    // A read is one of the moments the plugin's due timers fire (lazily,
+    // under the session lock — lib/activity-timers.ts). What fired is the
+    // state this viewer gets.
+    const now = Date.now();
+    const fired = await fireDueSessionTimers({
+      db: getDb(),
+      row: stateRow,
+      plugin,
+      hostUserId,
+      locale: sandboxLocaleFor(_req),
+      now,
+    });
+    if (fired) stateRow = fired.row;
+    const state = fired
+      ? fired.state
+      : plugin?.migrateState
+        ? await plugin.migrateState(stateRow.state)
+        : stateRow.state;
 
     // LF-001: EVERYONE gets the projection — including the host. The
     // canonical projector (lib/activity-projection.ts, shared across all
@@ -163,12 +181,17 @@ async function handleGet(
           serverId: row.serverId,
           channelId: row.channelId,
           pluginId: row.pluginId,
-          status: row.status,
+          status: stateRow.status,
           state: projectedState,
           publicSummary: row.publicSummary,
           // The host (the session's creator until hosting moves).
           createdBy: hostUserId,
           ...(host ? { host } : {}),
+          // When the plugin's pending timers fall due — never what they do.
+          // With the server's clock, so the panel re-reads at the right
+          // moment whatever its own clock says (lib/activity-next-check.ts).
+          timersDueAt: timersDueAtJson(readStoredTimers(stateRow.timers)),
+          now: new Date(now).toISOString(),
           createdAt: row.createdAt.toISOString(),
           startedAt: row.startedAt ? row.startedAt.toISOString() : null,
           players: players.map((p) => ({

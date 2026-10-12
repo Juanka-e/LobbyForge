@@ -7,11 +7,14 @@
  * - A post from an incoming channel webhook has `userId: null`, no bot, and
  *   `metadata.webhook = { id, name, username? }` (§5.1); it renders with the
  *   WEBHOOK badge.
+ * - An app message (a game plugin's `chat.post` effect, docs/PLUGIN_SDK.md
+ *   "Effects") has no user, no bot, and `metadata.app = { pluginId, name }`;
+ *   it renders with the APP badge.
  *
- * Both readers refuse what a member could forge: a message with a user
+ * The readers refuse what a member could forge: a message with a user
  * author is a member's message whatever its metadata says, an interaction
- * header only ever sits on a bot's message, and a webhook post is never a
- * bot's.
+ * header only ever sits on a bot's message, and a webhook post or an app
+ * message is never a bot's.
  */
 import { readMessageBot } from './message-meta';
 
@@ -28,6 +31,13 @@ export interface MessageWebhookInfo {
   name: string;
   /** What the chat shows: the post's `username` override, else the name ('' when neither). */
   displayName: string;
+}
+
+/** The plugin that posted an app message. */
+export interface MessageAppInfo {
+  pluginId: string;
+  /** The plugin's display name when it posted (the chat may show a translation of it). */
+  name: string;
 }
 
 type MessageLike = { userId?: string | null; botId?: string | null; metadata?: unknown };
@@ -69,4 +79,15 @@ export function readMessageWebhook(message: MessageLike): MessageWebhookInfo | n
   if (!raw) return null;
   const name = text(raw.name) ?? '';
   return { id: text(raw.id), name, displayName: text(raw.username) ?? name };
+}
+
+export function readMessageApp(message: MessageLike): MessageAppInfo | null {
+  if (message.userId) return null;
+  if (typeof message.botId === 'string' && message.botId) return null;
+  const metadata = record(message.metadata);
+  if (record(metadata?.bot) || record(metadata?.webhook)) return null;
+  const raw = record(metadata?.app);
+  const pluginId = text(raw?.pluginId);
+  if (!raw || !pluginId) return null;
+  return { pluginId, name: text(raw.name) ?? pluginId };
 }

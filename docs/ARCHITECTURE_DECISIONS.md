@@ -196,7 +196,8 @@ app's origin.
   `audit`). `ctx` carries `players`, `now` and `random()` values injected
   by the host (`random` draws from a CSPRNG-seeded list the host passes
   in), `locale`, and the session/server ids. No storage in v1 (state is
-  the plugin's only memory); a host-mediated storage effect can follow.
+  the plugin's only memory); a host-mediated storage effect can follow
+  (it did: phase 3, below).
 - `projectState` gives marketplace plugins the same per-viewer hidden
   state official plugins have: every read path (REST, SSE, gateway, action
   response) calls it for the viewer; without it the plugin's state is
@@ -258,7 +259,21 @@ Where the implementation refines the points above:
   signed with a key derived from `LOBBYFORGE_SESSION_SECRET` (which the
   gateway already holds); failure means an event without state.
 - `/api/internal/plugin-storage` and `LOBBYFORGE_PLUGIN_STORAGE_TOKEN` on
-  `web` remain but are unused until a host-mediated storage effect.
+  `web` remain but are unused: storage became a host effect (below) and
+  the worker still makes no outbound calls.
+- **Host effects** (2026-10, phase 3a of docs/PLUGIN_UNLOCK_PLAN.md):
+  `createInitialState` / `handleAction` may return `{ __lf: 1, state,
+  effects }` — `timer.set` / `timer.clear`, `storage.set` /
+  `storage.delete`, `chat.post`. They are still pure data crossing the
+  boundary: the VM returns them beside the state, and the web app
+  validates each one against the plugin's EFFECTIVE permissions (manifest
+  `permissions` asked for AND approved at install) and applies all or none
+  (`effect_refused`). Timers fire lazily under the session lock as
+  `role: "system"` actions no client can send; `ctx.storage` is a
+  read-only JSON snapshot passed in with the call, written back after the
+  commit; a chat post becomes an author-less app message in the text
+  channel the community chose. Official plugins use the same effects with
+  their manifest's permissions. Details: docs/PLUGIN_SDK.md "Effects".
 
 ### Client side — sandboxed iframe
 - A marketplace plugin may ship `ui/index.html` (+ assets). The lobby

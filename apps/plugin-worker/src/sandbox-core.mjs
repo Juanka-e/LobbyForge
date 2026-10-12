@@ -26,6 +26,14 @@
  *                         validateAction?(action), projectState?(state, viewerId, ctx),
  *                         migrateState?(raw) }
  * All functions are synchronous and return JSON-serialisable values.
+ *
+ * Host effects (docs/PLUGIN_SDK.md "Effects"): createInitialState and
+ * handleAction may return `{ __lf: 1, state, effects }`. The output then
+ * carries the effects beside the state — `{ r: state, e: effects }`, or
+ * `{ u: 1, e: effects }` when handleAction kept its input state — and the
+ * host validates them. `ctx.storage` is a read-only snapshot of the
+ * plugin's storage in the community, passed in as JSON: `get(key)` returns
+ * a copy, `keys()` the sorted keys.
  */
 import { newQuickJSWASMModuleFromVariant, newVariant } from 'quickjs-emscripten-core';
 import releaseSyncVariant from '@jitl/quickjs-wasmfile-release-sync';
@@ -63,6 +71,9 @@ const PRELUDE = `(function () {
   var stringify = JSON.stringify;
   var MathObj = Math;
   var G = globalThis;
+  var hasOwn = Object.prototype.hasOwnProperty;
+  var keysOf = Object.keys;
+  var freeze = Object.freeze;
   // No shared memory (ADR-007). QuickJS has no Atomics in this build and
   // there is no other thread to share with, but the constructor exists.
   delete G.SharedArrayBuffer;
@@ -72,6 +83,26 @@ const PRELUDE = `(function () {
   function need(plugin, name) {
     if (typeof plugin[name] !== 'function') throw new Error('plugin.' + name + ' is not a function');
     return plugin[name];
+  }
+  // The read-only storage snapshot the host sent as JSON.
+  function storageSnapshot(raw) {
+    var store = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    var keys = keysOf(store).sort();
+    return freeze({
+      get: function (key) {
+        return typeof key === 'string' && hasOwn.call(store, key) ? parse(stringify(store[key])) : undefined;
+      },
+      keys: function () {
+        return keys.slice();
+      }
+    });
+  }
+  // A reducer result: the state, and the effects when it is an envelope.
+  function unwrap(out) {
+    if (out !== null && typeof out === 'object' && !Array.isArray(out) && out.__lf === 1 && hasOwn.call(out, 'state')) {
+      return { state: out.state, effects: out.effects === undefined ? [] : out.effects, envelope: true };
+    }
+    return { state: out, effects: undefined, envelope: false };
   }
   return function lfCall(inputJson) {
     var input = parse(inputJson);
@@ -93,6 +124,7 @@ const PRELUDE = `(function () {
       throw new Error('server.js must assign globalThis.plugin = { createInitialState, handleAction, ... }');
     }
     var out;
+    var effects;
     var op = input.op;
     if (op === 'describe') {
       out = {
@@ -103,13 +135,22 @@ const PRELUDE = `(function () {
         migrateState: typeof plugin.migrateState === 'function'
       };
     } else if (op === 'createInitialState') {
-      out = need(plugin, 'createInitialState')(ctx);
+      ctx.storage = storageSnapshot(ctx.storage);
+      var initial = unwrap(need(plugin, 'createInitialState')(ctx));
+      out = initial.state;
+      effects = initial.effects;
     } else if (op === 'handleAction') {
       var state = input.state;
-      out = need(plugin, 'handleAction')(ctx, state, input.action);
+      ctx.storage = storageSnapshot(ctx.storage);
+      var next = unwrap(need(plugin, 'handleAction')(ctx, state, input.action));
+      out = next.state;
+      effects = next.effects;
       if (out === state) {
         if (exhausted) throw new Error('ctx.random(): the random values for this call are used up');
-        return '{"u":1}';
+        if (!next.envelope) return '{"u":1}';
+        var same = stringify({ u: 1, e: effects });
+        if (typeof same !== 'string') throw new Error('handleAction returned effects that are not JSON');
+        return same;
       }
     } else if (op === 'validateAction') {
       out = typeof plugin.validateAction === 'function' ? plugin.validateAction(input.action) : null;
@@ -124,7 +165,7 @@ const PRELUDE = `(function () {
       throw new Error(op + ' returned a Promise: sandbox calls are synchronous');
     }
     if (exhausted) throw new Error('ctx.random(): the random values for this call are used up');
-    var json = stringify({ r: out === undefined ? null : out });
+    var json = stringify(effects === undefined ? { r: out === undefined ? null : out } : { r: out === undefined ? null : out, e: effects });
     if (typeof json !== 'string') throw new Error(op + ' returned a value that is not JSON');
     return json;
   };

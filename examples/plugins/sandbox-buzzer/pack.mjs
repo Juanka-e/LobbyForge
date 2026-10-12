@@ -35,6 +35,9 @@ const MAX_SERVER_JS_BYTES = 2 * 1024 * 1024;
 const MAX_LOCALE_FILES = 32;
 const MAX_LOCALE_FILE_BYTES = 128 * 1024;
 const LOCALE_FILE_RE = /^([a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*)\.json$/;
+// The host effects a manifest may ask for (docs/PLUGIN_SDK.md "Effects"):
+// the instance owner approves them at install.
+const PERMISSIONS = ['timers', 'storage', 'chat', 'voice.mute'];
 
 function fail(message) {
   console.error(`pack: ${message}`);
@@ -154,6 +157,11 @@ function main() {
     fail('manifest.json: "version" must be strict semver');
   }
   if (typeof manifest.ui !== 'boolean') fail('manifest.json: "ui" must be true or false');
+  if (manifest.permissions !== undefined) {
+    if (!Array.isArray(manifest.permissions)) fail('manifest.json: "permissions" must be an array');
+    const unknown = manifest.permissions.find((name) => !PERMISSIONS.includes(name));
+    if (unknown !== undefined) fail(`manifest.json: unknown permission "${String(unknown)}" (${PERMISSIONS.join(', ')})`);
+  }
   const serverPath = join(dir, 'server.js');
   if (!existsSync(serverPath)) fail(`no server.js in ${dir}`);
   if (readFileSync(serverPath).length > MAX_SERVER_JS_BYTES) fail(`server.js is larger than ${MAX_SERVER_JS_BYTES} bytes`);
@@ -198,7 +206,14 @@ function main() {
   writeFileSync(join(out, `${fileName}.sha256`), `${sha256}  ${fileName}\n`);
   console.info(
     JSON.stringify(
-      { file: join(out, fileName), sha256, sizeBytes: gz.length, entries: files.map((f) => `./${f.path}`) },
+      {
+        file: join(out, fileName),
+        sha256,
+        sizeBytes: gz.length,
+        entries: files.map((f) => `./${f.path}`),
+        // What the instance owner will be asked to approve at install.
+        ...(Array.isArray(manifest.permissions) && manifest.permissions.length > 0 ? { permissions: [...new Set(manifest.permissions)].sort() } : {}),
+      },
       null,
       2
     )

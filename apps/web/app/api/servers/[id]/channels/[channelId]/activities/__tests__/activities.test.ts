@@ -225,6 +225,57 @@ function mockPluginInstall(overrides: Partial<{ enabled: boolean; settings: Reco
   };
 }
 
+// docs/PLUGIN_SDK.md "Effects": createInitialState may return effects too.
+describe('POST /api/servers/{id}/channels/{channelId}/activities — effects of createInitialState', () => {
+  function effectsPlugin(permissions: string[]) {
+    return {
+      ...fakePlugin,
+      manifest: { ...fakePlugin.manifest, id: 'fake', permissions },
+      actionPolicies: { ...fakePlugin.actionPolicies, tick: { role: 'system' as const } },
+      createInitialState: () => ({
+        __lf: 1,
+        state: { count: 0, armed: true },
+        effects: [{ type: 'timer.set', id: 'first', afterMs: 60_000, action: { type: 'tick' } }],
+      }),
+    };
+  }
+
+  async function start() {
+    const { POST } = await loadListRoute();
+    return POST(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}/activities`, {
+        method: 'POST',
+        headers: { cookie: makeSessionCookie() },
+        body: JSON.stringify({ pluginId: 'fake' }),
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID }) }
+    );
+  }
+
+  beforeEach(() => {
+    getServerById.mockResolvedValue(mockServer(USER_ID));
+    getUserPermissions.mockResolvedValue(['start_activity']);
+    createGameSession.mockResolvedValue(mockSession());
+  });
+
+  it('the state is unwrapped and a first timer is created with the session', async () => {
+    getPluginServer.mockImplementation((id: string) => (id === 'fake' ? (effectsPlugin(['timers']) as never) : null));
+    const res = await start();
+    expect(res.status).toBe(201);
+    const input = createGameSession.mock.calls[0]![1] as { state: unknown; timers: Array<{ id: string; at: number }> };
+    expect(input.state).toEqual({ count: 0, armed: true });
+    expect(input.timers).toEqual([expect.objectContaining({ id: 'first', action: { type: 'tick' } })]);
+  });
+
+  it('an effect the plugin may not use refuses the start: nothing is created', async () => {
+    getPluginServer.mockImplementation((id: string) => (id === 'fake' ? (effectsPlugin([]) as never) : null));
+    const res = await start();
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ code: 'effect_refused' });
+    expect(createGameSession).not.toHaveBeenCalled();
+  });
+});
+
 // Security follow-up: the /apps allow-lists are enforced at start.
 describe('POST /api/servers/{id}/channels/{channelId}/activities — app allow-lists', () => {
   const OTHER_CHANNEL = '00000000-0000-0000-0000-000000000011';

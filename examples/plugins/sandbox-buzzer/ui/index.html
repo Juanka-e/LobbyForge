@@ -29,6 +29,7 @@
       <div class="stage">
         <button class="buzz" id="buzz" type="button" disabled>Buzz!</button>
         <p class="count" id="count"></p>
+        <p class="count" id="countdown" aria-live="off"></p>
       </div>
 
       <section class="result" id="result" hidden>
@@ -40,6 +41,11 @@
       <section class="scores" id="scores" hidden>
         <h2 class="label" id="scores-label"></h2>
         <ul class="score-list" id="score-list"></ul>
+      </section>
+
+      <section class="scores" id="best" hidden>
+        <h2 class="label" id="best-label"></h2>
+        <ol class="score-list" id="best-list"></ol>
       </section>
 
       <section class="host" id="host" hidden>

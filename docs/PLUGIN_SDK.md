@@ -10,7 +10,10 @@ The `@lobbyforge/plugin-sdk` package is the contract between the web app
   host-side registry shape without exposing `any` at every call site.
 - The `createTestHarness` test helper (subpath export `@lobbyforge/plugin-sdk/testing`)
   that gives a plugin test a fully-mocked context so the plugin's
-  reducer can be exercised in isolation.
+  reducer can be exercised in isolation — effects and timers included.
+- Host effects: `withEffects` and the rules the host applies to what a
+  reducer asks for — timers, storage, chat
+  ([Effects](#effects-timers-storage-and-chat)).
 
 This document covers the SDK's surface, the `GamePlugin` contract, and
 how to author a new plugin. The HTTP host side (the routes that
@@ -36,6 +39,13 @@ import {
   type GamePluginContext,
   type GamePluginHostChange,
   registerGamePlugin,
+  // Host effects (see "Effects: timers, storage and chat"):
+  withEffects,
+  EFFECT_PERMISSIONS,
+  EFFECT_LIMITS,
+  type PluginEffect,
+  type ReducerResult,
+  type StorageSnapshot,
   CATALOG_SUMMARY_KEY,
   CATALOG_NAME_KEY,
   // M19 shared locale helper (also exported from the
@@ -59,10 +69,12 @@ import { connect, type FrameInitMessage } from '@lobbyforge/plugin-sdk/frame';
 ```
 
 The `PluginPermission` constant is an enum-like object whose values
-are short lowercase strings (`read_room_participants`,
-`send_room_message`, `manage_game_session`, etc.) that the host
-displays in the "this plugin wants to …" dialog when a server
-enables it (M17+ scope).
+are short lowercase strings. Four of them are enforced: `timers`,
+`storage`, `chat` and `voice.mute` (reserved) are the permissions the host
+checks before it applies an effect
+([Effects](#effects-timers-storage-and-chat)). The others
+(`read_room_participants`, `send_room_message`, `manage_game_session`, …)
+describe what a plugin does and grant nothing.
 
 ## Manifest fields for app catalog
 
@@ -111,11 +123,11 @@ catalog metadata alongside the stable `id`, `name`, `version`, and `type`.
 ## The `GamePlugin<TState, TAction, TProps>` contract
 
 ```ts
-interface GamePlugin<TState = unknown, TAction = unknown, TProps = unknown> {
+interface GamePlugin<TState = unknown, TAction = unknown, TProps = unknown, TReturn = TState> {
   manifest: PluginManifest;
   actionPolicies?: Record<string, GamePluginActionPolicy>;
-  createInitialState: (ctx: GamePluginContext<TState>) => TState;
-  handleAction: (ctx: GamePluginContext<TState>, state: TState, action: TAction) => TState;
+  createInitialState: (ctx: GamePluginContext<TState>) => TReturn;
+  handleAction: (ctx: GamePluginContext<TState>, state: TState, action: TAction) => TReturn;
   validateAction?: (action: unknown) => string | null;
   restartActions?: readonly string[];
   onHostChange?: (state: TState, change: GamePluginHostChange) => TState;
@@ -134,6 +146,10 @@ interface GamePlugin<TState = unknown, TAction = unknown, TProps = unknown> {
   `setGameSessionState` writes. Most plugins (quiz included) treat
   this as a `switch (action.type)` and never touch `ctx` — the SDK
   shape is the same for HTTP and voice-room hosts.
+- `TReturn` is what both reducers return: the state by default. A plugin
+  that asks the host for effects declares `ReducerResult<TState>` and
+  returns `withEffects(next, effects)` where it needs them
+  ([Effects](#effects-timers-storage-and-chat)).
 - `restartActions` lists a game's "play again" actions (Hushle
   `start-game`, Quiz `play-again`). Declaring it turns on the host's
   ended-phase guard: once `state.phase === 'ended'`, only these action
@@ -188,7 +204,7 @@ Unknown action types default to `host`, so new actions are safe by default.
 
 ```ts
 type GamePluginActionPolicy = {
-  role: "host" | "member" | "player";
+  role: "host" | "member" | "player" | "system";
   actorFields?: string[];
   joinsRoster?: boolean;
   audit?: boolean;
@@ -199,6 +215,9 @@ type GamePluginActionPolicy = {
 - `host`: only the session creator can perform the action. A user with
   `START_ACTIVITY` can also perform it for moderation/admin control.
 - `member`: any server member can perform the action.
+- `system`: no client may send it (403, `code: 'system_action'`); the host
+  runs it when a timer the plugin set falls due
+  ([System actions](#system-actions)).
 - `player`: the user must be an active player in `game_session_players`.
   An action joins the actor to that roster when its policy says
   `joinsRoster: true` AND the action changes state (a refused join —
@@ -248,6 +267,8 @@ rules on top of the action policies. Every refusal keeps its English
 | `not_player` | 403 | a `player` action from someone who is not on the roster |
 | `wrong_phase` | 409 | the host's own phase table refuses the action (Hushle/Quiz: not started yet, answers closed) |
 | `activity_exists` | 409 | starting an activity in a channel that already has one open (`sessionId` names it) — also when two starts race |
+| `system_action` | 403 | a client sent a `role: "system"` action (only the host runs those, when a timer falls due) |
+| `effect_refused` | 422 | the plugin's reducer asked for an effect that is invalid or that it has no permission for: nothing of the action (or the start) was applied |
 | `rate_limited` | 429 | too many requests (every 429 of the app carries it) |
 
 **Voice.** "In the voice room" means connected to the activity channel's
@@ -316,19 +337,213 @@ again" sends `play-again` (back to the lobby: the players who stayed keep
 their seats with a clean score, the last game's deck, answers and reveal
 are dropped, anyone may join before the host starts).
 
+## Effects: timers, storage and chat
+
+A reducer stays pure and synchronous: it cannot await a database, schedule
+anything or post a message. What it wants the host to do beyond the next
+state, it **returns** as effects, wrapped around the state:
+
+```ts
+import { withEffects, type GamePlugin, type ReducerResult } from '@lobbyforge/plugin-sdk';
+
+export const buzzerPlugin: GamePlugin<State, Action, Props, ReducerResult<State>> = {
+  manifest: { /* … */ permissions: ['timers', 'storage', 'chat'] },
+  actionPolicies: { 'open-round': { role: 'host' }, 'auto-reveal': { role: 'system' } },
+  handleAction(ctx, state, action) {
+    if (action.type === 'open-round') {
+      const next = { ...state, phase: 'open', round: state.round + 1, revealAt: ctx.now! + 30_000 };
+      return withEffects(next, [
+        { type: 'timer.set', id: 'reveal', afterMs: 30_000, action: { type: 'auto-reveal', round: next.round } },
+      ]);
+    }
+    // …
+    return state;
+  },
+};
+```
+
+`withEffects(state, effects)` returns `{ __lf: 1, state, effects }`; a
+marketplace plugin's `server.js` has no imports and writes that object
+itself. `__lf` is reserved: a plain state must not have it.
+`createInitialState` may return effects too (a first timer, say).
+
+**All or nothing.** The host unwraps the envelope wherever it consumes a
+reducer result and checks every effect — its shape, its limits, and that
+the plugin has the permission it needs. One invalid or unpermitted effect
+refuses the whole call: an action answers `422` with `code:
+'effect_refused'` and nothing of it is applied (no state, no timer, no
+storage, no chat line); a start creates no activity; a timer's action is
+dropped and logged. The reason goes to the server log, not to the client.
+Returning the **same** state object with no effects (or
+`withEffects(state, [])`) still means "no change" — nothing is audited and
+no one joins the roster; the same state *with* effects counts as a change.
+
+**Permissions.** A compiled-in plugin declares them in
+`manifest.permissions` (`PluginPermission.TIMERS`, `.STORAGE`, `.CHAT`):
+it is trusted code, so there is no approval dialog. A marketplace plugin
+asks for them in manifest.json `permissions`, and gets only what it asks
+for **and** the instance owner approved at install
+([PLUGIN_PUBLISHING.md → Asking for more than the
+sandbox](PLUGIN_PUBLISHING.md#asking-for-more-than-the-sandbox)). The older
+`PluginPermission` names (`manage_timer`, `send_room_message`, …) describe a
+plugin and grant nothing.
+
+| Effect | Permission | Fields | Limits |
+|---|---|---|---|
+| `timer.set` | `timers` | `id`, `afterMs` **or** `at` (epoch ms), `action` | at most **8** pending per session; due **1 s – 24 h** after `ctx.now`; `id` is 1–64 of `A-Z a-z 0-9 . _ : -`, and the same id replaces the pending timer; `action` must be one of the plugin's `role: "system"` actions, at most 4 KiB of JSON |
+| `timer.clear` | `timers` | `id` | clearing a timer that is not pending is fine |
+| `storage.set` | `storage` | `key`, `value` | `key` is 1–128 of `a-z A-Z 0-9 . _ : -` (not `__proto__`); `value` any JSON; the plugin's storage in a community holds at most **64 KiB** (every key plus its value's JSON, in UTF-8) |
+| `storage.delete` | `storage` | `key` | |
+| `chat.post` | `chat` | `text` | 1–**500** characters after trimming, no control characters but tab and newline; at most **one per 5 s and 30 per hour** per session |
+
+At most 32 effects per call; an unknown key on an effect is refused (a
+typo never silently does something else). `voice.mute` is a known
+permission name a manifest may ask for, but the effect does not exist yet
+(phase 3b of [PLUGIN_UNLOCK_PLAN.md](PLUGIN_UNLOCK_PLAN.md)): it is refused.
+
+### System actions
+
+An action policy may say `role: "system"`. **No client can send it** — not
+the host, not an administrator: the actions route answers `403` with `code:
+'system_action'`. Only the host runs it, when a timer that names it falls
+due. The reducer then sees `ctx.actorUserId === ''` (a marketplace plugin's
+`ctx.actorId` is `null`) and `ctx.now` = the timer's due time. A system
+action takes no `actorFields`, never joins the roster and has no voice rule
+(a sandbox manifest refuses those keys on it); `audit` defaults to `false`.
+The host's phase checks and the ended-phase guard (`restartActions`) are for
+clients: a system action always reaches the reducer, so make it check that
+it still applies — the example's `auto-reveal` carries the round it was set
+for and changes nothing in a later round.
+
+### Timers fire lazily
+
+Timers follow the design of the host hand-over
+([ACTIVITY_INTEGRITY_AND_RESILIENCE.md §3.4](ACTIVITY_INTEGRITY_AND_RESILIENCE.md)):
+nothing runs on a clock.
+
+- The pending timers are stored with the session (`game_sessions.timers`)
+  in the **same** compare-and-swap as the state that set them.
+- Whenever somebody touches the session — a state read (`GET`), an action,
+  an end request — every timer whose due time has passed fires under the
+  session's write lock, **earliest first** (ties: the one set first), each
+  as its system action through your reducer with `ctx.now` = its due time.
+  Its effects apply too, so a timer may set the next one; a chain that is
+  already due keeps firing, up to 32 timers per touch (the rest fires on
+  the next touch).
+- Before an action, the timers due by then fire first and the action runs
+  on the state they left — in one write. If the action is then refused,
+  the timers still commit.
+- **Exactly once**: the lock serializes touches and a fired timer is
+  removed in the same write as the state it produced, so of two
+  concurrent reads the second finds nothing due.
+- A timer whose action throws or whose effects are refused is dropped and
+  logged, and the next one runs. So is a timer whose action is no longer a
+  system action (a new version of the plugin changed it).
+- `GET …/activities/{sessionId}` returns `timersDueAt` — the pending due
+  times, ISO, earliest first; **never** the actions — and `now`, the
+  server's clock. An open panel re-reads the session once at the earliest
+  due time, counted on the server's clock (`nextActivityCheck` in
+  `apps/web/lib/activity-next-check.ts`, which also covers the host
+  hand-over); setting, clearing or firing a timer tells every open panel
+  to re-read (`publicSummary.timersChanged` on the activity bus), and an
+  action's answer carries the new `timersDueAt`.
+- Ending the activity fires what was already due, then drops every other
+  pending timer.
+
+So a timer is **never early, and late only when nobody is looking** —
+which is exactly when nobody would notice. Keep the deadline in your state
+(`revealAt`) and let the UI count down to it.
+
+### Storage
+
+`ctx.storage` is a read-only snapshot of your plugin's storage in this
+community, taken under the session's lock before the call:
+`ctx.storage.get(key)` returns a copy of the value (or `undefined`),
+`ctx.storage.keys()` the sorted keys. Without the `storage` permission it is
+empty. A marketplace plugin gets the same two functions; the host sends the
+snapshot with the call as JSON.
+
+Writes are `storage.set` / `storage.delete` effects, and the order matters:
+
+1. **Before the commit** the host applies them to the snapshot and checks
+   the 64 KiB limit — over it, the call is refused like an invalid effect.
+2. The state (and timers) commit.
+3. **After the commit** the writes go to the database as one batch (the
+   last effect on a key wins), re-measured under a lock on (community,
+   plugin): another session may have written in between. A batch that no
+   longer fits, or a write that fails, is **dropped and logged**; it is
+   not retried and the state stays committed. Treat the state as the
+   source of truth and storage as a side record.
+
+Storage is shared by every session of the plugin in the community and
+holds whole values: two sessions that read, change and write the same key
+at the same moment can overwrite each other (last write wins). Merge with
+what the snapshot holds when you write, as the example's leaderboard does,
+and keep values small.
+
+### Chat
+
+An activity runs in a voice or stage channel, and those have no text chat
+in the lobby. So a `chat.post` goes to the text or announcement channel
+the community chose for the app — Server settings → Apps → **App messages
+go to** (shown for apps with the `chat` permission). With no channel
+chosen, the default, the post is dropped: a game never writes into a
+channel nobody picked (which could also carry a private voice room's game
+into a public channel). The choice is checked again on every post.
+
+- The message has **no author** (no user, no bot) and `metadata.app = {
+  pluginId, name }`; the lobby shows it with the plugin's name, an app
+  avatar and an **APP** badge ("UYGULAMA" in Turkish), and a desktop
+  notification says "(APP)". Members cannot set `metadata.app`.
+- Mentions are inert: every `@` that could start one gets a zero-width
+  space after it, so `@everyone`, `@here` and `@<name>` ping nobody.
+- Over the rate (one per 5 s, 30 per hour, per session) a post is
+  **dropped** and logged; the action that asked for it still applies.
+  Chat is a side channel, never part of your game's state.
+- It is posted after the commit (after the storage batch), published on
+  the chat bus like any message and audited as `message.create` (actor:
+  none, the plugin in the metadata).
+
+Everyone in that channel reads the line: never post hidden information.
+`ctx.locale` is the caller's language (for a system action, the language
+of whoever's touch fired it), so prefer short, language-light lines —
+names and numbers.
+
+### Testing effects
+
+`createTestHarness` applies effects with the same rules as the host
+([below](#the-createtestharness-test-helper)): `performAction` throws an
+`EffectRefusedError` where the host would answer `effect_refused` (and
+applies nothing), refuses a system action from a client, and
+`advanceTime(ms)` fires due timers in order with `ctx.now` = each due time.
+`getTimers()`, `getStorage()` and `getChatPosts()` show what the host
+would have stored and posted; `permissions` and `storage` options set the
+plugin's permissions and its storage before the game.
+
+### Deprecated: `ctx.timer` and `ctx.messages`
+
+`ctx.timer.start/stop` and `ctx.messages.sendGameMessage` never did
+anything on the HTTP host (the latter only logged). They stay as no-op
+stubs for compatibility; use `timer.set` / `timer.clear` and `chat.post`.
+`ctx.storage` used to be an async `get/set/delete/list/clear` object that no
+plugin used — a synchronous reducer cannot await it — and is now the
+snapshot above.
+
 ## The `GamePluginContext` sub-contexts
 
-The context has `actorUserId` plus nine sub-contexts, all part of the SDK contract:
+The context has `actorUserId`, `now` and ten sub-contexts, all part of the SDK contract:
 
 | Sub-context | Sync / async | Used for |
 |---|---|---|
-| `actorUserId` | sync | Local user id that triggered the current action |
+| `actorUserId` | sync | Local user id that triggered the current action (`''` for a system action) |
+| `now` | sync | The server clock of the call, ms; a timer's due time for a system action. Prefer it to `Date.now()` |
 | `players` | sync (M16) | `list()` returns active player ids, `get(id)` returns `{ id, name }` |
-| `messages` | async | `sendGameMessage(text)` posts to the channel |
+| `storage` | sync | `get(key)` / `keys()` — a read-only snapshot of the plugin's storage in the community; writes are effects ([Storage](#storage)) |
+| `messages` | async | **deprecated**: `sendGameMessage(text)` only logs — return a `chat.post` effect |
 | `state` | async | `save(state)` — the HTTP host treats this as a no-op (it persists state itself) |
 | `cache` | async | `get` / `set` with TTL — HTTP host returns `undefined` / no-op |
 | `pubsub` | async | `publish` / `subscribe` — HTTP host is a no-op |
-| `timer` | async | `start(seconds)` / `stop` — HTTP host is a no-op |
+| `timer` | async | **deprecated** no-op: return `timer.set` / `timer.clear` effects |
 | `votes` | async | `create(question, options)` — HTTP host is a no-op |
 | `scores` | async | `add(playerId, score)` — HTTP host is a no-op |
 | `voice` | sync | `getParticipants()` — the user ids in the activity's voice room, oldest first, for plugins that require voice (`[]` otherwise) |
@@ -398,10 +613,31 @@ The harness exposes:
 - `context` — the full `GamePluginContext` if your reducer needs to
   assert on sub-context calls.
 - `startGame()` — calls `plugin.createInitialState(ctx)`.
-- `performAction(playerId, action)` — calls `plugin.handleAction(ctx, state, action)`.
-- `getState()` — the current state. Throws if `startGame()` wasn't called.
-- `advanceTimer(seconds)` — for plugins that use `timer.start`; the
-  harness counts down and the timer's callback fires when it hits 0.
+- `performAction(playerId, action)` — calls `plugin.handleAction(ctx, state, action)`
+  and applies its effects the way the host does: an invalid or
+  unpermitted effect throws `EffectRefusedError` and nothing is applied; a
+  `role: "system"` action is refused (only a timer fires it).
+- `getState()` — the current state. Throws until there is one.
+- `advanceTime(ms)` — moves the harness clock and fires every timer that
+  falls due on the way, in due order, each as its system action with
+  `ctx.now` = its due time (and its effects). `advanceTimer(seconds)` is
+  the old name.
+- `now()`, `getTimers()`, `getStorage()`, `getChatPosts()` — the clock, the
+  pending timers, the plugin's storage and the chat lines posted so far.
+
+Options besides `plugin` and `players`: `now` (the clock's start),
+`permissions` (default: the effect permissions in `manifest.permissions`)
+and `storage` (the plugin's storage before the game, what `ctx.storage`
+reads).
+
+```ts
+const h = createTestHarness({ plugin: buzzerPlugin, players: ['host'], now: 0, storage: { best: [] } });
+await h.startGame();
+await h.performAction('host', { type: 'open-round' });
+expect(h.getTimers()).toEqual([{ id: 'reveal', at: 30_000, action: { type: 'auto-reveal', round: 1 } }]);
+await h.advanceTime(30_000);
+expect(h.getState().phase).toBe('revealed');
+```
 
 The mock sub-contexts are documented in
 `packages/plugin-sdk/src/testing.ts`. The `cache.get` / `set` are
@@ -861,7 +1097,11 @@ and fonts; the files are public anyway).
 ### The worked example
 
 `examples/plugins/sandbox-buzzer/ui/` is a complete frame: the host opens a
-round, everyone buzzes, the host reveals who was first. It shows the
+round, everyone buzzes, the host reveals who was first — or the round
+reveals itself 30 s after it opened (a `timer.set` effect firing the
+`auto-reveal` system action), and a record reaction time joins the
+community's leaderboard (`storage.set`, read back from `ctx.storage`). Its
+manifest asks for `"permissions": ["timers", "storage"]`. It shows the
 handshake, host-only controls (the server's `host` policy is what actually
 enforces them), its own English and Turkish strings chosen from
 `init.locale`, theme variables, and a state where the buzz order stays hidden

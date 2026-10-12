@@ -128,6 +128,56 @@ describe('controls', () => {
     expect(group).toHaveTextContent('This community has no roles yet.');
   });
 
+  it('an app that can post chat lines gets "App messages go to": nowhere, or a text channel', async () => {
+    const posts: unknown[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith('/apps') && init?.method === 'POST') {
+          posts.push(JSON.parse(String(init.body)));
+          return new Response('{}', { status: 200 });
+        }
+        if (url.endsWith('/apps')) {
+          const app = (id: string, effectPermissions: string[]) => ({
+            id,
+            name: id,
+            version: '1.0.0',
+            type: 'game',
+            catalog: null,
+            installed: true,
+            enabled: true,
+            settings: { defaultMaxPlayers: 8 },
+            effectPermissions,
+            installedAt: null,
+          });
+          return new Response(JSON.stringify({ apps: [app('sandbox-buzzer', ['timers', 'chat']), app('dice', ['timers'])] }), { status: 200 });
+        }
+        if (url.endsWith('/channels')) {
+          return new Response(
+            JSON.stringify({
+              channels: [
+                { id: 'c1', serverId: SERVER, name: 'general', type: 'text', position: 0, topic: null },
+                { id: 'v1', serverId: SERVER, name: 'Lounge', type: 'voice', position: 1, topic: null },
+              ],
+            }),
+            { status: 200 }
+          );
+        }
+        return fetchMock(input);
+      })
+    );
+    renderAs({}, 'apps');
+    const select = (await screen.findByLabelText('App messages go to')) as HTMLSelectElement;
+    // Only one app can post; only text channels are offered.
+    expect(screen.getAllByLabelText('App messages go to')).toHaveLength(1);
+    expect([...select.options].map((o) => o.textContent)).toEqual(["Nowhere (don't post)", '#general']);
+    expect(select.value).toBe('');
+    fireEvent.change(select, { target: { value: 'c1' } });
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toEqual({ pluginId: 'sandbox-buzzer', settings: { defaultMaxPlayers: 8, chatChannelId: 'c1' } });
+  });
+
   it('lets a non-owner manager install apps and save the access policy', async () => {
     renderAs({}, 'apps');
     const install = await screen.findByRole('button', { name: /Install/ });

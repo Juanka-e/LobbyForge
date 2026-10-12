@@ -94,6 +94,18 @@ describe('describeWorkerPlugin', () => {
     });
   });
 
+  it('grants only the effect permissions the manifest asks for AND the active record approved', async () => {
+    writeBundle({ ...MANIFEST, permissions: ['timers', 'storage', 'chat'] });
+    describeReply = { plugin: { ...(describeReply.plugin as Record<string, unknown>), permissions: ['timers', 'storage', 'chat'] } };
+    // Installed before approvals existed: asks, but nothing was approved.
+    expect((await describeWorkerPlugin(REF, root)).permissions).toBeUndefined();
+    // Approved a part, plus something it does not ask for (never granted).
+    const partly = await describeWorkerPlugin({ ...REF, approved: { permissions: ['timers', 'voice.mute'] } }, root);
+    expect(partly.permissions).toEqual(['timers']);
+    const plugin = buildWorkerPlugin(partly);
+    expect(plugin.manifest.permissions).toEqual(['timers']);
+  });
+
   it('carries the bundle’s locales/ tables, validated from the web app’s own copy', async () => {
     const dir = join(root, 'buzzer', '1.2.0');
     mkdirSync(join(dir, 'locales'), { recursive: true });
@@ -192,6 +204,26 @@ describe('buildWorkerPlugin', () => {
       ctx: { sessionId: 'sess-9', serverId: 'srv-1', hostId: 'u-host', locale: 'tr', now: 1234 },
     });
     expect((calls[0]!.ctx as { players: unknown[] }).players).toHaveLength(2);
+  });
+
+  it('effects from the worker come back as the SDK envelope; the storage snapshot travels in ctx', async () => {
+    const plugin = buildWorkerPlugin(info());
+    const ctx = createTestHarness({ plugin: pollPlugin, players: ['u-1'], storage: { best: 9 }, permissions: ['storage'] })
+      .context as unknown as GamePluginContext;
+    Object.defineProperty(ctx, '__lfScope', { value: { serverId: 'srv-1', pluginId: 'buzzer' } });
+    const effects = [{ type: 'timer.set', id: 'r', afterMs: 5000, action: { type: 'tick' } }];
+    vi.mocked(fetch).mockImplementationOnce(async (_url, init) => {
+      calls.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response(JSON.stringify({ result: { n: 2 }, effects }), { status: 200 });
+    });
+    expect(await plugin.handleAction(ctx, { n: 1 }, { type: 'go' })).toEqual({ __lf: 1, state: { n: 2 }, effects });
+    expect((calls[0]!.ctx as { storage: unknown }).storage).toEqual({ best: 9 });
+
+    // The same state with effects: the SAME object inside the envelope.
+    const same = { n: 1 };
+    vi.mocked(fetch).mockImplementationOnce(async () => new Response(JSON.stringify({ unchanged: true, effects }), { status: 200 }));
+    const wrapped = (await plugin.handleAction(ctx, same, { type: 'go' })) as { state: unknown };
+    expect(wrapped.state).toBe(same);
   });
 
   it('validateAction and projectState are RPCs', async () => {

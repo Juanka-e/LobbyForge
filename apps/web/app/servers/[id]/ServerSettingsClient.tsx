@@ -104,7 +104,11 @@ type ServerApp = {
     allowedRoleIds?: string[];
     defaultMaxPlayers?: number;
     overflowPolicy?: 'spectator' | 'queue' | 'split' | 'reject';
+    /** Where the app's chat posts go (a text or announcement channel); unset: nowhere. */
+    chatChannelId?: string | null;
   };
+  /** Host effects the app may use: `chat` means it can post app messages. */
+  effectPermissions?: string[];
   installedAt: string | null;
 };
 
@@ -370,6 +374,7 @@ export default function ServerSettingsClient({
       ) : tab === 'apps' ? (
         <AppsPanel
           apps={apps}
+          channels={sortedChannels}
           serverId={serverId}
           roles={sortedRoles}
           canManageRoles={viewer.isOwner || viewer.can.manageRoles}
@@ -600,12 +605,15 @@ function Overview({
 /** Every viewer here holds Manage Community, which is what the apps route needs. */
 function AppsPanel({
   apps,
+  channels,
   serverId,
   roles,
   canManageRoles,
   onChanged,
 }: {
   apps: ServerApp[];
+  /** For "App messages go to": games run in voice channels, which have no chat. */
+  channels: Channel[];
   serverId: string;
   roles: Role[];
   canManageRoles: boolean;
@@ -652,6 +660,8 @@ function AppsPanel({
     },
     [serverId, onChanged, t]
   );
+
+  const chatChannels = channels.filter((c) => c.type === 'text' || c.type === 'announcement');
 
   return (
     <div className="space-y-3">
@@ -732,6 +742,25 @@ function AppsPanel({
                         <option value="reject">{t('hub.servers.apps.overflow.reject')}</option>
                       </select>
                     </label>
+                    {app.effectPermissions?.includes('chat') ? (
+                      <label className="grid gap-1 text-xs text-text-muted" title={t('hub.servers.apps.chatChannel.hint')}>
+                        <span>{t('hub.servers.apps.chatChannel')}</span>
+                        <select
+                          data-app-chat-channel
+                          value={settings.chatChannelId ?? ''}
+                          disabled={disabled}
+                          onChange={(e) => save(app.id, { settings: { ...settings, chatChannelId: e.target.value || null } })}
+                          className="rounded-md border border-border-strong bg-surface-dim px-2 py-1.5 text-sm text-text-primary outline-none focus:border-primary"
+                        >
+                          <option value="">{t('hub.servers.apps.chatChannel.none')}</option>
+                          {chatChannels.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              #{c.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
                     <button type="button" disabled={disabled} onClick={() => uninstall(app.id)} className="ml-auto rounded-md px-3 py-2 text-xs font-medium text-danger hover:bg-danger/10 disabled:opacity-40">
                       {t('hub.servers.apps.uninstall')}
                     </button>

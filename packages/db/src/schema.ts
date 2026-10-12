@@ -363,6 +363,11 @@ export const gameSessions = pgTable('game_sessions', {
   // Optimistic concurrency control — incremented on every state update.
   // The action route uses CAS: UPDATE ... WHERE revision = $expected.
   revision: integer('revision').default(0).notNull(),
+  // 0049 — the session's pending plugin timers (`timer.set` effects,
+  // docs/PLUGIN_SDK.md "Effects"): [{ id, at (epoch ms), action }], at most
+  // 8. Written in the same CAS update as `state`; fired lazily under the
+  // session's write lock; emptied when the session ends.
+  timers: jsonb('timers').$type<Array<{ id: string; at: number; action: Record<string, unknown> }>>().default([]).notNull(),
   createdBy: uuid('created_by').references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   startedAt: timestamp('started_at', { withTimezone: true }),

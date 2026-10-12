@@ -51,7 +51,7 @@ const dbFns = vi.hoisted(() => ({
     store.roster.push(userId);
   }),
   logAction: vi.fn(async () => undefined),
-  setGameSessionStateCAS: vi.fn(async (_db: unknown, _id: string, rev: number, state: Record<string, unknown>) => {
+  setGameSessionStateCAS: vi.fn(async (_db: unknown, _id: string, rev: number, state: Record<string, unknown>, _summary?: unknown, _extra?: unknown) => {
     if (rev !== store.row.revision) return { ok: false, row: structuredClone(store.row) };
     store.row = { ...store.row, state: structuredClone(state), revision: rev + 1 };
     return { ok: true, row: structuredClone(store.row) };
@@ -133,6 +133,9 @@ async function fakeWorker(_url: string | URL | Request, init?: RequestInit): Pro
       return reply({ result: action.type === 'pick' && typeof action.choice !== 'string' ? 'Pick a colour.' : null });
     case 'handleAction':
       if (action.type === 'noop') return reply({ unchanged: true });
+      if (action.type === 'arm') {
+        return reply({ result: { ...state, armed: true }, effects: [{ type: 'timer.set', id: 'r', afterMs: 5000, action: { type: 'tick' } }] });
+      }
       if (action.type === 'pick') {
         return reply({ result: { ...state, picks: { ...(state.picks ?? {}), [String(action.playerId)]: String(action.choice) } } });
       }
@@ -276,6 +279,49 @@ describe('sandbox plugin: the manifest action policies apply', () => {
     expect(res.status).toBe(200);
     expect(store.row.state.revealed).toBe(true);
     expect(dbFns.logAction).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('sandbox plugin: host effects need the owner’s approval', () => {
+  function timedPlugin(permissions?: Array<'timers'>) {
+    return buildWorkerPlugin({
+      ...baseInfo,
+      id: 'timed-pick',
+      name: 'Timed Pick',
+      actionPolicies: { arm: { role: 'host' }, tick: { role: 'system' } },
+      hasValidateAction: false,
+      hasProjection: false,
+      ...(permissions ? { permissions } : {}),
+    });
+  }
+
+  it('an effect the owner did not approve refuses the action (422 effect_refused, nothing committed)', async () => {
+    registry.set('timed-pick', timedPlugin());
+    seedRow('timed-pick', { armed: false });
+    const res = await act(HOST, { type: 'arm' });
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { code: string }).code).toBe('effect_refused');
+    expect(dbFns.setGameSessionStateCAS).not.toHaveBeenCalled();
+    expect(store.row.state).toEqual({ armed: false });
+  });
+
+  it('once approved (effective permissions), the timer is stored with the state', async () => {
+    registry.set('timed-pick', timedPlugin(['timers']));
+    seedRow('timed-pick', { armed: false });
+    const res = await act(HOST, { type: 'arm' });
+    expect(res.status).toBe(200);
+    expect(store.row.state).toEqual({ armed: true });
+    const extra = dbFns.setGameSessionStateCAS.mock.calls[0]![5] as { timers: Array<{ id: string; action: unknown }> };
+    expect(extra.timers).toEqual([expect.objectContaining({ id: 'r', action: { type: 'tick' } })]);
+  });
+
+  it('a client can never send the system action (403 system_action, the worker is not asked)', async () => {
+    registry.set('timed-pick', timedPlugin(['timers']));
+    seedRow('timed-pick', { armed: false });
+    const res = await act(HOST, { type: 'tick' });
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe('system_action');
+    expect(callsOf('handleAction')).toHaveLength(0);
   });
 });
 

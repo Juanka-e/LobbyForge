@@ -66,14 +66,15 @@ left": every client counts down to the same moment.
 - Answers are accepted until `deadline + 1 s` (`QUIZ_ANSWER_GRACE_MS`), so an
   answer sent just before the deadline is not lost in transit. Answers in
   that second score base points only (no speed bonus).
-- The HTTP host has **no server timers** (`ctx.timer` is inert), so "time's
+- Quiz does not use the host's timers (`timer.set` effects, docs/PLUGIN_SDK.md
+  "Effects") yet — `ctx.timer` is an inert, deprecated stub — so "time's
   up" is an action — `time-up` — that any member may send and the reducer
   honours **only** once the server clock is past `deadline + 1 s`. Sending it
   early changes nothing. The host's panel sends it 1.2 s after the grace
   period; players' panels 3.5–5 s after it (staggered per user) in case the
   host is away; each retries up to four times. Spectators never send it.
-- Moving on from a reveal is **host-driven** (no auto-advance without server
-  timers).
+- Moving on from a reveal is **host-driven** (no auto-advance until Quiz
+  moves to timer effects).
 
 ## Scoring
 

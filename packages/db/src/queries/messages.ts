@@ -118,6 +118,33 @@ export async function createMessage(db: DbClient, input: CreateMessageInput): Pr
 }
 
 /**
+ * Store an app message: a line a game plugin posted with a `chat.post`
+ * effect (docs/PLUGIN_SDK.md "Effects"). Like a webhook post it has no
+ * author — `user_id` and `bot_id` NULL — and `metadata.app` names the
+ * plugin, which is how clients show the App badge. Only the host writes
+ * it (members cannot set `metadata.app`: the messages route reserves it).
+ */
+export async function createAppMessage(
+  db: DbClient,
+  input: { channelId: string; content: string; metadata: Record<string, unknown> }
+): Promise<MessageRow> {
+  await assertChannelAlive(db, input.channelId);
+  const [row] = await db
+    .insert(messages)
+    .values({
+      channelId: input.channelId,
+      userId: null,
+      botId: null,
+      content: input.content,
+      metadata: input.metadata,
+      replyToId: null,
+    })
+    .returning();
+  if (!row) throw new Error('createAppMessage: insert returned no rows');
+  return row as MessageRow;
+}
+
+/**
  * List the messages in a channel, ordered by `createdAt DESC` (newest
  * first — matches what the UI wants to render at the bottom of the
  * scroll). The caller is expected to provide a `before` cursor for

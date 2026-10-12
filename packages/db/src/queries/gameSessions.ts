@@ -27,6 +27,16 @@ import type { DbClient } from '../client.js';
 import { pgErrorCode } from '../pg-errors.js';
 import { gameSessionPlayers, gameSessions } from '../schema.js';
 
+/**
+ * One pending plugin timer (0049, `timer.set` effects — docs/PLUGIN_SDK.md
+ * "Effects"): fire `action` (a `role: "system"` action) at `at` (epoch ms).
+ */
+export interface GameSessionTimer {
+  id: string;
+  at: number;
+  action: Record<string, unknown>;
+}
+
 export interface GameSessionRow {
   id: string;
   serverId: string;
@@ -45,6 +55,8 @@ export interface GameSessionRow {
    */
   teamSize: number | null;
   difficultyDistribution: Record<string, number> | null;
+  /** 0049: pending plugin timers (at most 8). Optional for rows read by an older query shape. */
+  timers?: GameSessionTimer[];
   createdBy: string | null;
   createdAt: Date;
   startedAt: Date | null;
@@ -78,6 +90,8 @@ export interface CreateGameSessionInput {
    */
   teamSize?: number | null;
   difficultyDistribution?: Record<string, number> | null;
+  /** Timers set by the plugin's createInitialState (`timer.set` effects). */
+  timers?: GameSessionTimer[];
 }
 
 /**
@@ -107,6 +121,7 @@ export async function createGameSession(
       publicSummary: input.publicSummary ?? {},
       teamSize: input.teamSize ?? null,
       difficultyDistribution: input.difficultyDistribution ?? null,
+      timers: input.timers ?? [],
       // startedAt / endedAt: NULL until the plugin transitions.
     })
     .returning();
@@ -215,16 +230,22 @@ export async function setGameSessionState(
  * The actions route writes through this inside `withGameSessionWriteLock`,
  * where the revision always matches; the check stays as the guard against
  * a writer that does not take the lock (and the terminal-status guard).
+ *
+ * `extra.timers` (0049) replaces the session's pending timers in the SAME
+ * statement, so a timer commits with the state that set it; left out, the
+ * timers are not touched.
  */
 export async function setGameSessionStateCAS(
   db: DbClient,
   sessionId: string,
   expectedRevision: number,
   state: Record<string, unknown>,
-  publicSummary?: Record<string, unknown>
+  publicSummary?: Record<string, unknown>,
+  extra: { timers?: GameSessionTimer[] } = {}
 ): Promise<{ ok: boolean; row: GameSessionRow | null }> {
   const patch: Record<string, unknown> = { state, revision: sql`${gameSessions.revision} + 1` };
   if (publicSummary !== undefined) patch.publicSummary = publicSummary;
+  if (extra.timers !== undefined) patch.timers = extra.timers;
   const [row] = await db
     .update(gameSessions)
     .set(patch)
@@ -381,8 +402,9 @@ export async function transferGameSessionHost(
 
 /**
  * Mark a session as ended. Sets `status = 'ended'` and
- * `endedAt = now()`. Returns the updated row, or null if the session
- * didn't exist.
+ * `endedAt = now()`, and drops its pending timers (an ended session never
+ * fires one). Returns the updated row, or null if the session didn't
+ * exist.
  */
 export async function endGameSession(
   db: DbClient,
@@ -393,6 +415,7 @@ export async function endGameSession(
     .set({
       status: 'ended',
       endedAt: new Date(),
+      timers: [],
     })
     .where(eq(gameSessions.id, sessionId))
     .returning();

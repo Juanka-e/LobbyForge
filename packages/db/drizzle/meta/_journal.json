@@ -330,6 +330,13 @@
       "when": 1787027200000,
       "tag": "0048_account_language",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1787113600000,
+      "tag": "0049_activity_timers",
+      "breakpoints": true
     }
   ]
 }

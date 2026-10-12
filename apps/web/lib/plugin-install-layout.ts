@@ -478,7 +478,8 @@ export async function activateStagedBundle<T extends DescribedPlugin>(input: {
 
   let info: T;
   try {
-    info = await input.describe({ pluginId, version, digest });
+    // With what this install approved: the loaded plugin grants exactly that.
+    info = await input.describe({ pluginId, version, digest, ...(approval.approved ? { approved: approval.approved } : {}) });
   } catch (err) {
     rollback();
     return { ok: false, error: `The plugin-worker could not load the bundle: ${(err as Error).message}` };

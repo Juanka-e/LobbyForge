@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import {
   deletePluginInstall,
+  getChannelById,
   getPluginInstall,
   listPluginInstallsForServer,
   logAction,
@@ -9,6 +10,8 @@ import {
 } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { getPluginServer, listPluginSummariesServer } from '@/lib/plugin-server-registry';
+import { effectGrantFor } from '@/lib/activity-effects';
+import { APP_MESSAGE_CHANNEL_TYPES } from '@/lib/activity-app-chat';
 import { pluginName, pluginSummary } from '@/lib/plugin-catalog-text';
 import { localeFromRequest } from '@/lib/i18n/server';
 import {
@@ -27,6 +30,12 @@ const AppSettingsSchema = z.object({
   allowedRoleIds: z.array(z.string().uuid()).optional(),
   defaultMaxPlayers: z.number().int().min(1).max(500).optional(),
   overflowPolicy: z.enum(['spectator', 'queue', 'split', 'reject']).optional(),
+  /**
+   * Where the app's chat posts go (`chat.post`, lib/activity-app-chat.ts):
+   * a text or announcement channel of this community. Absent or null: the
+   * app posts nowhere.
+   */
+  chatChannelId: z.string().uuid().nullable().optional(),
 }).strict();
 
 const UpsertAppSchema = z.object({
@@ -48,10 +57,13 @@ function appSummary(input: {
   // that render this list run pluginSummary in the browser, which knows the
   // compiled-in plugins' tables but not a marketplace bundle's locales/.
   const summary = pluginSummary(input.plugin.id, input.locale, input.plugin.catalog?.summary ?? null);
+  const registered = getPluginServer(input.plugin.id);
   return {
     ...input.plugin,
     // The plugin's own catalog.name in the viewer's language ("Poll" → "Anket").
     name: pluginName(input.plugin.id, input.locale, input.plugin.name),
+    // The host effects it may use (a marketplace plugin's: only what the owner approved).
+    effectPermissions: registered ? effectGrantFor(registered).permissions : [],
     catalog: summary !== null ? { ...(input.plugin.catalog ?? {}), summary } : input.plugin.catalog,
     installed: Boolean(input.install),
     enabled: input.install?.enabled ?? false,
@@ -110,6 +122,16 @@ async function handlePost(
   const plugin = getPluginServer(body.pluginId);
   if (!plugin) {
     return NextResponse.json({ error: 'Unknown plugin' }, { status: 404 });
+  }
+  const chatChannelId = body.settings?.chatChannelId;
+  if (typeof chatChannelId === 'string') {
+    const channel = await getChannelById(getDb(), chatChannelId);
+    if (!channel || channel.serverId !== serverId || !APP_MESSAGE_CHANNEL_TYPES.has(channel.type)) {
+      return NextResponse.json(
+        { error: 'App messages can only go to a text or announcement channel of this community', code: 'invalid_chat_channel' },
+        { status: 400 }
+      );
+    }
   }
 
   const install = await upsertPluginInstall(getDb(), {

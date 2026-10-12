@@ -14,11 +14,17 @@ import { useActivitySession } from '../useActivitySession';
  * only when every attempt failed.
  */
 
-const realtime = vi.hoisted(() => ({ reconnectListeners: new Set<() => void>() }));
+const realtime = vi.hoisted(() => ({
+  reconnectListeners: new Set<() => void>(),
+  handlers: new Map<string, (event: unknown) => void>(),
+}));
 vi.mock('@/lib/realtime-client', () => ({
   getRealtimeClient: () => ({
     connect: () => {},
-    subscribe: () => () => {},
+    subscribe: (topic: string, handler: (event: unknown) => void) => {
+      realtime.handlers.set(topic, handler);
+      return () => realtime.handlers.delete(topic);
+    },
     onReconnect: (listener: () => void) => {
       realtime.reconnectListeners.add(listener);
       return () => realtime.reconnectListeners.delete(listener);
@@ -291,6 +297,87 @@ describe('useActivitySession host hand-over', () => {
     await new Promise((resolve) => setTimeout(resolve, 2_000));
     expect(reads).toHaveLength(1);
   }, 10_000);
+});
+
+/**
+ * Plugin timers fire lazily too (lib/activity-timers.ts): the GET reports
+ * when they fall due (never what they do) and the server's clock, and the
+ * hook re-reads once at the earliest due time, counted on the server's clock.
+ */
+describe('useActivitySession plugin timers', () => {
+  function stubDetails(answers: Array<() => Record<string, unknown>>) {
+    const reads: number[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url === ACTIONS) {
+          return Response.json({ activity: { state: { armed: true }, status: 'running', timersDueAt: [new Date(Date.now() + 60_000).toISOString()] } });
+        }
+        if (url !== DETAIL) return Response.json({}, { status: 404 });
+        reads.push(Date.now());
+        const answer = answers[Math.min(reads.length - 1, answers.length - 1)]!;
+        return Response.json({ activity: answer() });
+      })
+    );
+    return reads;
+  }
+
+  const activity = (extra: Record<string, unknown>) => ({
+    id: SESSION,
+    pluginId: 'sandbox-buzzer',
+    status: 'running',
+    state: { phase: 'open' },
+    createdBy: 'u1',
+    players: [],
+    ...extra,
+  });
+
+  it('re-reads once at the earliest due time on the SERVER’s clock, then stops', async () => {
+    // The server's clock runs 30 s ahead of this device: its timer is due in
+    // half a second of server time, not in 30.5 s of device time.
+    const skew = 30_000;
+    const reads = stubDetails([
+      () =>
+        activity({
+          now: new Date(Date.now() + skew).toISOString(),
+          timersDueAt: [new Date(Date.now() + skew + 500).toISOString(), new Date(Date.now() + skew + 600_000).toISOString()],
+        }),
+      () => activity({ now: new Date(Date.now() + skew).toISOString(), timersDueAt: [new Date(Date.now() + skew + 600_000).toISOString()], state: { phase: 'revealed' } }),
+    ]);
+    const hook = renderHook(() => useActivitySession({ serverId: SERVER, sessionId: SESSION, onEnded: () => {} }), {
+      wrapper: wrapper('en'),
+    });
+    await waitFor(() => expect(hook.result.current.detail?.timersDueAt).toHaveLength(2), { timeout: 5000 });
+    expect(reads).toHaveLength(1);
+    await waitFor(() => expect(hook.result.current.detail?.state).toEqual({ phase: 'revealed' }), { timeout: 6000 });
+    expect(reads).toHaveLength(2);
+    // The next timer is ten minutes away: nothing more for now.
+    await new Promise((resolve) => setTimeout(resolve, 2_500));
+    expect(reads).toHaveLength(2);
+  }, 15_000);
+
+  it('a bus event saying the timers changed re-reads for the new due times', async () => {
+    const reads = stubDetails([() => activity({ timersDueAt: [] })]);
+    renderHook(() => useActivitySession({ serverId: SERVER, sessionId: SESSION, onEnded: () => {} }), { wrapper: wrapper('en') });
+    await waitFor(() => expect(reads).toHaveLength(1));
+    act(() => {
+      realtime.handlers.get(`activity-state:${SERVER}:${SESSION}`)!({ status: 'running', revision: 5, publicSummary: { timersChanged: true } });
+    });
+    await waitFor(() => expect(reads).toHaveLength(2));
+  });
+
+  it('an action that sets a timer hands back its due time with the new state', async () => {
+    stubDetails([() => activity({ timersDueAt: [] })]);
+    const hook = renderHook(() => useActivitySession({ serverId: SERVER, sessionId: SESSION, onEnded: () => {} }), {
+      wrapper: wrapper('en'),
+    });
+    await waitFor(() => expect(hook.result.current.detail?.timersDueAt).toEqual([]));
+    await act(async () => {
+      await hook.result.current.dispatch({ type: 'open-round' });
+    });
+    expect(hook.result.current.detail?.state).toEqual({ armed: true });
+    expect(hook.result.current.detail?.timersDueAt).toHaveLength(1);
+  });
 });
 
 describe('useActivitySession catching up after the connection was away', () => {
