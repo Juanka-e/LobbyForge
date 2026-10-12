@@ -1,5 +1,6 @@
 /**
- * Sandbox Buzzer — frame UI. Plain ES module, no build step, no network.
+ * Sandbox Buzzer — frame UI. Plain ES module, no build step, no network
+ * (its own buzz.wav is the one file it loads besides its scripts and styles).
  *
  * Everything arrives through the frame client:
  *   onInit  → who is looking (viewer), names (players), language, theme
@@ -195,7 +196,17 @@ const lf = connect({
   },
 });
 
-$('buzz').addEventListener('click', () => lf.dispatch({ type: 'buzz' }));
+// A sound shipped in ui/: the frame's policy lets media and fetch() reach
+// this plugin's own files and nothing else. Played on the viewer's own
+// press, the gesture a browser wants before a page makes sound.
+const buzzSound = new Audio('./buzz.wav');
+buzzSound.preload = 'auto';
+
+$('buzz').addEventListener('click', () => {
+  buzzSound.currentTime = 0;
+  buzzSound.play().catch(() => {});
+  lf.dispatch({ type: 'buzz' });
+});
 $('open').addEventListener('click', () => lf.dispatch({ type: 'open-round' }));
 $('reveal').addEventListener('click', () => lf.dispatch({ type: 'reveal' }));
 $('reset').addEventListener('click', () => lf.dispatch({ type: 'reset' }));

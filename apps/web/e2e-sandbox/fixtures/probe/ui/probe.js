@@ -19,6 +19,15 @@ const settle = (promise) =>
     () => 'allowed',
     () => 'blocked'
   );
+const audio = (src) =>
+  new Promise((resolve) => {
+    const a = new Audio();
+    a.onloadedmetadata = () => resolve('loaded');
+    a.onerror = () => resolve('blocked');
+    a.src = src;
+  });
+// The smallest valid module: compiling it needs 'wasm-unsafe-eval'.
+const EMPTY_WASM = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
 const image = (src) =>
   new Promise((resolve) => {
     const img = new Image();
@@ -39,7 +48,12 @@ const results = {
   }),
   popup: attempt(() => window.open('https://example.com/')),
   appFetch: await settle(fetch('/lobby')),
+  apiFetch: await settle(fetch('/api/health')),
+  otherPluginFetch: await settle(fetch('/api/plugin-ui/sandbox-buzzer/' + new URL(location.href).searchParams.get('other') + '/style.css')),
   ownFileFetch: await settle(fetch('dot.svg')),
+  ownWasm: await settle(WebAssembly.instantiate(EMPTY_WASM)),
+  ownAudio: await audio('beep.wav'),
+  externalAudio: await audio('https://example.com/beep.wav'),
   externalFetch: await settle(fetch('https://example.com/')),
   externalImage: await image('https://example.com/pixel.png'),
   ownImage: await image('dot.svg'),

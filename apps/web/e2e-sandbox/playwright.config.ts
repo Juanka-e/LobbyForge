@@ -89,6 +89,9 @@ export default defineConfig({
     env: {
       LOBBYFORGE_PLUGIN_INSTALL_DIR: INSTALL_DIR,
       LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED: 'true',
+      // The public origin: the frame's fetch() and media reach only the
+      // plugin's own folder on it (lib/plugin-ui-assets.ts).
+      LOBBYFORGE_APP_ORIGIN: `http://localhost:${PORT}`,
       NEXT_TELEMETRY_DISABLED: '1',
     },
   },
