@@ -83,39 +83,58 @@ Honest assessment of what works today:
 - **pnpm ≥ 10.12.1** (`corepack enable`)
 - **Docker** (for the backing services)
 
-### 1. Start the backing services
+### 1. Start the local stack
 
 ```sh
-cp infra/docker/.env.example .env
-docker compose -f infra/docker/docker-compose.dev.yml up -d
+cp infra/docker/.env.example infra/docker/.env
+pnpm lfctl setup token   # put the printed value in infra/docker/.env as LOBBYFORGE_SETUP_TOKEN
+docker compose -f infra/docker/docker-compose.dev.yml up -d --build
 ```
 
-This brings up PostgreSQL, Redis, and LiveKit with healthchecks. (See
-`infra/docker/README.md` for the optional `--profile full` services: Mailpit,
-MinIO, Coturn.)
+This builds the app image and runs **the whole stack on this machine**:
+PostgreSQL, Redis, LiveKit, the database migrations, the web app (a
+production build, `NODE_ENV=production`) and the realtime gateway, with
+healthchecks. Open `http://localhost:19520` and walk through the first-run
+setup wizard. (See `infra/docker/README.md` for the optional
+`--profile full` services: Mailpit, MinIO, Coturn.)
 
-### 2. Install dependencies
+> **Local only.** Every port this stack publishes is bound to `127.0.0.1`,
+> so nothing is reachable from your network. It runs with public
+> development secrets (the compose defaults and `.env.example`), which the
+> app accepts only because the dev compose sets `LOBBYFORGE_DEV_STACK=true`;
+> anywhere else, web and the gateway refuse to start with a placeholder
+> session secret. To run LobbyForge for other people, use the production
+> installer (`install.sh`, see [docs/BETA_RELEASE.md](docs/BETA_RELEASE.md)).
+
+### 2. Work on the code (hot reload)
+
+Run only the backing services in Docker and the apps from source:
 
 ```sh
 pnpm install
+pnpm build:packages
+docker compose -f infra/docker/docker-compose.dev.yml stop web ws-gateway   # if step 1 is running
+docker compose -f infra/docker/docker-compose.dev.yml up -d postgres redis livekit
 ```
 
-### 3. Configure the app
-
-Edit `.env` and set real values for the secrets marked `replace_me`:
+Configure the web app in `apps/web/.env.local` (Next.js reads env files
+from the app's directory). The session secret must be real — placeholder
+values are refused:
 
 ```sh
-LOBBYFORGE_SESSION_SECRET=<at least 32 chars of random hex>
-LOBBYFORGE_SETUP_TOKEN=<at least 32 chars of random hex>
+LOBBYFORGE_SESSION_SECRET=<64 random hex characters>
+LOBBYFORGE_SETUP_TOKEN=<64 random hex characters, a different one>
+DATABASE_URL=postgres://lobbyforge:lobbyforge_dev@localhost:19532/lobbyforge
+REDIS_URL=redis://:lobbyforge_dev@localhost:19579
 ```
 
-Generate them with:
+Generate each secret with:
 
 ```sh
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-### 4. Run the app
+Then run:
 
 ```sh
 pnpm dev        # all workspaces in parallel
@@ -127,7 +146,8 @@ Open `http://localhost:19520` and walk through the first-run setup wizard.
 
 > Local ports sit in a quiet range so they do not collide with whatever
 > else you run: web `19520`, realtime gateway `19521`, LiveKit `19580`
-> (media `19582/udp`), Postgres `19532`, Redis `19579`.
+> (media `19582/udp`), Postgres `19532`, Redis `19579` — all on
+> `127.0.0.1`.
 
 ### Verify everything
 

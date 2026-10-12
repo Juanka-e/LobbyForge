@@ -13,6 +13,19 @@ export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
   if (process.env.NEXT_PHASE === 'phase-production-build') return;
 
+  // security-review INFRA-V-02: refuse to start with a missing, short or
+  // PUBLISHED session secret (the .env.example placeholder, the dev compose
+  // default) — anyone could forge sessions against it. Only the local dev
+  // stack (LOBBYFORGE_DEV_STACK=true, set by docker-compose.dev.yml) may run
+  // with a placeholder. Thrown on purpose: `next start` exits on it.
+  const { requireSessionSecret } = await import('@lobbyforge/core');
+  try {
+    requireSessionSecret();
+  } catch (err) {
+    console.error(`[App Boot] ${(err as Error).message}`);
+    throw err;
+  }
+
   // Pre-warm marketplace plugins: the active version recorded under
   // LOBBYFORGE_PLUGIN_INSTALL_DIR, loaded through the plugin-worker.
   // A no-op unless LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED=true.

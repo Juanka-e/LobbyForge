@@ -2,10 +2,20 @@ name: lobbyforge-dev
 
 # Local development stack for LobbyForge.
 #
-# This is the stack the application code in apps/web connects to on a developer
-# machine. It is intentionally separate from the production deployment
-# (see projectdetails/04_DEPLOYMENT_SINGLE_VPS_NGINX.md) which uses the
-# same images but adds Nginx, certbot, and a public hostname.
+# Builds the app image and runs ALL of it on this machine: Postgres, Redis,
+# LiveKit, the one-shot migrations, the web app (production build,
+# NODE_ENV=production) and the realtime gateway. It is intentionally
+# separate from the production deployment (docker-compose.prod.yml +
+# install.sh), which adds nginx, certbot, TLS and generated secrets.
+#
+# security-review INFRA-V-02 — this stack is for THIS machine only:
+#   - every published port binds 127.0.0.1, so nothing is reachable from the
+#     LAN (or the internet, on a cloud VM). Do not change that to share it;
+#     use the production stack for anything other people reach.
+#   - its secrets are public (the defaults below, .env.example). web and
+#     ws-gateway accept a published placeholder session secret only because
+#     this file sets LOBBYFORGE_DEV_STACK=true; any other deployment that
+#     uses one refuses to start.
 #
 # Usage:
 #   docker compose -f infra/docker/docker-compose.dev.yml up -d
@@ -31,7 +41,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lobbyforge_dev}
     ports:
       # Host ports live in a quiet range (see docs/MONOREPO.md).
-      - "19532:5432"
+      - "127.0.0.1:19532:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -49,7 +59,7 @@ services:
     restart: unless-stopped
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-lobbyforge_dev}", "--appendonly", "yes"]
     ports:
-      - "19579:6379"
+      - "127.0.0.1:19579:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -85,8 +95,13 @@ services:
           urls:
             - http://web:3000/api/livekit/webhook
     ports:
-      - "19580:19580"     # HTTP signaling
-      - "19582:19582/udp" # RTC media (ICE/TCP is not published locally)
+      # Loopback only, media included: LiveKit advertises 127.0.0.1
+      # (--node-ip above), so voice only ever worked from this machine
+      # — binding the UDP port to 127.0.0.1 keeps dev voice working and
+      # stops the LAN reaching the SFU. Voice from another device needs
+      # the production stack (docs/VOICE_TURN.md).
+      - "127.0.0.1:19580:19580"     # HTTP signaling
+      - "127.0.0.1:19582:19582/udp" # RTC media (ICE/TCP is not published locally)
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:19580/"]
       interval: 5s
@@ -122,6 +137,9 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-lobbyforge}:${POSTGRES_PASSWORD:-lobbyforge_dev}@postgres:5432/${POSTGRES_DB:-lobbyforge}
       REDIS_URL: redis://:${REDIS_PASSWORD:-lobbyforge_dev}@redis:6379
       LOBBYFORGE_SESSION_SECRET: ${LOBBYFORGE_SESSION_SECRET:-dev_session_secret_change_before_public_use_1234}
+      # INFRA-V-02: the only place a published placeholder session secret is
+      # accepted (the default above, .env.example). Never set it elsewhere.
+      LOBBYFORGE_DEV_STACK: "true"
       LOBBYFORGE_SETUP_TOKEN: ${LOBBYFORGE_SETUP_TOKEN:-}
       LOBBYFORGE_DEPLOYMENT_MODE: selfhost
       # Fallback language; the default saved at /setup or in Admin wins (docs/TRANSLATING.md).
@@ -139,7 +157,7 @@ services:
       NEXT_PUBLIC_LIVEKIT_URL: ${NEXT_PUBLIC_LIVEKIT_URL:-http://localhost:19580}
       NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:19521}
     ports:
-      - "19520:3000"
+      - "127.0.0.1:19520:3000"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -170,11 +188,13 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-lobbyforge}:${POSTGRES_PASSWORD:-lobbyforge_dev}@postgres:5432/${POSTGRES_DB:-lobbyforge}
       REDIS_URL: redis://:${REDIS_PASSWORD:-lobbyforge_dev}@redis:6379
       LOBBYFORGE_SESSION_SECRET: ${LOBBYFORGE_SESSION_SECRET:-dev_session_secret_change_before_public_use_1234}
+      LOBBYFORGE_DEV_STACK: "true"
+      # Inside the container; the published port below is loopback-only.
       WS_HOST: 0.0.0.0
       WS_PORT: 3001
       LOBBYFORGE_APP_ORIGIN: ${LOBBYFORGE_APP_ORIGIN:-http://localhost:19520}
     ports:
-      - "19521:3001"
+      - "127.0.0.1:19521:3001"
     # A healthcheck makes `up --wait` (CI) fail on a crash-looping gateway
     # instead of passing on a momentary "running" snapshot.
     healthcheck:
@@ -196,8 +216,8 @@ services:
     container_name: lobbyforge-mailpit
     restart: unless-stopped
     ports:
-      - "19525:1025"  # SMTP
-      - "19526:8025"  # Web UI
+      - "127.0.0.1:19525:1025"  # SMTP
+      - "127.0.0.1:19526:8025"  # Web UI
     profiles: ["full"]
 
   # Optional: local S3-compatible object store. UI at http://localhost:19591.
@@ -210,14 +230,17 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-lobbyforge}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-lobbyforge_dev}
     ports:
-      - "19590:9000"
-      - "19591:9001"
+      - "127.0.0.1:19590:9000"
+      - "127.0.0.1:19591:9001"
     volumes:
       - minio-data:/data
     profiles: ["full"]
 
   # Optional: TURN server for NAT traversal. Only needed for voice testing
   # from networks that block UDP. See projectdetails/08_LIVEKIT_MEDIA.md.
+  # Host networking publishes nothing through Docker, so the listener itself
+  # is pinned to loopback (INFRA-V-02) — with a public static secret it
+  # would otherwise be a relay for the whole LAN.
   coturn:
     image: coturn/coturn:latest
     container_name: lobbyforge-coturn
@@ -225,6 +248,7 @@ services:
     network_mode: host
     command:
       - "-n"
+      - "--listening-ip=127.0.0.1"
       - "--log-file=stdout"
       - "--realm=lobbyforge.local"
       - "--static-auth-secret=${COTURN_STATIC_AUTH_SECRET:-turn_dev_secret}"

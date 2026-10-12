@@ -1,23 +1,36 @@
 # Local development infrastructure
 
-Brings up the LobbyForge backing services on a developer machine so that `apps/web` (when it ships) has a real target to talk to.
+Runs LobbyForge on a developer machine: the backing services and the app
+itself (`docker-compose.dev.yml` builds the image and starts the web app as a
+production build, plus the realtime gateway).
+
+**This machine only** (security-review INFRA-V-02): every published port is
+bound to `127.0.0.1`, and the stack runs with public development secrets.
+web and ws-gateway accept a placeholder session secret here only because the
+compose file sets `LOBBYFORGE_DEV_STACK=true` — never set that anywhere else.
+Anything other people reach runs the production stack (`install.sh`).
 
 ## Services
 
-| Service   | Port (host)     | Purpose                                                 |
-|-----------|-----------------|---------------------------------------------------------|
-| postgres  | `5432`          | Primary data store (users, servers, messages, sessions) |
-| redis     | `6379`          | Presence, pub/sub, rate limit, short-lived state        |
-| livekit   | `7880`/`7881`/`7882/udp` | WebRTC SFU for voice rooms                  |
-| web       | `3000`          | Next.js UI and API                                      |
-| ws-gateway | `3001`        | Realtime WebSocket subscriptions                        |
-| mailpit   | `1025` + `8025` | Local SMTP catcher + web UI (profile: `full`)           |
-| minio     | `9000` + `9001` | S3-compatible object storage (profile: `full`)          |
-| coturn    | `3478` + `5349` | TURN server for NAT traversal (profile: `full`)         |
+| Service    | Host port (127.0.0.1)          | Purpose                                                 |
+|------------|--------------------------------|---------------------------------------------------------|
+| postgres   | `19532`                        | Primary data store (users, servers, messages, sessions) |
+| redis      | `19579`                        | Presence, pub/sub, rate limit, short-lived state        |
+| livekit    | `19580` + `19582/udp`          | WebRTC SFU for voice rooms (signaling + media)          |
+| migrate    | —                              | One-shot schema migrations (runs before web/gateway)    |
+| web        | `19520`                        | Next.js UI and API                                      |
+| ws-gateway | `19521`                        | Realtime WebSocket subscriptions                        |
+| mailpit    | `19525` + `19526`              | Local SMTP catcher + web UI (profile: `full`)           |
+| minio      | `19590` + `19591`              | S3-compatible object storage (profile: `full`)          |
+| coturn     | host network, `127.0.0.1` only | TURN server for NAT traversal (profile: `full`)         |
+
+LiveKit advertises `127.0.0.1` to clients (`--node-ip`), so dev voice works
+from browsers on this machine — which is exactly what the loopback-bound
+media port allows. Voice from another device needs the production stack.
 
 Profiles:
 
-- **default** — only the three required services (postgres, redis, livekit).
+- **default** — postgres, redis, livekit, migrate, web and ws-gateway.
 - **full**   — everything, including mail/minio/coturn, started with `--profile full`.
 
 ## Quick start
@@ -30,8 +43,8 @@ cp infra/docker/.env.example infra/docker/.env
 #    infra/docker/.env as LOBBYFORGE_SETUP_TOKEN=<value>
 pnpm lfctl setup token
 
-# 3. Start the required services
-docker compose -f infra/docker/docker-compose.dev.yml up -d
+# 3. Build the image and start the stack
+docker compose -f infra/docker/docker-compose.dev.yml up -d --build
 
 # 4. (optional) Add the optional services
 docker compose -f infra/docker/docker-compose.dev.yml --profile full up -d
@@ -63,10 +76,10 @@ The release smoke sequence is documented in
 - The compose file uses **standard compose syntax** with no `&&` or shell fragments, so the same `docker compose -f … up -d` works on Windows PowerShell, Windows CMD, macOS, and Linux.
 - Path-style volume mounts (`postgres-data:/var/lib/postgresql/data`) are **named volumes**, not bind mounts. Docker Desktop on Windows (WSL2 backend) handles them transparently — no `/var/run/docker.sock` quirks.
 - Healthchecks are included so that downstream tooling (`apps/web`'s `Doctor` check, future integration tests) can `wait-for` the services without timing-dependent sleeps.
-- The dev secrets in `.env.example` are intentionally weak. They are checked in for convenience. **Do not** use these in any environment that is reachable from the public internet.
+- The dev secrets in `.env.example` are intentionally weak. They are checked in for convenience. **Do not** use these in any environment that is reachable from the public internet — the app refuses the placeholder session secret everywhere except this stack (`LOBBYFORGE_DEV_STACK=true`), and the stack's ports stay on `127.0.0.1`.
 
 ## What this is *not*
 
 - This is **not** the production deployment. Production SHIPS in this repo: [`docker-compose.prod.yml`](docker-compose.prod.yml) (nginx + certbot + web + postgres + redis + livekit + coturn + ws-gateway) provisioned by [`install.sh`](../../install.sh) — see [docs/VOICE_TURN.md](../../docs/VOICE_TURN.md) for the voice/TURN port matrix. This dev file remains the local-development stack.
 - Integration/E2E: the CI `e2e` job runs Playwright against THIS compose stack (real Postgres/Redis/LiveKit and the production-built image). `scripts/e2e-compose.sh` runs the same locally; `docker-compose.e2e-ports.yml` runs an isolated copy beside a live dev stack.
-- Production exposure note: in production only 80/443 (+ the WebRTC/TURN UDP-TCP ranges) need to be public. LiveKit's 7880 signaling is proxied by nginx at `wss://<domain>/livekit` — do NOT expose 7880/7881 directly in production; the ports listed below are the DEV stack's host mappings.
+- Production exposure note: in production only 80/443 (+ the WebRTC/TURN UDP-TCP ranges) need to be public. LiveKit's signaling port is proxied by nginx at `wss://<domain>/livekit` — do NOT expose it directly in production; the ports listed above are the DEV stack's loopback-only host mappings.

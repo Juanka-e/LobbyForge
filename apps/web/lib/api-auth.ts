@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { CorePermission, hasPermission, type CorePermission as CorePermissionT } from '@lobbyforge/core';
+import { CorePermission, hasPermission, requireSessionSecret, type CorePermission as CorePermissionT } from '@lobbyforge/core';
 import { getChannelById, getServerById, getUserPermissions, isServerMember } from '@lobbyforge/db';
 import { authorizeChannelVisibility } from '@/lib/permissions';
 import { getDb } from '@/lib/db';
@@ -11,12 +11,14 @@ export type ApiResult<T> =
   | ({ ok: true } & T)
   | { ok: false; response: NextResponse };
 
+/**
+ * The session secret, refusing a missing, short or published placeholder
+ * value (security-review INFRA-V-02, `@lobbyforge/core` session-secret).
+ * The process already refused to start with one (instrumentation.ts); this
+ * keeps the request path closed too.
+ */
 export function getSessionSecret(): string {
-  const secret = process.env.LOBBYFORGE_SESSION_SECRET;
-  if (!secret || secret.length < 32) {
-    throw new Error('LOBBYFORGE_SESSION_SECRET must be set to at least 32 characters');
-  }
-  return secret;
+  return requireSessionSecret();
 }
 
 export function requireMaterializedSession(req: Request): ApiResult<{ session: ApiSession }> {

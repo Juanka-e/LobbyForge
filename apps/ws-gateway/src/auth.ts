@@ -11,7 +11,7 @@
  * socket with the appropriate WS close code without leaking the
  * underlying reason to the client.
  */
-import { readGuestSession } from '@lobbyforge/core';
+import { readGuestSession, requireSessionSecret } from '@lobbyforge/core';
 
 export interface ResolvedGuest {
   uid: string;
@@ -23,12 +23,12 @@ export type AuthResult =
   | { ok: true; guest: ResolvedGuest }
   | { ok: false; reason: 'no_cookie' | 'no_uid' | 'bad_secret' };
 
+/**
+ * Missing, short or published-placeholder secrets are refused
+ * (security-review INFRA-V-02); `main()` already refused to start with one.
+ */
 function getSessionSecret(): string {
-  const secret = process.env.LOBBYFORGE_SESSION_SECRET;
-  if (!secret || secret.length < 32) {
-    throw new Error('LOBBYFORGE_SESSION_SECRET must be set to at least 32 characters');
-  }
-  return secret;
+  return requireSessionSecret();
 }
 
 /**
