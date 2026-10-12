@@ -488,6 +488,7 @@ describe('bot-events channel', () => {
       options: { sides: 20 },
       channelId: CH2,
       user: { id: USER, displayName: 'Ayşe' },
+      locale: 'tr',
       expiresAt: '2026-10-03T12:15:00.000Z',
     },
   };
@@ -497,7 +498,10 @@ describe('bot-events channel', () => {
     await start();
     const { ws } = await connectReady();
     bus.publish(BOT_EVENTS, interaction);
-    expect(await nextFrame(ws)).toMatchObject({ type: 'event', topic: 'bot', data: interaction });
+    const frame = await nextFrame(ws);
+    expect(frame).toMatchObject({ type: 'event', topic: 'bot', data: interaction });
+    // The invoker's language reaches the bot as published (BOT_API_V2 "Languages").
+    expect((frame.data as { interaction: { locale?: string } }).interaction.locale).toBe('tr');
     bus.publish(BOT_EVENTS, join);
     expect((await nextFrame(ws)).data).toEqual(join);
     bus.publish(BOT_EVENTS, { data: { ...join, event: 'member_leave' } });

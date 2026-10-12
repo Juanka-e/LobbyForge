@@ -108,11 +108,17 @@ function bot(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function invoke(uid: string | null, body: unknown, ids: { channelId?: string; commandId?: string } = {}) {
+function invoke(
+  uid: string | null,
+  body: unknown,
+  ids: { channelId?: string; commandId?: string } = {},
+  extra: { cookie?: string; acceptLanguage?: string } = {}
+) {
   const channelId = ids.channelId ?? GENERAL;
   const commandId = ids.commandId ?? COMMAND;
   const headers: Record<string, string> = { 'content-type': 'application/json' };
-  if (uid) headers.cookie = cookie(uid);
+  if (uid) headers.cookie = [cookie(uid), extra.cookie].filter(Boolean).join('; ');
+  if (extra.acceptLanguage) headers['accept-language'] = extra.acceptLanguage;
   return import('../[commandId]/invoke/route.js').then((route) =>
     route.POST(
       new Request(`https://chat.example.test/api/servers/${SERVER}/channels/${channelId}/commands/${commandId}/invoke`, {
@@ -283,6 +289,29 @@ describe('a successful run', () => {
       interaction: { id: 'int-1', commandName: 'roll', options: { sides: 20, note: 'good luck' }, channelId: GENERAL, user: { id: MEMBER, displayName: 'Ayşe' } },
     });
     expect(db.logAction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: 'command.invoke', actorUserId: MEMBER, targetId: BOT_ID }));
+  });
+
+  it('tells the bot the invoker’s language: their saved choice, else their browser’s, else the instance default', async () => {
+    const localeOf = async (extra: { cookie?: string; acceptLanguage?: string }) => {
+      redisPublish.mockClear();
+      expect((await invoke(MEMBER, { options: { sides: 6 } }, {}, extra)).status).toBe(202);
+      await vi.waitFor(() => expect(redisPublish).toHaveBeenCalled());
+      return (JSON.parse(redisPublish.mock.calls[0]![1]) as { interaction: { locale?: string } }).interaction.locale;
+    };
+    const previous = process.env.LOBBYFORGE_DEFAULT_LOCALE;
+    delete process.env.LOBBYFORGE_DEFAULT_LOCALE;
+    try {
+      expect(await localeOf({ acceptLanguage: 'tr-TR,tr;q=0.9,en;q=0.8' })).toBe('tr');
+      expect(await localeOf({ cookie: 'lf_locale=tr', acceptLanguage: 'en-US,en;q=0.9' })).toBe('tr');
+      expect(await localeOf({ acceptLanguage: 'en-GB' })).toBe('en');
+      // A language the instance does not have falls back to the instance default.
+      expect(await localeOf({ acceptLanguage: 'ja' })).toBe('en');
+      process.env.LOBBYFORGE_DEFAULT_LOCALE = 'tr';
+      expect(await localeOf({})).toBe('tr');
+    } finally {
+      if (previous === undefined) delete process.env.LOBBYFORGE_DEFAULT_LOCALE;
+      else process.env.LOBBYFORGE_DEFAULT_LOCALE = previous;
+    }
   });
 
   it('a bot without receive_events cannot be reached at all (no stream, no endpoint): 409 bot_offline, nothing written', async () => {

@@ -17,8 +17,17 @@
  *     import tr from './locales/tr.json';
  *     loadBotLocale('music-bot', { en, tr });
  *
- *     // Inside a handler:
- *     tFor('music-bot', ctx.locale, 'queue.empty')
+ *     // Every interaction carries the invoker's language (`locale`, an
+ *     // installed language code of the instance such as `tr` or `pt-BR`;
+ *     // absent on older instances). `pickBestLocale` maps `pt-BR` to a
+ *     // bot that only ships `pt`, and anything unknown to English:
+ *     bot.on('interaction', async (interaction) => {
+ *       const locale = pickBestLocale('music-bot', interaction.locale);
+ *       await interaction.reply(tFor('music-bot', locale, 'queue.empty'), { ephemeral: true });
+ *     });
+ *
+ * Message and member events carry no language — a channel message is read
+ * by everyone — so answer those in the bot's own default language.
  *
  * Adding a new language to the music-bot is a single import +
  * `loadBotLocale` call. Community bots do the same.

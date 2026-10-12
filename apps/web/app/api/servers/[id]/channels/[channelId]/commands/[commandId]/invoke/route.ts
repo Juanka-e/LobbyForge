@@ -26,6 +26,7 @@ import { moderateMessage, moderationBlockedBody } from '@/lib/bots/moderation';
 import { botHasPermission } from '@/lib/bots/permissions';
 import { botCanReceiveInteractions } from '@/lib/bots/reachability';
 import { requireVerifiedEmail } from '@/lib/mail/verification';
+import { localeFromRequest } from '@/lib/i18n/server';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -182,8 +183,11 @@ async function handlePost(req: Request, ctx: RouteContext): Promise<NextResponse
     now
   );
   const names = await listUserDisplayNames(getDb(), [uid]);
-  void dispatchInteractionCreate({ bot, interaction, user: { id: uid, displayName: names.get(uid) ?? '' } }).catch((err) =>
-    console.error('[bots] interaction dispatch failed:', (err as Error).message)
+  // The invoker's language — the one their lobby is shown in — so the bot
+  // can answer them in it (docs/BOT_API_V2.md, "Languages").
+  const locale = localeFromRequest(req);
+  void dispatchInteractionCreate({ bot, interaction, user: { id: uid, displayName: names.get(uid) ?? '' }, locale }).catch(
+    (err) => console.error('[bots] interaction dispatch failed:', (err as Error).message)
   );
   void logAction(getDb(), {
     serverId,
