@@ -24,6 +24,12 @@
  * `settings.difficultyDistribution`, then draws the next unused card
  * from that tier's bucket. If that tier is exhausted, falls back to
  * any unused card from any tier.
+ *
+ * Stale intent (v4): every draw bumps `cardSeq`. The host's card moves
+ * (Got it, Skip, Penalty, Next card) carry the `cardSeq` their button was
+ * drawn for; one that names an earlier deal is ignored — the same object
+ * comes back, like a BUST for a card that is gone. Without a `cardSeq`
+ * (a panel from before v4) the move applies to the card in play.
  */
 
 import { getDefaultDeck, getLanguageForPackSlug } from './decks';
@@ -122,6 +128,23 @@ function drawNextCardWeighted(
   return null;
 }
 
+/**
+ * The deal in play; a row from before v4 that skipped migration counts as 0
+ * (and so does no state at all: `start-game` may be the first action).
+ */
+function cardSeqOf(state: HushleState | undefined): number {
+  const seq = state?.cardSeq;
+  return typeof seq === 'number' && Number.isSafeInteger(seq) && seq >= 0 ? seq : 0;
+}
+
+/**
+ * True when a host's card move names a deal that is no longer in play. A
+ * move without a `cardSeq` names none, and is never stale.
+ */
+function isStaleCardMove(state: HushleState, action: { cardSeq?: number | null }): boolean {
+  return action.cardSeq != null && action.cardSeq !== cardSeqOf(state);
+}
+
 function findTeam(state: HushleState, teamId: string): HushleTeam | null {
   return state.teams.find((t) => t.id === teamId) ?? null;
 }
@@ -164,6 +187,7 @@ function startTurn(state: HushleState, team: HushleTeam, requestedExplainer: str
     currentTeamId: team.id,
     currentExplainerId: explainer,
     currentCard: card,
+    cardSeq: cardSeqOf(state) + 1,
     usedCardIds,
     cardsPlayedThisTurn: 0,
     timer: {
@@ -207,6 +231,8 @@ function applyCorrectPassPenalty(
   );
   const usedCardIds = card ? [...state.usedCardIds, card.id] : state.usedCardIds;
   const cardsPlayedThisTurn = state.cardsPlayedThisTurn + 1;
+  // The card in play is settled: whatever comes next is a new deal.
+  const cardSeq = cardSeqOf(state) + 1;
 
   // If we've hit the per-turn cap or the deck is exhausted, the turn
   // ends and the next team takes over.
@@ -221,6 +247,7 @@ function applyCorrectPassPenalty(
         ...state,
         teams: updatedTeams,
         currentCard: null,
+        cardSeq,
         usedCardIds,
         totalCardsPlayed: state.totalCardsPlayed + 1,
         phase: 'ended',
@@ -233,6 +260,7 @@ function applyCorrectPassPenalty(
       ...state,
       teams: updatedTeams,
       currentCard: null,
+      cardSeq,
       usedCardIds,
       cardsPlayedThisTurn: 0,
       totalCardsPlayed: state.totalCardsPlayed + 1,
@@ -245,6 +273,7 @@ function applyCorrectPassPenalty(
     ...state,
     teams: updatedTeams,
     currentCard: card,
+    cardSeq,
     usedCardIds,
     cardsPlayedThisTurn,
     totalCardsPlayed: state.totalCardsPlayed + 1,
@@ -253,6 +282,9 @@ function applyCorrectPassPenalty(
 
 /** Longest card id accepted on the wire (built-in ids are short slugs; DB ids are UUIDs). */
 const CARD_ID_MAX_LENGTH = 128;
+
+/** The host's card moves, which may name the deal they are for (`cardSeq`). */
+const CARD_MOVES = new Set(['next-card', 'correct-guess', 'pass', 'penalty']);
 
 /**
  * The host's outer belt (it answers 400 with the message). Only the fields
@@ -266,6 +298,12 @@ export function validateHushleAction(action: unknown): string | null {
     const cardId = record.cardId;
     if (typeof cardId !== 'string' || cardId.length === 0 || cardId.length > CARD_ID_MAX_LENGTH) {
       return 'bust-forbidden requires the cardId of the card on screen.';
+    }
+  }
+  if (typeof record.type === 'string' && CARD_MOVES.has(record.type) && record.cardSeq != null) {
+    const seq = record.cardSeq;
+    if (typeof seq !== 'number' || !Number.isSafeInteger(seq) || seq < 0) {
+      return `${record.type}: cardSeq must be a non-negative integer when present.`;
     }
   }
   return null;
@@ -334,6 +372,9 @@ export function hushleReducer(state: HushleState, action: HushleAction): HushleS
         timer: stoppedTimer(settings),
         cardsPlayedThisTurn: 0,
         totalCardsPlayed: 0,
+        // Not reset: a late press from the last game must not match a deal
+        // of this one.
+        cardSeq: cardSeqOf(state),
         createdBy: action.createdBy,
         createdAt: new Date(nowMs()).toISOString(),
       };
@@ -400,6 +441,7 @@ export function hushleReducer(state: HushleState, action: HushleAction): HushleS
     }
 
     case 'next-card': {
+      if (isStaleCardMove(state, action)) return state;
       if (state.phase !== 'playing') return state;
       if (!state.timer.startedAt) return state;
       if (turnTimeIsUp(state, nowMs())) return state;
@@ -414,19 +456,23 @@ export function hushleReducer(state: HushleState, action: HushleAction): HushleS
       return {
         ...state,
         currentCard: card,
+        cardSeq: cardSeqOf(state) + 1,
         usedCardIds: [...state.usedCardIds, card.id],
         cardsPlayedThisTurn: state.cardsPlayedThisTurn + 1,
       };
     }
 
+    // A host's press that names an earlier deal is ignored: a BUST (or a
+    // second moderator) moved the card on first, and the new card was
+    // never explained.
     case 'correct-guess':
-      return applyCorrectPassPenalty(state, 'correct');
+      return isStaleCardMove(state, action) ? state : applyCorrectPassPenalty(state, 'correct');
 
     case 'pass':
-      return applyCorrectPassPenalty(state, 'pass');
+      return isStaleCardMove(state, action) ? state : applyCorrectPassPenalty(state, 'pass');
 
     case 'penalty':
-      return applyCorrectPassPenalty(state, 'penalty');
+      return isStaleCardMove(state, action) ? state : applyCorrectPassPenalty(state, 'penalty');
 
     case 'bust-forbidden': {
       // Classic-Taboo buzzer. Server-authoritative actor check: the
@@ -440,7 +486,9 @@ export function hushleReducer(state: HushleState, action: HushleAction): HushleS
       // Only a BUST for the card on screen counts. Two opponents pressing
       // at once: the first applies the penalty and draws the next card, the
       // second names the old card and is ignored (no double penalty, no
-      // burnt card). A BUST without a card id is refused too.
+      // burnt card). A BUST without a card id is refused too. The penalty
+      // is a new deal (`cardSeq`), so the host's Got it for the busted
+      // card, arriving after it, is ignored as well.
       if (typeof action.cardId !== 'string' || action.cardId !== state.currentCard.id) return state;
       const bustedBy = action.bustedBy;
       if (typeof bustedBy !== 'string' || bustedBy.length === 0) return state;

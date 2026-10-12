@@ -388,7 +388,8 @@ describe('a running turn, seat by seat', () => {
     await panel.click(gotIt);
     await panel.click(gotIt);
     await panel.click(panel.button('Skip'));
-    expect(panel.actions).toEqual([{ type: 'correct-guess' }]);
+    // Each press names the deal it was drawn for (B-06, stale intent).
+    expect(panel.actions).toEqual([{ type: 'correct-guess', cardSeq: state.cardSeq }]);
     expect(gotIt.disabled).toBe(true);
 
     // The next card unlocks the host's buttons.
@@ -398,7 +399,38 @@ describe('a running turn, seat by seat', () => {
     const afterSkip = { ...hushleReducer(next, { type: 'pass' }), currentCard: UMBRELLA };
     await panel.rerender({ state: project(afterSkip, SAM) });
     await panel.click(panel.button('Penalty'));
-    expect(panel.actions).toEqual([{ type: 'correct-guess' }, { type: 'pass' }, { type: 'penalty' }]);
+    expect(panel.actions).toEqual([
+      { type: 'correct-guess', cardSeq: state.cardSeq },
+      { type: 'pass', cardSeq: next.cardSeq },
+      { type: 'penalty', cardSeq: afterSkip.cardSeq },
+    ]);
+    // Three different deals, and none of them reveals the card.
+    expect(new Set([state.cardSeq, next.cardSeq, afterSkip.cardSeq]).size).toBe(3);
+  });
+
+  it('a host who cannot see the card still names it: the deal number, never the card id', async () => {
+    const panel = await view(SAM, SAM);
+    expect(q(panel, 'article[aria-label="Word card"]')).toBeNull();
+    await panel.click(panel.button('Got it'));
+    const [sent] = panel.actions;
+    expect(sent).toEqual({ type: 'correct-guess', cardSeq: state.cardSeq });
+    expect(JSON.stringify(panel.actions)).not.toContain(LIGHTHOUSE.id);
+  });
+
+  it('a press the reducer receives after a BUST moved the card on scores nothing', async () => {
+    const panel = await view(SAM, SAM);
+    await panel.click(panel.button('Got it'));
+    const [gotIt] = panel.actions;
+    // Juno's BUST reaches the server first: Lighthouse costs a point, a new card is dealt.
+    const busted = hushleReducer(state, { type: 'bust-forbidden', bustedBy: JUNO, cardId: LIGHTHOUSE.id });
+    expect(hushleReducer(busted, gotIt!)).toBe(busted);
+  });
+
+  it('a session from before deal numbers (read raw) sends the classic payload', async () => {
+    const legacy = { ...project(state, SAM), cardSeq: undefined } as unknown as ReturnType<typeof project>;
+    const panel = await mount({ state: legacy, actorUserId: SAM, hostUserId: SAM });
+    await panel.click(panel.button('Got it'));
+    expect(panel.actions).toEqual([{ type: 'correct-guess' }]);
   });
 
   it('a host on the watching team busts instead of a second penalty button', async () => {
@@ -428,7 +460,7 @@ describe('a running turn, seat by seat', () => {
     await panel.click(panel.button('End turn'));
     await panel.click(panel.button('End game'));
     expect(panel.actions).toEqual([
-      { type: 'next-card' },
+      { type: 'next-card', cardSeq: state.cardSeq },
       { type: 'set-explainer', explainerId: THEO },
       { type: 'end-turn' },
       { type: 'end-game' },

@@ -118,6 +118,19 @@ export function turnDeadline(timer: HushleTimer | null | undefined): number | nu
   return start + Math.max(0, timer.durationSeconds) * 1000;
 }
 
+/**
+ * What a host's card move (Got it, Skip, Penalty, Next card) sends to name
+ * the card it is for: the deal number of the snapshot the button was drawn
+ * from. Take it at render time, never at click time — the point is that a
+ * press meant for one card cannot score the next. A snapshot without one
+ * (a session from before v4, read raw) sends nothing, which the reducer
+ * accepts as before.
+ */
+export function cardMoveIntent(state: Pick<HushleState, 'cardSeq'>): { cardSeq?: number } {
+  const seq = state.cardSeq as unknown;
+  return typeof seq === 'number' && Number.isSafeInteger(seq) && seq >= 0 ? { cardSeq: seq } : {};
+}
+
 /** "Turn 3" — the reducer counts the turns. */
 export function turnNumber(state: Pick<HushleState, 'turnNumber'>): number {
   return Math.max(1, state.turnNumber || 0);

@@ -459,7 +459,7 @@ describe('@lobbyforge/hushle', () => {
   });
 
   it('migrator is idempotent on already-current state', () => {
-    const v3 = {
+    const current = {
       version: HUSHLE_STATE_VERSION,
       phase: 'lobby',
       teams: [],
@@ -468,6 +468,7 @@ describe('@lobbyforge/hushle', () => {
       currentTeamId: null,
       currentExplainerId: null,
       currentCard: null,
+      cardSeq: 0,
       deck: [],
       deckIndex: 0,
       usedCardIds: [],
@@ -485,10 +486,56 @@ describe('@lobbyforge/hushle', () => {
       createdBy: null,
       createdAt: null,
     };
-    const first = migrateHushleState(v3);
+    const first = migrateHushleState(current);
     const second = migrateHushleState(first);
     expect(second).toEqual(first);
-    expect(first).toEqual(v3);
+    expect(first).toEqual(current);
+  });
+
+  it('migrator numbers the deals of a v3 game in progress from 0, the same on every read', () => {
+    // A v3 row mid-turn: the panel and the reducer each migrate it on their
+    // own read, so both must arrive at the same deal number.
+    const v3 = {
+      version: 3,
+      phase: 'playing',
+      teams: [
+        { id: 'team-a', name: 'A', playerIds: ['p1', 'p2'], score: 1, correctCount: 1, passCount: 0, penaltyCount: 0, nextExplainerSlot: 1 },
+        { id: 'team-b', name: 'B', playerIds: ['p3', 'p4'], score: 0, correctCount: 0, passCount: 0, penaltyCount: 0, nextExplainerSlot: 0 },
+      ],
+      floaterPlayerId: null,
+      turnNumber: 1,
+      currentTeamId: 'team-a',
+      currentExplainerId: 'p1',
+      currentCard: { id: 'c2', language: 'en', word: 'apple', forbiddenWords: ['fruit'], difficulty: 'easy' },
+      deck: [],
+      deckIndex: 0,
+      usedCardIds: ['c1', 'c2'],
+      settings: {
+        turnDurationSeconds: 60,
+        cardsPerTurn: 15,
+        language: 'en',
+        packId: 'hushle-en-basic',
+        teamSize: 2,
+        difficultyDistribution: { easy: 0.6, medium: 0.3, hard: 0.1 },
+      },
+      timer: { startedAt: '2026-09-01T10:00:00.000Z', durationSeconds: 60, paused: false, endsAt: '2026-09-01T10:01:00.000Z' },
+      cardsPlayedThisTurn: 1,
+      totalCardsPlayed: 1,
+      createdBy: 'p1',
+      createdAt: '2026-09-01T09:55:00.000Z',
+    };
+    const migrated = migrateHushleState(v3);
+    expect(migrated.version).toBe(HUSHLE_STATE_VERSION);
+    expect(migrated.cardSeq).toBe(0);
+    expect(migrateHushleState(v3)).toEqual(migrated);
+    expect(migrateHushleState(migrated)).toBe(migrated);
+    // Everything else carries through untouched.
+    const { version: _v, cardSeq: _seq, ...rest } = migrated;
+    const { version: _v3, ...restV3 } = v3;
+    expect(rest).toEqual(restV3);
+    // Older rows reach v4 through every step.
+    expect(migrateHushleState({ version: 2, phase: 'lobby', teams: [] }).cardSeq).toBe(0);
+    expect(migrateHushleState({ phase: 'lobby', teams: [] }).cardSeq).toBe(0);
   });
 
   it('migrator upgrades a v2 game in progress: per-team rotation, turn number, deadline', () => {
@@ -1129,6 +1176,119 @@ describe('@lobbyforge/hushle', () => {
     expect(validate({ type: 'bust-forbidden', bustedBy: 'p3', cardId: 'en-easy-001' })).toBeNull();
     expect(validate({ type: 'correct-guess' })).toBeNull();
     expect(validate(null)).toMatch(/object/);
+  });
+
+  // ── Stale intent (B-06): the host's card moves name their deal ──────
+  it('a host move naming the deal in play applies; one without a deal number applies as before', async () => {
+    const harness = await setupBustHarness();
+    const s0 = harness.getState();
+    expect(s0.cardSeq).toBe(1);
+    await harness.performAction('p1', { type: 'correct-guess', cardSeq: s0.cardSeq });
+    const s1 = harness.getState();
+    expect(s1.teams[0]!.correctCount).toBe(1);
+    expect(s1.cardSeq).toBe(2);
+    await harness.performAction('p1', { type: 'pass', cardSeq: s1.cardSeq });
+    await harness.performAction('p1', { type: 'penalty', cardSeq: harness.getState().cardSeq });
+    await harness.performAction('p1', { type: 'next-card', cardSeq: harness.getState().cardSeq });
+    // A panel from before deal numbers (no cardSeq, or null) still plays.
+    await harness.performAction('p1', { type: 'correct-guess' });
+    await harness.performAction('p1', { type: 'correct-guess', cardSeq: null });
+    const end = harness.getState();
+    expect(end.teams[0]).toMatchObject({ correctCount: 3, passCount: 1, penaltyCount: 1, score: 2 });
+    expect(end.cardSeq).toBe(7);
+    expect(end.cardsPlayedThisTurn).toBe(6);
+  });
+
+  it("BUST on card A, then the host's Got it for A: only the BUST applies — card B is not scored", async () => {
+    const harness = await setupBustHarness();
+    const before = harness.getState();
+    const cardA = before.currentCard!.id;
+    // Both pressed while A was on screen; the BUST reaches the server first.
+    await harness.performAction('p3', { type: 'bust-forbidden', bustedBy: 'p3', cardId: cardA });
+    const afterBust = harness.getState();
+    const cardB = afterBust.currentCard!;
+    expect(cardB.id).not.toBe(cardA);
+    expect(afterBust.cardSeq).toBe(before.cardSeq + 1);
+    await harness.performAction('p1', { type: 'correct-guess', cardSeq: before.cardSeq });
+    // Ignored: the same object, A penalised once, B still in play and unscored.
+    expect(harness.getState()).toBe(afterBust);
+    expect(afterBust.teams[0]).toMatchObject({
+      score: before.teams[0]!.score - 1,
+      correctCount: before.teams[0]!.correctCount,
+      penaltyCount: before.teams[0]!.penaltyCount + 1,
+    });
+    expect(afterBust.totalCardsPlayed).toBe(before.totalCardsPlayed + 1);
+    // The host's next press comes from B's snapshot and scores B.
+    await harness.performAction('p1', { type: 'correct-guess', cardSeq: afterBust.cardSeq });
+    expect(harness.getState().teams[0]!.correctCount).toBe(before.teams[0]!.correctCount + 1);
+  });
+
+  it('the host and a moderator pressing Got it at once score ONE card', async () => {
+    const harness = await setupBustHarness();
+    const before = harness.getState();
+    await harness.performAction('p1', { type: 'correct-guess', cardSeq: before.cardSeq });
+    const afterFirst = harness.getState();
+    await harness.performAction('p2', { type: 'correct-guess', cardSeq: before.cardSeq });
+    expect(harness.getState()).toBe(afterFirst);
+    expect(afterFirst.teams[0]!.correctCount).toBe(before.teams[0]!.correctCount + 1);
+    expect(afterFirst.usedCardIds).toHaveLength(before.usedCardIds.length + 1);
+  });
+
+  it('a stale Skip, Penalty or Next card is ignored — the same object, no burnt card', async () => {
+    const harness = await setupBustHarness();
+    const stale = harness.getState().cardSeq;
+    await harness.performAction('p1', { type: 'next-card', cardSeq: stale });
+    const current = harness.getState();
+    expect(current.cardSeq).toBe(stale + 1);
+    for (const action of [
+      { type: 'correct-guess' as const, cardSeq: stale },
+      { type: 'pass' as const, cardSeq: stale },
+      { type: 'penalty' as const, cardSeq: stale },
+      { type: 'next-card' as const, cardSeq: stale },
+      // A deal that has not happened yet is no more current than an old one.
+      { type: 'correct-guess' as const, cardSeq: current.cardSeq + 1 },
+    ]) {
+      await harness.performAction('p1', action);
+      expect(harness.getState(), action.type).toBe(current);
+    }
+  });
+
+  it('keeps counting deals across games, so a late press from the last game never matches', async () => {
+    const harness = await setupBustHarness();
+    await harness.performAction('p1', { type: 'correct-guess' });
+    const lastGame = harness.getState().cardSeq;
+    await harness.performAction('p1', { type: 'end-game' });
+    await harness.performAction('p1', { type: 'start-game', packId: 'hushle-en-basic', cardsPerTurn: 100, createdBy: 'p1' });
+    expect(harness.getState().cardSeq).toBe(lastGame);
+    await harness.performAction('p1', {
+      type: 'set-teams',
+      teams: [
+        { name: 'A', playerIds: ['p1', 'p2'] },
+        { name: 'B', playerIds: ['p3', 'p4'] },
+      ],
+    });
+    await harness.performAction('p1', { type: 'start-turn', teamId: harness.getState().teams[0]!.id, explainerId: 'p1' });
+    const fresh = harness.getState();
+    expect(fresh.cardSeq).toBe(lastGame + 1);
+    for (let seq = 0; seq <= lastGame; seq += 1) {
+      await harness.performAction('p1', { type: 'correct-guess', cardSeq: seq });
+      expect(harness.getState()).toBe(fresh);
+    }
+  });
+
+  it("validateAction: a card move's cardSeq, when present, is a non-negative integer", () => {
+    const validate = hushlePlugin.validateAction!;
+    for (const type of ['correct-guess', 'pass', 'penalty', 'next-card']) {
+      expect(validate({ type })).toBeNull();
+      expect(validate({ type, cardSeq: null })).toBeNull();
+      expect(validate({ type, cardSeq: 0 })).toBeNull();
+      expect(validate({ type, cardSeq: 42 })).toBeNull();
+      for (const cardSeq of [-1, 1.5, '3', Number.NaN, Number.MAX_SAFE_INTEGER + 1, {}]) {
+        expect(validate({ type, cardSeq }), `${type} ${String(cardSeq)}`).toMatch(/cardSeq/);
+      }
+    }
+    // Other actions do not look at it.
+    expect(validate({ type: 'end-turn', cardSeq: 'x' })).toBeNull();
   });
 });
 

@@ -118,6 +118,18 @@ export interface HushleState {
   currentTeamId: string | null;
   currentExplainerId: string | null;
   currentCard: HushleCard | null;
+  /**
+   * v4 — which deal the card in play is: goes up by one at every draw
+   * (the start of a turn, a card scored, skipped or busted, `next-card`)
+   * and never goes down, not even for a new game. Public: it says how
+   * many cards were dealt, never which. Got it / Skip / Penalty / Next
+   * card carry the number the host's button was drawn for, so a press
+   * that lands after the card changed (a BUST got there first, or a
+   * second moderator pressed too) is ignored instead of scoring a card
+   * nobody explained. The card's id cannot do this job: the host and the
+   * explaining team never receive it.
+   */
+  cardSeq: number;
   deck: HushleCard[];
   deckIndex: number;
   /**
@@ -165,10 +177,16 @@ export type HushleAction =
     }
   | { type: 'start-turn'; teamId: string; explainerId: string | null }
   | { type: 'set-explainer'; explainerId: string | null }
-  | { type: 'next-card' }
-  | { type: 'correct-guess' }
-  | { type: 'pass' }
-  | { type: 'penalty' }
+  /**
+   * The host's card moves. `cardSeq` is the `state.cardSeq` the button was
+   * drawn for: when present and no longer current, the action is ignored
+   * (the card it meant is gone). Absent (or null), it applies to whatever
+   * card is in play — the shape older panels send.
+   */
+  | { type: 'next-card'; cardSeq?: number | null }
+  | { type: 'correct-guess'; cardSeq?: number | null }
+  | { type: 'pass'; cardSeq?: number | null }
+  | { type: 'penalty'; cardSeq?: number | null }
   /**
    * Classic-Taboo buzzer: a player on an OPPOSING team catches the
    * explainer saying a forbidden word and presses BUST. Server injects
@@ -210,8 +228,9 @@ export const HUSHLE_TIME_UP_GRACE_MS = 2000;
  * v3 gives every team its own explainer rotation (`teams[].nextExplainerSlot`,
  * replacing the single `currentExplainerIndex`), counts turns
  * (`turnNumber`) and keeps the turn's deadline (`timer.endsAt`).
+ * v4 numbers the deals (`cardSeq`) so a host's press names its card.
  */
-export const HUSHLE_STATE_VERSION = 3;
+export const HUSHLE_STATE_VERSION = 4;
 
 export function createHushleInitialState(): HushleState {
   return {
@@ -223,6 +242,7 @@ export function createHushleInitialState(): HushleState {
     currentTeamId: null,
     currentExplainerId: null,
     currentCard: null,
+    cardSeq: 0,
     deck: [],
     deckIndex: 0,
     usedCardIds: [],
@@ -369,7 +389,7 @@ function migrateV2ToV3(raw: unknown): HushleState {
   const inPlay = (base.phase === 'playing' || base.phase === 'ended') && typeof base.currentTeamId === 'string';
   const state = {
     ...(base as unknown as HushleState),
-    version: HUSHLE_STATE_VERSION,
+    version: 3,
     teams,
     turnNumber: inPlay ? oldIndex + 1 : 0,
     timer: { startedAt, durationSeconds, paused, endsAt },
@@ -386,6 +406,20 @@ function migrateV2ToV3(raw: unknown): HushleState {
     }
   }
   return state;
+}
+
+function migrateV3ToV4(raw: unknown): HushleState {
+  // v4 numbers the deals. A game in progress starts counting at 0: every
+  // read of the same v3 row migrates to the same number, so a panel that
+  // read the migrated state names the card the reducer sees. Panels that
+  // read the raw row send no number, and that is accepted too.
+  const base = asRecord(raw);
+  const cardSeq = base.cardSeq;
+  return {
+    ...(base as unknown as HushleState),
+    version: HUSHLE_STATE_VERSION,
+    cardSeq: typeof cardSeq === 'number' && Number.isSafeInteger(cardSeq) && cardSeq >= 0 ? cardSeq : 0,
+  };
 }
 
 /**
@@ -411,6 +445,7 @@ export function migrateHushleState(raw: unknown): HushleState {
   if (version < 1) state = migrateV0ToV1(state);
   if (version < 2) state = migrateV1ToV2(state);
   if (version < 3) state = migrateV2ToV3(state);
-  // if (version < 4) state = migrateV3ToV4(state);   ← add when v4 lands
+  if (version < 4) state = migrateV3ToV4(state);
+  // if (version < 5) state = migrateV4ToV5(state);   ← add when v5 lands
   return state as HushleState;
 }

@@ -5,6 +5,7 @@ import {
   DIFFICULTY_PRESETS,
   EMPTY_TURN_LOG,
   advanceTurnLog,
+  cardMoveIntent,
   draftOf,
   explainerCandidates,
   gameTotals,
@@ -90,6 +91,22 @@ describe('turn and timer', () => {
     expect(s.phase).toBe('playing');
     expect(isTurnRunning(s)).toBe(false);
     expect(isTurnRunning(teamSetupState())).toBe(false);
+  });
+
+  it("names the deal a host move is for, from every viewer's snapshot alike", () => {
+    const state = playingState();
+    // The deal number is public — the host, the guessers and spectators get
+    // it with no card — and it is what the host's card moves send.
+    for (const viewer of [MIRA, THEO, KAYA, NOVA, SAM]) {
+      expect(cardMoveIntent(project(state, viewer))).toEqual({ cardSeq: state.cardSeq });
+    }
+    const next = hushleReducer(state, { type: 'correct-guess', ...cardMoveIntent(state) });
+    expect(next.cardSeq).toBe(state.cardSeq + 1);
+    expect(cardMoveIntent(next)).toEqual({ cardSeq: next.cardSeq });
+    // A snapshot from before deal numbers sends none; so does garbage.
+    for (const cardSeq of [undefined, null, -1, 1.5, '3']) {
+      expect(cardMoveIntent({ cardSeq } as unknown as HushleState)).toEqual({});
+    }
   });
 
   it('numbers turns as the reducer counts them', () => {

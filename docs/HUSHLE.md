@@ -64,11 +64,11 @@ lobby ─────────────► team_setup ──────�
 - **ended** — from any phase via `end-game`. Scores stay; `start-game`
   goes back to team setup with a fresh deck and no teams.
 
-## State shape (version 3)
+## State shape (version 4)
 
 ```ts
 type HushleState = {
-  version: 3;                          // HUSHLE_STATE_VERSION
+  version: 4;                          // HUSHLE_STATE_VERSION
   phase: HushlePhase;
   teams: Array<{
     id; name; playerIds: string[]; score; correctCount; passCount; penaltyCount;
@@ -79,6 +79,7 @@ type HushleState = {
   currentTeamId: string | null;
   currentExplainerId: string | null;
   currentCard: HushleCard | null;      // { id, language, word, forbiddenWords, difficulty, category? }
+  cardSeq: number;                     // which deal is in play: +1 at every draw, never reset; public
   deck: HushleCard[];                  // SERVER ONLY — never sent to a client
   deckIndex: number;                   // legacy, unused by the weighted draw
   usedCardIds: string[];               // SERVER ONLY — the last one is the current card
@@ -118,8 +119,8 @@ unchanged.
 | `set-teams` | Replaces the roster. Empty names are dropped, names cut to 40 characters, each team trimmed to `teamSize`. The floater is kept only if they are on no team. Every team's rotation starts at its first player. |
 | `start-turn` | → `playing`: the given team, the given explainer (or the next in the team's rotation), a card drawn by difficulty weight, the turn's clock started. |
 | `set-explainer` | Hands the turn to someone else; the team's rotation then continues after them. |
-| `next-card` | A new card without scoring; counts toward the turn's cards. Refused once the time is up or between turns. |
-| `correct-guess` / `pass` / `penalty` | +1 / 0 / −1 for the explaining team, then the next card on the same clock — or, at the turn's card budget or an empty deck, the end of the turn. Refused once the time is up or between turns. |
+| `next-card` `{ cardSeq? }` | A new card without scoring; counts toward the turn's cards. Refused once the time is up or between turns, and ignored when `cardSeq` names an earlier deal (see [Stale presses](#stale-presses)). |
+| `correct-guess` / `pass` / `penalty` `{ cardSeq? }` | +1 / 0 / −1 for the explaining team, then the next card on the same clock — or, at the turn's card budget or an empty deck, the end of the turn. Refused once the time is up or between turns, and ignored when `cardSeq` names an earlier deal. |
 | `bust-forbidden` | The other team's buzzer: the same as `penalty`, accepted only when `bustedBy` (injected by the server from the session) sits on a team other than the explaining one, AND `cardId` names the card on screen. Two opponents pressing at once (or a double tap) send the same `cardId`: the first costs the penalty and draws the next card, the second names a card that is gone and is ignored — one penalty, no burnt card. `validateAction` answers 400 for a BUST without a `cardId`. |
 | `end-turn` | The next team in order; the next player in its own rotation explains, and its turn starts at once on a fresh clock. |
 | `end-game` | → `ended`: the card and the timer are cleared, scores kept. |
@@ -127,6 +128,35 @@ unchanged.
 Card draw: the reducer picks a difficulty tier by the weights, then an
 unused card of that tier, falling back to any unused card. A card is never
 drawn twice in a game.
+
+### Stale presses
+
+A press can reach the server after the card it was meant for is gone. An
+opponent presses BUST on card A while the host presses Got it: the BUST
+lands first (A costs a point, card B is dealt), and Got it would then
+score B, which nobody explained. Two moderators pressing at once do the
+same.
+
+So every draw bumps `cardSeq` (the start of a turn, a card scored, skipped
+or busted, `next-card`), and the host's card moves carry the `cardSeq` of
+the state their button was drawn from. One that names an earlier deal — or
+a later one — is ignored: the reducer returns the same state object, so
+the press changes nothing (no score, no burnt card, no audit row), exactly
+like a BUST for a card that is gone. The actions route answers a plain 200
+with the current state, which shows the presser the new card. `cardSeq` is not
+reset by `start-game`, so a late press from the last game cannot match a
+deal of the new one.
+
+- **Why a counter and not the card id:** the host who does not play and
+  the explaining team never receive `currentCard`, so they cannot name it.
+  `cardSeq` is public and says only how many cards were dealt (the same
+  as `usedCardCount`), never which. BUST keeps its `cardId`: only
+  opponents press it, and they see the card.
+- **Without a `cardSeq`** (a panel loaded before v4 and still open after a
+  deploy, or a session read raw from the realtime gateway before its
+  first v4 write) the move applies to the card in play, as before. A
+  present `cardSeq` that is not a non-negative integer is a 400 from
+  `validateAction`; `null` counts as absent.
 
 ### Turns and the explainer rotation
 
@@ -197,6 +227,9 @@ the realtime gateway alike):
 - `currentCard` reaches only the **explainer** and the players of the
   **other teams**. The explainer's teammates, the floater, spectators and
   a host who does not play get `null`.
+- `cardSeq` reaches everyone: it is how a host who cannot see the card
+  names it when scoring (see [Stale presses](#stale-presses)). It counts
+  deals and identifies no card.
 
 The panel never decides visibility; it shows what it was sent and words
 each viewer's job to match.
@@ -338,6 +371,9 @@ placeholder that says what to do instead ("Listen to Mira").
 - The host's **Got it / Skip / Penalty / Next card** lock after a press
   until the next state arrives (keyed on a fingerprint of the card in
   play), and unlock by themselves after 4 s if the move never landed.
+- Each of those presses carries the `cardSeq` of the state the button was
+  rendered from (`cardMoveIntent` in `ui/model.ts`), so a press that lands
+  after the card changed is ignored ([Stale presses](#stale-presses)).
 - The server also de-duplicates retries by `actionId`.
 
 ### "This turn"
@@ -417,18 +453,23 @@ the activity is truly over.
 
 `plugins/hushle/src/__tests__/`:
 
-- `hushle.test.ts` (36) — the reducer: every action, teams and floater,
+- `hushle.test.ts` (49) — the reducer: every action, teams and floater,
   the per-team rotation (four turns for four players, the floater once
   for each team, an explainer picked by hand), the turn clock and time's
-  up, weighted draw, BUST rules, migrations up to v3.
-- `panel-model.test.ts` (25) — the panel's pure logic: each viewer's role
-  against the projection, the deadline, the next-up preview checked
+  up, weighted draw, BUST rules, stale presses (a BUST then the host's Got
+  it for the same card applies once; two moderators score one card; a
+  stale Skip, Penalty or Next card; deals counted across games),
+  migrations up to v4.
+- `panel-model.test.ts` (26) — the panel's pure logic: each viewer's role
+  against the projection, the deal number every viewer sends, the
+  deadline, the next-up preview checked
   against what `end-turn` really does over a full round, standings,
   settings round-tripped through the reducer, the two-team split,
   `set-teams` payloads, the "this turn" log over real reducer transitions.
-- `panel.test.tsx` (40) — the panel mounted in a DOM: every phase and
+- `panel.test.tsx` (43) — the panel mounted in a DOM: every phase and
   seat, seating by name and splitting the room, time's up, the exact
-  action each button dispatches, the double-tap guards, Turkish rendering
+  action each button dispatches (the host's card moves with their
+  `cardSeq`, never the card id), the double-tap guards, Turkish rendering
   and "no raw key anywhere". `harness.tsx` holds the
   fixtures, a restatement of the server projection, and the DOM: the
   package does not depend on react-dom or a DOM library, so the harness
@@ -445,7 +486,7 @@ it); `compose-stack.spec.ts` covers the same rules through the API.
 
 ## State versioning
 
-`HUSHLE_STATE_VERSION` is `3`. `migrateHushleState(raw)` is wired as the
+`HUSHLE_STATE_VERSION` is `4`. `migrateHushleState(raw)` is wired as the
 plugin's `migrateState`, so the host upgrades any persisted row on read:
 version 0 rows gain `version`; version 1 rows gain the floater,
 `usedCardIds`, `teamSize`, the difficulty weights and a difficulty on
@@ -453,8 +494,10 @@ every card; version 2 rows trade the single `currentExplainerIndex` for a
 rotation cursor on every team and a `turnNumber`, and a running turn gets
 its deadline (`endsAt` = start + duration). A game in progress keeps its
 explaining team's rotation going after whoever explains now; the other
-teams start theirs afresh. Garbage falls back to the initial state. To
-change the shape: bump the constant, add a `migrateV3ToV4` step, and make
+teams start theirs afresh. Version 3 rows gain `cardSeq: 0` — the same
+number on every read, so a panel that read the migrated row names the
+deal the reducer sees. Garbage falls back to the initial state. To
+change the shape: bump the constant, add a `migrateV4ToV5` step, and make
 the reducer produce the new version.
 
 ## Locales

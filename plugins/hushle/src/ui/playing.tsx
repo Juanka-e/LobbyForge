@@ -22,6 +22,7 @@ import { CardFace, HiddenCard } from './card';
 import { listOf, useHushleI18n } from './i18n';
 import { outcomeName, playerName, roleLine } from './labels';
 import {
+  cardMoveIntent,
   explainerCandidates,
   isTurnRunning,
   nextTurnPreview,
@@ -168,6 +169,10 @@ function TurnColumn({
   // a point and draw the next card, and two red buttons doing the same
   // thing would only make the host hesitate.
   const canBust = role === 'opponent' && card !== null;
+  // The deal these buttons were drawn for. If a BUST (or another
+  // moderator) moves the card on first, the press is ignored instead of
+  // scoring a card nobody explained.
+  const intent = cardMoveIntent(state);
 
   return (
     <Panel padding={22} radius={24} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -187,15 +192,20 @@ function TurnColumn({
       {isHost ? (
         <Stack gap={10}>
           <Grid min={140} gap={12}>
-            <Button variant="success" size="lg" disabled={hostLocked} onClick={() => hostAct({ type: 'correct-guess' })}>
+            <Button
+              variant="success"
+              size="lg"
+              disabled={hostLocked}
+              onClick={() => hostAct({ type: 'correct-guess', ...intent })}
+            >
               {t('hushle.playing.correct')}
             </Button>
-            <Button variant="secondary" size="lg" disabled={hostLocked} onClick={() => hostAct({ type: 'pass' })}>
+            <Button variant="secondary" size="lg" disabled={hostLocked} onClick={() => hostAct({ type: 'pass', ...intent })}>
               {t('hushle.playing.pass')}
             </Button>
           </Grid>
           {canBust ? null : (
-            <Button variant="danger" block disabled={hostLocked} onClick={() => hostAct({ type: 'penalty' })}>
+            <Button variant="danger" block disabled={hostLocked} onClick={() => hostAct({ type: 'penalty', ...intent })}>
               {t('hushle.playing.penalty')}
             </Button>
           )}
@@ -444,12 +454,19 @@ function HostTools({
 }: ViewProps & { hostLocked: boolean; hostAct: (action: HushleAction) => void }) {
   const { t } = useHushleI18n();
   const candidates = explainerCandidates(state);
+  // Like the scoring buttons: a swap meant for one card never skips the next.
+  const intent = cardMoveIntent(state);
   return (
     <Panel variant="sunken" padding={18} radius={22}>
       <Stack gap={14}>
         <SectionLabel>{t('hushle.host.tools')}</SectionLabel>
         <Row wrap gap={12}>
-          <Button variant="secondary" size="sm" disabled={hostLocked} onClick={() => hostAct({ type: 'next-card' })}>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={hostLocked}
+            onClick={() => hostAct({ type: 'next-card', ...intent })}
+          >
             {t('hushle.playing.nextCard')}
           </Button>
           <span style={{ fontSize: 13, lineHeight: 1.5, color: lf.muted }}>{t('hushle.host.nextCardHint')}</span>
