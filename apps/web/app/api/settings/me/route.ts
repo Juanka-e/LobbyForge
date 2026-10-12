@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import {
   getEffectiveUserSettings,
+  getUserLocale,
+  setUserLocale,
   updateUserAudio,
   updateUserNotifications,
   updateUserKeybinds,
@@ -11,6 +13,8 @@ import {
 } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { requireMaterializedSession } from '@/lib/api-auth';
+import { getDiscovery } from '@/lib/i18n/catalogue';
+import { installedLocale } from '@/lib/i18n/core';
 import { withApiSecurity } from '@/lib/security-headers';
 import { recordSession } from '@/lib/session-tracker';
 
@@ -20,6 +24,13 @@ export const runtime = 'nodejs';
 const VisibilityScopeSchema = z.enum(['everyone', 'server_members', 'friends', 'nobody']);
 
 const ThemeSchema = z.enum(['dark', 'dim', 'light', 'system']);
+
+/**
+ * The account's language (docs/TRANSLATING.md): an installed language's
+ * code, or null for "Match my browser". Checked against the languages on
+ * disk below — the schema only bounds the shape.
+ */
+const LocaleSchema = z.string().trim().min(2).max(35).nullable();
 
 const PrivacySchema = z
   .object({
@@ -101,6 +112,7 @@ const PatchSchema = z
     notifications: PreferenceRecordSchema.optional(),
     audio: PreferenceRecordSchema.optional(),
     keybinds: KeybindRecordSchema.optional(),
+    locale: LocaleSchema.optional(),
   })
   .strict()
   .refine(
@@ -109,14 +121,17 @@ const PatchSchema = z
       value.theme !== undefined ||
       value.notifications !== undefined ||
       value.audio !== undefined ||
-      value.keybinds !== undefined,
+      value.keybinds !== undefined ||
+      value.locale !== undefined,
     { message: 'PATCH body must include at least one settings field' }
   );
 
-function toJson(settings: Awaited<ReturnType<typeof getEffectiveUserSettings>>) {
+function toJson(settings: Awaited<ReturnType<typeof getEffectiveUserSettings>>, locale: string | null) {
   return {
     settings: {
       theme: settings.theme,
+      // The account's saved language; null = follows the browser.
+      locale,
       notifications: settings.notifications,
       audio: settings.audio,
       privacy: settings.privacy,
@@ -131,8 +146,11 @@ async function handleGet(req: Request): Promise<NextResponse> {
   if (!session.ok) return session.response;
   // Fire-and-forget: refresh the session fingerprint on settings page loads.
   void recordSession(session.session.uid, session.session.gid, req);
-  const settings = await getEffectiveUserSettings(getDb(), session.session.uid);
-  return NextResponse.json(toJson(settings), { headers: { 'Cache-Control': 'no-store' } });
+  const [settings, locale] = await Promise.all([
+    getEffectiveUserSettings(getDb(), session.session.uid),
+    getUserLocale(getDb(), session.session.uid),
+  ]);
+  return NextResponse.json(toJson(settings, locale), { headers: { 'Cache-Control': 'no-store' } });
 }
 
 async function handlePatch(req: Request): Promise<NextResponse> {
@@ -148,6 +166,16 @@ async function handlePatch(req: Request): Promise<NextResponse> {
       { error: 'Invalid settings payload' },
       { status: 400 }
     );
+  }
+
+  // A language this instance does not ship is refused, not stored: the
+  // page could not render in it, and a stale code would sit in the row.
+  let locale: string | null | undefined;
+  if (parsed.locale !== undefined) {
+    locale = parsed.locale === null ? null : installedLocale(parsed.locale, getDiscovery().locales.map((l) => l.code));
+    if (locale === null && parsed.locale !== null) {
+      return NextResponse.json({ error: 'Unknown language' }, { status: 400 });
+    }
   }
 
   const db = getDb();
@@ -171,7 +199,8 @@ async function handlePatch(req: Request): Promise<NextResponse> {
   if (parsed.keybinds) {
     settings = await updateUserKeybinds(db, uid, parsed.keybinds);
   }
-  return NextResponse.json(toJson(settings), { headers: { 'Cache-Control': 'no-store' } });
+  const savedLocale = locale !== undefined ? await setUserLocale(db, uid, locale) : await getUserLocale(db, uid);
+  return NextResponse.json(toJson(settings, savedLocale ?? null), { headers: { 'Cache-Control': 'no-store' } });
 }
 
 export const GET = withApiSecurity(handleGet, {

@@ -39,7 +39,8 @@ export interface FakeUser {
   email: string | null;
   emailVerifiedAt: Date | null;
   isGuest: boolean;
-  locale: string;
+  /** Null = never chose a language (0048). */
+  locale: string | null;
   displayName: string;
   createdAt: Date;
   deletedAt: Date | null;
@@ -222,7 +223,7 @@ export function createFakeEmailDb() {
       email: `${overrides.id.slice(0, 8)}@example.org`,
       emailVerifiedAt: null,
       isGuest: false,
-      locale: 'en',
+      locale: null,
       displayName: 'Member',
       createdAt: new Date(),
       deletedAt: null,

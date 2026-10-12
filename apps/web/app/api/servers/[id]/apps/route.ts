@@ -73,7 +73,7 @@ async function handleGet(
 
   const installs = await listPluginInstallsForServer(getDb(), serverId);
   const installByPlugin = new Map(installs.map((install) => [install.pluginId, install]));
-  const locale = localeFromRequest(req);
+  const locale = await localeFromRequest(req);
   const apps = listPluginSummariesServer().map((plugin) =>
     appSummary({ plugin, install: installByPlugin.get(plugin.id) ?? null, locale })
   );
@@ -132,7 +132,7 @@ async function handlePost(
       app: appSummary({
         plugin: listPluginSummariesServer().find((p) => p.id === plugin.manifest.id)!,
         install,
-        locale: localeFromRequest(req),
+        locale: await localeFromRequest(req),
       }),
     },
     { status: 200, headers: { 'Cache-Control': 'no-store' } }

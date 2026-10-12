@@ -16,7 +16,8 @@ import {
 } from '@/lib/mail/limits';
 import { appLink, dispatchMail, mailAvailability } from '@/lib/mail/send';
 import { resolveMailSettings } from '@/lib/mail/settings';
-import { mailLocale, requestLocale } from '@/lib/mail/templates';
+import { localeFromRequest } from '@/lib/i18n/request-locale';
+import { savedMailLocale } from '@/lib/mail/templates';
 import { CODE_TTL_MS, issueChallenge, LINK_TTL_MS } from '@/lib/mail/tokens';
 import { EmailAddressSchema } from '@/lib/mail/types';
 import { withApiSecurity } from '@/lib/security-headers';
@@ -62,8 +63,10 @@ async function sendResetIfAccountExists(email: string, requesterLocale: string):
   dispatchMail({
     to: user.email,
     template: 'reset',
-    // users.locale when it is an explicit choice, else the requester's language.
-    locale: user.locale && user.locale !== 'en' ? mailLocale(user.locale) : requesterLocale,
+    // The account owner's saved language — the email is theirs, whoever
+    // asked for it — else the requester's language (which ends in the
+    // instance default).
+    locale: savedMailLocale(user.locale) ?? requesterLocale,
     vars: {
       code: challenge.code,
       link: appLink('/reset-password', challenge.token),
@@ -109,7 +112,10 @@ async function handlePost(req: Request): Promise<NextResponse> {
     throw err;
   }
 
-  void sendResetIfAccountExists(email.data, requestLocale(req)).catch((err: unknown) => {
+  // Resolved before answering, the same way for every address, so it
+  // says nothing about whether one has an account.
+  const requesterLocale = await localeFromRequest(req);
+  void sendResetIfAccountExists(email.data, requesterLocale).catch((err: unknown) => {
     console.error('[auth/password/forgot] reset email not sent', JSON.stringify((err as Error).message));
   });
   return padded(startedAt);

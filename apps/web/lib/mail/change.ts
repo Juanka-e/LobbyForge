@@ -34,7 +34,8 @@ export async function confirmEmailChange(req: Request, proof: EmailTokenProof): 
 
   if (applied.oldEmail && applied.oldEmail !== applied.newEmail) {
     const user = await getUserEmailState(getDb(), applied.userId).catch(() => null);
-    dispatchMail({ to: applied.oldEmail, template: 'change-notice', locale: preferredMailLocale(req, user?.locale), vars: { email: maskEmail(applied.newEmail) } });
+    const locale = await preferredMailLocale(req, user?.locale);
+    dispatchMail({ to: applied.oldEmail, template: 'change-notice', locale, vars: { email: maskEmail(applied.newEmail) } });
   }
 
   let sessionsRevoked = true;

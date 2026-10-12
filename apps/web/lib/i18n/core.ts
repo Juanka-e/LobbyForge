@@ -149,6 +149,45 @@ export function negotiateLocale(
 }
 
 /**
+ * `value` when it names an installed language exactly (ignoring case),
+ * as the installed spelling; else null. For stored choices — a cookie, an
+ * account's saved language, the instance default — which name one
+ * language, not "anything close to it", and may name one since removed.
+ */
+export function installedLocale(value: string | null | undefined, available: readonly string[]): string | null {
+  const lower = value?.trim().toLowerCase();
+  if (!lower || !LOCALE_CODE_PATTERN.test(lower)) return null;
+  return available.find((code) => code.toLowerCase() === lower) ?? null;
+}
+
+/** What a request says about language, each choice already checked with `installedLocale`. */
+export interface LocaleSources {
+  /** The signed-in account's saved language (null when signed out or never chosen). */
+  account?: string | null;
+  /** The `lf_locale` cookie — this browser's choice. */
+  cookie?: string | null;
+  acceptLanguage?: string | null;
+  /** The instance default — see `lib/i18n/instance-default.ts`. */
+  fallback: string;
+}
+
+/**
+ * The language to render in, and what the picker shows as chosen:
+ *
+ *   the account's saved language → this browser's cookie →
+ *   Accept-Language → the instance default
+ *
+ * The account comes first because it is the one choice that travels: the
+ * desktop app and a second browser have their own cookie jars. `choice` is
+ * "system" when nothing explicit was chosen and the browser decides.
+ */
+export function chooseLocale(available: readonly string[], sources: LocaleSources): { locale: string; choice: string } {
+  const explicit = sources.account ?? sources.cookie ?? null;
+  if (explicit) return { locale: explicit, choice: explicit };
+  return { locale: negotiateLocale(sources.acceptLanguage, available, sources.fallback), choice: 'system' };
+}
+
+/**
  * The argument names a message uses, sorted and de-duplicated — for
  * comparing a translation with English. Plural and select cases count by
  * their argument, so "{count} members" matches a Russian plural over

@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import SettingsShell from '@/app/SettingsShell';
 import { currentPagePath, signInHref } from '@/lib/sign-in-return';
 import { deriveAccent } from '@/lib/accent';
-import { clearLocaleCookie, serializeLocaleCookie } from '@/lib/i18n/locale-cookie';
+import { saveLanguageChoice } from './language-choice';
 import { useLocaleOptions, useT } from '@/lib/i18n/client';
 import SettingsStickyFooter, { type SettingsStatus } from '@/app/settings/SettingsStickyFooter';
 
@@ -170,6 +170,8 @@ export default function AppearanceSettingsPage() {
   const [status, setStatus] = useState<SettingsStatus>({ key: 'settings.footer.loading' });
   const [busy, setBusy] = useState(false);
   const [themeDirty, setThemeDirty] = useState(false);
+  const [languageBusy, setLanguageBusy] = useState(false);
+  const [languageError, setLanguageError] = useState(false);
   const [savedExtraSnapshot, setSavedExtraSnapshot] = useState<AppearanceExtra>(DEFAULT_EXTRA);
 
   const extraDirty = useMemo(
@@ -230,17 +232,26 @@ export default function AppearanceSettingsPage() {
   }
 
   /**
-   * Changing the language has to reload: the page is translated during
-   * the SERVER render, from this cookie. Re-rendering on the client alone
+   * Changing the language saves it on the account and in this browser's
+   * cookie (see `saveLanguageChoice`), then reloads: the page is
+   * translated during the SERVER render. Re-rendering on the client alone
    * would leave every server-rendered string in the old language until
    * the next navigation.
    */
-  function selectLanguage(choice: string) {
-    if (choice === localeOptions.choice) return;
-    try {
-      document.cookie = choice === 'system' ? clearLocaleCookie() : serializeLocaleCookie(choice);
-    } catch {
-      return; // Cookies blocked: nothing we set would survive the reload.
+  async function selectLanguage(choice: string) {
+    if (choice === localeOptions.choice || languageBusy) return;
+    setLanguageBusy(true);
+    setLanguageError(false);
+    const saved = await saveLanguageChoice(choice, {
+      fetch: (url, init) => fetch(url, init),
+      writeCookie: (cookie) => {
+        document.cookie = cookie;
+      },
+    });
+    if (!saved) {
+      setLanguageBusy(false);
+      setLanguageError(true);
+      return;
     }
     window.location.reload();
   }
@@ -365,7 +376,7 @@ export default function AppearanceSettingsPage() {
 
           <Section title={t('settings.language.title')}>
             <p className="mb-3 max-w-xl text-sm text-text-secondary">
-              {t('settings.language.description')}
+              {t('settings.language.description')} {t('settings.language.accountNote')}
             </p>
             {/* A list, not a segmented control: it has to hold however many
                 languages the instance ships, and the old one-row switch
@@ -373,6 +384,7 @@ export default function AppearanceSettingsPage() {
             <div
               role="radiogroup"
               aria-label={t('settings.language.title')}
+              aria-busy={languageBusy || undefined}
               className="max-w-md overflow-hidden rounded-lg border border-border-subtle bg-surface-container"
             >
               {[{ code: 'system', name: t('settings.language.system'), englishName: '', status: 'complete' as const }, ...localeOptions.locales].map(
@@ -384,7 +396,8 @@ export default function AppearanceSettingsPage() {
                       type="button"
                       role="radio"
                       aria-checked={selected}
-                      onClick={() => selectLanguage(option.code)}
+                      disabled={languageBusy}
+                      onClick={() => void selectLanguage(option.code)}
                       lang={option.code === 'system' ? undefined : option.code}
                       className={`flex w-full items-center gap-3 border-b border-border-subtle px-4 py-2.5 text-left last:border-b-0 transition-colors ${
                         selected ? 'bg-surface-raised text-text-primary' : 'text-text-secondary hover:bg-surface-raised/60 hover:text-text-primary'
@@ -416,6 +429,11 @@ export default function AppearanceSettingsPage() {
                 }
               )}
             </div>
+            {languageError ? (
+              <p role="alert" className="mt-2 max-w-md text-xs text-danger">
+                {t('settings.language.saveFailed')}
+              </p>
+            ) : null}
             {localeOptions.locales.some((l) => l.status === 'partial') ? (
               <p className="mt-2 max-w-md text-xs text-text-muted">{t('settings.language.partialHint')}</p>
             ) : null}

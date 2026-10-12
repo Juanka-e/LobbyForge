@@ -1,4 +1,4 @@
-import { LOCALE_CODE_PATTERN } from './core';
+import { installedLocale } from './core';
 
 /**
  * The user's explicit language choice, readable by both sides.
@@ -16,6 +16,11 @@ import { LOCALE_CODE_PATTERN } from './core';
  *
  * Holds a language code and nothing else: `SameSite=Lax`, and not
  * `HttpOnly`, because the client sets it.
+ *
+ * A signed-in account also saves its choice (`users.locale`), and that
+ * wins over this cookie (see `chooseLocale`): the desktop app and a second
+ * browser have cookie jars of their own. The picker writes both, and
+ * "Match my browser" clears both.
  */
 export const LOCALE_COOKIE = 'lf_locale';
 const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
@@ -38,9 +43,8 @@ export function readLocaleCookie(
     } catch {
       return null;
     }
-    if (!LOCALE_CODE_PATTERN.test(value)) return null;
     // Exact only: the user picked THIS language, not a relative of it.
-    return available.find((code) => code.toLowerCase() === value.toLowerCase()) ?? null;
+    return installedLocale(value, available);
   }
   return null;
 }
