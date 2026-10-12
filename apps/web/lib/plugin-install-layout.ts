@@ -58,6 +58,7 @@ import {
   sandboxManifestOptions,
   type PluginApprovals,
 } from './plugin-approvals';
+import { configuredAppOrigins, externalUiOrigin } from './plugin-frame-target';
 
 export const DEFAULT_PLUGIN_INSTALL_DIR = '/app/plugins/installed';
 export const ACTIVE_POINTER_FILE = 'active.json';
@@ -413,6 +414,17 @@ export async function activateStagedBundle<T extends DescribedPlugin>(input: {
   if (!bundleCheck.ok) {
     rmSync(stagingDir, { recursive: true, force: true });
     return { ok: false, error: bundleCheck.error };
+  }
+  // The lobby frames a `ui: { url }` page with allow-same-origin, which is
+  // safe only for another site (plugin-frame-target.ts): never one on this
+  // instance's own address. Checked again whenever the lobby frames it.
+  const uiUrl = bundleCheck.manifest.uiUrl;
+  if (uiUrl && !externalUiOrigin(uiUrl, configuredAppOrigins())) {
+    rmSync(stagingDir, { recursive: true, force: true });
+    return {
+      ok: false,
+      error: 'manifest.json: "ui.url" is on this instance\'s own address (its host or a subdomain of it); the lobby only frames a page on another site.',
+    };
   }
   const previous = readActivePointer(root, pluginId);
   // Nothing moves before the owner has approved what the bundle asks for.

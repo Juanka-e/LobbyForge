@@ -41,11 +41,26 @@ function install(
   for (const [rel, content] of Object.entries(files)) write(join(dir, ...rel.split('/')), content);
 }
 
-function activate(pluginId: string, version: string) {
-  write(join(root, pluginId, 'active.json'), JSON.stringify({ version, digest: DIGEST }));
+function activate(pluginId: string, version: string, approved?: Record<string, unknown>) {
+  write(join(root, pluginId, 'active.json'), JSON.stringify({ version, digest: DIGEST, ...(approved ? { approved } : {}) }));
 }
 
 const SANDBOX = { sdk: 'sandbox-v1', ui: true };
+
+/** What the networked plugin's manifest asks for (phase 2: outside origins). */
+const ASKED = {
+  connect: ['https://api.example.com', 'https://asked-only.example.com'],
+  img: ['https://cdn.example.com'],
+  media: ['https://media.example.com'],
+  frame: ['https://embed.example.com'],
+};
+/** What the owner approved: all of it but one origin, plus one the manifest never asked for. */
+const APPROVED = {
+  connect: ['https://api.example.com', 'https://approved-only.example.com'],
+  img: ['https://cdn.example.com'],
+  media: ['https://media.example.com'],
+  frame: ['https://embed.example.com'],
+};
 
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'lf-plugin-ui-'));
@@ -78,6 +93,11 @@ beforeAll(() => {
   activate('bare', '1.0.0');
   // On disk but never activated.
   install('pending', '1.0.0', { sdk: 'sandbox-v1', ui: true }, { 'ui/index.html': '<p>x</p>' });
+  // Asks for outside origins: approved (mostly) / never approved.
+  install('netplug', '1.0.0', { ...SANDBOX, network: ASKED }, { 'ui/index.html': '<p>net</p>', 'ui/app.js': '1' });
+  activate('netplug', '1.0.0', { network: APPROVED });
+  install('unapproved', '1.0.0', { ...SANDBOX, network: ASKED }, { 'ui/index.html': '<p>x</p>' });
+  activate('unapproved', '1.0.0');
 });
 
 afterAll(() => {
@@ -139,7 +159,9 @@ describe('GET /api/plugin-ui — what is served', () => {
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
     expect(res.headers.get('cross-origin-resource-policy')).toBe('cross-origin');
     expect(res.headers.get('access-control-allow-origin')).toBe('*');
-    expect(res.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    // The document's policy carries the approval, which can change for this
+    // version: every load asks again.
+    expect(res.headers.get('cache-control')).toBe('no-cache');
     expect(res.headers.get('vary')).toBe('Sec-Fetch-Dest, Sec-Fetch-Site');
     expect(res.headers.get('referrer-policy')).toBe('no-referrer');
     expect(res.headers.get('permissions-policy')).toContain('camera=()');
@@ -163,6 +185,10 @@ describe('GET /api/plugin-ui — what is served', () => {
     expect(svg.headers.get('content-disposition')).toBe('inline');
     expect(svg.headers.get('content-security-policy')).toBe(DEV_CSP);
     expect(js.headers.get('content-disposition')).toBeNull();
+    // Everything but the document: the same bytes and headers forever.
+    for (const res of [js, css, json, svg]) {
+      expect(res.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    }
   });
 
   it('answers HEAD with the headers and no body', async () => {
@@ -329,6 +355,60 @@ describe('GET /api/plugin-ui — Fetch Metadata', () => {
   it('refuses before looking at the disk, so a refusal reveals nothing', async () => {
     const res = await get('missing', '9.9.9', ['app.js'], { 'sec-fetch-dest': 'script', 'sec-fetch-site': 'same-origin' });
     expect(res.status).toBe(403);
+  });
+});
+
+describe('GET /api/plugin-ui — outside origins the owner approved (phase 2)', () => {
+  const directives = (res: Response) =>
+    new Map(
+      (res.headers.get('content-security-policy') ?? '')
+        .split('; ')
+        .map((d) => [d.split(' ')[0]!, d] as [string, string])
+    );
+
+  it('adds the effective origins to the document’s policy: asked for AND approved, nothing else', async () => {
+    process.env.LOBBYFORGE_APP_ORIGIN = 'https://chat.example.test';
+    const own = 'https://chat.example.test/api/plugin-ui/netplug/1.0.0/';
+    const res = await get('netplug', '1.0.0', ['index.html'], AS_IFRAME);
+    expect(res.status).toBe(200);
+    const csp = directives(res);
+    // Asked for but not approved (asked-only), approved but never asked for
+    // (approved-only): neither is in the policy.
+    expect(csp.get('connect-src')).toBe(`connect-src ${own} https://api.example.com`);
+    expect(csp.get('img-src')).toBe("img-src 'self' data: https://cdn.example.com");
+    expect(csp.get('media-src')).toBe(`media-src ${own} data: blob: https://media.example.com`);
+    expect(csp.get('frame-src')).toBe('frame-src https://embed.example.com');
+    expect(res.headers.get('content-security-policy')).not.toMatch(/asked-only|approved-only/);
+    // Still sandboxed, still framed only by the app, never cached past a change of approval.
+    expect(csp.get('sandbox')).toBe('sandbox allow-scripts');
+    expect(csp.get('frame-ancestors')).toBe("frame-ancestors 'self'");
+    expect(csp.get('default-src')).toBe("default-src 'none'");
+    expect(res.headers.get('cache-control')).toBe('no-cache');
+  });
+
+  it('keeps every other file on the base policy, cached forever', async () => {
+    const js = await get('netplug', '1.0.0', ['app.js'], FROM_FRAME('script'));
+    expect(js.status).toBe(200);
+    expect(js.headers.get('content-security-policy')).toBe(DEV_CSP);
+    expect(js.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+  });
+
+  it('adds nothing while the request is not approved, and has no frame-src without an approved frame origin', async () => {
+    const res = await get('unapproved', '1.0.0', ['index.html'], AS_IFRAME);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-security-policy')).toBe(DEV_CSP);
+    expect(directives(res).has('frame-src')).toBe(false);
+  });
+
+  it('never writes an origin that could end a directive', () => {
+    const csp = pluginUiCsp("'self'", {
+      connect: ['https://ok.example.com', 'https://a;sandbox', "https://x' 'unsafe-inline", 'https://b.example.com/path'],
+      frame: ['javascript:alert(1)'],
+    });
+    expect(csp.split('; ')).toContain("connect-src 'self' https://ok.example.com");
+    expect(csp).not.toMatch(/a;sandbox|https:\/\/x'|\/path|javascript/);
+    expect(csp).not.toContain('frame-src');
+    expect(csp.split('; ').filter((d) => d.startsWith('sandbox'))).toEqual(['sandbox allow-scripts']);
   });
 });
 

@@ -47,6 +47,35 @@ async function captchaSources(pathname: string): Promise<{ script: string[]; fra
   }
 }
 
+/** A file name at the end of the path (`/icon.svg`): a static file, not a page. */
+const FILE_PATH = /\/[^/]*\.[A-Za-z0-9]+$/;
+
+/**
+ * Marketplace plugins whose UI is their author's own site (`ui: { url }`,
+ * docs/PLUGIN_UNLOCK_PLAN.md phase 2): the lobby frames that site, so its
+ * origin joins the pages' `frame-src` — only while the instance owner's
+ * approval is on the plugin's active record. On every page, for the same
+ * reason as the CAPTCHA origins: a client-side navigation keeps the CSP of
+ * the document it started on. `lib/plugin-frame-origins.ts` keeps the list
+ * in a 30 s per-process cache read from the install root (reset by an
+ * install), so a page costs a lookup in memory. Fail closed: when dynamic
+ * plugins are off, for API routes and static files, and on any error,
+ * nothing is added — the module is not even loaded.
+ */
+async function pluginFrameSources(pathname: string, requestOrigin: string): Promise<string[]> {
+  if (process.env.LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED !== 'true') return [];
+  if (pathname === '/api' || pathname.startsWith('/api/') || pathname.startsWith('/_next/') || FILE_PATH.test(pathname)) {
+    return [];
+  }
+  try {
+    const { approvedPluginFrameOrigins } = await import('@/lib/plugin-frame-origins');
+    return approvedPluginFrameOrigins(requestOrigin);
+  } catch (error) {
+    console.error('[csp] plugin frame origins unavailable', (error as Error).message);
+    return [];
+  }
+}
+
 /**
  * Pages whose URL can carry a one-time token from an email — the
  * verification link, the password-reset link (docs/EMAIL.md §4.1, §4.3) —
@@ -61,7 +90,11 @@ export async function middleware(request: NextRequest) {
   if (PLUGIN_UI_ROUTE.test(request.nextUrl.pathname)) return NextResponse.next();
   // The raw path: `nextUrl` rewrites `/_next/data/…` requests to the page they
   // belong to, and those are data, not documents.
-  const captcha = await captchaSources(new URL(request.url).pathname);
+  const rawUrl = new URL(request.url);
+  const [captcha, pluginFrames] = await Promise.all([
+    captchaSources(rawUrl.pathname),
+    pluginFrameSources(rawUrl.pathname, rawUrl.origin),
+  ]);
 
   const nonce = crypto.randomUUID().replace(/-/g, '');
   const requestId = crypto.randomUUID().slice(0, 8);
@@ -120,7 +153,11 @@ export async function middleware(request: NextRequest) {
     // and is driven over postMessage, checked both ways.
     // + the active external CAPTCHA provider's frame origins, on pages, only
     // while Turnstile or reCAPTCHA is configured (docs/CAPTCHA.md §9).
-    "frame-src 'self' https://www.youtube-nocookie.com" + withSources(captcha.frame),
+    // + the owner-approved sites of marketplace plugins whose UI is their
+    // author's own page (pluginFrameSources above), on pages: framing only,
+    // like YouTube's — the lobby's PluginFrame sandboxes them and talks to
+    // each over postMessage checked against its origin.
+    "frame-src 'self' https://www.youtube-nocookie.com" + withSources(captcha.frame) + withSources(pluginFrames),
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>impostor</title>
+  </head>
+  <body>
+    <main>another site</main>
+    <script>
+      // Another site, loaded into the plugin's frame (the same window the
+      // lobby talks to): it pretends to be the plugin. The lobby must hear
+      // none of it, and must post nothing it can read.
+      const heard = [];
+      addEventListener('message', (e) => {
+        heard.push({ origin: e.origin, type: e.data && e.data.type });
+      });
+      parent.postMessage({ lf: 1, type: 'ready' }, '*');
+      parent.postMessage({ lf: 1, type: 'action', action: { type: 'forged' } }, '*');
+      parent.postMessage({ lf: 1, type: 'resize', height: 1111 }, '*');
+      setTimeout(() => parent.postMessage({ impostorReport: heard }, '*'), 1500);
+    </script>
+  </body>
+</html>

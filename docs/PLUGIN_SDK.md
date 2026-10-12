@@ -627,7 +627,9 @@ never the only signal: pair it with text, an icon or a count.
 Official plugins are trusted code and render React panels in the app.
 A **marketplace** plugin (`sdk: "sandbox-v1"`, ADR-007) is not trusted, so
 it brings its own UI as plain web files and the lobby runs them in a
-sandbox:
+sandbox — or, with the instance owner's approval, its UI is the author's
+own site, framed by the lobby
+([Your own site as the UI](#your-own-site-as-the-ui-ui--url-)):
 
 ```
 my-plugin/
@@ -678,10 +680,36 @@ img-src 'self' data:; font-src 'self'; media-src <own> data: blob:; connect-src 
 frame-ancestors 'self'; base-uri 'none'; form-action 'none'; sandbox allow-scripts
 ```
 
-So: **no network beyond your own files.** `fetch()` and XHR can read your
-own files (level data, a `.wasm`, sound for the Web Audio API) and nothing
-else — not the app, not another plugin, not the web; WebSockets and remote
-images are blocked. The frame cannot send what it is shown anywhere.
+So by default: **no network beyond your own files.** `fetch()` and XHR can
+read your own files (level data, a `.wasm`, sound for the Web Audio API)
+and nothing else — not the app, not another plugin, not the web; WebSockets
+and remote images are blocked. The frame cannot send what it is shown
+anywhere.
+
+**Outside origins the owner approved.** A manifest may ask for outside
+origins under `network` ([PLUGIN_PUBLISHING.md → Asking for more than the
+sandbox](PLUGIN_PUBLISHING.md#asking-for-more-than-the-sandbox)). Once the
+instance owner approves them at install, the policy of your **HTML
+document** adds them — and only the origins your manifest asks for AND the
+owner approved:
+
+| `network` key | Added to | What it unlocks |
+|---|---|---|
+| `connect` | `connect-src` | `fetch()`, XHR, WebSockets (`https://api.example.com` also admits `wss://api.example.com`), EventSource |
+| `img` | `img-src` | images from that origin |
+| `media` | `media-src` | `<audio>` / `<video>` from that origin |
+| `frame` | `frame-src` | `<iframe>` of a page on that origin (without one there is no `frame-src`, so no frames at all) |
+
+A page you frame this way **inherits your frame's sandbox**: it runs in an
+opaque origin too, without its own cookies or storage, so an embed that
+needs to sign in or remember something does not work here (use
+[your own site as the UI](#your-own-site-as-the-ui-ui--url-) instead). The
+server you reach sees requests with `Origin: null` and no cookies: answer
+with `Access-Control-Allow-Origin: *` (or `null`) for `fetch()` to read the
+response. Because an approval can change for the same version (approved
+again, or taken back by uninstalling), the HTML is served `no-cache`; every
+other file keeps the base policy (only the document's policy governs the
+frame) and its year-long cache.
 `<audio>` and `<video>` play your own files (and `blob:`/`data:` URLs you
 make); the route answers `Range` requests, so they can seek. WebAssembly
 compiles (`WebAssembly.instantiate`, `instantiateStreaming`), so an engine
@@ -699,9 +727,9 @@ The instance names `<own>` from its configured public origin
 request. Without either (a dev setup) it is `'self'`: the app's origin,
 reached without cookies, where every mutating route refuses a cross-site
 request. Navigating the
-frame elsewhere is stopped by the app's own `frame-src`. Assets are public
-and cached for a year (`immutable`, the version is in the path): ship a new
-version to change them. The HTML loads only as an iframe document, and the
+frame elsewhere is stopped by the app's own `frame-src`. Assets other than
+the HTML are public and cached for a year (`immutable`, the version is in
+the path): ship a new version to change them. The HTML loads only as an iframe document, and the
 app's own pages can never load your scripts (Fetch Metadata), so do not
 link to your files from anywhere else.
 
@@ -709,6 +737,62 @@ Everything the frame knows arrives in a message; everything it can do is an
 action the lobby sends **as the viewer**, through the normal actions route,
 under your manifest's `actionPolicies`. It can do nothing the viewer could
 not do by sending actions.
+
+### Your own site as the UI (`ui: { url }`)
+
+Instead of `ui/` files, a manifest may name a page on your own site:
+`"ui": { "url": "https://game.example.com/play" }` (an https URL on a public
+host, no credentials or fragment). The lobby frames that page directly —
+the Discord Activities model — once the instance owner has approved that
+exact URL at install. Until then the plugin has no screen.
+
+- **The frame:** `<iframe src="https://game.example.com/play"
+  sandbox="allow-scripts allow-same-origin allow-forms allow-pointer-lock"
+  referrerpolicy="no-referrer">`. Your page keeps **its own origin**: its
+  own cookies and storage (partitioned under the instance by most
+  browsers — do not rely on them, the state comes from the lobby), forms
+  and pointer lock for games. It can never navigate the lobby away, open
+  windows or show `alert()` / `confirm()` dialogs (no
+  `allow-top-navigation`, `allow-popups` or `allow-modals`), and the lobby
+  sends no `Referer`.
+- **Never the instance's own address.** `allow-same-origin` is safe only
+  because your origin is not the app's: a same-origin frame could reach into
+  the lobby and lift its own sandbox. The installer refuses a `ui.url` on
+  the instance's host (any port) or a subdomain of it, and the lobby checks
+  again before framing it.
+- **What your site receives:** the same as a files frame — the viewer's id
+  and display name, the players, the language, the theme and the state
+  **projected for this viewer**. The difference is that it now reaches your
+  server; the owner's approval dialog says so. Treat it as display data, not
+  as proof of who the viewer is (sign-in with LobbyForge is a later phase).
+  What the site can do is still only `dispatch` actions, which the lobby
+  sends as the viewer under your `actionPolicies`.
+- **Messages:** protocol v1 is unchanged. The lobby accepts a message only
+  when it comes from your iframe's window **and** from the approved URL's
+  origin (the window stays the same object when the frame navigates, so the
+  window alone proves nothing), and posts to that origin only — never to
+  `'*'` — so a frame that has navigated to another site hears nothing. Your
+  page may move between its own pages; each new document says `ready` and
+  gets a fresh `init`.
+- **The address badge:** above the frame the lobby shows "Runs on
+  game.example.com" and a reminder that this screen is not LobbyForge, so a
+  "sign in" box inside it is visibly yours.
+- **The app's own policy:** the instance's pages add the approved sites to
+  their `frame-src` (cached for 30 seconds, refreshed on install). That only
+  allows framing; nothing from your site runs in the app.
+- **Your server** must let instances frame the page: no
+  `X-Frame-Options: DENY` or `frame-ancestors 'none'`. Anyone can frame a
+  public page, so to choose who may, send
+  `Content-Security-Policy: frame-ancestors https://chat.example.org …`.
+  Nothing else about your site changes: your own CSP, your own network.
+- **The frame client** works unchanged ([below](#the-frame-client)): on your
+  site it says `ready` to whoever frames the page, learns the lobby's origin
+  from the first `init` sent by its parent window, and from then on talks to
+  that origin only (`lf.parentOrigin`).
+- **Local development:** with `LOBBYFORGE_PLUGIN_ALLOW_LOCAL_ORIGINS=true`
+  (never in production) a `ui.url` may be `http:` on a local host. It still
+  must not share the instance's host: an instance on `localhost` can frame a
+  page on `127.0.0.1`, not on another `localhost` port.
 
 ### Protocol v1
 
@@ -727,11 +811,14 @@ Every message is a plain JSON object with `lf: 1` and a `type`.
 - `state` is the state **projected for this viewer** by your `projectState`
   — never the full state. Without `projectState` every viewer gets the full
   state, and the lobby shows players "This app doesn't hide information".
-- The parent accepts messages only from your iframe's window (origin
-  `"null"`), checks their shape, drops anything over **64 KiB**, forwards at
-  most **10 actions per second** (the rest are dropped and logged), clamps
-  heights to **200–1200 px**, and replaces any `actionId` you send with its
-  own idempotency key.
+- The parent accepts messages only from your iframe's window **and** the
+  expected origin — `"null"` for your `ui/` files, the approved URL's origin
+  for your own site — checks their shape, drops anything over **64 KiB**,
+  forwards at most **10 actions per second** (the rest are dropped and
+  logged), clamps heights to **200–1200 px**, and replaces any `actionId`
+  you send with its own idempotency key. It posts to your own site's origin
+  only; to `ui/` files it has to post to `'*'` (an opaque origin cannot be
+  named), which is why it never posts anything but the above.
 
 The types and limits live in `@lobbyforge/plugin-sdk/frame`
 (`FrameInitMessage`, `FrameToHostMessage`, `FRAME_MAX_MESSAGE_BYTES`, …); the
@@ -750,7 +837,10 @@ button.onclick = () => lf.dispatch({ type: 'buzz' });
 ```
 
 `connect()` does the handshake (and repeats `ready` every 250 ms until the
-parent answers), listens only to its parent window, applies the theme —
+parent answers), listens only to its parent window and the parent's origin
+(for `ui/` files the frame URL's host; on your own site the origin of the
+first `init`, readable as `lf.parentOrigin` — before it, only `ready` leaves
+the frame), applies the theme —
 every `--lf-*` variable on `:root`, plus `data-lf-theme`, `color-scheme` and
 `lang` — and reports the content height with a ResizeObserver (measure
 another element with `autoResize: el`, or pass `false` and call

@@ -17,9 +17,16 @@
  *    frame without the attribute), so a plugin page can never run as the app.
  *    `'self'`-only images/scripts/styles/fonts, and `fetch()` and media
  *    limited to the plugin's OWN files (see `pluginUiAssetSource`): no
- *    network to send anything to. `'wasm-unsafe-eval'` lets it compile
- *    WebAssembly, which reaches nothing a script cannot. `frame-ancestors
- *    'self'`: only the app's own pages can frame it.
+ *    network to send anything to — unless the instance owner approved
+ *    outside origins at install (phase 2 of docs/PLUGIN_UNLOCK_PLAN.md).
+ *    The HTML document's policy then adds the plugin's EFFECTIVE origins
+ *    (asked for by its manifest AND approved, `effectiveApprovals`) to
+ *    `connect-src`, `img-src`, `media-src` and `frame-src` (no frames
+ *    otherwise). A page it nests inherits its sandbox flags, so that page
+ *    runs in an opaque origin too, without cookies or storage.
+ *    `'wasm-unsafe-eval'` lets it compile WebAssembly, which reaches nothing
+ *    a script cannot. `frame-ancestors 'self'`: only the app's own pages can
+ *    frame it.
  *  - Single `Range` requests answer 206, so audio and video can seek (Safari
  *    plays no media from a server that ignores Range).
  *  - `X-Content-Type-Options: nosniff` and a fixed Content-Type per extension.
@@ -36,8 +43,13 @@
  *    app's OWN pages — the app's CSP allows `script-src 'self'`, so without
  *    this a plugin's JS on our origin would be a ready-made gadget for any
  *    HTML injection in the app. `Vary` names those headers.
- *  - `Cache-Control: public, max-age=31536000, immutable`: the version is in
- *    the path and only the active version is served.
+ *  - `Cache-Control: public, max-age=31536000, immutable` for every file but
+ *    the HTML: the version is in the path, only the active version is served,
+ *    and their policy never names an approved origin (only a document's CSP
+ *    governs the frame; a script's or an image's does not). The HTML is
+ *    `no-cache`: its policy carries the approval, which can change for the
+ *    same version (approved again, or taken back), so every load asks the
+ *    server.
  *  - No `X-Frame-Options` (it would forbid the frame; `frame-ancestors`
  *    governs), no cookies read or set, no auth: an opaque-origin frame sends
  *    no SameSite=Lax cookie, and installed plugin assets are not secret.
@@ -46,6 +58,8 @@
  */
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
+import { effectiveApprovals } from './plugin-approvals';
+import { isCspOrigin } from './plugin-frame-target';
 import {
   PLUGIN_ID_RE,
   VERSION_RE,
@@ -53,6 +67,7 @@ import {
   readActivePointer,
   readInstalledSandboxManifest,
 } from './plugin-install-layout';
+import type { SandboxManifest, SandboxNetwork, SandboxNetworkKind } from './sandbox-manifest';
 
 /**
  * Where a plugin version's files live, as a CSP source:
@@ -84,16 +99,29 @@ export function pluginUiAssetSource(
   return "'self'";
 }
 
-/** The frame document's policy: ADR-007's CSP plus `sandbox allow-scripts`. */
-export function pluginUiCsp(assetSource: string): string {
+/**
+ * The frame document's policy: ADR-007's CSP plus `sandbox allow-scripts`,
+ * and the outside origins in `network`. Pass only the plugin's EFFECTIVE
+ * origins (`effectiveApprovals(manifest, active.approved).network`): asked
+ * for by the manifest and approved by the owner. Anything that is not a
+ * plain `scheme://host[:port]` is left out (`isCspOrigin`). Without
+ * `network.frame` there is no `frame-src`, so `default-src 'none'` forbids
+ * nested frames.
+ */
+export function pluginUiCsp(assetSource: string, network: SandboxNetwork = {}): string {
+  const approved = (kind: SandboxNetworkKind): string[] => (network[kind] ?? []).filter(isCspOrigin);
+  const plus = (kind: SandboxNetworkKind): string => approved(kind).map((origin) => ` ${origin}`).join('');
+  const frames = approved('frame');
   return [
     "default-src 'none'",
     "script-src 'self' 'wasm-unsafe-eval'",
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data:",
+    `img-src 'self' data:${plus('img')}`,
     "font-src 'self'",
-    `media-src ${assetSource} data: blob:`,
-    `connect-src ${assetSource}`,
+    `media-src ${assetSource} data: blob:${plus('media')}`,
+    // An https origin here also admits wss:// to the same host (CSP level 3).
+    `connect-src ${assetSource}${plus('connect')}`,
+    ...(frames.length > 0 ? [`frame-src ${frames.join(' ')}`] : []),
     "frame-ancestors 'self'",
     "base-uri 'none'",
     "form-action 'none'",
@@ -250,7 +278,9 @@ export function pluginUiHeaders(contentType: string, kind: AssetKind, length: nu
     'Permissions-Policy': PERMISSIONS_POLICY,
     'Cross-Origin-Resource-Policy': 'cross-origin',
     'Access-Control-Allow-Origin': '*',
-    'Cache-Control': 'public, max-age=31536000, immutable',
+    // The document's policy names what the owner approved, which can change
+    // for this version; every other file has the same bytes and headers forever.
+    'Cache-Control': kind === 'document' ? 'no-cache' : 'public, max-age=31536000, immutable',
     'Accept-Ranges': 'bytes',
     Vary: 'Sec-Fetch-Dest, Sec-Fetch-Site',
   });
@@ -259,35 +289,51 @@ export function pluginUiHeaders(contentType: string, kind: AssetKind, length: nu
 }
 
 /**
- * Does this installed version declare a UI? The layout's own reader
+ * An installed version's manifest, read by the layout's own reader, which
  * validates the bundle exactly as the installer did (sdk "sandbox-v1",
- * matching id and version, server.js, ui/index.html when `ui: true`); a
- * legacy or damaged bundle never gets a frame.
+ * matching id and version, server.js, ui/index.html when `ui: true`). Null
+ * for a legacy or damaged bundle, which never gets a frame.
  */
-export function installedVersionDeclaresUi(root: string, pluginId: string, version: string): boolean {
+export function readInstalledManifestOrNull(root: string, pluginId: string, version: string): SandboxManifest | null {
   try {
-    return readInstalledSandboxManifest(root, pluginId, version).ui === true;
+    return readInstalledSandboxManifest(root, pluginId, version);
   } catch {
-    return false;
+    return null;
   }
 }
 
+/** Does this installed version serve a UI from its own files (`ui: true`)? */
+export function installedVersionDeclaresUi(root: string, pluginId: string, version: string): boolean {
+  return readInstalledManifestOrNull(root, pluginId, version)?.ui === true;
+}
+
+/** A file the route may serve, and what its document's policy may add. */
+export interface ServablePluginUiFile {
+  /** The real path, under the active version's `ui/`. */
+  path: string;
+  /** The plugin's effective outside origins: asked for by the manifest AND approved at install. */
+  network: SandboxNetwork;
+}
+
 /**
- * The absolute path of a servable file, or null. Resolves under the ACTIVE
- * version's `ui/` folder and re-checks the real path (no symlink, no escape).
+ * A servable file, or null. Resolves under the ACTIVE version's `ui/`
+ * folder and re-checks the real path (no symlink, no escape). The active
+ * record and the manifest are read once, here: the approval in that record
+ * is what the document's policy may add.
  */
 export async function resolvePluginUiFile(
   pluginId: string,
   version: string,
   segments: string[],
   env: Record<string, string | undefined> = process.env
-): Promise<string | null> {
+): Promise<ServablePluginUiFile | null> {
   if (env.LOBBYFORGE_DYNAMIC_PLUGINS_ENABLED !== 'true') return null;
   if (!PLUGIN_ID_RE.test(pluginId) || !VERSION_RE.test(version)) return null;
   const root = pluginInstallDir(env);
   const active = readActivePointer(root, pluginId);
   if (!active || active.version !== version) return null;
-  if (!installedVersionDeclaresUi(root, pluginId, version)) return null;
+  const manifest = readInstalledManifestOrNull(root, pluginId, version);
+  if (manifest?.ui !== true) return null;
 
   const uiDir = resolve(root, pluginId, version, 'ui');
   const candidate = resolve(uiDir, ...segments);
@@ -297,7 +343,7 @@ export async function resolvePluginUiFile(
     if (!realFile.startsWith(realUi + sep)) return null;
     const info = await stat(realFile);
     if (!info.isFile() || info.size > MAX_FILE_BYTES) return null;
-    return realFile;
+    return { path: realFile, network: effectiveApprovals(manifest, active.approved).network ?? {} };
   } catch {
     return null;
   }
@@ -321,11 +367,17 @@ export async function servePluginUiAsset(
   if (!file) return refusal(404, method);
   let body: Buffer;
   try {
-    body = await readFile(file);
+    body = await readFile(file.path);
   } catch {
     return refusal(404, method);
   }
-  const csp = pluginUiCsp(pluginUiAssetSource(params.pluginId, params.version, env));
+  // Only the document's policy governs the frame, so only the document names
+  // the approved origins; every other file keeps the base policy and its
+  // immutable caching.
+  const csp = pluginUiCsp(
+    pluginUiAssetSource(params.pluginId, params.version, env),
+    parsed.kind === 'document' ? file.network : {}
+  );
   const range = parseByteRange(req.headers.get('range'), body.byteLength);
   if (range === 'unsatisfiable') {
     const headers = pluginUiHeaders(parsed.contentType, parsed.kind, 0, csp);

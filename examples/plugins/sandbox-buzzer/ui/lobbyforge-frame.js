@@ -9,16 +9,27 @@ const MAX_THEME_VALUE_LENGTH = 200;
 function isObject(value) {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
+function isHttpOrigin(value) {
+    return typeof value === 'string' && (value.startsWith('http://') || value.startsWith('https://'));
+}
 /**
- * Where messages to the parent go. The asset route only lets the app's own
- * pages frame it (`frame-ancestors 'self'`), so the parent is on the frame
- * URL's host; `location.origin` is that URL's origin even though the frame's
- * own origin is opaque.
+ * Where messages to the parent go, as far as the frame can tell before the
+ * parent has said anything:
+ *  - the plugin's own files: the frame's origin is opaque (`self.origin` is
+ *    "null") and the asset route only lets the app's own pages frame it
+ *    (`frame-ancestors 'self'`), so the parent is on the frame URL's host —
+ *    `location.origin` is that URL's origin. ('*' if it has none.)
+ *  - the author's own site: the frame has a real origin of its own, and any
+ *    instance that installed the plugin may frame it, so the parent's origin
+ *    is unknown until its first `init` (null).
  */
-function parentOrigin(win) {
+function initialParentOrigin(win) {
+    const own = win.origin;
+    if (typeof own === 'string' && own !== 'null')
+        return null;
     try {
         const origin = win.location.origin;
-        if (origin.startsWith('http://') || origin.startsWith('https://'))
+        if (isHttpOrigin(origin))
             return origin;
     }
     catch {
@@ -90,7 +101,8 @@ export function connect(options = {}) {
     const doc = win.document;
     const parent = win.parent;
     const embedded = Boolean(parent) && parent !== win;
-    const targetOrigin = parentOrigin(win);
+    // null on the author's own site until the parent's first init names it.
+    let targetOrigin = initialParentOrigin(win);
     const applyTheme = options.applyTheme !== false;
     let connected = false;
     let closed = false;
@@ -103,6 +115,14 @@ export function connect(options = {}) {
     const post = (message) => {
         if (!embedded || closed)
             return;
+        if (targetOrigin === null) {
+            // The parent's origin is not known yet: only `ready`, which carries
+            // nothing, may go to whoever frames us. Actions and heights wait for
+            // init (which measures again).
+            if (message.type === 'ready')
+                parent.postMessage(message, '*');
+            return;
+        }
         parent.postMessage(message, targetOrigin);
     };
     const stopReady = () => {
@@ -138,9 +158,17 @@ export function connect(options = {}) {
     const onMessage = (event) => {
         if (closed || event.source !== parent)
             return;
-        if (targetOrigin !== '*' && event.origin !== targetOrigin)
-            return;
         const data = event.data;
+        if (targetOrigin === null) {
+            // The window that frames us names its origin with its first init;
+            // from then on nothing from any other origin is heard.
+            if (!isObject(data) || data.lf !== LF || data.type !== 'init' || !isHttpOrigin(event.origin))
+                return;
+            targetOrigin = event.origin;
+        }
+        else if (targetOrigin !== '*' && event.origin !== targetOrigin) {
+            return;
+        }
         if (!isObject(data) || data.lf !== LF)
             return;
         if (data.type === 'init') {
@@ -205,6 +233,9 @@ export function connect(options = {}) {
         resize,
         get connected() {
             return connected;
+        },
+        get parentOrigin() {
+            return targetOrigin === null || targetOrigin === '*' ? null : targetOrigin;
         },
         close() {
             if (closed)
