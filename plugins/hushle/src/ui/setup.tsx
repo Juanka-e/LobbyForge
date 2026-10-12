@@ -25,6 +25,7 @@ import {
   seatedIds,
   setTeamsAction,
   splitIntoTeams,
+  turnMoveIntent,
   withPlayerAdded,
   withPlayerRemoved,
   withoutTeam,
@@ -69,6 +70,8 @@ export function TeamSetupView(props: ViewProps) {
       type: 'start-turn',
       teamId: firstTeam.id,
       explainerId: firstTeam.playerIds[0] ?? null,
+      // A second press names turn 0, which the first press ended: ignored.
+      ...turnMoveIntent(state),
     });
   };
 

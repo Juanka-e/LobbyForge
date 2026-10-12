@@ -1290,6 +1290,162 @@ describe('@lobbyforge/hushle', () => {
     // Other actions do not look at it.
     expect(validate({ type: 'end-turn', cardSeq: 'x' })).toBeNull();
   });
+
+  // ── An empty deck: nothing dealt, nothing to score ─────────────────
+  async function emptyDeckTurn() {
+    const harness = createTestHarness<HushleState, Parameters<typeof hushlePlugin.handleAction>[2]>({
+      plugin: hushlePlugin,
+      players: ['p1', 'p2', 'p3', 'p4'],
+    });
+    const deck = ['one', 'two'].map((word) => ({
+      id: `card-${word}`,
+      language: 'en',
+      word,
+      forbiddenWords: ['x'],
+      difficulty: 'easy' as const,
+    }));
+    await harness.performAction('p1', { type: 'start-game', packId: 'tiny', cardsPerTurn: 100, createdBy: 'p1', deck });
+    await harness.performAction('p1', {
+      type: 'set-teams',
+      teams: [
+        { name: 'A', playerIds: ['p1', 'p2'] },
+        { name: 'B', playerIds: ['p3', 'p4'] },
+      ],
+    });
+    await harness.performAction('p1', { type: 'start-turn', teamId: harness.getState().teams[0]!.id, explainerId: 'p1' });
+    // Card one is in play; Got it deals card two, the last one.
+    await harness.performAction('p1', { type: 'correct-guess' });
+    expect(harness.getState().currentCard?.word).toBeDefined();
+    // The host ends the turn on the last card: the next turn starts with nothing to deal.
+    await harness.performAction('p1', { type: 'end-turn' });
+    return harness;
+  }
+
+  it('a turn that starts on an empty deck has no card, and Got it / Skip / Penalty / Next card / BUST score nothing', async () => {
+    const harness = await emptyDeckTurn();
+    const empty = harness.getState();
+    expect(empty.phase).toBe('playing');
+    expect(empty.currentCard).toBeNull();
+    expect(empty.timer.startedAt).not.toBeNull();
+    expect(empty.currentTeamId).toBe(empty.teams[1]!.id);
+    for (const action of [
+      { type: 'correct-guess' as const },
+      { type: 'pass' as const },
+      { type: 'penalty' as const },
+      { type: 'next-card' as const },
+      // With the deal number of this turn, too.
+      { type: 'correct-guess' as const, cardSeq: empty.cardSeq },
+    ]) {
+      await harness.performAction('p1', action);
+      expect(harness.getState(), action.type).toBe(empty);
+    }
+    await harness.performAction('p1', { type: 'bust-forbidden', bustedBy: 'p1', cardId: 'card-two' });
+    expect(harness.getState()).toBe(empty);
+    expect(empty.teams[1]).toMatchObject({ score: 0, correctCount: 0, passCount: 0, penaltyCount: 0 });
+    // The host can still move on or finish.
+    await harness.performAction('p1', { type: 'end-game' });
+    expect(harness.getState().phase).toBe('ended');
+  });
+
+  // ── Turn moves name their turn (B-06) ──────────────────────────────
+  it('end-turn naming the current turn ends it; without a turn number it ends it as before', async () => {
+    const harness = await setupBustHarness();
+    const t1 = harness.getState();
+    expect(t1.turnNumber).toBe(1);
+    await harness.performAction('p1', { type: 'end-turn', turnNumber: t1.turnNumber });
+    const t2 = harness.getState();
+    expect(t2.turnNumber).toBe(2);
+    expect(t2.currentTeamId).toBe(t2.teams[1]!.id);
+    await harness.performAction('p1', { type: 'end-turn' });
+    expect(harness.getState().turnNumber).toBe(3);
+    await harness.performAction('p1', { type: 'end-turn', turnNumber: null });
+    expect(harness.getState().turnNumber).toBe(4);
+  });
+
+  it('End turn pressed twice — or by the host and a moderator at once — ends ONE turn', async () => {
+    const harness = await setupBustHarness();
+    const t1 = harness.getState();
+    await harness.performAction('p1', { type: 'end-turn', turnNumber: t1.turnNumber });
+    const t2 = harness.getState();
+    await harness.performAction('p2', { type: 'end-turn', turnNumber: t1.turnNumber });
+    // The second press names turn 1, which is over: team B's turn goes on.
+    expect(harness.getState()).toBe(t2);
+    expect(t2.currentTeamId).toBe(t2.teams[1]!.id);
+    expect(t2.currentExplainerId).toBe('p3');
+  });
+
+  it('Start next turn pressed twice between turns starts ONE turn', async () => {
+    const harness = createTestHarness<HushleState, Parameters<typeof hushlePlugin.handleAction>[2]>({
+      plugin: hushlePlugin,
+      players: ['p1', 'p2', 'p3', 'p4'],
+    });
+    await harness.performAction('p1', { type: 'start-game', packId: 'hushle-en-basic', cardsPerTurn: 1, createdBy: 'p1' });
+    await harness.performAction('p1', {
+      type: 'set-teams',
+      teams: [
+        { name: 'A', playerIds: ['p1', 'p2'] },
+        { name: 'B', playerIds: ['p3', 'p4'] },
+      ],
+    });
+    await harness.performAction('p1', { type: 'start-turn', teamId: harness.getState().teams[0]!.id, explainerId: 'p1', turnNumber: 0 });
+    await harness.performAction('p1', { type: 'correct-guess' });
+    const between = harness.getState();
+    expect(between.timer.startedAt).toBeNull();
+    await harness.performAction('p1', { type: 'end-turn', turnNumber: between.turnNumber });
+    const next = harness.getState();
+    expect(next.turnNumber).toBe(between.turnNumber + 1);
+    await harness.performAction('p1', { type: 'end-turn', turnNumber: between.turnNumber });
+    expect(harness.getState()).toBe(next);
+  });
+
+  it('Start first turn pressed twice starts ONE turn — no second card, no restarted clock', async () => {
+    const harness = createTestHarness<HushleState, Parameters<typeof hushlePlugin.handleAction>[2]>({
+      plugin: hushlePlugin,
+      players: ['p1', 'p2', 'p3', 'p4'],
+    });
+    await harness.performAction('p1', { type: 'start-game', packId: 'hushle-en-basic', cardsPerTurn: 100, createdBy: 'p1' });
+    await harness.performAction('p1', {
+      type: 'set-teams',
+      teams: [
+        { name: 'A', playerIds: ['p1', 'p2'] },
+        { name: 'B', playerIds: ['p3', 'p4'] },
+      ],
+    });
+    const setup = harness.getState();
+    expect(setup.turnNumber).toBe(0);
+    const start = { type: 'start-turn' as const, teamId: setup.teams[0]!.id, explainerId: 'p1', turnNumber: setup.turnNumber };
+    await harness.performAction('p1', start);
+    const started = harness.getState();
+    expect(started.turnNumber).toBe(1);
+    await harness.performAction('p1', start);
+    expect(harness.getState()).toBe(started);
+    expect(started.usedCardIds).toHaveLength(1);
+  });
+
+  it('a turn number from another turn — older or newer — is ignored', async () => {
+    const harness = await setupBustHarness();
+    const t1 = harness.getState();
+    for (const turnNumber of [0, 2, 99]) {
+      await harness.performAction('p1', { type: 'end-turn', turnNumber });
+      expect(harness.getState(), String(turnNumber)).toBe(t1);
+      await harness.performAction('p1', { type: 'start-turn', teamId: t1.teams[1]!.id, explainerId: 'p3', turnNumber });
+      expect(harness.getState(), String(turnNumber)).toBe(t1);
+    }
+  });
+
+  it("validateAction: a turn move's turnNumber, when present, is a non-negative integer", () => {
+    const validate = hushlePlugin.validateAction!;
+    for (const base of [{ type: 'end-turn' }, { type: 'start-turn', teamId: 't', explainerId: null }]) {
+      expect(validate(base)).toBeNull();
+      expect(validate({ ...base, turnNumber: null })).toBeNull();
+      expect(validate({ ...base, turnNumber: 0 })).toBeNull();
+      expect(validate({ ...base, turnNumber: 7 })).toBeNull();
+      for (const turnNumber of [-1, 2.5, '3', Number.NaN, {}]) {
+        expect(validate({ ...base, turnNumber }), `${base.type} ${String(turnNumber)}`).toMatch(/turnNumber/);
+      }
+    }
+    expect(validate({ type: 'correct-guess', turnNumber: 'x' })).toBeNull();
+  });
 });
 
 describe('Hushle play again (restartActions)', () => {

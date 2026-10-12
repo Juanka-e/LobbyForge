@@ -117,12 +117,12 @@ unchanged.
 |---|---|
 | `start-game` | → `team_setup`. Deck: the pack's cards, injected by the host from `card_packs` (`apps/web/lib/prepare-plugin-action.ts`; client input is overwritten), else the bundled deck for the language. Settings are clamped; the difficulty weights are renormalised. |
 | `set-teams` | Replaces the roster. Empty names are dropped, names cut to 40 characters, each team trimmed to `teamSize`. The floater is kept only if they are on no team. Every team's rotation starts at its first player. |
-| `start-turn` | → `playing`: the given team, the given explainer (or the next in the team's rotation), a card drawn by difficulty weight, the turn's clock started. |
+| `start-turn` `{ turnNumber? }` | → `playing`: the given team, the given explainer (or the next in the team's rotation), a card drawn by difficulty weight, the turn's clock started. Ignored when `turnNumber` names another turn. |
 | `set-explainer` | Hands the turn to someone else; the team's rotation then continues after them. |
 | `next-card` `{ cardSeq? }` | A new card without scoring; counts toward the turn's cards. Refused once the time is up or between turns, and ignored when `cardSeq` names an earlier deal (see [Stale presses](#stale-presses)). |
-| `correct-guess` / `pass` / `penalty` `{ cardSeq? }` | +1 / 0 / −1 for the explaining team, then the next card on the same clock — or, at the turn's card budget or an empty deck, the end of the turn. Refused once the time is up or between turns, and ignored when `cardSeq` names an earlier deal. |
+| `correct-guess` / `pass` / `penalty` `{ cardSeq? }` | +1 / 0 / −1 for the explaining team, then the next card on the same clock — or, at the turn's card budget or an empty deck, the end of the turn. Refused once the time is up, between turns, and when no card is in play (a turn that started on an empty deck); ignored when `cardSeq` names an earlier deal. |
 | `bust-forbidden` | The other team's buzzer: the same as `penalty`, accepted only when `bustedBy` (injected by the server from the session) sits on a team other than the explaining one, AND `cardId` names the card on screen. Two opponents pressing at once (or a double tap) send the same `cardId`: the first costs the penalty and draws the next card, the second names a card that is gone and is ignored — one penalty, no burnt card. `validateAction` answers 400 for a BUST without a `cardId`. |
-| `end-turn` | The next team in order; the next player in its own rotation explains, and its turn starts at once on a fresh clock. |
+| `end-turn` `{ turnNumber? }` | The next team in order; the next player in its own rotation explains, and its turn starts at once on a fresh clock. Ignored when `turnNumber` names another turn, so two presses end one turn. |
 | `end-game` | → `ended`: the card and the timer are cleared, scores kept. |
 
 Card draw: the reducer picks a difficulty tier by the weights, then an
@@ -157,6 +157,23 @@ deal of the new one.
   first v4 write) the move applies to the card in play, as before. A
   present `cardSeq` that is not a non-negative integer is a 400 from
   `validateAction`; `null` counts as absent.
+- **No card, nothing to score.** When the host ends a turn on the last
+  card, the next turn starts on an empty deck: the clock runs but
+  `currentCard` is null. Got it, Skip and Penalty are refused then (the
+  same object comes back), and Next card and BUST have nothing to act on
+  either. End turn and End game still work.
+
+The turn moves follow the same rule with the public `turnNumber`. Start
+first turn, End turn and Start next turn send the `turnNumber` of the
+state their button was drawn from; `start-turn` and `end-turn` ignore one
+that names another turn. So a double tap, or the host and a moderator
+pressing together, ends one turn instead of cutting the next team's turn
+short the moment it begins, and a second press of Start first turn does
+not restart the turn with a new card and clock. Absent or `null`, the move
+acts on the turn as it stands; any other non-integer is a 400.
+`turnNumber` restarts at 0 with every game (it is the "Turn 3" the panel
+shows), so unlike `cardSeq` it does not guard against a press that
+arrives a whole game late.
 
 ### Turns and the explainer rotation
 
@@ -374,6 +391,9 @@ placeholder that says what to do instead ("Listen to Mira").
 - Each of those presses carries the `cardSeq` of the state the button was
   rendered from (`cardMoveIntent` in `ui/model.ts`), so a press that lands
   after the card changed is ignored ([Stale presses](#stale-presses)).
+- **Start first turn**, **End turn** and **Start next turn** carry the
+  `turnNumber` they were rendered for (`turnMoveIntent`), so a double tap
+  starts or ends one turn.
 - The server also de-duplicates retries by `actionId`.
 
 ### "This turn"
@@ -453,23 +473,25 @@ the activity is truly over.
 
 `plugins/hushle/src/__tests__/`:
 
-- `hushle.test.ts` (49) — the reducer: every action, teams and floater,
+- `hushle.test.ts` (56) — the reducer: every action, teams and floater,
   the per-team rotation (four turns for four players, the floater once
   for each team, an explainer picked by hand), the turn clock and time's
   up, weighted draw, BUST rules, stale presses (a BUST then the host's Got
   it for the same card applies once; two moderators score one card; a
-  stale Skip, Penalty or Next card; deals counted across games),
-  migrations up to v4.
-- `panel-model.test.ts` (26) — the panel's pure logic: each viewer's role
-  against the projection, the deal number every viewer sends, the
+  stale Skip, Penalty or Next card; deals counted across games; a turn on
+  an empty deck scores nothing; End turn, Start next turn and Start first
+  turn pressed twice move one turn), migrations up to v4.
+- `panel-model.test.ts` (27) — the panel's pure logic: each viewer's role
+  against the projection, the deal and turn numbers every viewer sends, the
   deadline, the next-up preview checked
   against what `end-turn` really does over a full round, standings,
   settings round-tripped through the reducer, the two-team split,
   `set-teams` payloads, the "this turn" log over real reducer transitions.
-- `panel.test.tsx` (43) — the panel mounted in a DOM: every phase and
+- `panel.test.tsx` (45) — the panel mounted in a DOM: every phase and
   seat, seating by name and splitting the room, time's up, the exact
   action each button dispatches (the host's card moves with their
-  `cardSeq`, never the card id), the double-tap guards, Turkish rendering
+  `cardSeq`, never the card id; the turn buttons with their `turnNumber`),
+  the double-tap guards, Turkish rendering
   and "no raw key anywhere". `harness.tsx` holds the
   fixtures, a restatement of the server projection, and the DOM: the
   package does not depend on react-dom or a DOM library, so the harness

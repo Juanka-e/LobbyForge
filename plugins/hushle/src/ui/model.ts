@@ -131,6 +131,18 @@ export function cardMoveIntent(state: Pick<HushleState, 'cardSeq'>): { cardSeq?:
   return typeof seq === 'number' && Number.isSafeInteger(seq) && seq >= 0 ? { cardSeq: seq } : {};
 }
 
+/**
+ * What a host's turn move (Start first turn, End turn, Start next turn)
+ * sends to name the turn it is for: the turn number of the snapshot the
+ * button was drawn from, so a double tap — or the host and a moderator
+ * pressing together — starts or ends one turn. Taken at render time, like
+ * `cardMoveIntent`; a snapshot without one sends nothing.
+ */
+export function turnMoveIntent(state: Pick<HushleState, 'turnNumber'>): { turnNumber?: number } {
+  const turn = state.turnNumber as unknown;
+  return typeof turn === 'number' && Number.isSafeInteger(turn) && turn >= 0 ? { turnNumber: turn } : {};
+}
+
 /** "Turn 3" — the reducer counts the turns. */
 export function turnNumber(state: Pick<HushleState, 'turnNumber'>): number {
   return Math.max(1, state.turnNumber || 0);

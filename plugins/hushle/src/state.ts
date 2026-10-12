@@ -175,7 +175,14 @@ export type HushleAction =
       /** The single extra player of an odd count, or null (the default). */
       floaterPlayerId?: string | null;
     }
-  | { type: 'start-turn'; teamId: string; explainerId: string | null }
+  /**
+   * `turnNumber` (on `start-turn` and `end-turn`) is the `state.turnNumber`
+   * the host's button was drawn for: when present and no longer current,
+   * the action is ignored, so a double tap — or the host and a moderator
+   * pressing together — starts or ends ONE turn. Absent (or null), it acts
+   * on the turn as it stands, as older panels sent it.
+   */
+  | { type: 'start-turn'; teamId: string; explainerId: string | null; turnNumber?: number | null }
   | { type: 'set-explainer'; explainerId: string | null }
   /**
    * The host's card moves. `cardSeq` is the `state.cardSeq` the button was
@@ -200,7 +207,7 @@ export type HushleAction =
    * double-tap) cost ONE penalty and never burn the next card.
    */
   | { type: 'bust-forbidden'; bustedBy?: string; cardId?: string }
-  | { type: 'end-turn' }
+  | { type: 'end-turn'; turnNumber?: number | null }
   | { type: 'end-game' };
 
 export const HUSHLE_DEFAULT_TURN_DURATION_SECONDS = 60;

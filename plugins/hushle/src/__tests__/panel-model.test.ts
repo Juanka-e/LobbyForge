@@ -21,6 +21,7 @@ import {
   standings,
   startGameAction,
   turnDeadline,
+  turnMoveIntent,
   turnNumber,
   withPlayerAdded,
   withPlayerRemoved,
@@ -106,6 +107,21 @@ describe('turn and timer', () => {
     // A snapshot from before deal numbers sends none; so does garbage.
     for (const cardSeq of [undefined, null, -1, 1.5, '3']) {
       expect(cardMoveIntent({ cardSeq } as unknown as HushleState)).toEqual({});
+    }
+  });
+
+  it("names the turn a host's turn move is for, from the snapshot", () => {
+    const setup = teamSetupState();
+    expect(turnMoveIntent(project(setup, KAYA))).toEqual({ turnNumber: 0 });
+    const first = playingState();
+    for (const viewer of [MIRA, THEO, KAYA, NOVA, SAM]) {
+      expect(turnMoveIntent(project(first, viewer))).toEqual({ turnNumber: first.turnNumber });
+    }
+    const second = hushleReducer(first, { type: 'end-turn', ...turnMoveIntent(first) });
+    expect(second.turnNumber).toBe(first.turnNumber + 1);
+    expect(hushleReducer(second, { type: 'end-turn', ...turnMoveIntent(first) })).toBe(second);
+    for (const turnNumber of [undefined, null, -1, 1.5, '2']) {
+      expect(turnMoveIntent({ turnNumber } as unknown as HushleState)).toEqual({});
     }
   });
 

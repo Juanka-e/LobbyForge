@@ -29,6 +29,7 @@ import {
   playRole,
   teamById,
   turnDeadline,
+  turnMoveIntent,
   turnNumber,
   type HushleViewState,
   type PlayRole,
@@ -72,6 +73,9 @@ export function PlayingView({ log, ...props }: ViewProps & { log: TurnLog }) {
     lockHost();
     void dispatch(action);
   };
+  // The turn the header's buttons were drawn for: a second End turn (or
+  // Start next turn) names a turn that is already over and is ignored.
+  const endTurn: HushleAction = { type: 'end-turn', ...turnMoveIntent(state) };
 
   return (
     <>
@@ -103,11 +107,11 @@ export function PlayingView({ log, ...props }: ViewProps & { log: TurnLog }) {
           isHost ? (
             <>
               {live ? (
-                <Button variant="secondary" onClick={() => void dispatch({ type: 'end-turn' })}>
+                <Button variant="secondary" onClick={() => void dispatch(endTurn)}>
                   {t('hushle.playing.endTurn')}
                 </Button>
               ) : (
-                <Button variant="primary" disabled={deckEmpty} onClick={() => void dispatch({ type: 'end-turn' })}>
+                <Button variant="primary" disabled={deckEmpty} onClick={() => void dispatch(endTurn)}>
                   {t('hushle.host.nextTurn')}
                 </Button>
               )}
