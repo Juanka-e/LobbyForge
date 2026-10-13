@@ -19,17 +19,21 @@
  * because the revocation entry outlives the cookie's absolute lifetime and
  * every reader checks it.
  */
-import { GUEST_COOKIE_NAME, guestSessionNeedsRefresh } from '@lobbyforge/core';
+import { GUEST_COOKIE_NAME, guestSessionNeedsRefresh, requireSessionSecret } from '@lobbyforge/core';
 import { buildGuestSessionCookie, readGuestSession } from './guest-session';
 import { sessionMaxAgeSeconds } from './session-lifetime';
 
 /** A `Set-Cookie` value re-signing the request's session when it is due, else null. */
 export function refreshedSessionCookie(cookieHeader: string | null, now?: number): string | null {
   if (!cookieHeader || !cookieHeader.includes(`${GUEST_COOKIE_NAME}=`)) return null;
-  // Read directly (not through api-auth, which pulls the database into the
-  // request proxy's bundle); the same rule as getSessionSecret.
-  const secret = process.env.LOBBYFORGE_SESSION_SECRET;
-  if (!secret || secret.length < 32) return null;
+  // From core (not api-auth, which pulls the database into the request
+  // proxy's bundle): the same rule as getSessionSecret, placeholders refused.
+  let secret: string;
+  try {
+    secret = requireSessionSecret();
+  } catch {
+    return null;
+  }
   const session = readGuestSession(cookieHeader, secret, now === undefined ? {} : { now });
   if (!session) return null;
   const maxAgeSeconds = sessionMaxAgeSeconds();
