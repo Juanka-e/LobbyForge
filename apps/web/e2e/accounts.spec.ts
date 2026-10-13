@@ -10,6 +10,10 @@
  *     31 days old is signed out even though its `exp` is still valid, and
  *     the guest route does not refresh it (needs LOBBYFORGE_SESSION_SECRET,
  *     the stack's session secret, to forge the cookies);
+ *   - the sliding session (7 days): a cookie with less than half left is
+ *     re-signed by an API answer or a page load — same session id and
+ *     auth_time — while a refused answer gets nothing and sign-out sends
+ *     only the clearing cookie (forged with the same secret);
  *   - active sessions: another session can be revoked, the current one not;
  *   - desktop handoff: a code completes once; after three failed attempts
  *     the desktop sign-in needs the login challenge too.
@@ -32,6 +36,21 @@ test.skip(!baseUrl, 'Runs only against the compose stack (set LF_E2E_BASE_URL).'
 test.describe.configure({ mode: 'default', timeout: 120_000 });
 
 const freshSignIns = () => clearRateLimitBuckets(['auth-local-login']);
+
+interface SessionPayload {
+  gid: string;
+  uid: string;
+  name: string;
+  iat: number;
+  exp: number;
+  auth_time?: number;
+}
+
+/** The (signed, not encrypted) payload of an `lf_guest` cookie value. */
+function decodeSession(raw: string): SessionPayload {
+  const body = decodeURIComponent(raw).split('.')[0] ?? '';
+  return JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as SessionPayload;
+}
 
 test.describe('account security', () => {
   let request: PlaywrightWorkerArgs['playwright']['request'];
@@ -123,6 +142,66 @@ test.describe('account security', () => {
     const refresh = await send(old, '/api/auth/guest', { method: 'POST', body: '{}' });
     expect(refresh.status).toBe(400);
     expect(((await refresh.json()) as { error: string }).error).toBe('captcha_required');
+  });
+
+  test('the session slides: past half its 7 days a request re-signs it (same session); sign-out still clears it', async () => {
+    test.skip(!sessionSecret, 'Set LOBBYFORGE_SESSION_SECRET (the stack\'s session secret) to forge the cookies.');
+    const email = await account('slide');
+    const ctx = await api();
+    freshSignIns();
+    expect((await signIn(ctx, { data: { email, password: PASSWORD } })).status()).toBe(200);
+    const raw = (await ctx.storageState()).cookies.find((c) => c.name === 'lf_guest')?.value ?? '';
+    const issued = decodeSession(raw);
+    // A new session lasts 7 days without a request.
+    expect(issued.exp - issued.iat).toBe(7 * 86_400);
+    expect(typeof issued.auth_time).toBe('number');
+
+    const send = (cookie: string, path: string, init: RequestInit = {}) =>
+      fetch(new URL(path, baseUrl), { redirect: 'manual', ...init, headers: { cookie: `lf_guest=${cookie}`, Origin: baseUrl } });
+    const sessionCookies = (res: Response) => res.headers.getSetCookie().filter((value) => value.startsWith('lf_guest='));
+
+    // More than half left: nothing new, on an API answer or a page load.
+    const fresh = await send(raw, '/api/servers');
+    expect(fresh.status).toBe(200);
+    expect(sessionCookies(fresh)).toEqual([]);
+    expect(sessionCookies(await send(raw, '/lobby'))).toEqual([]);
+
+    // The same session four days on (3 of 7 days left).
+    const now = Math.floor(Date.now() / 1000);
+    const aged = buildGuestSessionCookie({ gid: issued.gid, uid: issued.uid, name: issued.name }, sessionSecret, {
+      now: now - 4 * 86_400,
+      authTime: issued.auth_time,
+      secure: false,
+    }).raw;
+    for (const path of ['/api/servers', '/lobby']) {
+      const res = await send(aged, path);
+      expect(res.status, path).toBeLessThan(400);
+      const [refreshed, ...more] = sessionCookies(res);
+      expect(more, path).toEqual([]);
+      expect(refreshed, `${path} re-signs the cookie`).toBeTruthy();
+      expect(refreshed).toMatch(/Max-Age=60480\d/);
+      expect(refreshed).toContain('HttpOnly');
+      const next = decodeSession(refreshed!.slice('lf_guest='.length).split(';')[0]!);
+      // Same session (revocation and the session list keep working), same sign-in time, a fresh week.
+      expect(next.gid).toBe(issued.gid);
+      expect(next.uid).toBe(issued.uid);
+      expect(next.auth_time).toBe(issued.auth_time);
+      expect(next.exp - now).toBeGreaterThanOrEqual(7 * 86_400 - 60);
+    }
+    // A refused answer gets nothing new.
+    const refused = await send(aged, '/api/servers/00000000-0000-4000-8000-000000000000/channels');
+    expect(refused.status).toBeGreaterThanOrEqual(400);
+    expect(sessionCookies(refused)).toEqual([]);
+
+    // Sign-out with the aged cookie: one Set-Cookie for the session, and it clears it.
+    const out = await send(aged, '/api/auth/logout', { method: 'POST' });
+    expect(out.status).toBe(200);
+    const cleared = sessionCookies(out);
+    expect(cleared).toHaveLength(1);
+    expect(cleared[0]).toMatch(/^lf_guest=;.*Max-Age=0/);
+    // …and the session is over for every copy of it, refreshed or not.
+    expect((await send(aged, '/api/servers')).status).toBe(401);
+    expect((await send(raw, '/api/servers')).status).toBe(401);
   });
 
   test('active sessions: another session is revoked; the current one cannot be', async () => {

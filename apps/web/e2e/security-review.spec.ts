@@ -19,7 +19,8 @@
  *   AUTHZ-004  "approval required": an invite files a join request (no
  *              membership) that the owner approves from the queue
  *   AUTHZ-005 / FILE-001  avatars are short URLs, served with nosniff,
- *              and hidden by "Profile visibility: nobody"
+ *              and hidden by "Profile visibility: nobody"; a guest's
+ *              upload is refused (403 guest_upload_forbidden, 2026-10-13)
  *   AUTHZ-006  publish grants: a member publishes mic, camera and screen;
  *              a server-muted member loses mic and screen audio but keeps
  *              camera and screen share; a timed-out member publishes
@@ -30,6 +31,9 @@
  *              the old token is thrown out again on join)
  *   PLUG-001   a poll vote is not written to the audit log
  *   PLUG-002   a kicked host cannot end their activity
+ *   AUTHZ-008 / ACT-001 (2026-10-13)  client message metadata is refused;
+ *              a DM needs a shared community (an unshared user answers
+ *              like an unknown one); the SSE activity stream is gone
  *   FILE-002 / HUB-001  directory writes are official-hub only; the
  *              install has its own directory id
  *
@@ -765,8 +769,26 @@ test.describe('security review 2026-10 — regressions on the real stack', () =>
   });
 
   /**
-   * A member with a freshly uploaded 256×256 PNG avatar ("pictured") and a
-   * second member who looks at them ("viewer").
+   * A registered member: since FILE-001 (2026-10-13) guests cannot upload
+   * images (403 guest_upload_forbidden), so a picture needs an account.
+   * Registering with the owner's invite joins the community.
+   */
+  async function newAccountMember(playwright: Playwright, seed: string): Promise<Member> {
+    const api = await newApi(playwright);
+    const email = `sec-${seed.toLowerCase()}-${RUN}-${Math.random().toString(36).slice(2, 8)}@e2e.local`;
+    const res = await send(() =>
+      registerAccount(api, { data: { email, displayName: `${seed} ${RUN.slice(-4)}`, password: `pictured-password-${RUN}`, inviteCode } })
+    );
+    expect(res.status(), await res.text()).toBe(201);
+    const { guest } = (await (await api.get('/api/auth/guest')).json()) as { guest: { uid: string; name: string } };
+    expect(guest.uid).toMatch(UUID_RE);
+    return { api, uid: guest.uid, name: guest.name };
+  }
+
+  /**
+   * A member with a freshly uploaded 256×256 PNG avatar ("pictured", an
+   * account) and a second member who looks at them ("viewer", a guest —
+   * whose own upload is refused).
    */
   async function withPicturedMember(
     playwright: Playwright,
@@ -783,15 +805,17 @@ test.describe('security review 2026-10 — regressions on the real stack', () =>
       hideProfile: () => Promise<void>;
     }) => Promise<void>
   ) {
-    const pictured = await newGuest(playwright, 'Pictured');
+    const pictured = await newAccountMember(playwright, 'Pictured');
     const viewer = await newGuest(playwright, 'Viewer');
     try {
-      await join(pictured);
       await join(viewer);
       const png = solidPng(256, [0x2a, 0x9d, 0x8f]);
-      const upload = await send(() =>
-        pictured.api.post('/api/users/me/avatar', { data: { dataUrl: `data:image/png;base64,${png.toString('base64')}` } })
-      );
+      const dataUrl = `data:image/png;base64,${png.toString('base64')}`;
+      // FILE-001: the same image from a guest is refused.
+      const guestUpload = await send(() => viewer.api.post('/api/users/me/avatar', { data: { dataUrl } }));
+      expect(guestUpload.status(), await guestUpload.text()).toBe(403);
+      expect(((await guestUpload.json()) as { code?: string }).code).toBe('guest_upload_forbidden');
+      const upload = await send(() => pictured.api.post('/api/users/me/avatar', { data: { dataUrl } }));
       expect(upload.status(), await upload.text()).toBe(200);
       const avatarPath = `/api/users/${pictured.uid}/avatar`;
       const lobbyHtml = async () => {
@@ -1202,6 +1226,54 @@ test.describe('security review 2026-10 — regressions on the real stack', () =>
       await deleteChannel(channelId);
       await send(() => owner.delete(`/api/servers/${serverId}/roles/${roleId}`));
       await host.api.dispose();
+    }
+  });
+
+  // ── Follow-ups of the 2026-10-13 review ──────────────────────────────
+
+  test('AUTHZ-008 / ACT-001 (2026-10-13): client message metadata is refused; a DM needs a shared community; the SSE activity stream is gone', async ({
+    playwright,
+  }) => {
+    const member = await newGuest(playwright, 'Writer');
+    const stranger = await newGuest(playwright, 'Stranger');
+    await join(member);
+    const channelId = await createChannel(`sec-stream-${RUN}`, 'voice');
+    let sessionId = '';
+    try {
+      // AUTHZ-008: metadata is the server's (a poll's id, a bot's card) — a client's is refused outright.
+      const forged = await send(() =>
+        member.api.post(`/api/servers/${serverId}/channels/${textChannelId}/messages`, {
+          data: { content: `metadata ${RUN}`, metadata: { poll: { id: '00000000-0000-4000-8000-000000000000' } } },
+        })
+      );
+      expect(forged.status(), await forged.text()).toBe(400);
+      expect(((await forged.json()) as { code?: string }).code).toBe('metadata_not_allowed');
+      const plain = await send(() => member.api.post(`/api/servers/${serverId}/channels/${textChannelId}/messages`, { data: { content: `plain ${RUN}` } }));
+      expect(plain.status(), await plain.text()).toBe(201);
+
+      // A DM needs a shared community. Someone who shares none answers exactly like nobody.
+      const shared = await send(() => member.api.post('/api/dm', { data: { recipientUserId: ownerUid } }));
+      expect(shared.status(), await shared.text()).toBe(200);
+      const unshared = await send(() => member.api.post('/api/dm', { data: { recipientUserId: stranger.uid } }));
+      const nobody = await send(() => member.api.post('/api/dm', { data: { recipientUserId: '00000000-0000-4000-8000-000000000000' } }));
+      expect(unshared.status()).toBe(404);
+      expect(nobody.status()).toBe(404);
+      expect(await unshared.json()).toEqual(await nobody.json());
+
+      // ACT-001: the cookie-only SSE stream of an activity no longer exists; the activity itself answers.
+      expect((await send(() => owner.post(`/api/servers/${serverId}/apps`, { data: { pluginId: 'poll', enabled: true } }))).status()).toBe(200);
+      const created = await send(() => owner.post(`/api/servers/${serverId}/channels/${channelId}/activities`, { data: { pluginId: 'poll' } }));
+      expect(created.status(), await created.text()).toBe(201);
+      sessionId = ((await created.json()) as { activity: { id: string } }).activity.id;
+      expect((await owner.get(`/api/servers/${serverId}/activities/${sessionId}`)).status()).toBe(200);
+      const stream = await owner.get(`/api/servers/${serverId}/activities/${sessionId}/stream`, { headers: { Accept: 'text/event-stream' } });
+      expect(stream.status()).toBe(404);
+      expect(stream.headers()['content-type'] ?? '').not.toContain('text/event-stream');
+    } finally {
+      if (sessionId) await send(() => owner.post(`/api/servers/${serverId}/activities/${sessionId}/end`, { data: {} }));
+      await deleteChannel(channelId);
+      await member.api.dispose();
+      await stranger.api.dispose();
     }
   });
 
