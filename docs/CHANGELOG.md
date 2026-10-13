@@ -2,6 +2,11 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Security review 2026-10-13 and fresher docs - 2026-10-13
+
+- **Report:** docs/SECURITY_REVIEW_2026-10-13.md (Turkish): six areas reviewed on main 7798270; no critical or high finding; 7 medium and 11 low, every one fixed (#106, #108, #112), plus the one-hour session bug. The upgrade note: an install running on a published placeholder session secret no longer starts.
+- **Docs that disagreed with the code:** the README feature table and layout (all six activities ship, chat polls, Bot API v2, the sandboxed marketplace with owner approval, bot protection, email, languages; the plugin worker and the example plugin; no more `packages/i18n`), EXTENDING.md's bot sections (events, slash commands and webhooks exist since Bot API v2; role-gated channels can be granted; what is still missing) and its marketplace path, and ADR-007's status (implemented).
+
 ## [Unreleased] - Sessions no longer end after an hour - 2026-10-13
 
 - **The bug:** the session cookie lived one hour and nothing re-signed a cookie that was still valid — `POST /api/auth/guest` only ran once the cookie was already gone. A signed-in user was signed out an hour after signing in, however active they were, and a guest lost their identity. Found by the 2026-10-13 security review.

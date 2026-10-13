@@ -36,8 +36,9 @@ ways:
   Since ADR-007 the plugin runs sandboxed: its `server.js` in a QuickJS
   WebAssembly VM in the plugin worker, its UI in a sandboxed iframe. It
   gets action policies, `validateAction` and per-viewer hidden state
-  (`projectState`), but no Node APIs, imports, storage or timers, and it
-  is not listed in the Apps page or the picker
+  (`projectState`), and — only when the instance owner approves it at
+  install — outside sites, its own site as the UI, timers, per-community
+  storage and app chat lines; never Node APIs or imports
   ([§3.5](#35-path-b-marketplace-dynamic-plugin), [PLUGIN_PUBLISHING.md](PLUGIN_PUBLISHING.md)).
 
 **What is the most I can build?** Server-authoritative activities that run
@@ -45,15 +46,17 @@ inside a voice channel. They can be turn-based, or "real-time" at the pace
 of a few actions per second for a whole room. Every viewer gets only the
 part of the state they are allowed to see. That covers social deduction
 games, Taboo-style word games, trivia with server-held answers, synced
-YouTube watch parties, polls, buzzers and scoreboards. Bots can read and
-post in text channels that every member can see. They cannot use voice,
-slash commands, webhooks or events yet. See [§4](#4-what-you-can-build-capabilities-and-ceilings).
+YouTube watch parties, polls, buzzers and scoreboards. Bots read and post
+in the channels they are given, register slash commands, answer publicly
+or privately, and receive events over a WebSocket stream or a signed
+HTTPS endpoint; incoming webhooks post into a channel. They cannot use
+voice, buttons, embeds or DMs yet. See [§4](#4-what-you-can-build-capabilities-and-ceilings).
 
 **How is this different from Discord?** You run all of it yourself
 (AGPL-3.0), and the data never leaves your server. Games and their secrets
 are held by your own server, not by a third-party app backend that
-Discord proxies to. The trade-off: the bot platform is much thinner than
-Discord's (no gateway events, slash commands, webhooks or voice bots).
+Discord proxies to. The trade-off: the bot platform is thinner than
+Discord's (no buttons, embeds, voice bots or OAuth "add to server" yet).
 See [§5](#5-how-lobbyforge-differs).
 
 ## 2. Adding bots
@@ -205,9 +208,10 @@ message: `unauthorized`, `bot_disabled`, `missing_permission`,
 Per-address limits are only as accurate as `LOBBYFORGE_TRUSTED_PROXY`.
 Behind nginx, set it to `x-forwarded-for`.
 
-**Polling budget.** No events exist yet, so a bot polls. The read limit
-applies to the bot across all channels. A bot that watches three
-channels can read each one about every 3 seconds.
+**Polling budget.** Prefer events (Bot API v2: the WebSocket event stream
+or a signed HTTPS endpoint, [BOT_API_V2.md](BOT_API_V2.md)). A bot that
+polls instead shares one read limit across all channels: a bot that
+watches three channels can read each one about every 3 seconds.
 
 ### 2.5 The bot SDK
 
@@ -241,19 +245,21 @@ types with no runtime behind them.
 
 ### 2.6 What a bot cannot do today
 
-- **Receive events.** There is no gateway or event stream, so bots poll.
-- **Slash commands, buttons, embeds, attachments, reactions, replies,
-  editing or deleting its own messages.** `POST …/messages` accepts only
-  `content` (`messages/route.ts:16`). `replyToId` can be read but not set.
-- **DMs, role-gated channels, voice/stage channels.** A bot holds no
-  roles, so role-gated channels stay closed to it. To keep a channel away
-  from bots, gate it by role (`packages/db/src/queries/bots.ts:315`).
+Bot API v2 added events (WebSocket stream and signed HTTPS endpoints),
+slash commands with options, public and ephemeral answers with follow-ups,
+and incoming webhooks ([BOT_API_V2.md](BOT_API_V2.md)). Still missing:
+
+- **Buttons, embeds, attachments, reactions, replies, editing or deleting
+  its own messages.** A post is plain `content`.
+- **DMs and voice/stage channels.** A role-gated channel opens to a bot
+  only when someone with *Manage Channels* grants it in the bot's channel
+  access (selected mode); see [BOTS.md](BOTS.md).
 - **Moderate.** It cannot delete messages, time out, kick or ban.
   `moderate_messages` is honoured only by the built-in Moderation Bot.
 - **Mention `@everyone` or `@here`.** These are refused with
   `403 mass_mention_forbidden`.
-- **Webhooks or OAuth.** There is no incoming or outgoing webhook and no
-  OAuth "add to server" flow.
+- **OAuth.** There is no "add to server" flow and no outgoing webhook
+  other than the bot's own event endpoint.
 - **Use the reserved permissions.** `join_voice`, `publish_audio`,
   `read_presence`, `manage_game_session`, `manage_music_queue` and
   `read_audit_log` can be granted but unlock nothing yet.
@@ -926,10 +932,10 @@ version plus a record of the active one
 | Games that control voice (mute the eliminated, private night rooms) | no | `ctx.voice` is a stub; see [§6](#6-whats-next) |
 | A plugin posting results to chat | yes | A `chat.post` effect: an app message with an APP badge, in the text channel the community chose for the app |
 | Data that outlives a session (season leaderboards) | yes | `ctx.storage` snapshot plus `storage.set` effects (Postgres, per community and plugin, 64 KiB) |
-| Chat bots: commands, announcements, relays from game servers, RSS, CI | yes | Bot API v1, polling |
+| Chat bots: commands, announcements, relays from game servers, RSS, CI | yes | Bot API v1 + v2: slash commands, events (stream or HTTPS), incoming webhooks |
 | Welcome flows and automod | built in | Welcome and Moderation bots |
 | Custom moderation bots (delete, timeout, ban) | no | Bots cannot moderate |
-| Music or voice bots, slash commands, buttons, webhooks in or out, OAuth apps | no | Not in the API |
+| Music or voice bots, buttons, embeds, OAuth apps | no | Not in the API |
 | Mobile apps, federation, E2EE | no | Platform gaps ([SECURITY_REVIEW_2026-10.md](SECURITY_REVIEW_2026-10.md) §8) |
 
 **The unsupported voice escape hatch.** You own the LiveKit API key and
@@ -987,8 +993,8 @@ camera or screen share.
 In short, the ceiling is any game or tool a few dozen people play
 **together in one voice channel**, where the server alone knows the
 truth and each person sees their own slice. It updates at human speed
-(seconds), not twitch speed. Bots sit on top as polling integrations
-for text channels.
+(seconds), not twitch speed. Bots sit on top as text-channel
+integrations: slash commands, events and webhooks.
 
 ## 5. How LobbyForge differs
 
@@ -998,7 +1004,7 @@ platforms' public developer docs. Re-check them before quoting.
 
 | | LobbyForge | Discord | Matrix / Element | Mumble | TeamSpeak | Stoat (Revolt) |
 |---|---|---|---|---|---|---|
-| Bots | HTTP Bot API v1: read and post in open text channels, polling, one token per bot per community | Gateway event stream plus REST, slash commands, buttons, webhooks, voice bots | Any account can be a bot (sync stream); application services and bridges | Bots connect as clients; the server has an RPC interface | ServerQuery-style automation; client-side bots | Bot accounts with REST plus an event socket |
+| Bots | Bot API v1 + v2: read and post in granted channels, slash commands, ephemeral answers, event stream and signed HTTPS events, incoming webhooks; one token per bot per community | Gateway event stream plus REST, slash commands, buttons, webhooks, voice bots | Any account can be a bot (sync stream); application services and bridges | Bots connect as clients; the server has an RPC interface | ServerQuery-style automation; client-side bots | Bot accounts with REST plus an event socket |
 | In-app games or apps | Plugins run **inside your server**; per-viewer projection hides secrets | Activities: web apps on the Embedded App SDK inside Discord's client; you host the backend, Discord proxies it | Widgets (iframes) in rooms | Client plugins (native, per user) | Client plugins (native, per user) | none |
 | Who holds game state | your instance | the app developer's servers | the widget's own backend | n/a | n/a | n/a |
 | Self-host | yes | no | yes | yes | server only, closed source | yes |
@@ -1014,11 +1020,13 @@ platforms' public developer docs. Re-check them before quoting.
   and the per-viewer projection run in *your* server, and the same code
   path serves REST and WebSocket. A player reading the network tab
   sees only their own slice.
-- **Extension ceiling.** Discord's bot platform is far ahead: events,
-  commands, components, webhooks, voice and OAuth. Matrix's protocol
-  makes every client a potential bot or bridge. LobbyForge's advantage is
-  the in-voice game runtime plus easy self-hosting (signed updates,
-  backups, Doctor). Its weakest point is the bot platform.
+- **Extension ceiling.** Discord's bot platform is still ahead on
+  components (buttons, embeds), voice bots and OAuth; LobbyForge now has
+  events, slash commands and webhooks. Matrix's protocol makes every
+  client a potential bot or bridge. LobbyForge's advantage is the
+  in-voice game runtime — including sandboxed community plugins that can
+  run on their author's own site once the owner approves — plus easy
+  self-hosting (signed updates, backups, Doctor).
 
 ## 6. What's next
 
@@ -1077,6 +1085,6 @@ Each points to where it is tracked.
 | PLUGIN_SDK.md | `messages.sendGameMessage` posts to the channel | It only writes to the server log (`plugin-context.ts:99-104`) |
 | PLUGIN_SDK.md | "What M16 doesn't do": no plugin UI, the panel polls every 2 s | Panels render, and updates arrive over the WebSocket |
 | [ACTIVITIES.md](ACTIVITIES.md) | The panel polls every 2 s | WebSocket push, 5 s poll fallback |
-| README | Vampire Village and Watch Party are "planned"; bot-sdk "runtime planned" | Both games ship; the bot SDK has a working HTTP client |
+| README | Vampire Village and Watch Party are "planned"; bot-sdk "runtime planned" | Both games ship; the bot SDK has a working HTTP client. **Fixed 2026-10-13:** README updated |
 | `POST /api/marketplace/install` error text | "plugins run in-process without isolation" | The worker is mandatory. **Fixed 2026-10-03:** the message now says plugins run only in the plugin-worker, sandboxed in a QuickJS VM (ADR-007) |
 | [BOTS.md](BOTS.md) | (accurate) | Add: switching the Moderation Bot on needs *Manage Messages* unless you are the owner |

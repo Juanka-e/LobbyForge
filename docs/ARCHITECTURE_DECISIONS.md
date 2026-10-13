@@ -170,8 +170,7 @@ instances remains future work.
 
 ## ADR-007: Marketplace Plugins Run Sandboxed (supersedes the trust limits of ADR-001 and the target of ADR-002)
 
-**Status**: accepted 2026-10-03, in implementation on
-`feat/bot-api-v2-marketplace-sandbox`.
+**Status**: accepted 2026-10-03; implemented (PR #49, then the plugin unlock phases 1–3a in PRs #100, #103, #104 and #105, and the 2026-10-13 security fixes in #112).
 
 **Decision**: a marketplace plugin can be installed without trusting its
 author. Its code never runs with Node APIs and its UI never runs in the
