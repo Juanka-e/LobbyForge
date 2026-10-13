@@ -26,9 +26,18 @@ export function LobbyVoiceFooter({ serverName, hasUser, displayName }: LobbyVoic
   const t = useT();
   const voice = useLobbyVoice();
   const connected = voice.connectionState === ConnectionState.Connected && !!voice.activeChannelId;
-  const connecting = voice.connecting || voice.connectionState === ConnectionState.Connecting || voice.connectionState === ConnectionState.Reconnecting;
+  // LiveKit resumes a dropped signal connection as SignalReconnecting (the
+  // common case: the media path may still be up) and only falls back to a
+  // full Reconnecting when that fails. Either way the person is still in
+  // the room — for up to two minutes (lib/voice-resume.ts) — so say so,
+  // and keep Disconnect usable to stop waiting.
+  const reconnecting =
+    !!voice.activeChannelId &&
+    (voice.connectionState === ConnectionState.Reconnecting ||
+      voice.connectionState === ConnectionState.SignalReconnecting);
+  const connecting = voice.connecting || voice.connectionState === ConnectionState.Connecting || reconnecting;
   const stateLabel = connecting
-    ? voice.connectionState === ConnectionState.Reconnecting
+    ? reconnecting
       ? t('lobby.voice.reconnecting')
       : t('lobby.voice.connecting')
     : connected
@@ -56,7 +65,7 @@ export function LobbyVoiceFooter({ serverName, hasUser, displayName }: LobbyVoic
                 className={
                   connected
                     ? 'w-2 h-2 rounded-full bg-success animate-pulse-soft'
-                    : voice.connecting
+                    : connecting
                       ? 'w-2 h-2 rounded-full bg-tertiary'
                       : 'w-2 h-2 rounded-full bg-text-muted'
                 }
@@ -65,7 +74,7 @@ export function LobbyVoiceFooter({ serverName, hasUser, displayName }: LobbyVoic
                 className={
                   connected
                     ? 'text-[11px] text-success font-bold uppercase tracking-tight'
-                    : voice.connecting
+                    : connecting
                       ? 'text-[11px] text-tertiary font-bold uppercase tracking-tight'
                       : 'text-[11px] text-text-muted font-bold uppercase tracking-tight'
                 }
@@ -112,7 +121,7 @@ export function LobbyVoiceFooter({ serverName, hasUser, displayName }: LobbyVoic
             </button>
             <button
               type="button"
-              disabled={!connected}
+              disabled={!connected && !reconnecting}
               onClick={() => void voice.disconnect()}
               title={t('lobby.voice.disconnect')}
               aria-label={t('lobby.voice.disconnectAria')}
