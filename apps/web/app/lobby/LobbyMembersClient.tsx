@@ -215,7 +215,6 @@ export function LobbyMembersClient({
     setOpenBotId((current) => (current === bot.id ? null : bot.id));
   }
   const openBot = bots.find((b) => b.id === openBotId);
-  const closeProfile = () => profileCard?.closeProfile();
 
   return (
     <>
@@ -224,11 +223,11 @@ export function LobbyMembersClient({
           <p className="font-label-xs text-text-muted italic">{t('lobby.roster.empty')}</p>
         ) : null}
         {roleGroups.map(({ role, members: roleMembers }) => (
-          <MemberSection key={role.id} label={`${role.name} - ${roleMembers.length}`} members={roleMembers} roleColor={role.color} roleIcon={role.icon} currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} onClosePopover={closeProfile} />
+          <MemberSection key={role.id} label={`${role.name} - ${roleMembers.length}`} members={roleMembers} roleColor={role.color} roleIcon={role.icon} currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} />
         ))}
-        <MemberSection label={t('lobby.roster.onlineGroup', { count: ungroupedOnline.length })} members={ungroupedOnline} currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} onClosePopover={closeProfile} />
+        <MemberSection label={t('lobby.roster.onlineGroup', { count: ungroupedOnline.length })} members={ungroupedOnline} currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} />
         <BotSection bots={bots} openBotId={openBotId} onToggle={toggleBotPopover} />
-        <MemberSection label={t('lobby.roster.offlineGroup', { count: offline.length })} members={offline} dimmed currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} onClosePopover={closeProfile} />
+        <MemberSection label={t('lobby.roster.offlineGroup', { count: offline.length })} members={offline} dimmed currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} />
       </aside>
       {openBot ? (
         <BotProfilePopover bot={openBot} anchorRect={anchorRect} onClose={closeBotPopover} settingsHref={botSettingsHref} />
@@ -288,7 +287,6 @@ function MemberSection({
   currentUserId,
   openUserId,
   onOpen,
-  onClosePopover,
 }: {
   label: string;
   members: Member[];
@@ -298,7 +296,6 @@ function MemberSection({
   currentUserId: string | null;
   openUserId: string | null;
   onOpen: (m: Member, anchor: HTMLElement) => void;
-  onClosePopover: () => void;
 }) {
   if (members.length === 0) return null;
   // Offline rows are dimmed by their avatar and status dot only: an
@@ -321,7 +318,6 @@ function MemberSection({
             currentUserId={currentUserId}
             isOpen={openUserId === m.id}
             onOpen={(anchor) => onOpen(m, anchor)}
-            onClose={onClosePopover}
           />
         ))}
       </ul>
@@ -335,7 +331,6 @@ function MemberRow({
   currentUserId,
   isOpen,
   onOpen,
-  onClose,
 }: {
   member: Member;
   /** In the offline group: fade the avatar and status dot, never the text. */
@@ -343,17 +338,14 @@ function MemberRow({
   currentUserId: string | null;
   isOpen: boolean;
   onOpen: (anchor: HTMLElement) => void;
-  onClose: () => void;
 }) {
   const t = useT();
   const roleColor = member.roleColor || undefined;
 
   function handleClick(e: React.MouseEvent<HTMLButtonElement>) {
     e.stopPropagation();
-    if (isOpen) {
-      onClose();
-      return;
-    }
+    // The provider decides: this row again closes the card, a card opened
+    // for this member elsewhere moves here, anyone else's switches.
     onOpen(e.currentTarget);
   }
 

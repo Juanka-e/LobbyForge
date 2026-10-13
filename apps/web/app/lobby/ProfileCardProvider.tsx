@@ -159,6 +159,7 @@ export function ProfileCardProvider({
     const cached = refreshTick === 0 ? readCachedMemberProfile(serverId, activeUserId) : null;
     if (cached) {
       setLoaded({ userId: activeUserId, data: cached });
+      setLoadingUserId(null);
       return;
     }
     let cancelled = false;
@@ -198,8 +199,10 @@ export function ProfileCardProvider({
     ({ userId, anchor = null, seed = {} }: OpenProfileInput) => {
       setFull(null);
       setRefreshTick(0);
+      // The same person from the same place again closes the card; from
+      // somewhere else (their chat avatar, then their roster entry) it moves.
       setCard((current) =>
-        current && current.userId === userId
+        current && current.userId === userId && (current.anchor === anchor || !anchor)
           ? null
           : { userId, anchor, rect: anchor ? anchor.getBoundingClientRect() : null, seed }
       );

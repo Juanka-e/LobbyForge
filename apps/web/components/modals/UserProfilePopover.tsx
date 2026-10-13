@@ -215,7 +215,6 @@ export function UserProfilePopover({
       <div
         ref={ref}
         role="dialog"
-
         aria-label={t('shell.profile.dialogLabel', { name: view.displayName })}
         data-profile-card
         data-user-id={userId}
