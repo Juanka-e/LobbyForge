@@ -296,8 +296,13 @@ test.describe('Quiz with a host and two players, through the lobby', () => {
     await kayaQuiz.getByRole('button', { name: 'C: 8', exact: true }).focus();
     await kaya.keyboard.press('Enter');
     await expect(kayaQuiz.getByText('Answer C is locked in — waiting for the others.')).toBeVisible({ timeout: 15_000 });
+    // "Locked in" shows Kaya's choice optimistically (QuestionView's pending
+    // answer), before the server has applied it; the host's count comes from
+    // the server. Read the API only once that says so (raced on a warm stack
+    // on 2026-10-13: answeredCount 0 a moment before the host saw 1 of 2).
+    await expect(ownerQuiz.getByText('1 of 2 answered')).toBeVisible({ timeout: 15_000 });
 
-    const [session] = (await openActivitiesIn(ownerCtx.request, serverId, voiceChannelId)).filter((a) => a.pluginId === 'quiz');
+    const [session] =(await openActivitiesIn(ownerCtx.request, serverId, voiceChannelId)).filter((a) => a.pluginId === 'quiz');
     expect(session, 'the running quiz').toBeTruthy();
     const stateAs = async (ctx: BrowserContext) => {
       const res = await ctx.request.get(`/api/servers/${serverId}/activities/${session!.id}`);

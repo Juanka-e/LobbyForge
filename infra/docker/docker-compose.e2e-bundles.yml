@@ -1,0 +1,80 @@
+# E2E-only: a stand-in for a publisher's HTTPS host, so the real marketplace
+# routes (submit → review → install) can download a bundle on the e2e stack.
+#
+# The installer and the review route only fetch `https://` URLs whose host
+# resolves to a PUBLIC address, pinned to that address, with the system's
+# CA store (apps/web/lib/plugin-installer.ts, lib/ip-pinned-https.ts). This
+# overlay gives them one, without opening anything on the internet:
+#
+#   - `bundle-host` serves `<dir>/files/*.tgz` over HTTPS on port 8443 with a
+#     certificate for `bundles.lobbyforge-e2e.test`, issued by a throw-away
+#     CA (infra/docker/e2e-bundle-host.sh makes both);
+#   - it sits on an INTERNAL network (no gateway, no route out) whose subnet
+#     is a public-looking range, 11.250.250.0/24, under the DNS alias
+#     `bundles.lobbyforge-e2e.test` — so the SSRF guard sees a public address
+#     and passes it, while the traffic never leaves Docker;
+#   - web joins that network too and trusts the CA (NODE_EXTRA_CA_CERTS).
+#     Nothing else in web changes: the guard, the pin and the TLS checks are
+#     the production code paths.
+#
+#   bash infra/docker/e2e-bundle-host.sh          # certs + server into infra/docker/.e2e-bundles
+#   docker compose -p lobbyforge-e2e \
+#     -f infra/docker/docker-compose.dev.yml \
+#     -f infra/docker/docker-compose.e2e-ports.yml \
+#     -f infra/docker/docker-compose.e2e-plugins.yml \
+#     -f infra/docker/docker-compose.e2e-bundles.yml \
+#     up -d --no-build --wait
+#   LF_E2E_BASE_URL=http://localhost:19620 \
+#     pnpm --filter @lobbyforge/web exec playwright test e2e/marketplace-approval.spec.ts --workers=1
+#
+# The folder is infra/docker/.e2e-bundles unless LF_E2E_BUNDLE_DIR names
+# another (an ABSOLUTE path: compose resolves relative ones against this
+# directory); the script, this file and the spec all read the same variable.
+# Recreating web is what makes it trust the CA (NODE_EXTRA_CA_CERTS is read at
+# start), so add this file at `up`, not to a running stack mid-suite.
+# Test values only. The CA key never leaves .e2e-bundles (gitignored).
+services:
+  bundle-host:
+    image: lobbyforge-app:dev
+    container_name: lobbyforge-e2e-bundle-host
+    working_dir: /srv
+    command: ["node", "/srv/server.mjs"]
+    user: node
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ${LF_E2E_BUNDLE_DIR:-./.e2e-bundles}:/srv:ro
+    networks:
+      publisher:
+        ipv4_address: 11.250.250.10
+        aliases:
+          - bundles.lobbyforge-e2e.test
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('net').connect(8443,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+  web:
+    environment:
+      # Read once at start: the throw-away CA joins Node's CA store.
+      NODE_EXTRA_CA_CERTS: /run/e2e-bundles/tls/ca.pem
+    volumes:
+      - ${LF_E2E_BUNDLE_DIR:-./.e2e-bundles}:/run/e2e-bundles:ro
+    networks:
+      default: {}
+      publisher: {}
+    depends_on:
+      bundle-host:
+        condition: service_healthy
+
+networks:
+  publisher:
+    name: lobbyforge-e2e-publisher
+    # No gateway: nothing on it reaches anywhere else, the internet included.
+    internal: true
+    ipam:
+      config:
+        - subnet: 11.250.250.0/24

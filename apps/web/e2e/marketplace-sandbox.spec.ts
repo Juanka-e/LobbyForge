@@ -4,16 +4,23 @@
  * sandbox-buzzer` runs in the QuickJS plugin worker, and its UI in an
  * `<iframe sandbox="allow-scripts">` served from /api/plugin-ui/….
  *
- *   - The owner enables "Sandbox Buzzer" for the server and starts it in a
- *     voice room; two members open the same activity.
+ *   - The owner enables the Buzzer ("Sandbox Buzzer") for the server and
+ *     starts it in a voice room; two members open the same activity.
  *   - Inside the iframe: the host opens a round, member A buzzes, then B.
  *     Before the reveal nobody — B, nor the host, nor the state the API
  *     hands out — can see who buzzed first (the worker's projection). After
  *     the reveal everyone sees A first.
  *   - Isolation, checked from the parent page: the frame's origin is the
  *     opaque "null", it cannot read the parent's cookie or DOM, a fetch to
- *     /api from inside the frame is blocked (CSP connect-src 'none'), and
- *     navigating the frame away stops it — the lobby shows the error state.
+ *     /api from inside the frame is blocked while one to the plugin's own
+ *     folder works (CSP connect-src = this version's folder, plus
+ *     `webrtc 'block'` — security review PLUG-004, 2026-10-13: the policy
+ *     is no longer `connect-src 'none'`), and navigating the frame away
+ *     stops it — the lobby shows the error state.
+ *   - Host effects (0.2.0 asks for `timers` + `storage`, approved in
+ *     active.json by the install script): an open round nobody reveals
+ *     reveals itself after 30 s, and the fastest reactions are kept in the
+ *     community's storage — a new session starts with them.
  *   (Escape attempts from inside the QuickJS sandbox are unit-tested in
  *   apps/plugin-worker.)
  *
@@ -35,6 +42,7 @@ import {
   type FrameLocator,
   type Page,
 } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import { createGuest, resetRateLimits, signIn } from './helpers/auth';
 
 const baseUrl = process.env.LF_E2E_BASE_URL ?? '';
@@ -45,10 +53,44 @@ const ORIGIN = { Origin: baseUrl };
 const RUN = Date.now().toString(36);
 const PLUGIN_ID = 'sandbox-buzzer';
 const PLUGIN_VERSION = '0.2.0';
-const APP_NAME = 'Sandbox Buzzer';
+/**
+ * The name the lobby shows: 0.2.0 ships locales/<code>.json and names itself
+ * in the viewer's language ("catalog.name": "Buzzer" in en.json); the
+ * manifest's "Sandbox Buzzer" is only the fallback.
+ */
+const APP_NAME = 'Buzzer';
 /** How a browser fetches a frame document (the asset route checks Fetch Metadata). */
 const FRAME_FETCH = { 'Sec-Fetch-Dest': 'iframe', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Site': 'same-origin' };
 const FRAME_TITLE = `${APP_NAME} — app screen`;
+/** The frame's connect-src / media-src: this version's own folder (lib/plugin-ui-assets.ts pluginUiAssetSource). */
+const OWN_FOLDER = baseUrl ? `${new URL(baseUrl).origin}/api/plugin-ui/${PLUGIN_ID}/${PLUGIN_VERSION}/` : '';
+
+/** The frame document's policy since PLUG-004: its own folder for fetch and media, WebRTC refused, scripts-only sandbox. */
+function expectFramePolicy(csp: string) {
+  expect(csp).toContain("default-src 'none'");
+  expect(csp).toContain(`connect-src ${OWN_FOLDER};`);
+  expect(csp).toContain(`media-src ${OWN_FOLDER} data: blob:`);
+  expect(csp).toContain("webrtc 'block'");
+  expect(csp).toContain("frame-ancestors 'self'");
+  expect(csp).toContain('sandbox allow-scripts');
+  // No outside origin was asked for, so none is approved and no frames may nest.
+  expect(csp).not.toContain('frame-src');
+}
+
+const POSTGRES_CONTAINER = process.env.LF_E2E_POSTGRES_CONTAINER ?? 'lobbyforge-e2e-postgres';
+
+/**
+ * Wipe the community's leaderboard (the plugin's `best` storage key), so this
+ * run's players are the board — it keeps the 5 fastest of every run otherwise.
+ * Test data set-up, straight in the stack's Postgres.
+ */
+function clearLeaderboard() {
+  execFileSync(
+    'docker',
+    ['exec', POSTGRES_CONTAINER, 'psql', '-U', 'lobbyforge', '-d', 'lobbyforge', '-c', `delete from plugin_data where plugin_id = '${PLUGIN_ID}' and key = 'best'`],
+    { stdio: ['ignore', 'pipe', 'pipe'], timeout: 15_000 }
+  );
+}
 
 test.skip(!baseUrl, 'Runs only against the compose stack (set LF_E2E_BASE_URL).');
 test.describe.configure({ mode: 'serial', timeout: 150_000 });
@@ -175,6 +217,8 @@ test.describe('sandboxed marketplace plugin: Sandbox Buzzer', () => {
       'Sandbox Buzzer is not installed: start the stack with docker-compose.e2e-plugins.yml and run infra/docker/e2e-install-sandbox-plugin.sh.'
     );
     expect(asset.status()).toBe(200);
+    // Before any session of this run reads it (createInitialState copies the board).
+    clearLeaderboard();
 
     // A voice room of its own; the app is enabled by the first test (the
     // lobby builds its launch cards when it renders, so that comes first).
@@ -209,7 +253,7 @@ test.describe('sandboxed marketplace plugin: Sandbox Buzzer', () => {
     });
   });
 
-  test('isolation against the real asset route: opaque origin, no cookies, no parent, no network', async ({}, testInfo) => {
+  test('isolation against the real asset route: opaque origin, no cookies, no parent, no network beyond its own folder', async ({}, testInfo) => {
     // A stand-in parent at the app origin frames the REAL bundle exactly as
     // the lobby does (<iframe sandbox="allow-scripts">); only the parent page
     // is served by route interception, the frame comes from the stack with
@@ -226,9 +270,7 @@ test.describe('sandboxed marketplace plugin: Sandbox Buzzer', () => {
     await page.goto(new URL('/lf-sandbox-parent.html', baseUrl).toString());
     const served = await frameResponse;
     expect(served.status()).toBe(200);
-    const csp = served.headers()['content-security-policy'] ?? '';
-    expect(csp).toContain("connect-src 'none'");
-    expect(csp).toContain('sandbox allow-scripts');
+    expectFramePolicy(served.headers()['content-security-policy'] ?? '');
     expect(served.headers()['x-content-type-options']).toBe('nosniff');
     await expect.poll(() => page.frames().some((f) => f.url().includes(src))).toBe(true);
     const frame = page.frames().find((f) => f.url().includes(src))!;
@@ -251,9 +293,12 @@ test.describe('sandboxed marketplace plugin: Sandbox Buzzer', () => {
         storage: await attempt(() => window.localStorage.length),
         fetchApi: await attempt(async () => (await fetch('/api/servers', { credentials: 'include' })).status),
         fetchOutside: await attempt(async () => (await fetch('https://example.com/')).status),
+        // Its own folder is what connect-src allows (the sound it ships, for instance).
+        fetchOwn: await attempt(async () => (await fetch('./buzz.wav')).status),
       };
     });
     console.info('[sandbox] reads from inside the frame', reads);
+    expect(reads.fetchOwn).toBe('read:200');
     expect(reads.cookie).toBe('blocked:SecurityError');
     expect(reads.parentCookie).toBe('blocked:SecurityError');
     expect(reads.parentLocation).toBe('blocked:SecurityError');
@@ -386,9 +431,8 @@ test.describe('sandboxed marketplace plugin: Sandbox Buzzer', () => {
     const html = await host.ctx.request.get(`/api/plugin-ui/${PLUGIN_ID}/${info.version}/index.html`, {
       headers: { 'Sec-Fetch-Dest': 'iframe', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Site': 'same-origin' },
     });
-    const csp = html.headers()['content-security-policy'] ?? '';
-    expect(csp).toContain("connect-src 'none'");
-    expect(csp).toContain('sandbox allow-scripts');
+    expect(info.version).toBe(PLUGIN_VERSION);
+    expectFramePolicy(html.headers()['content-security-policy'] ?? '');
   });
 
   test('navigating the frame away stops it: the lobby shows the error state', async ({}, testInfo) => {
@@ -408,5 +452,79 @@ test.describe('sandboxed marketplace plugin: Sandbox Buzzer', () => {
     // Try again brings the real plugin back.
     await alert.getByRole('button', { name: 'Try again' }).click();
     await expect(buzzer(page).getByText(/buzzed first/)).toBeVisible({ timeout: 20_000 });
+  });
+
+  test('timers and storage: a round nobody reveals reveals itself after 30 s; the fastest reactions outlive the session', async ({}, testInfo) => {
+    test.setTimeout(180_000);
+    const shot = (name: string) => (theme: string) => testInfo.outputPath(`${name}-${theme}.png`);
+    const hostFrame = buzzer(host.page);
+    type Best = Array<{ playerId: string; name: string; ms: number }>;
+    /** The "Fastest reactions" list inside a player's frame. */
+    const board = (p: Player) => buzzer(p.page).locator('#best-list');
+
+    // Round 1's reveal put Alice's reaction on the community's board (a
+    // `storage.set` effect); every screen lists it.
+    const before = await viewerState(bob);
+    expect((before.best as Best).map((e) => e.playerId)).toEqual([alice.uid]);
+    for (const p of [host, alice, bob]) await expect(buzzer(p.page).getByText('Fastest reactions')).toBeVisible({ timeout: 15_000 });
+    await expect(board(alice).getByText(`1. ${alice.name} (you)`)).toBeVisible();
+
+    // Round 2: Bob buzzes, and nobody presses Reveal.
+    await hostFrame.getByRole('button', { name: 'Next round' }).click();
+    const openedAt = Date.now();
+    for (const p of [alice, bob]) await expect(buzzer(p.page).getByText('Buzz as fast as you can!')).toBeVisible({ timeout: 15_000 });
+    await expect(hostFrame.getByText(/^Reveals by itself in \d+ s$/)).toBeVisible();
+    await buzzer(bob.page).getByRole('button', { name: 'Buzz!' }).click();
+    await expect(buzzer(bob.page).getByText('You buzzed. Waiting for the host to reveal…')).toBeVisible();
+    const open = await viewerState(host);
+    expect(open.phase).toBe('open');
+    expect(open.round).toBe(2);
+    expect((open.revealAt as number) - (open.openedAt as number)).toBe(30_000);
+    expect(open.winner).toBeNull();
+    await shootBothThemes(host.page, shot('4-auto-reveal-countdown-host'));
+
+    // The host's timer (no client can send `auto-reveal`) reveals it ~30 s
+    // after it opened: Bob first, on every screen.
+    for (const p of [host, alice, bob]) {
+      await expect(buzzer(p.page).getByText(/buzzed first/)).toContainText(bob.name, { timeout: 75_000 });
+    }
+    expect(Date.now() - openedAt, 'not before the 30 s timer').toBeGreaterThanOrEqual(28_000);
+    const revealed = await viewerState(alice);
+    expect(revealed.phase).toBe('revealed');
+    expect(revealed.winner).toBe(bob.uid);
+    expect(revealed.revealAt).toBeNull();
+    // One entry per player, fastest first: both now hold a record.
+    const best = revealed.best as Best;
+    expect(best.map((e) => e.playerId).sort()).toEqual([alice.uid, bob.uid].sort());
+    expect(best[0]!.ms).toBeLessThanOrEqual(best[1]!.ms);
+    await expect(board(bob).getByText(`${bob.name} (you)`, { exact: false })).toBeVisible();
+    await expect(board(bob).getByRole('listitem')).toHaveCount(2);
+    await shootBothThemes(alice.page, shot('5-auto-revealed-alice'));
+
+    // Storage outlives the session: end it and start a new one — it opens
+    // with the board before a single round is played.
+    const end = await owner.post(`/api/servers/${serverId}/activities/${sessionId}/end`, { headers: ORIGIN, data: {} });
+    expect(end.status(), await end.text()).toBe(200);
+    const ended = sessionId;
+    // The ended activity gives the room back: the hub, or its button.
+    const hub = host.page.getByRole('heading', { name: 'Start something together' });
+    await expect(hub.or(host.page.getByTitle('Start a game or activity in this voice room'))).toBeVisible({ timeout: 20_000 });
+    if (!(await hub.isVisible())) await openActivities(host.page);
+    await host.page.getByRole('button').filter({ has: host.page.getByText(APP_NAME, { exact: true }) }).filter({ hasText: 'Start' }).click();
+    await expect(hostFrame.getByText('Open a round when everyone is ready.')).toBeVisible({ timeout: 20_000 });
+    const sessions = (await (await owner.get(`/api/servers/${serverId}/channels/${voiceChannelId}/activities`)).json()) as {
+      activities: Array<{ id: string; pluginId: string; status: string }>;
+    };
+    sessionId = sessions.activities.find((a) => a.pluginId === PLUGIN_ID && a.status !== 'ended')!.id;
+    expect(sessionId).not.toBe(ended);
+    const fresh = await viewerState(host);
+    expect(fresh.phase).toBe('idle');
+    expect(fresh.round).toBe(0);
+    expect(fresh.scores).toEqual({});
+    expect((fresh.best as Best).map((e) => e.playerId).sort()).toEqual([alice.uid, bob.uid].sort());
+    await expect(hostFrame.getByText('Fastest reactions')).toBeVisible();
+    await expect(board(host).getByText(bob.name, { exact: false })).toBeVisible();
+    await expect(board(host).getByText(alice.name, { exact: false })).toBeVisible();
+    await shootBothThemes(host.page, shot('6-new-session-keeps-board-host'));
   });
 });

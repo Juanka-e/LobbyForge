@@ -2,6 +2,46 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [0.2.0-rc.9] - 2026-10-13
+
+The release candidate after rc.8. It collects everything below, down to and including "Dependency cleanup, fourth batch".
+
+- **Security:** a second full security review (docs/SECURITY_REVIEW_2026-10-13.md) found no critical or high issue. All 7 medium and 11 low findings are fixed:
+  - bot token rotation and event endpoints;
+  - a fair event-delivery queue;
+  - a gzip bomb at plugin review and a cheaper plugin asset route;
+  - guest image uploads and a daily upload budget;
+  - client message metadata;
+  - blocks in live chat;
+  - audit rows shown per viewer;
+  - DMs only between people who share a community;
+  - timed-out members can neither play nor moderate;
+  - desktop navigation pinned to its instance;
+  - checked GIF frames.
+- **Sessions no longer end after an hour:** the session now slides. It stays valid for 7 days without a request and is re-signed while in use. The 30-day absolute lifetime and server-side revocation are unchanged.
+- **Marketplace plugins:**
+  - Plugin frames can play sound and video, run WebAssembly and fetch their own files.
+  - A plugin can ask for outside sites, its own site as the UI, timers, per-community storage and app chat lines. It gets them only once the owner approves them at install.
+  - Plugin names and summaries can be translated.
+- **Activities:**
+  - After a dropped connection, activities re-read their state, and taps retry with the same `actionId`.
+  - A late press no longer lands on the next card, question or poll.
+  - After a reload or a drop, voice comes back with one click, or automatically with the microphone off.
+- **Chat polls** in text channels, for roles with Create polls.
+- **Languages:**
+  - A user's language is saved on their account.
+  - The instance default is set in the admin panel and at setup.
+  - Bots speak each viewer's language.
+  - The desktop app and its installer use every shipped language.
+- **Dependencies:**
+  - Next.js 16.4 (`middleware.ts` is now `proxy.ts`), ioredis 6 with a fast-fail reconnect, TypeScript 6;
+  - nodemailer 10.0.14, livekit-server-sdk 2.19.1, LiveKit server 1.13.9, ws 8.22, altcha 3.3 with altcha-lib 2.6.
+- **Upgrade notes:**
+  - **An install whose `LOBBYFORGE_SESSION_SECRET` is a published placeholder no longer starts.** Before updating, set a real secret (`openssl rand -hex 32`) in `.env.prod`. Changing it signs everyone out. `install.sh` has always generated a random one.
+  - Migrations 0047 (chat polls), 0048 (account language) and 0049 (activity timers) are expand-only. Rolling back to rc.8 is safe.
+  - Guests can no longer upload avatars or banners.
+  - A marketplace plugin that asks for more than the sandbox needs the owner's approval through the marketplace dialog.
+
 ## [Unreleased] - Security review 2026-10-13 and fresher docs - 2026-10-13
 
 - **Report:** docs/SECURITY_REVIEW_2026-10-13.md (Turkish): six areas reviewed on main 7798270; no critical or high finding; 7 medium and 11 low, every one fixed (#106, #108, #112), plus the one-hour session bug. The upgrade note: an install running on a published placeholder session secret no longer starts.

@@ -57,8 +57,11 @@ test.describe('Polls in a text channel, two members, live', () => {
     resetRateLimits();
     // Own browser WITHOUT the config's --disable-web-security: that flag
     // drops the Origin header, which the CSRF guard rejects — every vote is
-    // a request from the page.
-    ownBrowser = await playwright.chromium.launch();
+    // a request from the page. `args: []` is what does it: a bare launch()
+    // inside a test still gets the config's launchOptions (Playwright
+    // applies them to every launch), so on the production image the poll
+    // POST was refused with 403 "Missing request origin".
+    ownBrowser = await playwright.chromium.launch({ args: [] });
     ownerCtx = await ownBrowser.newContext({ baseURL: baseUrl });
     guestCtx = await ownBrowser.newContext({ baseURL: baseUrl });
 
