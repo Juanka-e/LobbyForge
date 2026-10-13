@@ -26,6 +26,7 @@
   "lobby.presence.offline.label": "Görünmez",
   "lobby.presence.online.description": "Topluluktaki herkese görünürsün.",
   "lobby.presence.online.label": "Çevrimiçi",
+  "lobby.presence.openProfile": "Profilin",
   "lobby.presence.trigger": "{name} — durumunu değiştir",
   "lobby.presence.you": "Sen",
   "lobby.rail.home": "LobbyForge ana sayfası",

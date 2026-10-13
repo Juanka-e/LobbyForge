@@ -109,6 +109,66 @@ export interface ProfileSeed {
   inVoice?: boolean;
 }
 
+/** What a profile shows: the API's answer once it is in, the lobby's seed until then. */
+export interface MergedProfile {
+  userId: string;
+  displayName: string;
+  globalDisplayName: string | null;
+  nickname: string | null;
+  avatarUrl: string | null;
+  bannerUrl: string | null;
+  isGuest: boolean;
+  statusText: string | null;
+  bio: string | null;
+  presence: PresenceStatus | null;
+  inVoice: boolean;
+  roles: ProfileRoleView[];
+  limited: boolean;
+  isOwner: boolean;
+  /** The API has answered (dates, mutual communities and `viewerCan` are known). */
+  loaded: boolean;
+}
+
+const EVERYONE = '@everyone';
+
+/**
+ * Seed + API, field by field. The API wins for everything it projects
+ * (images, about, roles), so a hidden or blocked profile never keeps a
+ * seed value the server withheld. Presence is the exception: the seed is
+ * the member list's LIVE status, the API's a snapshot from when the card
+ * first loaded — but when the API withholds presence (a block), so does
+ * the card. Your own card shows the status you picked.
+ */
+export function mergeProfileView(
+  seed: ProfileSeed,
+  data: MemberProfileResponse | null,
+  selfStatus?: PresenceStatus | null
+): MergedProfile {
+  const p = data?.profile ?? null;
+  const presence = selfStatus
+    ? selfStatus
+    : p && p.presence === null
+      ? null
+      : (seed.presence ?? p?.presence ?? null);
+  return {
+    userId: seed.userId,
+    displayName: p?.displayName ?? seed.displayName,
+    globalDisplayName: p ? p.globalDisplayName : (seed.globalDisplayName ?? null),
+    nickname: p ? p.nickname : (seed.nickname ?? null),
+    avatarUrl: p ? p.avatarUrl : (seed.avatarUrl ?? null),
+    bannerUrl: p ? p.bannerUrl : (seed.bannerUrl ?? null),
+    isGuest: p?.isGuest ?? seed.isGuest ?? false,
+    statusText: p ? p.statusText : (seed.statusText ?? null),
+    bio: p ? p.bio : (seed.bio ?? null),
+    presence,
+    inVoice: seed.inVoice ?? false,
+    roles: p ? p.roles : (seed.roles ?? []).filter((role) => role.name !== EVERYONE),
+    limited: p?.limited ?? false,
+    isOwner: p?.isOwner ?? false,
+    loaded: p !== null,
+  };
+}
+
 export function profileCacheKey(serverId: string, userId: string): string {
   return `${serverId}:${userId}`;
 }
@@ -165,7 +225,11 @@ export function fetchMemberProfile(
     .then(async (res) => {
       if (res.status === 404) return null;
       if (!res.ok) throw new MemberProfileError(res.status);
-      const body = (await res.json()) as MemberProfileResponse;
+      const body = (await res.json().catch(() => null)) as MemberProfileResponse | null;
+      // Anything but the route's shape is no answer (and is not cached).
+      if (!body || typeof body.profile !== 'object' || !body.profile || typeof body.viewerCan !== 'object' || !body.viewerCan) {
+        throw new MemberProfileError(res.status);
+      }
       cache.set(key, body);
       return body;
     })

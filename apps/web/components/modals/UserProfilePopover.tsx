@@ -1,240 +1,388 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '@/lib/i18n/client';
-import { initialOf } from '@/lib/initial';
+import { useFocusTrap } from '@/lib/use-focus-trap';
+import type { PresenceStatus } from '@/lib/presence-status';
+import { mergeProfileView, type MemberProfileResponse, type ProfileSeed } from '@/lib/member-profile';
+import { ImageLightbox } from '@/components/ImageLightbox';
+import {
+  AboutSection,
+  BannerIconButton,
+  LimitedNotice,
+  MemberSinceSection,
+  MutualServersStrip,
+  ProfileAvatar,
+  ProfileBanner,
+  ProfileNameBlock,
+  RolesSection,
+  StatusBubble,
+  useBannerColor,
+} from './profile/ProfileParts';
+import { MessageBox, SelfStatusPicker, VolumeControl } from './profile/ProfileControls';
+import { ProfileMenu } from './profile/ProfileMenu';
+import { ModerationDialog } from './profile/ModerationDialog';
+import { useProfileActions } from './profile/useProfileActions';
+import { buildProfileMenuItems, EDIT_PROFILE_HREF } from './profile/profileMenuItems';
 
-interface ProfileRole {
-  id: string;
-  name: string;
-  color: string | null;
-  icon: string | null;
-  position?: number;
-  displaySeparately?: boolean;
-}
+export type ProfileTab = 'about' | 'mutual';
 
 export interface UserProfilePopoverProps {
   open: boolean;
   onClose: () => void;
-  user: {
-    userId: string;
-    displayName: string;
-    avatarUrl: string | null;
-    bannerUrl?: string | null;
-    isGuest: boolean;
-    roleName?: string | null;
-    roleColor?: string | null;
-    statusText?: string | null;
-    bio?: string | null;
-    roles?: ProfileRole[];
-    onlineStatus?: 'online' | 'in_voice' | 'idle' | 'offline';
-  } | null;
+  /** What the lobby already knows — the card opens with it at once. */
+  user: ProfileSeed | null;
+  /** The community the card is opened in (the profile API and its actions are per server). */
+  serverId: string;
+  serverName?: string;
+  /** The profile API's answer; null while it loads (skeletons fill the gaps). */
+  profile?: MemberProfileResponse | null;
+  loading?: boolean;
   anchorRect?: DOMRect | null;
+  /** The element that opened the card — focus goes back to it on close. */
+  returnFocusTo?: HTMLElement | null;
   getVolume?: (userId: string) => number;
   onVolumeChange?: (userId: string, volume: number) => void;
   isBlocked?: boolean;
   onToggleBlock?: (userId: string) => void;
-  /** Open a DM channel with this user. Hidden when not provided (e.g. self). */
-  onSendMessage?: (userId: string) => void;
+  /** Open (or create) the DM and send `text`; resolves to an error to show, or null. */
+  onSendMessage?: (userId: string, text: string) => Promise<string | null>;
+  onViewFullProfile?: (tab: ProfileTab) => void;
+  /** Something changed through the card (roles, timeout): refetch. */
+  onProfileChanged?: () => void;
+  /** The member left the community (kick, ban). */
+  onMemberRemoved?: (userId: string, message: string) => void;
+  /** Your own card: the status you picked, and the picker. */
+  self?: { status: PresenceStatus; onStatusChange: (status: PresenceStatus) => void } | null;
+  /** The member is in the viewer's voice room: server mute is possible there. */
+  serverMute?: { channelId: string; muted: boolean } | null;
 }
 
-/** `labelKey` is a message key, resolved with `t()` where it renders. */
-const STATUS = {
-  online: { labelKey: 'shell.profile.status.online', dot: 'bg-success' },
-  in_voice: { labelKey: 'shell.profile.status.inVoice', dot: 'bg-success' },
-  idle: { labelKey: 'shell.profile.status.idle', dot: 'bg-tertiary' },
-  offline: { labelKey: 'shell.profile.status.offline', dot: 'bg-text-muted' },
-} as const;
+const CARD_WIDTH = 360;
+const MARGIN = 12;
 
+/**
+ * Where the card goes: beside its anchor (left of it when there is room,
+ * else right), level with it and kept on screen; centred on a phone.
+ */
+export function placeProfileCard(
+  anchor: Pick<DOMRect, 'left' | 'right' | 'top'> | null,
+  size: { width: number; height: number },
+  viewport: { width: number; height: number }
+): { left: number; top: number } {
+  const width = Math.min(size.width, viewport.width - MARGIN * 2);
+  const clampTop = (top: number) => Math.max(MARGIN, Math.min(top, viewport.height - size.height - MARGIN));
+  if (!anchor || viewport.width < 640) {
+    return {
+      left: Math.max(MARGIN, (viewport.width - width) / 2),
+      top: anchor ? clampTop(anchor.top - 24) : clampTop((viewport.height - size.height) / 2),
+    };
+  }
+  let left = anchor.left - width - MARGIN;
+  if (left < MARGIN) left = Math.min(anchor.right + MARGIN, viewport.width - width - MARGIN);
+  return { left: Math.max(MARGIN, left), top: clampTop(anchor.top - 24) };
+}
+
+/**
+ * The profile card (docs/PROFILES.md) — Discord's popout, in LobbyForge's
+ * themed tokens: banner (or a band in the avatar's colour), the avatar
+ * with its status, names, the custom status, About me, Member since,
+ * Roles, Mutual communities, the volume slider in voice, "Message @name"
+ * and "View full profile". The "⋯" menu holds Copy user ID, Block, and the
+ * moderation actions the viewer may take. The avatar and the banner open
+ * in the image viewer.
+ *
+ * A non-modal dialog: focus moves in on open, stays inside, and goes back
+ * to the opener on close (Escape, the X, or a click elsewhere).
+ */
 export function UserProfilePopover({
   open,
   onClose,
   user,
+  serverId,
+  serverName = '',
+  profile = null,
+  loading = false,
   anchorRect,
+  returnFocusTo,
   getVolume,
   onVolumeChange,
-  isBlocked,
+  isBlocked = false,
   onToggleBlock,
   onSendMessage,
+  onViewFullProfile,
+  onProfileChanged,
+  onMemberRemoved,
+  self = null,
+  serverMute = null,
 }: UserProfilePopoverProps) {
   const t = useT();
   const ref = useRef<HTMLDivElement | null>(null);
+  const titleId = useId();
+  const sectionId = useId();
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
   const [volume, setVolume] = useState(1);
+  const [viewer, setViewer] = useState<{ kind: 'avatar' | 'banner'; opener: HTMLElement } | null>(null);
+  const visible = open && Boolean(user);
+  const userId = user?.userId ?? '';
+
+  const view = user ? mergeProfileView(user, profile, self?.status ?? null) : null;
+  const can = profile?.viewerCan ?? null;
+  const isSelf = can?.isSelf ?? Boolean(self);
+  const bandColor = useBannerColor(view?.avatarUrl, view?.roles);
+  const actions = useProfileActions({
+    serverId,
+    userId,
+    name: view?.displayName ?? '',
+    data: profile,
+    onChanged: onProfileChanged,
+    onRemoved: (removed, message) => {
+      onMemberRemoved?.(removed, message);
+    },
+  });
+
+  // Focus the card itself first, so its name is announced; Tab goes on from there.
+  useFocusTrap(ref, { active: visible, onEscape: onClose, initialFocus: ref, returnFocusTo, resetKey: userId });
 
   useLayoutEffect(() => {
-    if (!open || !user || !anchorRect) return setPosition(null);
-    const width = Math.min(360, window.innerWidth - 24);
-    const margin = 12;
-    let left = anchorRect.left - width - margin;
-    if (left < margin) left = Math.min(anchorRect.right + margin, window.innerWidth - width - margin);
-    const estimatedHeight = Math.min(560, window.innerHeight - margin * 2);
-    const top = Math.max(margin, Math.min(anchorRect.top - 24, window.innerHeight - estimatedHeight - margin));
-    setPosition({ left, top });
-  }, [open, user, anchorRect]);
+    if (!visible) {
+      setPosition(null);
+      return;
+    }
+    const place = () => {
+      const node = ref.current;
+      const height = node?.offsetHeight ?? 0;
+      setPosition(
+        placeProfileCard(anchorRect ?? null, { width: CARD_WIDTH, height }, { width: window.innerWidth, height: window.innerHeight })
+      );
+    };
+    place();
+    window.addEventListener('resize', place);
+    const observer = typeof ResizeObserver !== 'undefined' && ref.current ? new ResizeObserver(place) : null;
+    if (observer && ref.current) observer.observe(ref.current);
+    return () => {
+      window.removeEventListener('resize', place);
+      observer?.disconnect();
+    };
+  }, [visible, anchorRect, userId]);
 
   useEffect(() => {
-    if (open && user && getVolume) setVolume(getVolume(user.userId));
-  }, [open, user, getVolume]);
+    if (visible && userId && getVolume) setVolume(getVolume(userId));
+  }, [visible, userId, getVolume]);
 
+  // A click anywhere else closes the card — except on another profile
+  // anchor (it switches the card) or inside a layer the card opened
+  // (image viewer, confirmation).
   useEffect(() => {
-    if (!open) return;
-    const click = (event: MouseEvent) => {
-      if (ref.current?.contains(event.target as Node)) return;
-      if ((event.target as HTMLElement | null)?.closest('[data-user-popover-anchor]')) return;
+    if (!visible) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target || ref.current?.contains(target)) return;
+      if (target.closest('[data-user-popover-anchor], [data-profile-layer]')) return;
       onClose();
     };
-    const key = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    document.addEventListener('mousedown', click);
-    document.addEventListener('keydown', key);
-    return () => {
-      document.removeEventListener('mousedown', click);
-      document.removeEventListener('keydown', key);
-    };
-  }, [open, onClose]);
+    document.addEventListener('mousedown', onPointerDown);
+    return () => document.removeEventListener('mousedown', onPointerDown);
+  }, [visible, onClose]);
 
-  if (!open || !user || typeof document === 'undefined') return null;
+  if (!visible || !view || typeof document === 'undefined') return null;
 
-  const status = STATUS[user.onlineStatus ?? 'offline'];
-  const roles = (user.roles?.length
-    ? user.roles
-    : user.roleName
-      ? [{ id: user.roleName, name: user.roleName, color: user.roleColor ?? null, icon: null }]
-      : []).filter((role) => role.name !== '@everyone');
-  const showVolume = user.onlineStatus === 'in_voice' && Boolean(getVolume && onVolumeChange);
+  const showVolume = view.inVoice && !isSelf && Boolean(getVolume && onVolumeChange);
+  const showMessage = !isSelf && Boolean(onSendMessage) && !isBlocked && (can ? can.message : true);
+  const mutualOthers = profile ? profile.profile.mutualServers.filter((server) => server.id !== serverId) : [];
+  const timedOutUntil = profile?.profile.timedOutUntil ?? null;
+  const menuItems = buildProfileMenuItems({
+    t,
+    userId,
+    name: view.displayName,
+    isSelf,
+    data: profile,
+    isBlocked,
+    onCopyId: () => void actions.copyUserId(),
+    onToggleBlock: onToggleBlock ? () => onToggleBlock(userId) : undefined,
+    onModerate: actions.openDialog,
+    serverMute: serverMute
+      ? { muted: serverMute.muted, onToggle: () => void actions.setServerMute(serverMute.channelId, !serverMute.muted) }
+      : null,
+  });
+
+  const openViewer = (kind: 'avatar' | 'banner') => (event: React.MouseEvent<HTMLButtonElement>) =>
+    setViewer({ kind, opener: event.currentTarget });
 
   return createPortal(
-    <div
-      ref={ref}
-      role="dialog"
-      aria-label={t('shell.profile.dialogLabel', { name: user.displayName })}
-      className="fixed z-[70] max-h-[calc(100dvh-24px)] w-[360px] max-w-[calc(100vw-24px)] overflow-y-auto overflow-x-hidden rounded-lg border border-border-strong bg-surface-floating shadow-2xl"
-      style={position ?? { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}
-    >
+    <>
       <div
-        className="h-[104px] bg-surface-container-high bg-cover bg-center"
-        style={user.bannerUrl ? { backgroundImage: `url(${user.bannerUrl})` } : undefined}
-        aria-hidden
-      />
-      <button
-        type="button"
-        onClick={onClose}
-        aria-label={t('shell.profile.close')}
-        className="absolute right-3 top-3 grid size-8 place-items-center rounded-md bg-black/55 text-white transition-colors hover:bg-black/75 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+        ref={ref}
+        role="dialog"
+
+        aria-label={t('shell.profile.dialogLabel', { name: view.displayName })}
+        data-profile-card
+        data-user-id={userId}
+        className="lf-pop-in fixed z-[70] max-h-[calc(100dvh-24px)] w-[360px] max-w-[calc(100vw-24px)] overflow-y-auto overflow-x-hidden rounded-xl border border-border-subtle bg-surface-floating shadow-2xl outline-none"
+        style={position ?? { left: '50%', top: '50%', transform: 'translate(-50%, -50%)', visibility: 'hidden' }}
       >
-        <span className="material-symbols-outlined text-[18px]" aria-hidden>close</span>
-      </button>
-
-      <div className="px-4 pb-4">
-        <div className="relative -mt-10 mb-3 size-20">
-          <div className="size-20 overflow-hidden rounded-full border-[5px] border-surface-floating bg-surface-container">
-            {user.avatarUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element -- User avatars may be validated data URLs.
-              <img src={user.avatarUrl} alt="" className="size-full object-cover" />
-            ) : (
-              <span className="grid size-full place-items-center text-3xl font-semibold text-text-primary">
-                {initialOf(user.displayName, { locale: t.locale })}
-              </span>
-            )}
+        <ProfileBanner name={view.displayName} bannerUrl={view.bannerUrl} color={bandColor} onOpen={openViewer('banner')}>
+          <div className="absolute right-2.5 top-2.5 flex items-center gap-1.5">
+            <ProfileMenu label={t('shell.profile.moreActions', { name: view.displayName })} items={menuItems} />
+            <BannerIconButton icon="close" label={t('shell.profile.close')} onClick={onClose} />
           </div>
-          <span className={`absolute bottom-1 right-1 size-[18px] rounded-full border-[4px] border-surface-floating ${status.dot}`} aria-label={t(status.labelKey)} />
-        </div>
+        </ProfileBanner>
 
-        <div className="min-w-0">
-          <h2 className="break-words text-xl font-bold leading-tight text-text-primary">{user.displayName}</h2>
-          <div className="mt-1 flex min-w-0 items-center gap-2 text-sm text-text-secondary">
-            <span className={`size-2 flex-none rounded-full ${status.dot}`} aria-hidden />
-            <span className="flex-none">{t(status.labelKey)}</span>
-            {user.isGuest ? (
-              <>
-                <span className="text-text-muted" aria-hidden>·</span>
-                <span className="truncate text-text-muted">{t('common.guest')}</span>
-              </>
+        <div className="relative px-4 pb-4">
+          <div className="-mt-[46px] flex items-start gap-3">
+            <ProfileAvatar
+              name={view.displayName}
+              avatarUrl={view.avatarUrl}
+              presence={view.presence}
+              isSelf={isSelf}
+              onOpen={openViewer('avatar')}
+            />
+            {view.statusText ? (
+              <div className="mt-[52px] min-w-0 flex-1">
+                <StatusBubble text={view.statusText} />
+              </div>
             ) : null}
           </div>
-          {user.statusText ? <p className="mt-2 break-words text-sm leading-5 text-text-secondary">{user.statusText}</p> : null}
-        </div>
 
-        <div className="my-4 h-px bg-border-subtle" />
-
-        <section aria-labelledby={`profile-about-${user.userId}`}>
-          <h3 id={`profile-about-${user.userId}`} className="text-xs font-bold uppercase text-text-primary">{t('shell.profile.about')}</h3>
-          <p className={`mt-2 whitespace-pre-wrap break-words text-sm leading-5 ${user.bio ? 'text-text-secondary' : 'italic text-text-muted'}`}>
-            {user.bio || t('shell.profile.noBio')}
-          </p>
-        </section>
-
-        {roles.length ? (
-          <section className="mt-5" aria-labelledby={`profile-roles-${user.userId}`}>
-            <h3 id={`profile-roles-${user.userId}`} className="text-xs font-bold uppercase text-text-primary">{t('shell.profile.roles')}</h3>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {roles.map((role) => (
-                <span key={role.id} className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border-subtle bg-surface-container px-2 py-1 text-xs font-medium text-text-secondary">
-                  {role.icon ? (
-                    <span className="material-symbols-outlined text-[14px]" style={{ color: role.color ?? undefined }} aria-hidden>{role.icon}</span>
-                  ) : (
-                    <span className="size-2 rounded-full bg-current" style={{ color: role.color ?? undefined }} aria-hidden />
-                  )}
-                  <span className="truncate">{role.name.replace(/^@/, '')}</span>
-                </span>
-              ))}
-            </div>
-          </section>
-        ) : null}
-
-        {showVolume ? (
-          <section className="mt-5 border-t border-border-subtle pt-4">
-            <div className="mb-3 flex items-center justify-between text-sm text-text-secondary">
-              <span className="inline-flex items-center gap-1.5">
-                <span className="material-symbols-outlined text-[17px]" aria-hidden>{volume === 0 ? 'volume_off' : 'volume_up'}</span>
-                {t('shell.profile.volume')}
-              </span>
-              <output>{Math.round(volume * 100)}%</output>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={1}
-              value={Math.round(volume * 100)}
-              onChange={(event) => {
-                const next = Number(event.target.value) / 100;
-                setVolume(next);
-                onVolumeChange?.(user.userId, next);
-              }}
-              className="h-1.5 w-full accent-primary"
-              aria-label={t('shell.profile.volumeFor', { name: user.displayName })}
+          <div className="mt-2">
+            <ProfileNameBlock
+              titleId={titleId}
+              displayName={view.displayName}
+              globalDisplayName={view.globalDisplayName}
+              nickname={view.nickname}
+              isGuest={view.isGuest}
+              isOwner={view.isOwner}
+              presence={view.presence}
+              isSelf={isSelf}
+              inVoice={view.inVoice}
             />
-          </section>
-        ) : null}
+          </div>
 
-        {onSendMessage ? (
-          <button
-            type="button"
-            onClick={() => onSendMessage(user.userId)}
-            disabled={isBlocked}
-            className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md border border-primary/40 bg-primary/10 px-3 py-2.5 text-sm font-semibold text-primary transition-colors hover:bg-primary/20 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <span className="material-symbols-outlined text-[17px]" aria-hidden>mail</span>
-            {t('shell.profile.sendMessage')}
-          </button>
-        ) : null}
+          {timedOutUntil ? <TimedOutLine until={timedOutUntil} /> : null}
 
-        {onToggleBlock ? (
-          <button
-            type="button"
-            onClick={() => onToggleBlock(user.userId)}
-            className={`mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md border px-3 py-2.5 text-sm font-semibold transition-colors ${isBlocked ? 'border-border-strong text-text-secondary hover:bg-surface-container' : 'border-danger/40 text-danger hover:bg-danger/10'}`}
-          >
-            <span className="material-symbols-outlined text-[17px]" aria-hidden>{isBlocked ? 'remove_circle' : 'block'}</span>
-            {isBlocked ? t('shell.profile.unblock') : t('shell.profile.block')}
-          </button>
-        ) : null}
+          <div className="mt-3 space-y-3.5 rounded-lg bg-surface-container p-3">
+            {view.limited ? (
+              <LimitedNotice />
+            ) : (
+              <AboutSection bio={view.bio} loading={loading && !view.loaded} sectionId={sectionId} />
+            )}
+            {view.limited ? null : (
+              <MemberSinceSection
+                accountCreatedAt={profile?.profile.accountCreatedAt}
+                memberSince={profile?.profile.memberSince}
+                communityName={serverName}
+                loading={!view.loaded && loading}
+                sectionId={sectionId}
+              />
+            )}
+            <RolesSection
+              roles={view.roles}
+              sectionId={sectionId}
+              loading={loading && !view.loaded}
+              canManage={Boolean(can?.manageRoles)}
+              assignableRoles={can?.assignableRoles}
+              removableRoleIds={can?.removableRoleIds}
+              busy={actions.rolesBusy}
+              error={actions.rolesError}
+              onAdd={actions.addRole}
+              onRemove={actions.removeRole}
+            />
+            {!isSelf && !view.limited && mutualOthers.length > 0 ? (
+              <MutualServersStrip
+                servers={profile!.profile.mutualServers}
+                count={profile!.profile.mutualServerCount}
+                sectionId={sectionId}
+                onOpen={onViewFullProfile ? () => onViewFullProfile('mutual') : undefined}
+              />
+            ) : null}
+            {self ? <SelfStatusPicker status={self.status} onChange={self.onStatusChange} sectionId={sectionId} /> : null}
+            {showVolume ? (
+              <VolumeControl
+                name={view.displayName}
+                volume={volume}
+                onChange={(next) => {
+                  setVolume(next);
+                  onVolumeChange?.(userId, next);
+                }}
+              />
+            ) : null}
+          </div>
+
+          {actions.notice ? (
+            <p
+              role={actions.notice.tone === 'danger' ? 'alert' : 'status'}
+              className={`mt-3 rounded-md px-3 py-2 text-sm ${
+                actions.notice.tone === 'danger' ? 'border border-danger/40 bg-danger/10 text-danger' : 'bg-success/15 text-text-primary'
+              }`}
+            >
+              {actions.notice.text}
+            </p>
+          ) : null}
+
+          {showMessage && onSendMessage ? (
+            <MessageBox name={view.displayName} onSend={(text) => onSendMessage(userId, text)} />
+          ) : null}
+
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            {isSelf ? (
+              <Link
+                href={EDIT_PROFILE_HREF}
+                onClick={onClose}
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-on-primary hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              >
+                <span className="material-symbols-outlined text-[16px]" aria-hidden>edit</span>
+                {t('shell.profile.editProfile')}
+              </Link>
+            ) : (
+              <span />
+            )}
+            {onViewFullProfile ? (
+              <button
+                type="button"
+                onClick={() => onViewFullProfile('about')}
+                className="rounded-md px-1 text-sm font-medium text-primary underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+              >
+                {t('shell.profile.viewFull')}
+              </button>
+            ) : null}
+          </div>
+        </div>
       </div>
-    </div>,
+
+      <ImageLightbox
+        open={viewer !== null}
+        src={viewer?.kind === 'banner' ? view.bannerUrl : view.avatarUrl}
+        alt={
+          viewer?.kind === 'banner'
+            ? t('shell.profile.bannerAlt', { name: view.displayName })
+            : t('shell.profile.avatarAlt', { name: view.displayName })
+        }
+        onClose={() => setViewer(null)}
+        returnFocusTo={viewer?.opener ?? null}
+      />
+      {actions.dialog ? (
+        <ModerationDialog
+          kind={actions.dialog}
+          name={view.displayName}
+          onCancel={actions.closeDialog}
+          onConfirm={actions.moderate}
+        />
+      ) : null}
+    </>,
     document.body
+  );
+}
+
+/** For moderators: the member is timed out, until when. */
+export function TimedOutLine({ until }: { until: string }) {
+  const t = useT();
+  const when = new Intl.DateTimeFormat(t.locale, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(until));
+  return (
+    <p className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-danger/10 px-2 py-1 text-xs font-medium text-text-primary">
+      <span className="material-symbols-outlined text-[14px] text-danger" aria-hidden>timer</span>
+      {t('shell.profile.timedOutUntil', { time: when })}
+    </p>
   );
 }
