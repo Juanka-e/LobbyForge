@@ -252,11 +252,9 @@ export function FullProfileModal({
               >
                 {tab === 'about' ? (
                   <div className="space-y-5">
-                    {view.limited ? (
-                      <LimitedNotice />
-                    ) : (
+                    <AboutSection bio={view.bio} loading={loading && !view.loaded} limited={view.limited} sectionId={sectionId} />
+                    {view.limited ? null : (
                       <>
-                        <AboutSection bio={view.bio} loading={loading && !view.loaded} sectionId={sectionId} />
                         <MemberSinceSection
                           accountCreatedAt={profile?.profile.accountCreatedAt}
                           memberSince={profile?.profile.memberSince}

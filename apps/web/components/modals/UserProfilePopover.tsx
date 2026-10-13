@@ -11,7 +11,6 @@ import { ImageLightbox } from '@/components/ImageLightbox';
 import {
   AboutSection,
   BannerIconButton,
-  LimitedNotice,
   MemberSinceSection,
   MutualServersStrip,
   ProfileAvatar,
@@ -263,11 +262,7 @@ export function UserProfilePopover({
           {timedOutUntil ? <TimedOutLine until={timedOutUntil} /> : null}
 
           <div className="mt-3 space-y-3.5 rounded-lg bg-surface-container p-3">
-            {view.limited ? (
-              <LimitedNotice />
-            ) : (
-              <AboutSection bio={view.bio} loading={loading && !view.loaded} sectionId={sectionId} />
-            )}
+            <AboutSection bio={view.bio} loading={loading && !view.loaded} limited={view.limited} sectionId={sectionId} />
             {view.limited ? null : (
               <MemberSinceSection
                 accountCreatedAt={profile?.profile.accountCreatedAt}

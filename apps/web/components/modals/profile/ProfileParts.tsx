@@ -73,7 +73,9 @@ export function ProfileBanner({
 }) {
   const t = useT();
   return (
-    <div className={`relative ${heightClass} w-full overflow-hidden`} data-profile-banner>
+    // No overflow clipping here: the "⋯" menu drops below the banner. The
+    // card's own rounded, clipped frame trims the banner's corners.
+    <div className={`relative ${heightClass} w-full`} data-profile-banner>
       {bannerUrl ? (
         <button
           type="button"
@@ -277,13 +279,29 @@ export function StatusBubble({ text }: { text: string }) {
   );
 }
 
-export function AboutSection({ bio, loading, sectionId }: { bio: string | null | undefined; loading?: boolean; sectionId: string }) {
+export function AboutSection({
+  bio,
+  loading,
+  limited = false,
+  sectionId,
+}: {
+  bio: string | null | undefined;
+  loading?: boolean;
+  /** Details withheld (a private profile or a block): say so here, in the same place. */
+  limited?: boolean;
+  sectionId: string;
+}) {
   const t = useT();
   const headingId = `${sectionId}-about`;
   return (
     <section aria-labelledby={headingId}>
       <SectionHeading id={headingId}>{t('shell.profile.about')}</SectionHeading>
-      {loading && !bio ? (
+      {limited ? (
+        <p data-testid="profile-about-body" className="flex items-start gap-1.5 text-sm italic leading-5 text-text-secondary">
+          <span className="material-symbols-outlined text-[16px] not-italic" aria-hidden>visibility_off</span>
+          {t('shell.profile.limited')}
+        </p>
+      ) : loading && !bio ? (
         <div className="space-y-1.5 py-1">
           <Skeleton className="h-3 w-full" />
           <Skeleton className="h-3 w-2/3" />
