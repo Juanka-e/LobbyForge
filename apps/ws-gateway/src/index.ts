@@ -11,9 +11,20 @@
  */
 export * from './protocol.js';
 
+import { requireSessionSecret } from '@lobbyforge/core';
 import { createGateway } from './server.js';
 
 function main(): void {
+  // security-review INFRA-V-02: refuse to start with a missing, short or
+  // published-placeholder session secret (only the local dev stack, with
+  // LOBBYFORGE_DEV_STACK=true, may use one). Every handshake would verify
+  // cookies against it.
+  try {
+    requireSessionSecret();
+  } catch (err) {
+    console.error(`[ws-gateway] ${(err as Error).message}`);
+    process.exit(1);
+  }
   const gateway = createGateway();
   const { wss } = gateway;
   const address = wss.address();

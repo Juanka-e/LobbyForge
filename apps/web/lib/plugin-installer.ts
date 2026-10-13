@@ -36,11 +36,27 @@ import {
 import type { PluginApprovals } from './plugin-approvals';
 import { isBlockedNetworkIp } from './ip-ranges';
 import { fetchIpPinned } from './ip-pinned-https';
+import { isOfficialPluginId, officialPluginIdError } from './official-plugin-ids';
+import { resetPluginUiAssetCache } from './plugin-ui-assets';
 
 const execFileAsync = promisify(execFile);
 
-const MAX_BUNDLE_BYTES = 10 * 1024 * 1024; // 10 MB
+/** The largest bundle (compressed .tgz) the installer and the review scan accept. */
+export const MAX_BUNDLE_BYTES = 10 * 1024 * 1024; // 10 MB
 const DOWNLOAD_TIMEOUT_MS = 15_000;
+
+/** Tar limits, the same for the review scan and the install. */
+const MAX_TAR_ENTRIES = 500;
+/** Sum of the entries' sizes. */
+const MAX_TAR_DATA_BYTES = 50 * 1024 * 1024; // 50 MB uncompressed
+/**
+ * The whole uncompressed archive: the data, each entry's header block and
+ * the padding of its last data block, and a final record of end blocks
+ * (GNU tar pads to 20 blocks). Decompression stops here, so a small gzip
+ * that inflates to gigabytes is refused without ever being inflated.
+ */
+const MAX_TAR_ARCHIVE_BYTES = MAX_TAR_DATA_BYTES + MAX_TAR_ENTRIES * 1024 + 20 * 512;
+const TAR_BOMB_ERROR = `Tarball exceeds ${MAX_TAR_DATA_BYTES} bytes uncompressed — possible tar bomb.`;
 
 export interface InstallResult {
   ok: boolean;
@@ -95,6 +111,10 @@ export async function installPluginBundle(
   // Both are path segments: the id is a folder name, the version too.
   if (!PLUGIN_ID_RE.test(pluginId)) {
     return { ok: false, error: `Invalid plugin id "${pluginId}".` };
+  }
+  // An official plugin's id is never a marketplace install (official-plugin-ids.ts).
+  if (isOfficialPluginId(pluginId)) {
+    return { ok: false, error: officialPluginIdError(pluginId) };
   }
   // LF-004: Validate version as strict semver — it's used as a path segment.
   if (!VERSION_RE.test(version)) {
@@ -189,6 +209,7 @@ async function downloadAndActivate(
     // frame-src the approval on its new record (an external UI's site).
     registerDynamicPlugin(activation.info);
     resetPluginFrameOrigins();
+    resetPluginUiAssetCache();
 
     // 5. Delete superseded versions. A failure here leaves stale folders
     // (deleted on the next install), never a broken plugin.
@@ -257,8 +278,11 @@ async function downloadWithTimeout(url: string): Promise<ArrayBuffer> {
   // (serverName option), so TLS stays correct.
   // 14th-audit: shared IP-pinned transport (same code path as the
   // marketplace review-time bundle fetch and the directory verifier).
+  // The installer's cap, not the transport's 16 MiB default: the review
+  // scan and the install read no more than a bundle may be.
   const res = await fetchIpPinned(url, parsed.hostname, addresses, {
     timeoutMs: DOWNLOAD_TIMEOUT_MS,
+    maxStreamBytes: MAX_BUNDLE_BYTES,
   });
   if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`);
   return res.arrayBuffer;
@@ -329,6 +353,51 @@ export function missingSandboxRootFiles(entries: TarEntry[]): string | null {
   return 'Bundle must contain manifest.json and server.js at the archive root (entries ./manifest.json and ./server.js) — not a sandbox-v1 LobbyForge plugin.';
 }
 
+/**
+ * A numeric ustar field read the way GNU tar reads it, but stricter: leading
+ * spaces, at least one octal digit, then only NUL or space to the end of the
+ * field. Anything else is refused — the old reader dropped every space and
+ * NUL anywhere in the field and read garbage as 0, so it could place the next
+ * header somewhere other than tar does (security review PLUG-003).
+ */
+function parseOctalField(field: Buffer, what: string): number {
+  let i = 0;
+  while (i < field.length && field[i] === 0x20) i++;
+  const start = i;
+  while (i < field.length && field[i]! >= 0x30 && field[i]! <= 0x37) i++;
+  if (i === start) throw new Error(`Tarball header has an empty or malformed ${what} field. Rejected.`);
+  for (let j = i; j < field.length; j++) {
+    if (field[j] !== 0x00 && field[j] !== 0x20) {
+      throw new Error(`Tarball header has a malformed ${what} field. Rejected.`);
+    }
+  }
+  return parseInt(field.toString('latin1', start, i), 8);
+}
+
+/**
+ * The header checksum: the sum of the 512 bytes with the checksum field
+ * itself counted as spaces. Like GNU tar, the unsigned sum (POSIX) and the
+ * signed one (old Sun tar) are both accepted; anything else is refused.
+ */
+function checkHeaderChecksum(header: Buffer): void {
+  const stored = parseOctalField(header.subarray(148, 156), 'checksum');
+  let unsigned = 0;
+  let signed = 0;
+  for (let i = 0; i < 512; i++) {
+    const byte = i >= 148 && i < 156 ? 0x20 : header[i]!;
+    unsigned += byte;
+    signed += byte > 127 ? byte - 256 : byte;
+  }
+  if (stored !== unsigned && stored !== signed) {
+    throw new Error('Tarball header checksum does not match — not a well-formed tar archive. Rejected.');
+  }
+}
+
+/**
+ * Walk the uncompressed archive's 512-byte header blocks. Throws on anything
+ * tar might read differently: a bad checksum, a malformed or base-256 size,
+ * an entry whose data runs past the end of the archive.
+ */
 export function parseTarHeaders(uncompressed: Buffer): TarEntry[] {
   const entries: TarEntry[] = [];
   let offset = 0;
@@ -336,6 +405,7 @@ export function parseTarHeaders(uncompressed: Buffer): TarEntry[] {
     const header = uncompressed.subarray(offset, offset + 512);
     // All-zero header = end of archive.
     if (header.every((b) => b === 0)) break;
+    checkHeaderChecksum(header);
 
     const name = header.subarray(0, 100).toString('utf8').replace(/\x00[\s\S]*$/, '');
     // ustar (POSIX "ustar\0" and GNU "ustar ") carries a path prefix at offset 345.
@@ -343,16 +413,15 @@ export function parseTarHeaders(uncompressed: Buffer): TarEntry[] {
     const prefix = isUstar ? header.subarray(345, 500).toString('utf8').replace(/\x00[\s\S]*$/, '') : '';
     const sizeField = header.subarray(124, 136);
     const typeflag = String.fromCharCode(header[156]!);
-    let size: number;
     if (sizeField[0]! & 0x80) {
-      // GNU base-256 size encoding.
-      size = 0;
-      for (let i = 1; i < sizeField.length; i++) {
-        size = size * 256 + sizeField[i]!;
-      }
-    } else {
-      const octal = sizeField.toString('utf8').replace(/[\x00 ]/g, '');
-      size = parseInt(octal, 8) || 0;
+      // GNU base-256: only for sizes octal cannot hold (8 GiB and up), far
+      // past the bundle caps, so refused rather than parsed.
+      throw new Error('Tarball entry uses a base-256 size (8 GiB or more). Rejected.');
+    }
+    const size = parseOctalField(sizeField, 'size');
+    const next = offset + 512 + Math.ceil(size / 512) * 512;
+    if (next > uncompressed.length) {
+      throw new Error('Tarball is truncated: an entry runs past the end of the archive. Rejected.');
     }
     entries.push({
       name: prefix ? `${prefix}/${name}` : name,
@@ -360,29 +429,61 @@ export function parseTarHeaders(uncompressed: Buffer): TarEntry[] {
       sizeBytes: size,
       typeflag,
     });
-
-    const dataBlocks = Math.ceil(size / 512);
-    offset += 512 + dataBlocks * 512;
+    offset = next;
   }
   return entries;
+}
+
+/**
+ * Every rule, on an uncompressed archive: well-formed headers, at most
+ * MAX_TAR_ENTRIES entries and MAX_TAR_DATA_BYTES of data, only regular files
+ * and directories, no traversal or absolute paths. Shared by the review scan
+ * (`scanTarEntries`) and the install (`extractTarball`).
+ */
+function checkTarArchive(
+  uncompressed: Buffer
+): { ok: true; entries: TarEntry[]; totalBytes: number } | { ok: false; error: string } {
+  if (uncompressed.length > MAX_TAR_ARCHIVE_BYTES) return { ok: false, error: TAR_BOMB_ERROR };
+  let entries: TarEntry[];
+  try {
+    entries = parseTarHeaders(uncompressed);
+  } catch (err) {
+    return { ok: false, error: (err as Error).message };
+  }
+  if (entries.length > MAX_TAR_ENTRIES) {
+    return { ok: false, error: `Tarball has ${entries.length} entries (max ${MAX_TAR_ENTRIES}) — possible tar bomb.` };
+  }
+  let totalBytes = 0;
+  for (const entry of entries) {
+    totalBytes += entry.sizeBytes;
+    if (totalBytes > MAX_TAR_DATA_BYTES) return { ok: false, error: TAR_BOMB_ERROR };
+    const isRegular = entry.typeflag === '0' || entry.typeflag === '\x00';
+    const isDir = entry.typeflag === '5';
+    if (!isRegular && !isDir) {
+      return {
+        ok: false,
+        error: `Tarball contains a non-regular file entry: ${entry.name} (type "${entry.typeflag}"). Rejected.`,
+      };
+    }
+    if (isUnsafeTarPath(entry)) {
+      return { ok: false, error: `Tarball contains an unsafe path: ${entry.name}. Rejected.` };
+    }
+  }
+  return { ok: true, entries, totalBytes };
 }
 
 /** Extract a .tgz tarball using the system `tar` command.
  *  LF-004 + 14th-audit: decompress in-memory (bounded), scan tar
  *  headers PROGRAMATICALLY, reject traversal/absolute paths, non-regular
- *  entries and bombs BEFORE extraction; post-extraction symlink walk
- *  stays as defense-in-depth. */
+ *  entries and bombs BEFORE extraction; the post-extraction walk stays as
+ *  defense-in-depth. */
 async function extractTarball(tarPath: string, destDir: string): Promise<void> {
-  const MAX_ENTRIES = 500;
-  const MAX_TOTAL_BYTES = 50 * 1024 * 1024; // 50 MB uncompressed
-  const MAX_COMPRESSED_BYTES = 64 * 1024 * 1024; // scan-buffer cap
-
   // 1. Bounded decompress.
   const { createGunzip } = await import('node:zlib');
   const fsp = await import('node:fs').then((m) => m.promises);
   const compressed = await fsp.readFile(tarPath);
-  if (compressed.byteLength > MAX_COMPRESSED_BYTES) {
-    throw new Error(`Tarball exceeds the ${MAX_COMPRESSED_BYTES} byte compressed cap.`);
+  if (compressed.byteLength > MAX_BUNDLE_BYTES) {
+    throw new Error(`Bundle exceeds ${MAX_BUNDLE_BYTES} bytes`);
   }
   const uncompressed: Buffer = await new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -390,9 +491,8 @@ async function extractTarball(tarPath: string, destDir: string): Promise<void> {
     const gunzip = createGunzip();
     gunzip.on('data', (chunk: Buffer) => {
       total += chunk.length;
-      // Header+data upper bound; the exact data cap is enforced in the scan.
-      if (total > MAX_TOTAL_BYTES + 512 * (MAX_ENTRIES + 4)) {
-        gunzip.destroy(new Error(`Tarball exceeds ${MAX_TOTAL_BYTES} bytes uncompressed — possible tar bomb.`));
+      if (total > MAX_TAR_ARCHIVE_BYTES) {
+        gunzip.destroy(new Error(TAR_BOMB_ERROR));
         return;
       }
       chunks.push(chunk);
@@ -402,31 +502,12 @@ async function extractTarball(tarPath: string, destDir: string): Promise<void> {
     gunzip.end(compressed);
   });
 
-  // 2. Programmatic header scan — every rule now counts every entry.
-  const entries = parseTarHeaders(uncompressed);
-  if (entries.length > MAX_ENTRIES) {
-    throw new Error(`Tarball has ${entries.length} entries (max ${MAX_ENTRIES}) — possible tar bomb.`);
-  }
-  let totalBytes = 0;
-  for (const entry of entries) {
-    totalBytes += entry.sizeBytes;
-    if (totalBytes > MAX_TOTAL_BYTES) {
-      throw new Error(`Tarball exceeds ${MAX_TOTAL_BYTES} bytes uncompressed — possible tar bomb.`);
-    }
-    const isRegular = entry.typeflag === '0' || entry.typeflag === '\x00';
-    const isDir = entry.typeflag === '5';
-    if (!isRegular && !isDir) {
-      throw new Error(
-        `Tarball contains a non-regular file entry: ${entry.name} (type "${entry.typeflag}"). Rejected.`
-      );
-    }
-    if (isUnsafeTarPath(entry)) {
-      throw new Error(`Tarball contains an unsafe path: ${entry.name}. Rejected.`);
-    }
-  }
+  // 2. Programmatic header scan — every rule counts every entry.
+  const scan = checkTarArchive(uncompressed);
+  if (!scan.ok) throw new Error(scan.error);
   // ADR-007: refuse anything but a sandbox-v1 bundle before extracting it
   // (activation re-checks the extracted files and the manifest).
-  const rootError = missingSandboxRootFiles(entries);
+  const rootError = missingSandboxRootFiles(scan.entries);
   if (rootError) throw new Error(rootError);
 
   // 3. Extract with hardened flags.
@@ -443,23 +524,26 @@ async function extractTarball(tarPath: string, destDir: string): Promise<void> {
   assertNoEscapingSymlinks(destDir);
 }
 
-/** Walk destDir and reject any symlink whose target resolves outside it. */
-function assertNoEscapingSymlinks(dir: string, depth = 0): void {
-  if (depth > 10) return; // depth cap
-  try {
-    for (const entry of readdirSync(dir)) {
-      const fullPath = join(dir, entry);
+/**
+ * Walk the whole extracted tree and refuse any symlink or other non-regular
+ * entry. No depth cap and no swallowed errors (security review PLUG-003): a
+ * link below the old depth of 10, or a folder that could not be read, used
+ * to pass silently. The archive holds at most MAX_TAR_ENTRIES entries, so
+ * the walk is bounded by what tar wrote. Exported for the tests.
+ */
+export function assertNoEscapingSymlinks(dir: string): void {
+  const pending = [dir];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    for (const entry of readdirSync(current)) {
+      const fullPath = join(current, entry);
       const stat = lstatSync(fullPath);
       if (stat.isSymbolicLink()) {
         throw new Error(`Extracted bundle contains a symlink: ${fullPath}. Rejected.`);
       }
-      if (stat.isDirectory()) {
-        assertNoEscapingSymlinks(fullPath, depth + 1);
-      }
+      if (stat.isDirectory()) pending.push(fullPath);
+      else if (!stat.isFile()) throw new Error(`Extracted bundle contains a non-regular file: ${fullPath}. Rejected.`);
     }
-  } catch (err) {
-    if (err instanceof Error && err.message.includes('Rejected')) throw err;
-    // ignore walk errors
   }
 }
 
@@ -468,46 +552,27 @@ export async function downloadBundleForReview(url: string): Promise<ArrayBuffer>
 }
 
 /**
- * 14th-audit: scan a gzip'd tarball against every security rule
- * (entries, total size, non-regular types, traversal) WITHOUT
- * extracting. Exported for regression tests.
+ * 14th-audit: scan a gzip'd tarball against every security rule (entries,
+ * total size, non-regular types, traversal, well-formed headers) WITHOUT
+ * extracting; the review route runs it on the downloaded bundle.
+ *
+ * Security review PLUG-001: the bundle cap applies before anything is
+ * decompressed, and decompression itself stops at the archive cap — the old
+ * unbounded gunzipSync inflated a small gzip bomb in full before any size
+ * check ran. Exported for regression tests.
  */
 export function scanTarEntries(
   compressed: Buffer
 ): { ok: true; entries: TarEntry[]; totalBytes: number } | { ok: false; error: string } {
-  const MAX_ENTRIES = 500;
-  const MAX_TOTAL_BYTES = 50 * 1024 * 1024;
-  const MAX_COMPRESSED_BYTES = 64 * 1024 * 1024;
-  if (compressed.byteLength > MAX_COMPRESSED_BYTES) {
-    return { ok: false, error: `Tarball exceeds the ${MAX_COMPRESSED_BYTES} byte compressed cap.` };
+  if (compressed.byteLength > MAX_BUNDLE_BYTES) {
+    return { ok: false, error: `Bundle exceeds ${MAX_BUNDLE_BYTES} bytes` };
   }
   let uncompressed: Buffer;
   try {
-    uncompressed = gunzipSync(compressed);
-  } catch {
+    uncompressed = gunzipSync(compressed, { maxOutputLength: MAX_TAR_ARCHIVE_BYTES });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ERR_BUFFER_TOO_LARGE') return { ok: false, error: TAR_BOMB_ERROR };
     return { ok: false, error: 'Not a valid gzip stream' };
   }
-  if (uncompressed.length > MAX_TOTAL_BYTES + 512 * (MAX_ENTRIES + 4)) {
-    return { ok: false, error: `Tarball exceeds ${MAX_TOTAL_BYTES} bytes uncompressed — possible tar bomb.` };
-  }
-  const entries = parseTarHeaders(uncompressed);
-  if (entries.length > MAX_ENTRIES) {
-    return { ok: false, error: `Tarball has ${entries.length} entries (max ${MAX_ENTRIES}) — possible tar bomb.` };
-  }
-  let totalBytes = 0;
-  for (const entry of entries) {
-    totalBytes += entry.sizeBytes;
-    if (totalBytes > MAX_TOTAL_BYTES) {
-      return { ok: false, error: `Tarball exceeds ${MAX_TOTAL_BYTES} bytes uncompressed — possible tar bomb.` };
-    }
-    const isRegular = entry.typeflag === '0' || entry.typeflag === '\x00';
-    const isDir = entry.typeflag === '5';
-    if (!isRegular && !isDir) {
-      return { ok: false, error: `Tarball contains a non-regular file entry: ${entry.name} (type "${entry.typeflag}"). Rejected.` };
-    }
-    if (isUnsafeTarPath(entry)) {
-      return { ok: false, error: `Tarball contains an unsafe path: ${entry.name}. Rejected.` };
-    }
-  }
-  return { ok: true, entries, totalBytes };
+  return checkTarArchive(uncompressed);
 }

@@ -320,9 +320,9 @@ What your bot posts is your responsibility.
    the reducer returned the *same object*, the action counts as refused:
    the state is still written back, but nothing joins the roster and no
    audit row is written.
-5. A change notice goes out on Redis. It carries no state. The SSE route
-   and the WebSocket gateway then load the row and **project it per
-   viewer** with \`projectActivityState\`
+5. A change notice goes out on Redis. It carries no state. The WebSocket
+   gateway (and a panel's REST re-read) then load the row and **project it
+   per viewer** with \`projectActivityState\`
    (\`packages/core/src/activity-projection.ts\`) — or, for a marketplace
    plugin, with its own \`projectState\` in the plugin worker
    (\`apps/web/lib/plugin-projection.ts\`; the gateway asks the web app).
@@ -712,7 +712,7 @@ are per plugin id in host code, not in the SDK:
 
 | You need | Edit |
 |---|---|
-| Hidden information (roles, hands, answers): strip or rewrite it per viewer | add an \`if (pluginId === 'buzzer')\` branch to \`packages/core/src/activity-projection.ts\` (used by REST, SSE and the WS gateway). Without it, **every viewer receives the whole state**. |
+| Hidden information (roles, hands, answers): strip or rewrite it per viewer | add an \`if (pluginId === 'buzzer')\` branch to \`packages/core/src/activity-projection.ts\` (used by REST and the WS gateway). Without it, **every viewer receives the whole state**. |
 | Secret content loaded on the server (answers, decks) | \`apps/web/lib/prepare-plugin-action.ts\` (as Quiz and Hushle do) and a server-only subpath export ([PLUGIN_SDK.md → Server-only subpath exports](PLUGIN_SDK.md#server-only-subpath-exports-m18)) |
 | Phase checks before the reducer | \`validateActionPhase\` in the actions route |
 | Built-in content (packs, decks) | \`apps/web/lib/component-migrations.ts\` |
@@ -762,7 +762,7 @@ anything you compile in the way you review your own code.
 | | A: compiled in | B: marketplace (sandbox-v1) |
 |---|---|---|
 | Language and APIs | TypeScript, React, the whole SDK | plain JavaScript in \`server.js\`, no imports, no Node APIs |
-| Your own UI | a React panel in the app | \`ui/\` in a sandboxed iframe (no network beyond its own files; sound, video and WebAssembly work), postMessage protocol v1 |
+| Your own UI | a React panel in the app | \`ui/\` in a sandboxed iframe (no fetch, XHR, WebSocket, image or media requests beyond its own files and approved origins; WebRTC is not covered by CSP; sound, video and WebAssembly work), postMessage protocol v1 |
 | \`actionPolicies\`, \`validateAction\` | yes | yes: policies from \`manifest.json\`, \`validateAction\` in the sandbox |
 | Hidden state per viewer | yes, with a core projection branch | yes, with the plugin's own \`projectState\` |
 | Name and summary in each viewer's language | \`catalog.name\` / \`catalog.summary\` in \`locales/<code>.json\` | the same keys in the bundle's \`locales/<code>.json\` ([PLUGIN_PUBLISHING.md](PLUGIN_PUBLISHING.md#locales-optional-your-name-and-description-in-every-language)) |
@@ -805,13 +805,23 @@ How it runs:
   actions route — read by the web app from its own copy of the files, so
   plugin code cannot widen them; \`validateAction\`; a reducer that returns
   its input is a refused action; and \`projectState\` gives per-viewer
-  hidden state on every read path (GET, SSE, the action response, and the
+  hidden state on every read path (GET, the action response, and the
   WebSocket gateway, which asks web through the signed internal
   \`POST /api/internal/activity-projection\`). Without \`projectState\` the
   state is public and the lobby says so.
 - **UI** (\`ui/\`) is served from \`/api/plugin-ui/{pluginId}/{version}/…\`
-  into \`<iframe sandbox="allow-scripts">\` with no network; see
+  into \`<iframe sandbox="allow-scripts">\`, under a CSP that allows no
+  fetch, XHR, WebSocket, image or media requests beyond its own files and
+  the origins you approved. That is not "no network": WebRTC is not
+  covered by CSP (\`webrtc 'block'\` works only where browsers implement
+  it), and the frame can navigate itself to any origin the lobby page may
+  frame — so treat what a frame is shown as readable by its author. See
   "Marketplace plugin UI (sandboxed iframe)" in [PLUGIN_SDK.md](PLUGIN_SDK.md).
+  The route is public and cheap: the validated manifest is cached per
+  installed version, files are streamed (HEAD and Range read only what
+  they need), and a generous per-address limit in memory answers 429.
+  Plugin files and refusals carry \`CDN-Cache-Control: no-store\` so a CDN
+  never caches them ([DEPLOY_CLOUDFLARE.md](DEPLOY_CLOUDFLARE.md)).
 - **The container** is the outer layer: read-only file system and plugin
   mount, no capabilities, no-new-privileges, 256 MB and 64 pids, no
   secrets except its RPC token (\`PLUGIN_WORKER_TOKEN\`), and its own
@@ -821,6 +831,15 @@ How it runs:
 
 There is no shared catalog across instances. An entry approved on another
 instance (including the official one) does not appear on yours.
+
+An official plugin's id (\`hushle\`, \`quiz\`, \`poll\`, \`dice-bot\`,
+\`watch-party\`, \`vampire-village\`, in any case) is never a marketplace
+plugin: submit and install refuse it with 409 \`reserved_plugin_id\`, and the
+loader, the asset route and the pages' \`frame-src\` ignore a folder named
+like one (\`apps/web/lib/official-plugin-ids.ts\`). Approval sends the
+version the reviewer saw; if the publisher resubmitted in between, the
+review is refused with 409 \`version_changed\` and the moderation screen
+shows the new version.
 
 Steps:
 
@@ -970,7 +989,7 @@ camera or screen share.
 | Activity actions | 30 / min **per client IP**: a LAN party behind one NAT shares it | \`activity-action\` limit in \`actions/route.ts\`; IP key from \`rateLimitKey\` in \`security-headers.ts\` |
 | Concurrent actions | applied one at a time per session; a \`409\` (clients retry) only when the session's write lock is not granted within 10 s | \`GAME_SESSION_LOCK_TIMEOUT_MS\` in \`packages/db/src/queries/gameSessions.ts\` |
 | Activity starts | 10 / min per IP; **one running activity per voice/stage channel** | \`activities-create\` limit and \`getActiveGameSessionForChannel\` check in \`channels/[channelId]/activities/route.ts\` |
-| Activity reads | GET 60 / min, SSE opens 30 / min per IP; SSE poll fallback 5 s | \`activity-get\` in \`[sessionId]/route.ts\`, \`activity-stream\` in \`stream/route.ts\`, \`POLL_FALLBACK_MS\` in \`activity-bus.ts:196\` |
+| Activity reads | GET 60 / min per IP; poll fallback 5 s when the WebSocket is down (the SSE route was removed 2026-10-13) | \`activity-get\` in \`[sessionId]/route.ts\`, \`POLL_INTERVAL_MS\` in \`app/room/useActivitySession.ts\` |
 | Action body | 1 MiB | \`DEFAULT_MAX_BODY_BYTES\` in \`security-headers.ts\` |
 | State size | no explicit cap. Every action rewrites the whole JSONB and every subscriber reloads and projects it, so keep state in kilobytes. | inferred |
 | Players per app | \`defaultMaxPlayers\` 1–500 | \`apps/route.ts:27\` |
@@ -1010,7 +1029,7 @@ platforms' public developer docs. Re-check them before quoting.
   rendered in Discord's client. Discord itself cannot be self-hosted, and
   hiding secrets is up to each app's backend. In LobbyForge the reducer
   and the per-viewer projection run in *your* server, and the same code
-  path serves REST, SSE and WebSocket. A player reading the network tab
+  path serves REST and WebSocket. A player reading the network tab
   sees only their own slice.
 - **Extension ceiling.** Discord's bot platform is far ahead: events,
   commands, components, webhooks, voice and OAuth. Matrix's protocol
@@ -1073,8 +1092,8 @@ Each points to where it is tracked.
 | PLUGIN_PUBLISHING.md | Submit via \`/marketplace\` → "Submit a plugin"; enable via the Apps panel | No submit UI exists; the Apps panel lists compiled-in plugins only. **Fixed 2026-10-03:** doc updated |
 | [PLUGIN_SDK.md](PLUGIN_SDK.md) | \`renderClient: (props) => HushlePanel(props)\` | Must return \`createElement(Panel, props)\` (React #310, see \`plugins/dice-bot/src/index.ts\`) |
 | PLUGIN_SDK.md | \`messages.sendGameMessage\` posts to the channel | It only writes to the server log (\`plugin-context.ts:99-104\`) |
-| PLUGIN_SDK.md | "What M16 doesn't do": no plugin UI, the panel polls every 2 s | Panels render, and updates arrive over SSE/WebSocket |
-| [ACTIVITIES.md](ACTIVITIES.md) | The panel polls every 2 s | SSE/WebSocket push, 5 s poll fallback |
+| PLUGIN_SDK.md | "What M16 doesn't do": no plugin UI, the panel polls every 2 s | Panels render, and updates arrive over the WebSocket |
+| [ACTIVITIES.md](ACTIVITIES.md) | The panel polls every 2 s | WebSocket push, 5 s poll fallback |
 | README | Vampire Village and Watch Party are "planned"; bot-sdk "runtime planned" | Both games ship; the bot SDK has a working HTTP client |
 | \`POST /api/marketplace/install\` error text | "plugins run in-process without isolation" | The worker is mandatory. **Fixed 2026-10-03:** the message now says plugins run only in the plugin-worker, sandboxed in a QuickJS VM (ADR-007) |
 | [BOTS.md](BOTS.md) | (accurate) | Add: switching the Moderation Bot on needs *Manage Messages* unless you are the owner |
@@ -1119,7 +1138,9 @@ allow.
 - **Custom bots** are driven through the [Bot API](#bot-api-v1) with a token.
   A server can have up to 20.
 - **Channels.** Bots use text and announcement channels that every member can
-  see. A role-gated channel (a private channel) is never available to a bot:
+  see. A role-gated channel (a private channel) is not available to a bot
+  unless someone with *Manage Channels* grants it explicitly
+  ([channel access](BOT_API_V2.md#11-channel-access-per-bot-botschannel_access_mode--bot_channel_access)):
   a bot holds no roles, so there is no way to let it in by accident.
 - **No mass pings.** A bot can never mention \`@everyone\` or \`@here\`.
 
@@ -1179,8 +1200,28 @@ lfb_<bot id: 32 hex>_<secret: 43 base64url characters>
   at once. **Revoke** removes the token; the bot stays but cannot call the
   API. **Deleting** a bot also ends its token. Every one of these is written
   to the audit log (without the token).
+- **Rotate and revoke also switch off the bot's event endpoint.** The
+  outgoing HTTPS endpoint ([Bot API v2](BOT_API_V2.md#52-outgoing-bot-event-endpoint))
+  was set by whoever held the old token, who chose its URL and knows its
+  signing secret. So the endpoint goes off (\`disabled_reason =
+  'token_changed'\`, audited as \`bot.event_endpoint.disable\`): no events, no
+  interactions and no synchronous answers reach it, and a command of the
+  bot answers \`bot_offline\` until the bot is reachable again. A manager
+  cannot switch such an endpoint back on — the bot sets it again with the
+  new token (\`PUT /api/bot/v2/event-endpoint\`, which issues a new secret),
+  or a manager removes it. An open event stream is closed too.
+- **A token outlives the person who issued it.** It belongs to the bot, not
+  to a member: a manager who leaves, is banned or loses Manage Community
+  does not take the bot's token with them. Rotate it when someone who had
+  it should no longer act as the bot.
+- **Private channels.** A bot granted role-gated channels by someone with
+  *Manage Channels* reaches channels other managers may not see. A manager
+  who cannot see one of them (and cannot grant private channels) cannot take
+  that bot's token, nor give it \`read_messages\`, \`send_messages\`,
+  \`receive_events\` or \`slash_commands\` — \`403 cannot_take_hidden_access\`.
+  Revoking the token, or removing permissions, is always allowed.
 
-If a token leaks, rotate it.
+If a token leaks, rotate it — the bot's endpoint goes off with it.
 
 ## Bot API v1
 
@@ -1280,7 +1321,9 @@ v1 stays as it is. v2 adds, all scoped per channel:
 - **Event stream** — the bot connects to the gateway at \`/ws/bot\`
   (\`Authorization: Bot <token>\` or an \`identify\` message) and receives
   \`message_*\`, \`member_*\` and \`interaction_create\` events instead of
-  polling.
+  polling. A \`member_leave\` event says why the member left (\`reason\`:
+  \`leave\`, \`kick\` or \`ban\`) to every bot with \`read_members\` — a bot that
+  reads members learns who was kicked or banned.
 - **Outgoing event endpoint** — or the instance POSTs the same events to the
   bot's HTTPS URL, signed with HMAC-SHA256 (\`X-LobbyForge-Signature\`).
 - **Incoming webhooks** — a channel's webhook URL lets an outside service
@@ -1368,7 +1411,8 @@ When a message is blocked:
   this community does not allow.");
 - the audit log gets \`bot.moderation.block\` — the bot, the rule, what matched,
   the channel, a trimmed excerpt (120 characters) and a SHA-256 of the full
-  message;
+  message; an audit reader who cannot see that channel gets the row without
+  what matched and without the excerpt;
 - optionally (*Post a notice in the channel*) the bot posts a short neutral
   line such as "A message from Alex was blocked by the moderation filter." —
   at most one per member per channel per minute.
@@ -1393,17 +1437,19 @@ permission, except listing):
 |---|---|---|---|
 | \`GET\` | \`/api/servers/{id}/bots\` | | every member; settings only for managers; never a token or hash |
 | \`POST\` | \`/api/servers/{id}/bots\` | \`{ name, permissions }\` | \`201 { bot, token }\` — the only time the token is returned |
-| \`PATCH\` | \`/api/servers/{id}/bots/{botId}\` | \`{ name?, enabled?, permissions? }\` | built-in permissions cannot change |
+| \`PATCH\` | \`/api/servers/{id}/bots/{botId}\` | \`{ name?, enabled?, permissions? }\` | built-in permissions cannot change; adding a channel permission to a bot with private channels the caller cannot see → \`403 cannot_take_hidden_access\` |
 | \`DELETE\` | \`/api/servers/{id}/bots/{botId}\` | | its messages stay, still marked as a bot's |
-| \`POST\` | \`/api/servers/{id}/bots/{botId}/token\` | | issue or rotate: \`{ bot, token }\` |
-| \`DELETE\` | \`/api/servers/{id}/bots/{botId}/token\` | | revoke |
+| \`POST\` | \`/api/servers/{id}/bots/{botId}/token\` | | issue or rotate: \`{ bot, token }\`; switches the event endpoint off; \`403 ungrantable_permissions\` / \`cannot_take_hidden_access\` |
+| \`DELETE\` | \`/api/servers/{id}/bots/{botId}/token\` | | revoke; switches the event endpoint off |
 | \`PUT\` | \`/api/servers/{id}/bots/builtin/{welcome\\|moderation}\` | \`{ enabled?, name?, settings? }\` | sets the bot up on first call; settings are merged; \`name: null\` (or none, on first call) = the default name; a template that is \`null\` or a shipped default = the default text |
 
 Audit log actions: \`bot.create\`, \`bot.update\` (with what changed — for
 moderation settings, counts, never the word list), \`bot.enable\`,
 \`bot.disable\`, \`bot.delete\`, \`bot.token.issue\`, \`bot.token.rotate\`,
-\`bot.token.revoke\`, \`bot.moderation.block\`, and \`message.create\` for bot
-messages (\`metadata.botId\`).
+\`bot.token.revoke\` (\`metadata.endpointDisabled\` when the change switched an
+event endpoint off, which is also written as \`bot.event_endpoint.disable\`
+with \`reason: 'token_changed'\`), \`bot.moderation.block\`, and
+\`message.create\` for bot messages (\`metadata.botId\`).
 
 ## How bots appear
 
@@ -1594,6 +1640,17 @@ working unchanged. v2 adds four things, all **scoped per channel**:
 - The bot admin routes also publish \`bot-access\` invalidations:
   \`permissions_changed\` / \`enabled_changed\` (PATCH), \`deleted\` (DELETE),
   \`token_changed\` (token rotate / revoke).
+- Hidden grants and the token (security review BOT-001): whoever holds the
+  token reads and posts in every channel the bot reaches. So a manager
+  without Manage Channels for whom the bot has hidden grants (role-gated
+  channels they cannot see) can neither issue / rotate its token (\`POST
+  …/bots/{botId}/token\`) nor add \`read_messages\`, \`send_messages\`,
+  \`receive_events\` or \`slash_commands\` to it (\`PATCH …/bots/{botId}\`):
+  403 \`cannot_take_hidden_access\` (the refusal names no channel). Owner,
+  administrators and Manage Channels holders see every channel, so they
+  are never refused; revoking the token or removing a permission is always
+  allowed. Code: \`refuseHiddenChannelReach\` in \`lib/bots/admin.ts\`, over
+  the same \`loadChannelAccessView\` as the channel-access routes.
 
 ### 1.2 New bot permissions (\`@lobbyforge/bot-sdk\` \`BotPermission\`)
 | id | needs from the granter (core) | allows |
@@ -1778,10 +1835,21 @@ As implemented (\`apps/web/app/api/bot/v2/**\`, on v1's pipeline in
 - \`GET /event-endpoint\` (added) → \`{ endpoint: {...} | null }\`, never the
   secret. \`PUT /event-endpoint\` \`{ url, events? }\` → \`{ endpoint, secret }\`:
   **every PUT issues a new secret** (returned only there; the old one stops
-  signing at once) and re-arms a disabled endpoint. \`events\` ⊆ the §4.2
+  signing at once) and re-arms a disabled endpoint — including one switched
+  off by a token rotate / revoke (\`token_changed\`, §5.2): that is how the
+  new token's holder takes it over. \`events\` ⊆ the §4.2
   names minus \`ready\`; default = everything the bot's permissions allow.
-  A URL that is not https, has credentials, or does not resolve only to
-  public addresses → 400 \`invalid_endpoint\`. PUT/DELETE share 10/min.
+  A URL that is not https, has credentials, has a single-label host
+  (\`https://postgres/\`, \`https://web./\` — names that only resolve inside a
+  private network; IP literals are judged by their address), or does not
+  resolve within 2 s only to public addresses → 400 \`invalid_endpoint\`.
+  The \`error\` for the address case is always the same sentence ("url must
+  resolve, over public DNS, to public internet addresses only"): never the
+  address it resolved to, the host name or the resolver's error — those go
+  to the server log only (security review BOT-004). The save is bound to
+  the token that authenticated it: if that token was rotated or revoked
+  while the request ran (say during the DNS check), nothing is saved →
+  401 \`unauthorized\`. PUT/DELETE share 10/min.
   Audit \`bot.event_endpoint.set\` / \`.remove\` (host + events, never the
   secret).
 - \`GET /members/{userId}\` → \`{ member: { id, displayName, nickname,
@@ -2078,7 +2146,7 @@ at-most-once; there is no replay. A bot that reconnects backfills with
   in the process that changed something) plus at most one role-gate
   lookup per message — never a query per bot. Each queued delivery
   re-reads the bot and re-checks \`read_messages\` + channel access before
-  it is sent, so a stale cache cannot leak a message.
+  every attempt (retries included), so a stale cache cannot leak a message.
 - Access changes publish on \`lf:access-invalidation\`:
   \`{ kind: 'bot-access', serverId, botId, reason }\`. Browser
   subscriptions ignore it.
@@ -2132,9 +2200,10 @@ at-most-once; there is no replay. A bot that reconnects backfills with
   message shape (with \`webhook: { id, name }\`). Every post is audited as
   \`message.create\` (\`webhookId\`); a Moderation Bot block is audited as
   \`bot.moderation.block\` with \`targetType: 'webhook'\` (content rules only,
-  no staff exemption — a webhook has no roles). The \`webhook\` and
-  \`interaction\` metadata keys are reserved: the member messages API
-  refuses them.
+  no staff exemption — a webhook has no roles). A member's message carries
+  no client metadata at all — the member messages API refuses \`metadata\`
+  outright (400 \`metadata_not_allowed\`) — so \`webhook\` and \`interaction\`
+  cannot be forged.
 - Managing (Manage Channels + seeing the channel; text / announcement
   channels only; ≤ 10 per channel → 409 \`webhook_limit_reached\`):
   \`GET|POST /api/servers/{id}/channels/{channelId}/webhooks\` (POST
@@ -2151,6 +2220,19 @@ at-most-once; there is no replay. A bot that reconnects backfills with
 - HTTPS only; the URL is checked with the IP-pinned SSRF transport
   (\`apps/web/lib/ip-pinned-https.ts\`) — private, loopback, link-local and
   metadata addresses are refused at save time AND at delivery time.
+- **A token rotate or revoke switches the endpoint off** (security review
+  BOT-002). Its URL and signing secret were set by whoever held the old
+  token, so in the same transaction as the new token hash
+  (\`changeBotToken\`) the endpoint gets \`enabled = false\`,
+  \`disabled_reason = 'token_changed'\` (audited \`bot.event_endpoint.disable\`
+  \`{ reason: 'token_changed' }\`). From then on it is offline everywhere:
+  no event or interaction is delivered (a queued retry is dropped), a
+  synchronous answer that arrives after the change is not applied, and a
+  command of the bot answers 409 \`bot_offline\` unless its event stream is
+  connected (the stream opened with the old token was closed). A manager
+  cannot re-enable it (PATCH → 409 \`endpoint_token_changed\`); the bot sets
+  it again with its new token (\`PUT /event-endpoint\`, new secret), or a
+  manager removes it (DELETE).
 - Each delivery: \`POST <url>\` with body \`{ id, event, timestamp, data }\`
   and headers
   \`X-LobbyForge-Event\`, \`X-LobbyForge-Delivery\` (uuid),
@@ -2178,21 +2260,37 @@ at-most-once; there is no replay. A bot that reconnects backfills with
     \`disabled_reason = 'too_many_failures'\` and is audited
     (\`bot.event_endpoint.disable\`). Managers: \`GET|PATCH|DELETE
     /api/servers/{id}/bots/{botId}/event-endpoint\` (status without the
-    secret; PATCH \`{ enabled: true }\` re-enables and resets the counter;
-    audit \`bot.event_endpoint.enable\` / \`.remove\`);
-  - every attempt re-resolves DNS, refuses private / loopback /
-    link-local / CGNAT / ULA / metadata addresses and pins the connection
-    to the addresses it checked; redirects are never followed; the answer
-    is read up to 64 KiB;
-  - the queue is in-process (16 deliveries in flight, 2 000 waiting,
-    interactions first) and NOT durable: deliveries waiting for a retry
-    are lost when the web process restarts (events are at-most-once);
-  - before the first attempt the current bot row is re-read: still
-    enabled, still \`receive_events\`, the endpoint still enabled and
-    subscribed, plus the event's own check (message events:
+    secret; PATCH \`{ enabled: true }\` re-enables and resets the counter —
+    never for \`token_changed\`, 409 \`endpoint_token_changed\`; DELETE removes
+    it; audit \`bot.event_endpoint.enable\` / \`.remove\`);
+  - every attempt re-resolves DNS — with the c-ares resolver and a 2 s
+    deadline, so a stalling authoritative server costs one cancelled
+    query, not a libuv threadpool thread (the pool is shared with scrypt;
+    the container also raises \`UV_THREADPOOL_SIZE\` to 16) — refuses
+    private / loopback / link-local / CGNAT / ULA / metadata addresses
+    (and single-label hosts) and pins the connection to the addresses it
+    checked; redirects are never followed; the answer is read up to 64 KiB;
+  - the queue is in-process and NOT durable: deliveries waiting for a
+    retry are lost when the web process restarts (events are
+    at-most-once). It is fair across tenants (security review BOT-003):
+    each bot has its own lane (interactions first within it), lanes are
+    grouped per server, and a free slot goes round-robin — the next
+    server, then that server's next bot. Caps: 16 deliveries in flight per
+    process, 8 per server, 2 per bot; 100 waiting per bot (a full lane
+    drops its OWN oldest normal delivery) and 2 000 in all (the longest
+    lane gives one up). An attempt that takes over 1 s — even a 2xx — or
+    fails counts toward a back-off: after 3 in a row the bot's lane waits
+    1 s, then 2 s, 4 s … up to 60 s between attempts, until an answer
+    comes quickly again; deliveries still go out, just not faster than the
+    endpoint can take them;
+  - before EVERY attempt (the first and each retry) and again before a
+    synchronous interaction answer is applied, the current bot row and
+    endpoint are re-read: the bot still enabled, still \`receive_events\`,
+    the endpoint still enabled, subscribed and the very URL + secret the
+    delivery was signed for, plus the event's own check (message events:
     \`read_messages\` + channel access; member events: \`read_members\`;
-    interactions: \`slash_commands\` + channel access). A retry is dropped
-    if the endpoint was switched off or its URL/secret replaced.
+    interactions: \`slash_commands\` + channel access). Anything else drops
+    the delivery (or the answer) silently.
 
 ## 6. SDK (\`@lobbyforge/bot-sdk\` v2)
 \`\`\`ts
@@ -2282,7 +2380,8 @@ only after Ctrl+C / SIGTERM.
 - Admin → Bots: per bot — permissions incl. the new ones, channel access
   (all eligible / chosen channels), registered commands (read-only list,
   enable/disable per command, channel restriction), event endpoint
-  status (URL, last delivery, failures, re-enable).
+  status (URL, last delivery, failures, why it stopped, re-enable — not
+  after a token change — and remove, with a confirmation).
 - Admin → Channels: per text channel — incoming webhooks (create, copy
   URL once, rotate, disable, delete).
 - Everything themed (Tailwind tokens), en + tr.
@@ -2310,8 +2409,11 @@ Every path and payload the UI reads is in one module,
 - Admin → Bots calls \`GET|PUT …/bots/{botId}/channel-access\` (PUT
   \`{ channelIds: [...] | null }\`), \`GET …/bots/{botId}/commands\` +
   \`PATCH …/commands/{commandId}\` (\`{ enabled?, channelIds? }\` — the
-  managers' restriction), \`GET|PATCH …/bots/{botId}/event-endpoint\`
-  (\`{ enabled: true }\` re-enables). Admin → Channels calls
+  managers' restriction), \`GET|PATCH|DELETE …/bots/{botId}/event-endpoint\`
+  (\`{ enabled: true }\` re-enables; \`endpoint_token_changed\` is shown as
+  "switched off because the bot's token changed"; DELETE removes it).
+  \`cannot_take_hidden_access\` (token or permissions refused, §1.1) is
+  shown in the admin's language. Admin → Channels calls
   \`GET|POST …/channels/{channelId}/webhooks\`, \`PATCH|DELETE
   …/webhooks/{webhookId}\` and \`POST …/webhooks/{webhookId}/token\` (rotate).
 
@@ -2324,7 +2426,15 @@ Every path and payload the UI reads is in one module,
 - Webhook tokens and bot tokens are stored hashed; event-endpoint secrets
   are stored (needed to sign) and never returned after creation.
 - Outgoing deliveries never reach private networks (save + delivery
-  checks, no redirects).
+  checks, no redirects), and a refused URL is never explained with what it
+  resolved to.
+- A token rotate / revoke switches the event endpoint off; deliveries,
+  retries and synchronous answers re-check the bot and its endpoint each
+  time.
+- Nobody takes a token (or adds a channel permission) for a bot that
+  reaches private channels they cannot see.
+- One bot or server cannot hold the delivery queue: per-bot and per-server
+  caps, round-robin, back-off for slow endpoints.
 - No event ever carries a message from a channel the bot cannot access.
 - Commands and webhook posts obey timeouts, bans, slow paths and the
   Moderation Bot exactly like member posts.
@@ -2583,6 +2693,11 @@ type GamePluginActionPolicy = {
   activity's voice room. Set this on an action that must work from outside
   the room — leaving the game is the usual one (Quiz, Vampire Village and
   Watch Party mark \`leave\`). \`host\` actions are never voice-checked.
+  It also marks the one thing a member who is **timed out** in the
+  community may still do: a timed-out member starts no activity and sends
+  no other action, host actions included (\`403\`, \`code: "timed_out"\`,
+  with \`until\`) — as they cannot chat, vote in a poll or run a slash
+  command. Mark leaving, so they can always get out of a game.
 
 Do not trust actor identity fields sent by the browser.
 
@@ -2728,7 +2843,7 @@ plugin and grant nothing.
 | \`timer.clear\` | \`timers\` | \`id\` | clearing a timer that is not pending is fine |
 | \`storage.set\` | \`storage\` | \`key\`, \`value\` | \`key\` is 1–128 of \`a-z A-Z 0-9 . _ : -\` (not \`__proto__\`); \`value\` any JSON; the plugin's storage in a community holds at most **64 KiB** (every key plus its value's JSON, in UTF-8) |
 | \`storage.delete\` | \`storage\` | \`key\` | |
-| \`chat.post\` | \`chat\` | \`text\` | 1–**500** characters after trimming, no control characters but tab and newline; at most **one per 5 s and 30 per hour** per session |
+| \`chat.post\` | \`chat\` | \`text\` | 1–**500** characters after trimming, no control characters but tab and newline; at most **one per 5 s and 30 per hour** per session, and **60 per hour** per community and plugin; checked by the community's Moderation Bot |
 
 At most 32 effects per call; an unknown key on an effect is refused (a
 typo never silently does something else). \`voice.mute\` is a known
@@ -2761,12 +2876,30 @@ nothing runs on a clock.
   an end request — every timer whose due time has passed fires under the
   session's write lock, **earliest first** (ties: the one set first), each
   as its system action through your reducer with \`ctx.now\` = its due time.
-  Its effects apply too, so a timer may set the next one; a chain that is
-  already due keeps firing, up to 32 timers per touch (the rest fires on
-  the next touch).
+  Its effects apply too, so a timer may set the next one, and a chain that
+  is already due keeps firing in the same touch.
+- **Catch-up is bounded.** A session nobody touched for a while can have a
+  backlog: a 1 s timer that re-arms itself and sat idle for an hour is
+  3 600 firings behind. The host does not replay it:
+  - **Missed occurrences collapse.** When a timer's firing sets a timer
+    with the **same id** (it re-arms itself) at a time that is already due,
+    the host moves that timer to the **latest** occurrence of the same
+    period that is due. The idle 1 s ticker fires twice — for its first
+    due time and for the last second that passed — and its next firing is
+    in the future again. Do not count ticks to measure time; read
+    \`ctx.now\` (the due time of the firing) and keep deadlines in your
+    state. A timer set under a **new** id is never moved.
+  - **A touch fires at most 8 timers**, and starts none after 500 ms of
+    wall time (the first always runs). What is still due fires on the next
+    touch: the session GET reports it in \`timersDueAt\`, so an open panel
+    re-reads for it at once.
 - Before an action, the timers due by then fire first and the action runs
   on the state they left — in one write. If the action is then refused,
-  the timers still commit.
+  the timers still commit. If more timers were due than one touch fires,
+  the action does **not** run ahead of them: what fired commits and the
+  action answers \`409\` with \`code: "timers_pending"\` and \`retryable: true\`.
+  The lobby retries it by itself (same \`actionId\`), each retry continuing
+  the catch-up.
 - **Exactly once**: the lock serializes touches and a fired timer is
   removed in the same write as the state it produced, so of two
   concurrent reads the second finds nothing due.
@@ -2780,9 +2913,19 @@ nothing runs on a clock.
   \`apps/web/lib/activity-next-check.ts\`, which also covers the host
   hand-over); setting, clearing or firing a timer tells every open panel
   to re-read (\`publicSummary.timersChanged\` on the activity bus), and an
-  action's answer carries the new \`timersDueAt\`.
-- Ending the activity fires what was already due, then drops every other
-  pending timer.
+  action's answer carries the new \`timersDueAt\`. A due time that is still
+  pending after the panel re-read for it (the server could not fire it
+  yet) is re-read for again after 2 s, then 4 s, 8 s … at most once a
+  minute — never in a loop.
+- Ending the activity fires what was already due (within the per-touch
+  bound above), then drops every other pending timer.
+- **Only while the app is installed.** If the community uninstalls or
+  disables the app (Server settings → Apps), its open sessions end there
+  and then (audited as \`activity.end\` with the reason \`app_uninstalled\` /
+  \`app_disabled\`; nothing fires on the way out). A session that is still
+  open by a race takes no more actions (\`403\`, \`code:
+  "app_not_installed"\`), its due timers are dropped without running, and
+  storage writes and chat lines asked for after the removal are dropped.
 
 So a timer is **never early, and late only when nobody is looking** —
 which is exactly when nobody would notice. Keep the deadline in your state
@@ -2824,6 +2967,11 @@ go to** (shown for apps with the \`chat\` permission). With no channel
 chosen, the default, the post is dropped: a game never writes into a
 channel nobody picked (which could also carry a private voice room's game
 into a public channel). The choice is checked again on every post.
+Choosing a **role-gated** (private) channel takes what granting a bot one
+takes: Manage Channels (owners and administrators have it), and seeing
+the channel — Manage Server alone is refused with \`403\`, \`code:
+"chat_channel_not_allowed"\`. Saving other settings of the app keeps a
+channel someone else chose.
 
 - The message has **no author** (no user, no bot) and \`metadata.app = {
   pluginId, name }\`; the lobby shows it with the plugin's name, an app
@@ -2831,9 +2979,17 @@ into a public channel). The choice is checked again on every post.
   notification says "(APP)". Members cannot set \`metadata.app\`.
 - Mentions are inert: every \`@\` that could start one gets a zero-width
   space after it, so \`@everyone\`, \`@here\` and \`@<name>\` ping nobody.
-- Over the rate (one per 5 s, 30 per hour, per session) a post is
-  **dropped** and logged; the action that asked for it still applies.
-  Chat is a side channel, never part of your game's state.
+- Over the rate (one per 5 s and 30 per hour per session, and 60 per hour
+  per community and plugin, so restarting the activity does not reset it)
+  a post is **dropped** and logged; the action that asked for it still
+  applies. Chat is a side channel, never part of your game's state.
+- **Moderated like everyone's messages.** When the community runs the
+  Moderation Bot, its blocked-word and link rules apply to the line as you
+  wrote it (the mention rule does not: your mentions are inert anyway). A
+  line the rules block is **dropped** and logged, and audited as
+  \`bot.moderation.block\` naming your plugin (without the line's words when
+  the channel is role-gated); the action still applies. No notice is
+  posted and there is no exemption.
 - It is posted after the commit (after the storage batch), published on
   the chat bus like any message and audited as \`message.create\` (actor:
   none, the plugin in the metadata).
@@ -2849,7 +3005,9 @@ names and numbers.
 ([below](#the-createtestharness-test-helper)): \`performAction\` throws an
 \`EffectRefusedError\` where the host would answer \`effect_refused\` (and
 applies nothing), refuses a system action from a client, and
-\`advanceTime(ms)\` fires due timers in order with \`ctx.now\` = each due time.
+\`advanceTime(ms)\` fires due timers in order with \`ctx.now\` = each due time
+— every occurrence, as for a session somebody watches the whole time (the
+host's idle catch-up collapse and per-touch bound above do not apply).
 \`getTimers()\`, \`getStorage()\` and \`getChatPosts()\` show what the host
 would have stored and posted; \`permissions\` and \`storage\` options set the
 plugin's permissions and its storage before the game.
@@ -3247,14 +3405,28 @@ Every file carries this CSP, where \`<own>\` is your version's own folder,
 \`\`\`
 default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline';
 img-src 'self' data:; font-src 'self'; media-src <own> data: blob:; connect-src <own>;
-frame-ancestors 'self'; base-uri 'none'; form-action 'none'; sandbox allow-scripts
+frame-ancestors 'self'; base-uri 'none'; form-action 'none'; webrtc 'block'; sandbox allow-scripts
 \`\`\`
 
-So by default: **no network beyond your own files.** \`fetch()\` and XHR can
-read your own files (level data, a \`.wasm\`, sound for the Web Audio API)
-and nothing else — not the app, not another plugin, not the web; WebSockets
-and remote images are blocked. The frame cannot send what it is shown
-anywhere.
+So by default: **no fetch, XHR, WebSocket, image or media requests beyond
+your own files.** \`fetch()\` and XHR can read your own files (level data, a
+\`.wasm\`, sound for the Web Audio API) and nothing else — not the app, not
+another plugin, not the web; WebSockets and remote images are blocked.
+
+That is what CSP guarantees, and it is less than "no network":
+
+- **WebRTC is not covered by CSP.** \`connect-src\` does not govern an
+  \`RTCPeerConnection\`'s STUN/TURN traffic. The policy adds \`webrtc 'block'\`,
+  which refuses it only in browsers that implement that directive; the
+  others ignore it.
+- **The frame can navigate itself** (\`location.href = …\`) to any origin the
+  lobby page may frame: that is the embedding page's \`frame-src\`, not your
+  page's policy.
+
+So write your UI as if its author — you — could read everything the frame
+is shown, because it can: the viewer's projected state, names and language.
+Keep secrets out of what a viewer receives with \`projectState\`, not with
+the frame.
 
 **Outside origins the owner approved.** A manifest may ask for outside
 origins under \`network\` ([PLUGIN_PUBLISHING.md → Asking for more than the
@@ -3296,12 +3468,19 @@ The instance names \`<own>\` from its configured public origin
 (\`LOBBYFORGE_APP_ORIGIN\`, else \`NEXT_PUBLIC_BASE_URL\`), never from the
 request. Without either (a dev setup) it is \`'self'\`: the app's origin,
 reached without cookies, where every mutating route refuses a cross-site
-request. Navigating the
-frame elsewhere is stopped by the app's own \`frame-src\`. Assets other than
-the HTML are public and cached for a year (\`immutable\`, the version is in
-the path): ship a new version to change them. The HTML loads only as an iframe document, and the
+request. Where the frame can navigate itself is bounded by the app page's
+own \`frame-src\` — the app's origin, YouTube's privacy-enhanced player, the
+CAPTCHA provider's frames when one is configured, and the approved sites of
+plugins whose UI is their own page — not by your page's policy. Assets other than
+the HTML are public and cached for a year by browsers (\`immutable\`, the
+version is in the path): ship a new version to change them. Shared caches
+never store them (\`CDN-Cache-Control: no-store\`, see
+[DEPLOY_CLOUDFLARE.md](DEPLOY_CLOUDFLARE.md)). The HTML loads only as an iframe document, and the
 app's own pages can never load your scripts (Fetch Metadata), so do not
-link to your files from anywhere else.
+link to your files from anywhere else. Files are streamed (a \`Range\` reads
+only that range), and the route allows each address a burst of 1000
+requests, refilled at 50 per second, then answers 429 with \`Retry-After\`:
+plenty for a game's first load, but do not poll your own files in a loop.
 
 Everything the frame knows arrives in a message; everything it can do is an
 action the lobby sends **as the viewer**, through the normal actions route,
@@ -3606,8 +3785,9 @@ and \`dice-bot\` for small, complete panels.
   [\`docs/HUSHLE.md\`](./HUSHLE.md) for the full Hushle walkthrough.
 - \`apps/web/lib/plugin-registry.ts\` — the host's compiled-in plugin list.
 - \`apps/web/lib/plugin-context.ts\` — the HTTP host's \`buildHttpPluginContext\`.
-- \`apps/web/lib/activity-bus.ts\` — Redis pub/sub for activity state changes (M19).
-- \`apps/web/app/api/servers/[id]/activities/[sessionId]/stream/route.ts\` — SSE route (M19).
+- \`apps/web/lib/activity-bus.ts\` — Redis pub/sub for activity state changes (M19);
+  the WebSocket gateway (\`apps/ws-gateway\`) delivers them to open panels. The
+  M19 SSE route (\`…/activities/{sessionId}/stream\`) was removed: nothing used it.
 `,
   },
   "publishing": {
@@ -3640,11 +3820,14 @@ marketplace plugin is installed **without trusting its author**:
   the \`plugin-worker\` container: plain JavaScript, no Node APIs, no
   network, no file system, no timers, a fresh VM for every call;
 - its UI (\`ui/\`, optional) runs in \`<iframe sandbox="allow-scripts">\` with
-  an opaque origin and no network beyond its own files (it may load its own
-  sound, video, WebAssembly and data) — plus any outside origins the
-  instance owner approved at install; or, with that approval, its UI is the
-  author's own site, framed by the lobby
-  ([Asking for more than the sandbox](#asking-for-more-than-the-sandbox));
+  an opaque origin, and its CSP allows no fetch, XHR, WebSocket, image or
+  media requests beyond its own files (it may load its own sound, video,
+  WebAssembly and data) — plus any outside origins the instance owner
+  approved at install; or, with that approval, its UI is the author's own
+  site, framed by the lobby
+  ([Asking for more than the sandbox](#asking-for-more-than-the-sandbox)).
+  CSP does not cover WebRTC, so this is not "no network"
+  ([Security notes](#security-notes));
 - it gets what official plugins get from the host: action policies
   (\`host\` / \`member\` / \`player\`, \`actorFields\`, \`joinsRoster\`, \`audit\`),
   \`validateAction\`, and **per-viewer hidden state** through \`projectState\`.
@@ -3844,8 +4027,8 @@ timer's due time.
 
 \`projectState(state, viewerId, ctx)\` gets only \`ctx.sessionId\`,
 \`ctx.serverId\`, \`ctx.hostId\` and \`ctx.now\` — no players, no locale, no
-random values — because the same projection is served over REST, SSE and
-the WebSocket gateway and must not differ between them. Localise in the
+random values — because the same projection is served over REST and the
+WebSocket gateway and must not differ between them. Localise in the
 UI, not in the projection.
 
 ### Effects: timers, storage and chat
@@ -3876,7 +4059,7 @@ case 'auto-reveal': // "role": "system" in actionPolicies: only the host runs it
 | \`timer.set { id, afterMs \\| at, action }\` | \`timers\` | ≤ 8 pending per session, 1 s – 24 h, same \`id\` replaces; \`action\` is one of your \`system\` actions |
 | \`timer.clear { id }\` | \`timers\` | |
 | \`storage.set { key, value }\`, \`storage.delete { key }\` | \`storage\` | key \`[a-zA-Z0-9._:-]{1,128}\`, ≤ 64 KiB in all per community |
-| \`chat.post { text }\` | \`chat\` | ≤ 500 characters, mentions made inert, ≤ 1 per 5 s and 30 per hour per session |
+| \`chat.post { text }\` | \`chat\` | ≤ 500 characters, mentions made inert, ≤ 1 per 5 s and 30 per hour per session and 60 per hour per community; the community's Moderation Bot word and link rules apply |
 
 - One invalid or unapproved effect refuses the whole action (\`422\`,
   \`code: "effect_refused"\`): nothing of it is applied.
@@ -3884,6 +4067,9 @@ case 'auto-reveal': // "role": "system" in actionPolicies: only the host runs it
   after the due time, the host runs the system action through
   \`handleAction\` with \`ctx.now\` = the due time. Open panels re-read at the
   due time, so it happens on time while anyone is watching; never early.
+  After an idle stretch a timer that re-arms itself fires once for the
+  latest missed occurrence, not once per occurrence, and one touch fires at
+  most 8 timers ([PLUGIN_SDK.md → Timers fire lazily](PLUGIN_SDK.md#timers-fire-lazily)).
 - Storage writes land **after** the state commits, as one batch; a batch
   that no longer fits by then is dropped (logged). Sessions of your plugin
   share the storage: merge with \`ctx.storage\` when you write.
@@ -3896,9 +4082,8 @@ The full rules, ordering and failure cases:
 
 ### Hidden information
 
-Every path a viewer reads state through — the activity GET, the SSE
-snapshot and updates, the response to their own action, the WebSocket
-gateway — calls \`projectState(state, viewerId)\` for that viewer. Put
+Every path a viewer reads state through — the activity GET, the response
+to their own action, the WebSocket gateway — calls \`projectState(state, viewerId)\` for that viewer. Put
 secrets in the state and strip them per viewer in \`projectState\`, the way
 the example hides who buzzed until the host reveals. A failed projection
 fails the request; it never falls back to the full state.
@@ -4001,7 +4186,7 @@ the common mistakes before it packs.
 | \`server.js\` | 2 MiB |
 | \`manifest.json\` | 64 KiB |
 | \`locales/\` | 32 files, 128 KiB each, 1 MiB together, 1000 keys per file (the full rules are under [\`locales/\`](#locales-optional-your-name-and-description-in-every-language)) |
-| Archive | 10 MB compressed, 50 MB unpacked, 500 entries, regular files and folders only |
+| Archive | 10 MB compressed, 50 MB unpacked, 500 entries, regular files and folders only; plain ustar headers with valid checksums and octal sizes (what \`tar -czf\` and \`pack.mjs\` write; no GNU base-256 sizes, long-name or pax entries). Approval and install refuse anything else |
 
 Keep state in kilobytes: every action and every read passes it through the
 VM, and every viewer's read runs \`projectState\` once. Keep \`server.js\`
@@ -4161,9 +4346,22 @@ migrate:
   container is the outer layer: read-only file system, no capabilities,
   memory and pid caps, no secrets except its own RPC token, and a network
   only the web app joins.
+- **What the frame's CSP does and does not stop.** It stops fetch, XHR,
+  WebSocket, image and media requests beyond your own files and the
+  approved origins. It does not cover WebRTC: a page can open an
+  \`RTCPeerConnection\`, whose STUN/TURN traffic \`connect-src\` does not
+  govern. The policy carries \`webrtc 'block'\`, which refuses that only in
+  browsers that implement the directive. And the frame can navigate itself
+  to any origin the lobby page is allowed to frame. So an owner should
+  assume a plugin's author can read whatever its frame is shown — the
+  viewer's projected state, names and language — and nothing more:
+  \`projectState\` is what keeps a game's secrets from the wrong viewer.
 - **Authorization is the host's.** Who may send an action is decided by
   your manifest's \`actionPolicies\`, as read and validated by the web app;
   \`actorFields\` are filled in by the host. Your code cannot widen them.
+- **Official ids are reserved.** A bundle cannot use the id of an official
+  plugin (\`hushle\`, \`quiz\`, \`poll\`, \`dice-bot\`, \`watch-party\`,
+  \`vampire-village\`, in any case): submit and install refuse it.
 - **What review is still for.** A plugin can show misleading text inside
   its own frame, waste its own call budget (and slow other marketplace
   plugins while it does), or leak its own game's secrets through a careless

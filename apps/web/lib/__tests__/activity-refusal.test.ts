@@ -62,6 +62,13 @@ describe('activityRefusalMessage', () => {
     expect(say('en', 403, 'app_channel_not_allowed')).toMatch(/limited it to other channels/);
   });
 
+  it('says a timeout and a removed app in English and Turkish', () => {
+    expect(say('en', 403, 'timed_out')).toMatch(/^You are timed out/);
+    expect(say('tr', 403, 'timed_out')).toMatch(/^Zaman aşımındasın/);
+    expect(say('en', 403, 'app_not_installed', 'start')).toBe('This app is no longer installed or turned on in this community.');
+    expect(say('tr', 403, 'app_not_installed')).toBe('Bu uygulama artık bu toplulukta yüklü ya da açık değil.');
+  });
+
   it('falls back by status, in the reader’s language', () => {
     expect(say('en', 429, null)).toBe("You're going too fast. Wait a moment and try again.");
     expect(say('en', 401, null)).toBe('Your session has ended. Sign in again.');
@@ -94,6 +101,7 @@ describe('agreement with the server-side builder (lib/activity-errors.ts)', () =
     expect([...new Set([...serverCodes, 'bot_offline'])].sort()).toEqual(
       [
         'activity_exists',
+        'app_not_installed',
         'bot_offline',
         'effect_refused',
         'not_host',
@@ -101,6 +109,7 @@ describe('agreement with the server-side builder (lib/activity-errors.ts)', () =
         'rate_limited',
         'session_ended',
         'system_action',
+        'timed_out',
         'voice_required',
         'wrong_phase',
       ]

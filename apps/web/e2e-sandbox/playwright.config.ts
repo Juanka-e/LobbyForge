@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { randomBytes } from 'node:crypto';
 import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -153,6 +154,9 @@ export default defineConfig({
         // Development and tests only: http: and local hosts in `network` and
         // `ui.url` (the outside sites above). Ignored in production.
         LOBBYFORGE_PLUGIN_ALLOW_LOCAL_ORIGINS: 'true',
+        // The app refuses to boot without a real session secret (security
+        // review INFRA-V-02, instrumentation.ts) — a fresh one per run.
+        LOBBYFORGE_SESSION_SECRET: process.env.LOBBYFORGE_SESSION_SECRET || randomBytes(32).toString('hex'),
         NEXT_TELEMETRY_DISABLED: '1',
       },
     },

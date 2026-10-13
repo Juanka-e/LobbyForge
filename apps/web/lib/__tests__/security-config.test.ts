@@ -32,7 +32,7 @@ describe('dev stack origin wiring', () => {
   // the app's own origin, and the container always listens on 3000 — so a
   // published host port MUST be declared, or every POST from the browser
   // fails with "Invalid request origin" (hit when the ports moved).
-  const publishedWebPort = () => /- "(\d+):3000"/.exec(compose)?.[1];
+  const publishedWebPort = () => /- "(?:127\.0\.0\.1:)?(\d+):3000"/.exec(compose)?.[1];
   // Every LOBBYFORGE_APP_ORIGIN default in the file (web + ws-gateway).
   const declaredOrigins = () =>
     [...compose.matchAll(/LOBBYFORGE_APP_ORIGIN:[^\n]*localhost:(\d+)/g)].map((m) => m[1]);
@@ -48,6 +48,33 @@ describe('dev stack origin wiring', () => {
     expect(origins.length).toBeGreaterThanOrEqual(2);
     expect(new Set(origins).size).toBe(1);
     expect(origins[0]).toBe(publishedWebPort());
+  });
+
+  // security-review INFRA-V-02: the dev/e2e stacks run with public secrets,
+  // so nothing they publish may be reachable from the LAN.
+  it.each([
+    'docker-compose.dev.yml',
+    'docker-compose.e2e-ports.yml',
+    'docker-compose.e2e-mail.yml',
+    'docker-compose.e2e-plugins.yml',
+  ])('%s publishes every port on 127.0.0.1 only', (file) => {
+    const text = readFileSync(join(REPO_ROOT, 'infra', 'docker', file), 'utf8');
+    // Every list item under a `ports:` key.
+    const mappings: string[] = [];
+    const lines = text.split('\n');
+    lines.forEach((line, index) => {
+      if (!/^\s+ports:/.test(line)) return;
+      for (let next = index + 1; next < lines.length && /^\s+(-\s|#)/.test(lines[next]!); next += 1) {
+        if (/^\s+-\s/.test(lines[next]!)) mappings.push(lines[next]!.trim());
+      }
+    });
+    for (const mapping of mappings) expect(mapping, `${file}: ${mapping}`).toMatch(/^- "127\.0\.0\.1:\d+:\d+(\/udp)?"/);
+    // postgres, redis, livekit ×2, web, ws-gateway, mailpit ×2, minio ×2.
+    if (file === 'docker-compose.dev.yml') expect(mappings.length).toBe(10);
+  });
+
+  it('keeps the dev coturn (host networking) on loopback too', () => {
+    expect(compose).toContain('--listening-ip=127.0.0.1');
   });
 });
 

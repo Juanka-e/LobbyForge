@@ -5,7 +5,7 @@
  * Messages cascade-delete with the channel. The `lastMessageAt` column drives
  * sidebar ordering without a join.
  */
-import { and, eq, or, desc, lt } from 'drizzle-orm';
+import { and, eq, isNull, or, desc, lt, sql } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
 import { dmChannels, dmMessages, users } from '../schema.js';
 import { isUserBlocked } from './userBlocks.js';
@@ -171,6 +171,60 @@ export async function findDmChannelByPair(
     .where(and(eq(dmChannels.userAId, a), eq(dmChannels.userBId, b)))
     .limit(1);
   return row?.id ?? null;
+}
+
+export interface DmRecipientEligibility {
+  /** The recipient is a live (not soft-deleted) user. */
+  exists: boolean;
+  /**
+   * Both users are current members of at least one live server — neither
+   * holds an active ban there (a ban leaves the membership row in place).
+   */
+  sharesServer: boolean;
+  /** The DM channel the pair already has (looked up only when they share no server). */
+  existingChannelId: string | null;
+}
+
+/**
+ * May `viewerUserId` open a DM with `recipientUserId`? The route opens one
+ * only for a live user who shares a community with the caller, or with
+ * whom the caller already has a conversation; anything else answers the
+ * same 404 (no existence oracle — an unknown id used to be an FK error).
+ */
+export async function getDmRecipientEligibility(
+  db: DbClient,
+  viewerUserId: string,
+  recipientUserId: string
+): Promise<DmRecipientEligibility> {
+  // Ids as PARAMETERS: a single-table select renders `users.id` unqualified,
+  // which the memberships subquery would read as its own `id` column.
+  const viewer = sql`${viewerUserId}::uuid`;
+  const recipient = sql`${recipientUserId}::uuid`;
+  const [row] = await db
+    .select({
+      sharesServer: sql<boolean>`exists (
+        select 1 from memberships viewer_m
+        join memberships recipient_m on recipient_m.server_id = viewer_m.server_id
+        join servers shared_s on shared_s.id = viewer_m.server_id and shared_s.deleted_at is null
+        where viewer_m.user_id = ${viewer} and recipient_m.user_id = ${recipient}
+          and not exists (
+            select 1 from server_bans b
+            where b.server_id = viewer_m.server_id
+              and b.user_id in (viewer_m.user_id, recipient_m.user_id)
+              and (b.expires_at is null or b.expires_at > now())
+          )
+      )`,
+    })
+    .from(users)
+    .where(and(eq(users.id, recipientUserId), isNull(users.deletedAt)))
+    .limit(1);
+  if (!row) return { exists: false, sharesServer: false, existingChannelId: null };
+  const sharesServer = row.sharesServer === true;
+  return {
+    exists: true,
+    sharesServer,
+    existingChannelId: sharesServer ? null : await findDmChannelByPair(db, viewerUserId, recipientUserId),
+  };
 }
 
 export type DmAccessDecision = 'ok' | 'not_found' | 'not_participant' | 'blocked';

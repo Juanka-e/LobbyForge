@@ -100,11 +100,88 @@ function pngSize(buf: Buffer): { width: number; height: number } | null {
   return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
 }
 
-/** GIF: logical screen width/height are little-endian uint16 at 6/8. */
-function gifSize(buf: Buffer): { width: number; height: number } | null {
-  if (buf.length < 10) return null;
-  return { width: buf.readUInt16LE(6), height: buf.readUInt16LE(8) };
+export type GifStructure =
+  | { ok: true; width: number; height: number; frames: number }
+  | { ok: false; reason: 'truncated' | 'malformed' | 'frame_outside_screen' };
+
+/** Skip a run of GIF data sub-blocks (size byte + bytes, ended by a 0 byte). Returns the offset after the terminator, or -1 when the data ends first. */
+function skipGifSubBlocks(buf: Buffer, offset: number): number {
+  let off = offset;
+  while (off < buf.length) {
+    const size = buf[off]!;
+    off += 1;
+    if (size === 0) return off;
+    off += size;
+  }
+  return -1;
 }
+
+/**
+ * security-review FILE-V-01: walk every GIF block, not just the header.
+ *
+ * The logical screen (bytes 6–9) is what the dimension limits used to
+ * check, but each frame's image descriptor carries its own position and
+ * size — a 256×256 screen can hold a 65535×65535 first frame, and browsers
+ * grow the canvas to fit it (a decoder bomb). This walks the extensions and
+ * image descriptors (skipping colour tables and data sub-blocks) and
+ * requires every frame to lie inside the logical screen, at least one frame,
+ * and the trailer at the end. Anything else is refused as malformed or
+ * truncated. Bytes after the trailer are ignored, as decoders do.
+ */
+export function readGifStructure(buf: Buffer): GifStructure {
+  // Header (6) + logical screen descriptor (7).
+  if (buf.length < 13) return { ok: false, reason: 'truncated' };
+  const width = buf.readUInt16LE(6);
+  const height = buf.readUInt16LE(8);
+  const screenFlags = buf[10]!;
+  let off = 13;
+  if (screenFlags & 0x80) off += 3 * (1 << ((screenFlags & 0x07) + 1)); // global colour table
+  let frames = 0;
+  while (true) {
+    if (off >= buf.length) return { ok: false, reason: 'truncated' };
+    const introducer = buf[off]!;
+    if (introducer === 0x3b) {
+      // Trailer.
+      return frames > 0 ? { ok: true, width, height, frames } : { ok: false, reason: 'malformed' };
+    }
+    if (introducer === 0x21) {
+      // Extension: label byte, then data sub-blocks.
+      if (off + 2 > buf.length) return { ok: false, reason: 'truncated' };
+      off = skipGifSubBlocks(buf, off + 2);
+      if (off < 0) return { ok: false, reason: 'truncated' };
+      continue;
+    }
+    if (introducer === 0x2c) {
+      // Image descriptor: left, top, width, height (LE uint16), flags.
+      if (off + 10 > buf.length) return { ok: false, reason: 'truncated' };
+      const left = buf.readUInt16LE(off + 1);
+      const top = buf.readUInt16LE(off + 3);
+      const frameWidth = buf.readUInt16LE(off + 5);
+      const frameHeight = buf.readUInt16LE(off + 7);
+      const flags = buf[off + 9]!;
+      if (left + frameWidth > width || top + frameHeight > height) {
+        return { ok: false, reason: 'frame_outside_screen' };
+      }
+      off += 10;
+      if (flags & 0x80) off += 3 * (1 << ((flags & 0x07) + 1)); // local colour table
+      if (off >= buf.length) return { ok: false, reason: 'truncated' };
+      // LZW minimum code size: decoders accept 1–11 (a 12-bit dictionary is the ceiling).
+      const lzwMinimumCodeSize = buf[off]!;
+      if (lzwMinimumCodeSize < 1 || lzwMinimumCodeSize > 11) return { ok: false, reason: 'malformed' };
+      off = skipGifSubBlocks(buf, off + 1);
+      if (off < 0) return { ok: false, reason: 'truncated' };
+      frames += 1;
+      continue;
+    }
+    return { ok: false, reason: 'malformed' };
+  }
+}
+
+const GIF_STRUCTURE_ERRORS: Record<Exclude<GifStructure, { ok: true }>['reason'], string> = {
+  truncated: 'GIF image is truncated.',
+  malformed: 'GIF image structure is malformed.',
+  frame_outside_screen: 'GIF image has a frame larger than the image itself.',
+};
 
 /** WebP: VP8X canvas (24-bit LE, minus one) else VP8 keyframe / VP8L. */
 function webpSize(buf: Buffer): { width: number; height: number } | null {
@@ -163,12 +240,10 @@ function jpegSize(buf: Buffer): { width: number; height: number } | null {
   return null;
 }
 
-function parseSize(buf: Buffer, format: ImageFormat): { width: number; height: number } | null {
+function parseSize(buf: Buffer, format: Exclude<ImageFormat, 'gif'>): { width: number; height: number } | null {
   switch (format) {
     case 'png':
       return pngSize(buf);
-    case 'gif':
-      return gifSize(buf);
     case 'webp':
       return webpSize(buf);
     case 'jpeg':
@@ -210,7 +285,15 @@ export function checkImageDataUrl(dataUrl: string, limits: ImageLimits): ImageCh
     return { ok: false, error: `Declared image type (${declared}) does not match the actual file contents (${sniffed}).` };
   }
 
-  const size = parseSize(buf, sniffed);
+  let size: { width: number; height: number } | null;
+  if (sniffed === 'gif') {
+    // FILE-V-01: the frames, not just the logical screen.
+    const gif = readGifStructure(buf);
+    if (!gif.ok) return { ok: false, error: GIF_STRUCTURE_ERRORS[gif.reason], format: 'gif' };
+    size = { width: gif.width, height: gif.height };
+  } else {
+    size = parseSize(buf, sniffed);
+  }
   if (!size || !size.width || !size.height) {
     return { ok: false, error: 'Image dimensions could not be read from the file.' };
   }
@@ -249,7 +332,10 @@ export const IMAGE_FORMAT_MIME: Record<ImageFormat, string> = {
  * upload apply — the content is sniffed, never the claimed MIME, and the
  * claim must match — so a row written before validation existed (or by
  * hand) cannot be served as anything but PNG / JPEG / GIF / WebP. Size and
- * dimensions were enforced at upload; they are not re-parsed per request.
+ * dimensions were enforced at upload; they are not re-parsed per request —
+ * except a GIF's frame structure (FILE-V-01): a GIF stored before the
+ * frame check existed may carry an oversized frame, so it is walked here
+ * too (one pass over the sub-blocks) and not served when it fails.
  */
 export function decodeImageDataUrl(dataUrl: string): { format: ImageFormat; bytes: Buffer } | null {
   const match = DATA_URL_RE.exec(dataUrl);
@@ -259,5 +345,6 @@ export function decodeImageDataUrl(dataUrl: string): { format: ImageFormat; byte
   if (!sniffed) return null;
   const declared = match[1] === 'jpg' || match[1] === 'jpeg' ? 'jpeg' : (match[1] as ImageFormat);
   if (declared !== sniffed) return null;
+  if (sniffed === 'gif' && !readGifStructure(bytes).ok) return null;
   return { format: sniffed, bytes };
 }

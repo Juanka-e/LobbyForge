@@ -132,7 +132,7 @@
   "hub.landing.selfHost.running": "LobbyForge https://alan-adin adresinde çalışıyor",
   "hub.landing.selfHost.title": "Bir öğleden sonrada senin.",
   "hub.marketplace.approval.approve": "Onayla ve kur",
-  "hub.marketplace.approval.description": "Pazar yeri eklentileri ağ erişimi olmadan, korumalı alanda çalışır. Bu eklenti daha fazlasını istiyor. Burada onaylamadığın hiçbir şeye izin verilmez.",
+  "hub.marketplace.approval.description": "Pazar yeri eklentileri korumalı alanda çalışır ve ekranları yalnızca kendi dosyalarını yükleyebilir. Bu eklenti daha fazlasını istiyor. Burada onaylamadığın hiçbir şeye izin verilmez.",
   "hub.marketplace.approval.descriptionUpgrade": "Bu sürüm, kurulu olandan daha fazlasını istiyor. Yeni olarak işaretlenenler daha önce onaylanmadı.",
   "hub.marketplace.approval.footnote": "Eklentiyi kaldırmak bunların hepsini geri alır. Daha fazlasını isteyen sonraki bir sürüm sana yeniden sorar.",
   "hub.marketplace.approval.network.connect": "Veri gönderip alma",

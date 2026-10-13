@@ -35,7 +35,9 @@ allow.
 - **Custom bots** are driven through the [Bot API](#bot-api-v1) with a token.
   A server can have up to 20.
 - **Channels.** Bots use text and announcement channels that every member can
-  see. A role-gated channel (a private channel) is never available to a bot:
+  see. A role-gated channel (a private channel) is not available to a bot
+  unless someone with *Manage Channels* grants it explicitly
+  ([channel access](BOT_API_V2.md#11-channel-access-per-bot-botschannel_access_mode--bot_channel_access)):
   a bot holds no roles, so there is no way to let it in by accident.
 - **No mass pings.** A bot can never mention `@everyone` or `@here`.
 
@@ -95,8 +97,28 @@ lfb_<bot id: 32 hex>_<secret: 43 base64url characters>
   at once. **Revoke** removes the token; the bot stays but cannot call the
   API. **Deleting** a bot also ends its token. Every one of these is written
   to the audit log (without the token).
+- **Rotate and revoke also switch off the bot's event endpoint.** The
+  outgoing HTTPS endpoint ([Bot API v2](BOT_API_V2.md#52-outgoing-bot-event-endpoint))
+  was set by whoever held the old token, who chose its URL and knows its
+  signing secret. So the endpoint goes off (`disabled_reason =
+  'token_changed'`, audited as `bot.event_endpoint.disable`): no events, no
+  interactions and no synchronous answers reach it, and a command of the
+  bot answers `bot_offline` until the bot is reachable again. A manager
+  cannot switch such an endpoint back on — the bot sets it again with the
+  new token (`PUT /api/bot/v2/event-endpoint`, which issues a new secret),
+  or a manager removes it. An open event stream is closed too.
+- **A token outlives the person who issued it.** It belongs to the bot, not
+  to a member: a manager who leaves, is banned or loses Manage Community
+  does not take the bot's token with them. Rotate it when someone who had
+  it should no longer act as the bot.
+- **Private channels.** A bot granted role-gated channels by someone with
+  *Manage Channels* reaches channels other managers may not see. A manager
+  who cannot see one of them (and cannot grant private channels) cannot take
+  that bot's token, nor give it `read_messages`, `send_messages`,
+  `receive_events` or `slash_commands` — `403 cannot_take_hidden_access`.
+  Revoking the token, or removing permissions, is always allowed.
 
-If a token leaks, rotate it.
+If a token leaks, rotate it — the bot's endpoint goes off with it.
 
 ## Bot API v1
 
@@ -196,7 +218,9 @@ v1 stays as it is. v2 adds, all scoped per channel:
 - **Event stream** — the bot connects to the gateway at `/ws/bot`
   (`Authorization: Bot <token>` or an `identify` message) and receives
   `message_*`, `member_*` and `interaction_create` events instead of
-  polling.
+  polling. A `member_leave` event says why the member left (`reason`:
+  `leave`, `kick` or `ban`) to every bot with `read_members` — a bot that
+  reads members learns who was kicked or banned.
 - **Outgoing event endpoint** — or the instance POSTs the same events to the
   bot's HTTPS URL, signed with HMAC-SHA256 (`X-LobbyForge-Signature`).
 - **Incoming webhooks** — a channel's webhook URL lets an outside service
@@ -284,7 +308,8 @@ When a message is blocked:
   this community does not allow.");
 - the audit log gets `bot.moderation.block` — the bot, the rule, what matched,
   the channel, a trimmed excerpt (120 characters) and a SHA-256 of the full
-  message;
+  message; an audit reader who cannot see that channel gets the row without
+  what matched and without the excerpt;
 - optionally (*Post a notice in the channel*) the bot posts a short neutral
   line such as "A message from Alex was blocked by the moderation filter." —
   at most one per member per channel per minute.
@@ -309,17 +334,19 @@ permission, except listing):
 |---|---|---|---|
 | `GET` | `/api/servers/{id}/bots` | | every member; settings only for managers; never a token or hash |
 | `POST` | `/api/servers/{id}/bots` | `{ name, permissions }` | `201 { bot, token }` — the only time the token is returned |
-| `PATCH` | `/api/servers/{id}/bots/{botId}` | `{ name?, enabled?, permissions? }` | built-in permissions cannot change |
+| `PATCH` | `/api/servers/{id}/bots/{botId}` | `{ name?, enabled?, permissions? }` | built-in permissions cannot change; adding a channel permission to a bot with private channels the caller cannot see → `403 cannot_take_hidden_access` |
 | `DELETE` | `/api/servers/{id}/bots/{botId}` | | its messages stay, still marked as a bot's |
-| `POST` | `/api/servers/{id}/bots/{botId}/token` | | issue or rotate: `{ bot, token }` |
-| `DELETE` | `/api/servers/{id}/bots/{botId}/token` | | revoke |
+| `POST` | `/api/servers/{id}/bots/{botId}/token` | | issue or rotate: `{ bot, token }`; switches the event endpoint off; `403 ungrantable_permissions` / `cannot_take_hidden_access` |
+| `DELETE` | `/api/servers/{id}/bots/{botId}/token` | | revoke; switches the event endpoint off |
 | `PUT` | `/api/servers/{id}/bots/builtin/{welcome\|moderation}` | `{ enabled?, name?, settings? }` | sets the bot up on first call; settings are merged; `name: null` (or none, on first call) = the default name; a template that is `null` or a shipped default = the default text |
 
 Audit log actions: `bot.create`, `bot.update` (with what changed — for
 moderation settings, counts, never the word list), `bot.enable`,
 `bot.disable`, `bot.delete`, `bot.token.issue`, `bot.token.rotate`,
-`bot.token.revoke`, `bot.moderation.block`, and `message.create` for bot
-messages (`metadata.botId`).
+`bot.token.revoke` (`metadata.endpointDisabled` when the change switched an
+event endpoint off, which is also written as `bot.event_endpoint.disable`
+with `reason: 'token_changed'`), `bot.moderation.block`, and
+`message.create` for bot messages (`metadata.botId`).
 
 ## How bots appear
 

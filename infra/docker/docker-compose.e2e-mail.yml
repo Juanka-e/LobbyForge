@@ -25,5 +25,5 @@ services:
     container_name: lobbyforge-e2e-mailpit
     profiles: !reset []
     ports: !override
-      - "19625:1025"  # SMTP
-      - "19626:8025"  # Web UI and HTTP API
+      - "127.0.0.1:19625:1025"  # SMTP
+      - "127.0.0.1:19626:8025"  # Web UI and HTTP API

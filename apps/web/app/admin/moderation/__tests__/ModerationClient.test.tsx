@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render as rtlRender, screen } from '@testing-library/react';
+import { fireEvent, render as rtlRender, screen } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { I18nProvider } from '@/lib/i18n/client';
 import { providerPropsFor } from '@/lib/i18n/catalogue';
@@ -57,5 +57,39 @@ describe('ModerationClient — directory entry status', () => {
     expect(screen.getByText('public', { selector: 'span.rounded-full' })).toBeInTheDocument();
     expect(screen.getByText('blocked', { selector: 'span.rounded-full' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /Community Directory \(4\)/ })).toBeInTheDocument();
+  });
+});
+
+describe('ModerationClient — reviewing a plugin', () => {
+  const pending = (version: string) => ({
+    pendingPlugins: [
+      { pluginId: 'cool-game', name: 'Cool Game', version, publisher: 'Dev', category: null, summary: null, submittedAt: '2026-10-01T00:00:00.000Z' },
+    ],
+    reports: [],
+    registryInstances: [],
+  });
+
+  it('sends the version on screen, and says so when the submission changed in between', async () => {
+    const posts: unknown[] = [];
+    let listed = '1.0.0';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === '/api/marketplace/review') {
+          posts.push(JSON.parse(String(init?.body)));
+          listed = '1.1.0';
+          return Response.json({ error: 'changed', code: 'version_changed', version: '1.1.0' }, { status: 409 });
+        }
+        return Response.json(pending(listed));
+      })
+    );
+    render(<ModerationClient />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Cool Game was resubmitted as version 1.1.0 while this list was open, so nothing was saved.'
+    );
+    expect(posts).toEqual([{ pluginId: 'cool-game', decision: 'approved', version: '1.0.0' }]);
+    // The list now shows the new version to review.
+    expect(await screen.findByText('v1.1.0')).toBeInTheDocument();
   });
 });

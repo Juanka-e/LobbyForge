@@ -11,6 +11,7 @@ import {
   patchBotCommand,
   putBotChannelAccess,
   reenableBotEventEndpoint,
+  removeBotEventEndpoint,
   type AccessChannel,
   type BotChannelAccess,
   type BotCommandInfo,
@@ -19,7 +20,7 @@ import {
   type RequestFailure,
 } from '@/lib/bots/client-api';
 import { describeFailure } from './api-client';
-import { Alert, Switch, primaryButtonClass, secondaryButtonClass } from './ui';
+import { Alert, Switch, dangerButtonClass, primaryButtonClass, secondaryButtonClass } from './ui';
 
 /**
  * Bot API v2 settings for one custom bot (docs/BOT_API_V2.md §7):
@@ -29,8 +30,10 @@ import { Alert, Switch, primaryButtonClass, secondaryButtonClass } from './ui';
  * - Commands — what the bot registered, with enable/disable and a channel
  *   restriction per command.
  * - Event endpoint — where the instance delivers the bot's events, and
- *   why deliveries stopped. Its signing secret is shown to the BOT through
- *   the API when it sets the URL, never here.
+ *   why deliveries stopped; a manager can remove it. Its signing secret is
+ *   shown to the BOT through the API when it sets the URL, never here. One
+ *   switched off by a token change cannot be turned back on here — the bot
+ *   sets it again with its new token (BOT-002).
  *
  * Collapsed by default and loaded when opened: most bots never need it.
  */
@@ -581,6 +584,9 @@ function CommandsSection({
 
 // ---------------------------------------------------------------------------
 
+/** A token rotate / revoke switched the endpoint off: only the bot may set it again (BOT-002). */
+const TOKEN_CHANGED_REASON = 'token_changed';
+
 /** Reasons the delivery worker gives for switching an endpoint off. */
 function disabledReasonText(t: Translator, reason: string): string {
   switch (reason) {
@@ -594,6 +600,8 @@ function disabledReasonText(t: Translator, reason: string): string {
       return t('botAdmin.endpoint.reason.unsafe');
     case 'manual':
       return t('botAdmin.endpoint.reason.manual');
+    case TOKEN_CHANGED_REASON:
+      return t('botAdmin.endpoint.reason.tokenChanged');
     default:
       return reason;
   }
@@ -602,11 +610,14 @@ function disabledReasonText(t: Translator, reason: string): string {
 function EventEndpointSection({ bot, serverId, canMutate }: { bot: BotJson; serverId: string; canMutate: boolean }) {
   const t = useT();
   const titleId = useId();
+  const confirmId = useId();
   const [endpoint, setEndpoint] = useState<BotEventEndpoint | null | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const hasPermission = bot.permissions.includes('receive_events');
+  const tokenChanged = endpoint?.disabledReason === TOKEN_CHANGED_REASON;
 
   useEffect(() => {
     let cancelled = false;
@@ -625,9 +636,24 @@ function EventEndpointSection({ bot, serverId, canMutate }: { bot: BotJson; serv
     setNotice(null);
     const result = await reenableBotEventEndpoint(serverId, bot.id);
     setBusy(false);
-    if (!result.ok) return setNotice({ tone: 'danger', text: failureText(t, result) });
+    if (!result.ok) {
+      const text = result.code === 'endpoint_token_changed' ? t('botAdmin.endpoint.tokenChangedError') : failureText(t, result);
+      return setNotice({ tone: 'danger', text });
+    }
     setEndpoint(result.data.endpoint);
     setNotice({ tone: 'success', text: t('botAdmin.endpoint.reenabled') });
+  }
+
+  async function remove() {
+    setBusy(true);
+    setNotice(null);
+    const result = await removeBotEventEndpoint(serverId, bot.id);
+    setBusy(false);
+    setConfirmingRemove(false);
+    // Already gone (404) is what the manager wanted too.
+    if (!result.ok && result.status !== 404) return setNotice({ tone: 'danger', text: failureText(t, result) });
+    setEndpoint(null);
+    setNotice({ tone: 'success', text: t('botAdmin.endpoint.removed') });
   }
 
   return (
@@ -706,7 +732,12 @@ function EventEndpointSection({ bot, serverId, canMutate }: { bot: BotJson; serv
             ) : null}
           </dl>
 
-          {!endpoint.enabled ? (
+          {!endpoint.enabled && tokenChanged ? (
+            <p className="mt-3 border-t border-border-subtle pt-3 text-xs text-text-muted" data-testid="endpoint-token-changed">
+              {t('botAdmin.endpoint.tokenChangedHint')}
+            </p>
+          ) : null}
+          {!endpoint.enabled && !tokenChanged ? (
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border-subtle pt-3">
               <p className="text-xs text-text-muted">{t('botAdmin.endpoint.reenableHint')}</p>
               <button type="button" onClick={() => void reenable()} disabled={!canMutate || busy} className={primaryButtonClass}>
@@ -714,6 +745,40 @@ function EventEndpointSection({ bot, serverId, canMutate }: { bot: BotJson; serv
               </button>
             </div>
           ) : null}
+
+          <div className="mt-3 flex flex-wrap items-center justify-end gap-2 border-t border-border-subtle pt-3">
+            {confirmingRemove ? (
+              <>
+                <p id={confirmId} className="mr-auto text-xs text-text-secondary">
+                  {t('botAdmin.endpoint.removeConfirm')}
+                </p>
+                <button type="button" onClick={() => setConfirmingRemove(false)} disabled={busy} className={secondaryButtonClass}>
+                  {t('common.cancel')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void remove()}
+                  disabled={!canMutate || busy}
+                  aria-describedby={confirmId}
+                  className={dangerButtonClass}
+                >
+                  {busy ? t('bots.working') : t('botAdmin.endpoint.removeConfirmAction')}
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setNotice(null);
+                  setConfirmingRemove(true);
+                }}
+                disabled={!canMutate || busy}
+                className={secondaryButtonClass}
+              >
+                {t('botAdmin.endpoint.remove')}
+              </button>
+            )}
+          </div>
         </div>
       ) : null}
 

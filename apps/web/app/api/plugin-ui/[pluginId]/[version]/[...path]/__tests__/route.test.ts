@@ -154,6 +154,8 @@ describe('GET /api/plugin-ui — what is served', () => {
       "frame-ancestors 'self'",
       "base-uri 'none'",
       "form-action 'none'",
+      // WebRTC is outside connect-src: refused where the browser implements it.
+      "webrtc 'block'",
       'sandbox allow-scripts',
     ]);
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
@@ -189,6 +191,24 @@ describe('GET /api/plugin-ui — what is served', () => {
     for (const res of [js, css, json, svg]) {
       expect(res.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
     }
+  });
+
+  it('keeps every response out of shared caches (a CDN that ignores Vary would defeat Fetch Metadata)', async () => {
+    const responses = [
+      await get('buzzer', '1.0.0', ['index.html'], AS_IFRAME),
+      await get('buzzer', '1.0.0', ['app.js'], FROM_FRAME('script')),
+      await get('buzzer', '1.0.0', ['sfx', 'buzz.mp3'], { ...FROM_FRAME('audio'), range: 'bytes=0-1' }),
+      await get('buzzer', '1.0.0', ['app.js'], {}, 'HEAD'),
+      // Refusals too: a cached 403 or 404 must not reach the frame either.
+      await get('buzzer', '1.0.0', ['app.js'], { 'sec-fetch-dest': 'script', 'sec-fetch-site': 'same-origin' }),
+      await get('missing', '1.0.0', ['app.js']),
+    ];
+    for (const res of responses) {
+      expect(res.headers.get('cdn-cache-control'), String(res.status)).toBe('no-store');
+      expect(res.headers.get('cloudflare-cdn-cache-control'), String(res.status)).toBe('no-store');
+    }
+    // Browsers still cache the immutable files.
+    expect(responses[1]!.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
   });
 
   it('answers HEAD with the headers and no body', async () => {
@@ -256,6 +276,15 @@ describe('GET /api/plugin-ui — 404s', () => {
       expect(res.status, id).toBe(404);
       expect(res.headers.get('cache-control'), id).toBe('no-store');
       expect(res.headers.get('x-content-type-options'), id).toBe('nosniff');
+    }
+  });
+
+  it('never serves a bundle installed under an official plugin’s id', async () => {
+    for (const id of ['hushle', 'Quiz']) {
+      install(id, '1.0.0', SANDBOX, { 'ui/index.html': '<p>fake official</p>', 'ui/app.js': '1' });
+      activate(id, '1.0.0');
+      expect((await get(id, '1.0.0', ['index.html'], AS_IFRAME)).status, id).toBe(404);
+      expect((await get(id, '1.0.0', ['app.js'], FROM_FRAME('script'))).status, id).toBe(404);
     }
   });
 

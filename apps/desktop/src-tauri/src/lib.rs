@@ -103,11 +103,19 @@ fn base64_url_encode(data: &[u8]) -> String {
     out
 }
 
+/// A deep link that passed the native gate, with the instance origin the
+/// browser login was started for — the only origin it may be posted to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AcceptedHandoff {
+    url: String,
+    instance_origin: String,
+}
+
 /// Gate a lobbyforge:// deep link against the pending handoff.
-/// Returns Some(url) only when a pending entry exists, is unexpired,
+/// Returns the link only when a pending entry exists, is unexpired,
 /// the state matches EXACTLY and the link's instance (when present)
 /// matches the pending origin. Consumes the pending entry on success.
-fn accept_deep_link(state: &ShellState, raw: &str) -> Option<String> {
+fn accept_deep_link(state: &ShellState, raw: &str) -> Option<AcceptedHandoff> {
     let url = url::Url::parse(raw).ok()?;
     if url.scheme() != "lobbyforge" {
         return None;
@@ -137,7 +145,10 @@ fn accept_deep_link(state: &ShellState, raw: &str) -> Option<String> {
             return None;
         }
     }
-    let accepted = raw.to_string();
+    let accepted = AcceptedHandoff {
+        url: raw.to_string(),
+        instance_origin: pending.instance_origin.clone(),
+    };
     *pending_guard = None; // single-use — consumed only on success
     Some(accepted)
 }
@@ -163,6 +174,31 @@ struct ShellState {
     /// lobbyforge:// links (an attacker feeding their own code+state)
     /// are dropped at the OS boundary, before any web check runs.
     pending_handoff: Mutex<Option<PendingHandoff>>,
+    /// The bundled connect screen's URL (its scheme differs per platform),
+    /// recorded on its first page load — where disconnect and the page-load
+    /// guard send a window with no instance.
+    shell_url: Mutex<Option<url::Url>>,
+    /// When the navigation guard last handed a URL to the system browser
+    /// (a page cannot open a burst of browser tabs).
+    last_external_open: Mutex<Option<std::time::Instant>>,
+    /// When the page-load guard last sent the window back to the instance
+    /// (breaks a loop when the instance itself redirects elsewhere).
+    last_bounce: Mutex<Option<std::time::Instant>>,
+}
+
+impl ShellState {
+    /// Point the shell at an instance origin, or at none. Every switch —
+    /// connect, disconnect, restore at launch — drops a pending browser
+    /// login (security-review DESK-V-02): a login started for one instance
+    /// can never complete into another.
+    fn set_instance(&self, origin: Option<String>) {
+        *self.instance_url.lock().unwrap() = origin;
+        *self.pending_handoff.lock().unwrap() = None;
+    }
+
+    fn instance(&self) -> Option<String> {
+        self.instance_url.lock().unwrap().clone()
+    }
 }
 
 struct PendingHandoff {
@@ -171,10 +207,163 @@ struct PendingHandoff {
     expires_at: std::time::Instant,
 }
 
+/// What may happen to a URL the webview wants to load (security-review
+/// DESK-V-01). The window has no address bar, so whatever it shows looks
+/// like the instance — it must only ever show the instance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NavigationDecision {
+    /// Load it in the app window.
+    Allow,
+    /// Hand it to the system browser instead.
+    OpenExternally,
+    /// Drop it.
+    Block,
+}
+
+/// The bundled connect screen: `tauri://localhost` on macOS / Linux,
+/// `http(s)://tauri.localhost` on Windows.
+fn is_local_shell(url: &url::Url) -> bool {
+    match url.scheme() {
+        "tauri" => url.host_str() == Some("localhost"),
+        "http" | "https" => url.host_str() == Some("tauri.localhost"),
+        _ => false,
+    }
+}
+
+/// Where a TOP-LEVEL navigation may go: the connected instance (its exact
+/// origin) and the local shell load in the window; any other http(s) page
+/// opens in the system browser; every other scheme (file:, data:, custom
+/// protocols, …) is dropped. `about:blank` / `about:srcdoc` and a blob: URL
+/// of the instance itself carry the instance's origin, so they stay.
+fn decide_top_level_navigation(target: &url::Url, instance_origin: Option<&str>) -> NavigationDecision {
+    if is_local_shell(target) {
+        return NavigationDecision::Allow;
+    }
+    let same_instance = || instance_origin.is_some_and(|origin| target.origin().ascii_serialization() == origin);
+    match target.scheme() {
+        "http" | "https" if same_instance() => NavigationDecision::Allow,
+        "http" | "https" => NavigationDecision::OpenExternally,
+        "about" if matches!(target.path(), "blank" | "srcdoc") => NavigationDecision::Allow,
+        "blob" if same_instance() => NavigationDecision::Allow,
+        _ => NavigationDecision::Block,
+    }
+}
+
+/// The webview's navigation handler sees iframe navigations too on macOS and
+/// Linux (WKWebView and WebKitGTK ask for every frame); WebView2's
+/// NavigationStarting is top-level only. An outside http(s) URL there may be
+/// an embed the instance frames on purpose (Watch Party's YouTube player, a
+/// CAPTCHA widget), so it is let through at that point and the top-level
+/// rule is enforced from the page-load event instead, which is main-frame
+/// only on every platform.
+const NAVIGATION_HANDLER_SEES_SUBFRAMES: bool = !cfg!(target_os = "windows");
+
+/// The decision for one navigation-handler call.
+fn decide_navigation_event(
+    target: &url::Url,
+    instance_origin: Option<&str>,
+    handler_sees_subframes: bool,
+) -> NavigationDecision {
+    match decide_top_level_navigation(target, instance_origin) {
+        NavigationDecision::OpenExternally if handler_sees_subframes => NavigationDecision::Allow,
+        decision => decision,
+    }
+}
+
+/// `window.open` / `target=_blank`: never a second app window (it would
+/// have no address bar and no guard). http(s) goes to the system browser;
+/// anything else is dropped.
+fn decide_new_window(target: &url::Url) -> NavigationDecision {
+    match target.scheme() {
+        "http" | "https" => NavigationDecision::OpenExternally,
+        _ => NavigationDecision::Block,
+    }
+}
+
+const EXTERNAL_OPEN_MIN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// At most one system-browser hand-off per second.
+fn external_open_allowed(last: Option<std::time::Instant>, now: std::time::Instant) -> bool {
+    last.map_or(true, |at| now.saturating_duration_since(at) >= EXTERNAL_OPEN_MIN_INTERVAL)
+}
+
+/// Hand a refused URL to the system browser (throttled).
+fn open_externally(app: &tauri::AppHandle, url: &url::Url) {
+    let shell: tauri::State<ShellState> = app.state();
+    let now = std::time::Instant::now();
+    {
+        let mut last = shell.last_external_open.lock().unwrap();
+        if !external_open_allowed(*last, now) {
+            return;
+        }
+        *last = Some(now);
+    }
+    let _ = open_in_system_browser(app, url.as_str());
+}
+
+/// The navigation handler: true lets the webview load `url`.
+fn guard_navigation(app: &tauri::AppHandle, url: &url::Url) -> bool {
+    let instance = app.state::<ShellState>().instance();
+    match decide_navigation_event(url, instance.as_deref(), NAVIGATION_HANDLER_SEES_SUBFRAMES) {
+        NavigationDecision::Allow => true,
+        NavigationDecision::OpenExternally => {
+            open_externally(app, url);
+            false
+        }
+        NavigationDecision::Block => false,
+    }
+}
+
+const BOUNCE_LOOP_WINDOW: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Where the page-load guard sends a window that landed on a page it may
+/// not show: the instance's front page — unless it did that a moment ago
+/// (the instance itself redirects outside, e.g. a non-canonical address),
+/// then the connect screen, so the window does not bounce forever.
+fn bounce_target(
+    instance_origin: Option<&str>,
+    shell_url: Option<&url::Url>,
+    last_bounce: Option<std::time::Instant>,
+    now: std::time::Instant,
+) -> Option<url::Url> {
+    let recently = last_bounce.is_some_and(|at| now.saturating_duration_since(at) < BOUNCE_LOOP_WINDOW);
+    match instance_origin {
+        Some(origin) if !recently => url::Url::parse(&format!("{origin}/")).ok(),
+        _ => shell_url.cloned(),
+    }
+}
+
+/// Main-frame page loads: a top-level page the guard would not have allowed
+/// (one the navigation handler could not tell from an iframe, or a server
+/// redirect) is replaced at once by the instance, or the connect screen.
+fn guard_page_load(window: &WebviewWindow, url: &url::Url) {
+    let app = window.app_handle();
+    let shell: tauri::State<ShellState> = app.state();
+    let instance = shell.instance();
+    let decision = decide_top_level_navigation(url, instance.as_deref());
+    if decision == NavigationDecision::Allow {
+        return;
+    }
+    if decision == NavigationDecision::OpenExternally {
+        open_externally(app, url);
+    }
+    let now = std::time::Instant::now();
+    let home = {
+        let mut last_bounce = shell.last_bounce.lock().unwrap();
+        let shell_url = shell.shell_url.lock().unwrap().clone();
+        let target = bounce_target(instance.as_deref(), shell_url.as_ref(), *last_bounce, now);
+        *last_bounce = Some(now);
+        target
+    };
+    if let Some(home) = home {
+        let _ = window.navigate(home);
+    }
+}
+
 
 #[tauri::command]
 fn get_instance_url(state: tauri::State<ShellState>) -> Option<String> {
-    state.instance_url.lock().unwrap().clone()
+    state.instance()
 }
 
 /// Connect the webview to an instance URL. Validates, persists, navigates.
@@ -191,12 +380,17 @@ fn connect_instance(
         let _ = store.set(INSTANCE_URL_KEY, serde_json::json!(origin));
         let _ = store.save();
     }
+    // DESK-V-01: the navigation guard admits the instance origin only once
+    // it is recorded, so record it BEFORE navigating (DESK-V-02: this also
+    // drops any pending browser login for the previous instance).
+    let previous = state.instance();
+    state.set_instance(Some(origin.clone()));
     // Navigate the existing webview to the instance.
     let url = format!("{}/", origin);
-    window
-        .eval(&format!("window.__lobbyforgeNavigate({:?})", url))
-        .map_err(|e| format!("Failed to navigate: {}", e))?;
-    *state.instance_url.lock().unwrap() = Some(origin.clone());
+    if let Err(e) = window.eval(&format!("window.__lobbyforgeNavigate({:?})", url)) {
+        state.set_instance(previous);
+        return Err(format!("Failed to navigate: {}", e));
+    }
     // Reflect the instance in the window title + tray.
     let _ = window.set_title(&format!("LobbyForge — {}", origin));
     Ok(origin)
@@ -213,11 +407,20 @@ fn disconnect_instance(
         let _ = store.delete(INSTANCE_URL_KEY);
         let _ = store.save();
     }
-    // DP-16: actually navigate BACK. The shell's connect screen is the
-    // app's local entry point — a plain webview_url reset lands on the
-    // bundled index.html and reloads shell.js cleanly.
-    let _ = window.eval("window.location.href = 'index.html'");
-    *state.instance_url.lock().unwrap() = None;
+    // DESK-V-02: no instance, no pending browser login.
+    state.set_instance(None);
+    // DP-16: actually navigate BACK to the bundled connect screen (always
+    // allowed by the navigation guard). Its recorded URL when known; the
+    // relative path otherwise (this command runs on the connect screen).
+    let shell_url = state.shell_url.lock().unwrap().clone();
+    match shell_url {
+        Some(home) => {
+            let _ = window.navigate(home);
+        }
+        None => {
+            let _ = window.eval("window.location.href = 'index.html'");
+        }
+    }
     let _ = window.set_title("LobbyForge");
     Ok(())
 }
@@ -241,9 +444,14 @@ fn shell_flag(app: &tauri::AppHandle, key: &str, default: bool) -> bool {
 /// is not structured-cloneable — every postMessage threw DataCloneError,
 /// so desktop PTT, shortcuts and the login handoff never reached the page.
 /// The receiver checks `event.source === window`, which the browser sets
-/// itself. The payload is serialized as JSON (valid JS, safely escaped).
-fn post_message_script(payload: &serde_json::Value) -> String {
-    format!("window.postMessage({payload},'*')")
+/// itself. The payload and the target origin are serialized as JSON (valid
+/// JS, safely escaped). `target_origin` is `"*"` only for key state (PTT,
+/// shortcuts), which means nothing to another page; a session handoff names
+/// its instance origin, so the browser drops it on any other page
+/// (security-review DESK-V-02).
+fn post_message_script(payload: &serde_json::Value, target_origin: &str) -> String {
+    let target = serde_json::Value::String(target_origin.to_string());
+    format!("window.postMessage({payload},{target})")
 }
 
 fn emit_ptt(window: &WebviewWindow, pressed: bool) {
@@ -253,6 +461,7 @@ fn emit_ptt(window: &WebviewWindow, pressed: bool) {
     // …and postMessage into the page for the remote instance.
     let _ = window.eval(&post_message_script(
         &serde_json::json!({ "type": "lobbyforge:ptt", "pressed": pressed }),
+        "*",
     ));
 }
 
@@ -261,6 +470,7 @@ fn emit_ptt(window: &WebviewWindow, pressed: bool) {
 fn emit_shortcut(window: &WebviewWindow, action: &str) {
     let _ = window.eval(&post_message_script(
         &serde_json::json!({ "type": "lobbyforge:shortcut", "action": action }),
+        "*",
     ));
 }
 
@@ -349,12 +559,20 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 /// running, OS routed the URL) and the single-instance argv relay
 /// (DESK-001: on Windows/Linux a second launch carries the URL as a
 /// command-line argument — without the relay the handoff is lost).
-fn forward_handoff(window: &WebviewWindow, url_str: &str) {
-    let _ = window.eval(&post_message_script(
-        &serde_json::json!({ "type": "lobbyforge:handoff", "url": url_str }),
-    ));
+/// security-review DESK-V-02: the code + state go to the instance origin
+/// the login was started for, never `'*'` — on any other page the browser
+/// does not deliver them.
+fn forward_handoff(window: &WebviewWindow, handoff: &AcceptedHandoff) {
+    let _ = window.eval(&handoff_script(handoff));
     let _ = window.show();
     let _ = window.set_focus();
+}
+
+fn handoff_script(handoff: &AcceptedHandoff) -> String {
+    post_message_script(
+        &serde_json::json!({ "type": "lobbyforge:handoff", "url": handoff.url }),
+        &handoff.instance_origin,
+    )
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -389,6 +607,47 @@ pub fn run() {
         .manage(ShellState::default())
 
         .setup(|app| {
+            // security-review DESK-V-01: the main window is built here (its
+            // config says `"create": false`) so it carries the navigation
+            // guards. Top-level navigation stays on the connected instance
+            // and the local shell; other http(s) pages open in the system
+            // browser; window.open never makes a second app window.
+            let config = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|w| w.label == "main")
+                .cloned()
+                .ok_or("tauri.conf.json has no `main` window")?;
+            let nav_app = app.handle().clone();
+            let popup_app = app.handle().clone();
+            tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?
+                .on_navigation(move |url| guard_navigation(&nav_app, url))
+                .on_new_window(move |url, _features| {
+                    if decide_new_window(&url) == NavigationDecision::OpenExternally {
+                        open_externally(&popup_app, &url);
+                    }
+                    tauri::webview::NewWindowResponse::Deny
+                })
+                .on_page_load(|window, payload| {
+                    let url = payload.url();
+                    if is_local_shell(url) {
+                        // Remember the connect screen's real URL (scheme
+                        // differs per platform) for disconnect and the guard.
+                        let shell: tauri::State<ShellState> = window.state();
+                        let mut shell_url = shell.shell_url.lock().unwrap();
+                        if shell_url.is_none() {
+                            let mut home = url.clone();
+                            home.set_query(None);
+                            home.set_fragment(None);
+                            *shell_url = Some(home);
+                        }
+                    }
+                    guard_page_load(&window, url);
+                })
+                .build()?;
+
             // DP-07: session handoff deep links. The browser redirects to
             // lobbyforge://session/complete?code&state&instance after the
             // user logs into their instance; forward the URL into the page
@@ -451,14 +710,20 @@ pub fn run() {
                 });
             }
 
-            // Restore the saved instance URL and navigate on launch.
+            // Restore the saved instance URL and navigate on launch. The
+            // stored value is re-validated (it is a file on disk), and the
+            // guard learns the origin before the page navigates.
             if let Ok(store) = app.store(STORE_FILE) {
-                if let Some(url) = store.get(INSTANCE_URL_KEY).and_then(|v| v.as_str().map(String::from)) {
+                let saved = store
+                    .get(INSTANCE_URL_KEY)
+                    .and_then(|v| v.as_str().map(String::from))
+                    .and_then(|raw| normalize_instance_url(&raw).ok());
+                if let Some(url) = saved {
                     if let Some(window) = app.get_webview_window("main") {
+                        let state: tauri::State<ShellState> = app.state();
+                        state.set_instance(Some(url.clone()));
                         let full = format!("{}/", url);
                         let _ = window.eval(&format!("window.__lobbyforgeNavigate({:?})", full));
-                        let state: tauri::State<ShellState> = app.state();
-                        *state.instance_url.lock().unwrap() = Some(url.clone());
                         let _ = window.set_title(&format!("LobbyForge — {}", url));
                     }
                 }
@@ -478,22 +743,217 @@ pub fn run() {
 
 #[cfg(test)]
 mod post_message_tests {
-    use super::post_message_script;
+    use super::{handoff_script, post_message_script, AcceptedHandoff};
 
     #[test]
     fn payload_is_cloneable_json_without_a_window_reference() {
-        let script = post_message_script(&serde_json::json!({ "type": "lobbyforge:ptt", "pressed": true }));
-        assert_eq!(script, r#"window.postMessage({"pressed":true,"type":"lobbyforge:ptt"},'*')"#);
+        let script = post_message_script(&serde_json::json!({ "type": "lobbyforge:ptt", "pressed": true }), "*");
+        assert_eq!(script, r#"window.postMessage({"pressed":true,"type":"lobbyforge:ptt"},"*")"#);
         assert!(!script.contains("source"));
     }
 
     #[test]
     fn untrusted_strings_are_escaped() {
-        let script = post_message_script(&serde_json::json!({
-            "type": "lobbyforge:handoff",
-            "url": "lobbyforge://x\"});alert(1);//"
-        }));
+        let script = post_message_script(
+            &serde_json::json!({
+                "type": "lobbyforge:handoff",
+                "url": "lobbyforge://x\"});alert(1);//"
+            }),
+            "https://chat.example.com\"),alert(2",
+        );
         assert!(script.contains(r#"\"});alert(1);//"#));
+        assert!(script.ends_with(r#",alert(2")"#));
+        assert!(script.contains(r#""https://chat.example.com\"),alert(2""#));
+    }
+
+    /// security-review DESK-V-02: the code + state are posted to the
+    /// instance the login was started for, never broadcast.
+    #[test]
+    fn a_handoff_is_posted_to_its_instance_origin_only() {
+        let script = handoff_script(&AcceptedHandoff {
+            url: "lobbyforge://session/complete?code=c&state=s".to_string(),
+            instance_origin: "https://chat.example.com".to_string(),
+        });
+        assert!(script.ends_with(r#","https://chat.example.com")"#), "{script}");
+        assert!(!script.contains(r#""*""#));
+        assert!(!script.contains("'*'"));
+    }
+}
+
+#[cfg(test)]
+mod handoff_tests {
+    use super::{accept_deep_link, PendingHandoff, ShellState, HANDOFF_TTL};
+
+    const STATE: &str = "pending-state-0123456789abcdef";
+
+    fn pending_for(shell: &ShellState, origin: &str) {
+        *shell.pending_handoff.lock().unwrap() = Some(PendingHandoff {
+            state: STATE.to_string(),
+            instance_origin: origin.to_string(),
+            expires_at: std::time::Instant::now() + HANDOFF_TTL,
+        });
+    }
+
+    fn link(instance: &str) -> String {
+        format!("lobbyforge://session/complete?code=abc&state={STATE}&instance={instance}")
+    }
+
+    #[test]
+    fn an_accepted_link_carries_the_origin_it_was_started_for_and_is_single_use() {
+        let shell = ShellState::default();
+        pending_for(&shell, "https://chat.example.com");
+        let accepted = accept_deep_link(&shell, &link("https://chat.example.com")).expect("accepted");
+        assert_eq!(accepted.instance_origin, "https://chat.example.com");
+        assert!(accepted.url.starts_with("lobbyforge://session/complete"));
+        assert!(accept_deep_link(&shell, &link("https://chat.example.com")).is_none());
+    }
+
+    /// security-review DESK-V-02: switching or leaving the instance drops a
+    /// browser login that is still pending.
+    #[test]
+    fn connecting_elsewhere_or_disconnecting_clears_the_pending_login() {
+        let shell = ShellState::default();
+        shell.set_instance(Some("https://a.example.com".to_string()));
+        pending_for(&shell, "https://a.example.com");
+        shell.set_instance(Some("https://b.example.com".to_string()));
+        assert!(shell.pending_handoff.lock().unwrap().is_none());
+        assert!(accept_deep_link(&shell, &link("https://a.example.com")).is_none());
+
+        pending_for(&shell, "https://b.example.com");
+        shell.set_instance(None);
+        assert!(shell.pending_handoff.lock().unwrap().is_none());
+        assert_eq!(shell.instance(), None);
+        assert!(accept_deep_link(&shell, &link("https://b.example.com")).is_none());
+    }
+
+    #[test]
+    fn a_link_for_another_instance_or_state_is_refused_without_burning_the_login() {
+        let shell = ShellState::default();
+        pending_for(&shell, "https://chat.example.com");
+        assert!(accept_deep_link(&shell, &link("https://evil.example.com")).is_none());
+        assert!(accept_deep_link(&shell, "lobbyforge://session/complete?code=abc&state=wrong").is_none());
+        assert!(accept_deep_link(&shell, &link("https://chat.example.com")).is_some());
+    }
+}
+
+#[cfg(test)]
+mod navigation_tests {
+    use super::{
+        decide_navigation_event, decide_new_window, decide_top_level_navigation, external_open_allowed,
+        NavigationDecision::{Allow, Block, OpenExternally},
+    };
+
+    const INSTANCE: Option<&str> = Some("https://chat.example.com");
+
+    fn url(raw: &str) -> url::Url {
+        url::Url::parse(raw).unwrap()
+    }
+
+    #[test]
+    fn the_instance_origin_loads_in_the_window() {
+        for target in [
+            "https://chat.example.com/",
+            "https://chat.example.com/lobby?x=1#y",
+            "https://CHAT.example.com:443/settings",
+            "blob:https://chat.example.com/2f0c5c8e-1111-4a5e-9a37-0123456789ab",
+            "about:blank",
+        ] {
+            assert_eq!(decide_top_level_navigation(&url(target), INSTANCE), Allow, "{target}");
+        }
+    }
+
+    #[test]
+    fn the_local_shell_always_loads() {
+        for target in ["tauri://localhost/index.html", "http://tauri.localhost/index.html", "https://tauri.localhost/"] {
+            assert_eq!(decide_top_level_navigation(&url(target), INSTANCE), Allow, "{target}");
+            assert_eq!(decide_top_level_navigation(&url(target), None), Allow, "{target}");
+        }
+    }
+
+    #[test]
+    fn any_other_web_page_opens_in_the_system_browser() {
+        for target in [
+            "https://evil.example.com/login",
+            "https://chat.example.com.evil.com/",
+            "http://chat.example.com/", // same host, other scheme = other origin
+            "https://chat.example.com:8443/",
+            "https://sub.chat.example.com/",
+            "https://accounts.google.com/o/oauth2/auth",
+        ] {
+            assert_eq!(decide_top_level_navigation(&url(target), INSTANCE), OpenExternally, "{target}");
+        }
+        // Not connected: everything on the web is external.
+        assert_eq!(decide_top_level_navigation(&url("https://chat.example.com/"), None), OpenExternally);
+    }
+
+    #[test]
+    fn other_schemes_are_dropped() {
+        for target in [
+            "file:///C:/Windows/System32/drivers/etc/hosts",
+            "data:text/html,<script>alert(1)</script>",
+            "javascript:alert(1)",
+            "lobbyforge://session/complete?code=x&state=y",
+            "ms-settings:privacy",
+            "blob:https://evil.example.com/2f0c5c8e-1111-4a5e-9a37-0123456789ab",
+            "tauri://evil/index.html",
+            "about:config",
+        ] {
+            assert_eq!(decide_top_level_navigation(&url(target), INSTANCE), Block, "{target}");
+        }
+    }
+
+    #[test]
+    fn where_the_handler_also_sees_iframes_an_outside_page_is_left_to_the_page_load_guard() {
+        let youtube = url("https://www.youtube-nocookie.com/embed/abc");
+        // Windows: top-level only — decided right away.
+        assert_eq!(decide_navigation_event(&youtube, INSTANCE, false), OpenExternally);
+        // macOS / Linux: may be the Watch Party iframe — allowed here; a
+        // top-level load of it is caught by decide_top_level_navigation.
+        assert_eq!(decide_navigation_event(&youtube, INSTANCE, true), Allow);
+        assert_eq!(decide_top_level_navigation(&youtube, INSTANCE), OpenExternally);
+        // Dangerous schemes are dropped on every platform.
+        assert_eq!(decide_navigation_event(&url("file:///etc/passwd"), INSTANCE, true), Block);
+        assert_eq!(decide_navigation_event(&url("https://chat.example.com/x"), INSTANCE, true), Allow);
+    }
+
+    #[test]
+    fn new_windows_never_open_in_the_app() {
+        assert_eq!(decide_new_window(&url("https://chat.example.com/developers")), OpenExternally);
+        assert_eq!(decide_new_window(&url("https://evil.example.com/")), OpenExternally);
+        assert_eq!(decide_new_window(&url("about:blank")), Block);
+        assert_eq!(decide_new_window(&url("file:///etc/passwd")), Block);
+        assert_eq!(decide_new_window(&url("tauri://localhost/index.html")), Block);
+    }
+
+    #[test]
+    fn a_refused_page_sends_the_window_home_but_never_into_a_redirect_loop() {
+        use super::bounce_target;
+        let shell = url("http://tauri.localhost/index.html");
+        let now = std::time::Instant::now();
+        assert_eq!(
+            bounce_target(INSTANCE, Some(&shell), None, now),
+            Some(url("https://chat.example.com/"))
+        );
+        // Bounced a moment ago (the instance redirects outside): the connect screen.
+        assert_eq!(
+            bounce_target(INSTANCE, Some(&shell), Some(now), now + std::time::Duration::from_millis(500)),
+            Some(shell.clone())
+        );
+        assert_eq!(
+            bounce_target(INSTANCE, Some(&shell), Some(now), now + std::time::Duration::from_secs(5)),
+            Some(url("https://chat.example.com/"))
+        );
+        // Not connected: the connect screen, if its URL is known yet.
+        assert_eq!(bounce_target(None, Some(&shell), None, now), Some(shell));
+        assert_eq!(bounce_target(None, None, None, now), None);
+    }
+
+    #[test]
+    fn the_system_browser_is_opened_at_most_once_a_second() {
+        let start = std::time::Instant::now();
+        assert!(external_open_allowed(None, start));
+        assert!(!external_open_allowed(Some(start), start + std::time::Duration::from_millis(400)));
+        assert!(external_open_allowed(Some(start), start + std::time::Duration::from_millis(1000)));
     }
 }
 

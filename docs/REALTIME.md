@@ -1,10 +1,16 @@
 # Realtime architecture
 
-LobbyForge has two transports for pushing server-to-client state changes:
-**SSE** (Server-Sent Events) and **WebSocket**. Both are layered on top
-of a shared **Redis pub/sub bus**, so the Next.js app stays the only
+LobbyForge pushes server-to-client state changes over **WebSocket**, on
+top of a shared **Redis pub/sub bus**, so the Next.js app stays the only
 process that writes to `game_sessions` / `messages`; the WS gateway is a
-read-only fan-out.
+read-only fan-out. When the socket cannot connect, a panel falls back to
+polling the REST read.
+
+The M19 SSE route (`GET /api/servers/{id}/activities/{sessionId}/stream`)
+was removed on 2026-10-13: nothing used it since the room page moved to
+`RealtimeClient` (M20-bis), and it was the one activity route outside
+`withApiSecurity` — it only checked the session cookie, with the first
+revocation check 30 s in (security review ACT-001; ACTIVITY_INTEGRITY B-10).
 
 This doc covers the architecture, the wire protocol, the authorization
 rules, and the production layout. The SDK-level conventions for
@@ -19,16 +25,16 @@ is in [`docs/ACTIVITIES.md`](./ACTIVITIES.md).
                 │  Browser (Next.js client)            │
                 │  RealtimeClient (apps/web/lib)        │
                 └────────┬─────────────────┬────────────┘
-                         │ WS               │ EventSource (fallback)
+                         │ WS               │ REST poll (fallback)
                          │                  │
               ┌──────────▼──────┐   ┌───────▼──────────────┐
               │  apps/ws-       │   │  Next.js             │
               │  gateway (19521) │   │  apps/web            │
-              │  ws + ioredis   │   │  /api/.../stream     │
+              │  ws + ioredis   │   │  GET …/{sessionId}   │
               └──────────┬──────┘   └───────┬──────────────┘
                          │                  │
-                         │ Redis SUBSCRIBE  │
-                         │ Redis PUBLISH    │
+                         │ Redis SUBSCRIBE  │ Redis PUBLISH
+                         │                  │
                          └────────┬─────────┘
                                   │
                           ┌───────▼─────────┐
@@ -37,16 +43,15 @@ is in [`docs/ACTIVITIES.md`](./ACTIVITIES.md).
                           └─────────────────┘
 ```
 
-The Next.js app publishes to Redis on the action / end / message routes.
-The ws-gateway and the SSE route both subscribe to the same topics.
-Clients pick whichever transport fits their needs — modern browsers get
-WS by default; hosts behind proxies that strip WS upgrades stay on SSE.
+The Next.js app publishes to Redis on the action / end / message routes;
+the ws-gateway subscribes to the topics and fans them out. A panel whose
+socket cannot connect polls the session GET every 5 s instead.
 
 ## Topics
 
 | Topic (wire) | Redis channel | Publisher | Consumer(s) |
 |---|---|---|---|
-| `activity-state:{serverId}:{sessionId}` | `lf:{env}:activity-state:{serverId}:{sessionId}` | activity `actions` + `end` routes | SSE stream route, ws-gateway |
+| `activity-state:{serverId}:{sessionId}` | `lf:{env}:activity-state:{serverId}:{sessionId}` | activity `actions` + `end` routes (and the GET when it fires timers) | ws-gateway |
 | `chat:{serverId}:{channelId}` | `lf:{env}:chat:{serverId}:{channelId}` | messages `POST` route | ws-gateway (chat UI is M20+) |
 | `user:{userId}` | `lf:{env}:user-events:{userId}` | Bot API v2 (ephemeral interaction answers) | ws-gateway — only the session whose uid matches |
 
@@ -108,6 +113,15 @@ Every `subscribe` is gated by `authorizeTopicSubscribe(...)`:
 
 - The server's owner always passes (no DB lookup beyond `getServerById`).
 - Everyone else must be a member of `serverId` (`isServerMember`).
+- `chat` and `activity-state` topics also need the channel to exist in
+  that server and to be visible to the member (role-gated channels;
+  `administrator` / `manage_channels` skip the visibility check).
+- A `chat` topic additionally needs **`read_message_history`**
+  (`administrator` implies it; `manage_channels` does not) — the same rule
+  as reading the channel over REST (`authorizeChannelMessageAccess`,
+  operation `read`). A role that revokes history used to keep the live
+  feed. Role changes re-run this check on live subscriptions (access
+  invalidation), so revoking the permission also ends the subscription.
 
 A non-member's subscribe receives `{type: 'error', code: 'forbidden'}` —
 the connection stays open so the client can retry with a different topic
@@ -161,20 +175,11 @@ via `NEXT_PUBLIC_WS_URL` (the env var the build reads).
 
 ## Transport selection
 
-The M20-bis room page uses `RealtimeClient` exclusively. The SSE route
-stays in place as a fallback — some hosts sit behind reverse proxies
-that strip WS upgrade headers. Future code can choose per-feature:
-
-| Use case | Recommended transport | Why |
-|---|---|---|
-| Activity state streaming | WS | already wired in the room page; lower latency on first message |
-| Chat message streaming (M20+) | WS | higher message volume, multiplexing helps |
-| Push notifications / one-off alerts | SSE | simpler, no client state to manage |
-| Bidirectional events (typing, presence heartbeats) | WS | only transport that supports it |
-
-When the chat UI lands (M20+), it will use the WS path too. The SSE
-route stays untouched and continues to serve the activity stream as a
-backup.
+The room page and the lobby use `RealtimeClient` exclusively; when the
+socket cannot connect (a reverse proxy that strips WS upgrade headers),
+they poll the REST read. The SSE route that used to sit beside it was
+never used by any client after M20-bis and is gone (see the top of this
+page). Chat, presence and activity updates all ride the WS path.
 
 ## Production layout
 

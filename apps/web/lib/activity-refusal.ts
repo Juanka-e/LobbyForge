@@ -17,7 +17,9 @@
  *   bot_offline      the bot behind it is offline
  * Activity-only codes: wrong_phase, not_player, system_action (a client
  * sent an action only the app itself runs), effect_refused (the app asked
- * for an effect it may not use, so nothing was applied), and the start
+ * for an effect it may not use, so nothing was applied), timed_out (the
+ * member is timed out: no start, no action but leaving), app_not_installed
+ * (the app was uninstalled or turned off in the community), and the start
  * route's app allow-list codes. Anything else falls back to a translated generic
  * sentence chosen by HTTP status.
  */
@@ -77,6 +79,8 @@ const ACTIVITY_ONLY_KEYS: Record<string, string> = {
   not_player: 'room.activity.error.notPlayer',
   system_action: 'room.activity.error.systemAction',
   effect_refused: 'room.activity.error.effectRefused',
+  timed_out: 'room.activity.error.timedOut',
+  app_not_installed: 'room.activity.error.appUnavailable',
   app_channel_not_allowed: 'lobbyMain.activities.channelNotAllowed',
   app_role_not_allowed: 'lobbyMain.activities.roleNotAllowed',
   network: 'room.activity.error.network',

@@ -9,6 +9,8 @@ import {
   getServerById,
   getUserPermissions,
   isServerMember,
+  listRolesForServer,
+  listVisibleChannelsForMember,
   logAction,
   updateRole,
   type RoleGatesChannelsError,
@@ -120,8 +122,8 @@ async function loadRoleForWrite(serverId: string, roleId: string, userId: string
   }
   // Discord-style hierarchy (applies to ADMINISTRATOR too; only the
   // owner bypasses): you may only edit/delete roles STRICTLY BELOW your
-  // own highest role. The @everyone role is never deletable/position-
-  // editable by non-owners either.
+  // own highest role. The @everyone role is never deletable, and its
+  // position never changes — for anyone, the owner included (PATCH below).
   if (userId !== server.ownerUserId) {
     const actorHighest = await getHighestRolePosition(getDb(), serverId, userId);
     if (ctx.role.position >= actorHighest) {
@@ -238,6 +240,13 @@ async function handlePatch(req: Request, ctx: { params: Promise<{ id: string; ro
     }
 
     if (body.position !== undefined && access.role.position !== body.position) {
+      // @everyone is every member's floor and must stay the lowest role.
+      // A MANAGE_ROLES member could raise it (any position below their own
+      // passed the rank check below), and moving ANOTHER role to or under
+      // it pushes it up as well (`updateRole` shifts the roles in between).
+      // Refused for everyone, the owner included.
+      const everyoneRefusal = await refuseEveryoneReorder(serverId, access.role, body.position);
+      if (everyoneRefusal) return everyoneRefusal;
       // Moving a role at/past the actor's own rank would let a lower
       // member leapfrog into equivalence with (or above) their superior.
       const server = await getServerById(getDb(), serverId);
@@ -321,7 +330,21 @@ async function handleDelete(req: Request, ctx: { params: Promise<{ id: string; r
       );
     }
 
-    await deleteRole(getDb(), roleId);
+    try {
+      await deleteRole(getDb(), roleId);
+    } catch (err) {
+      // security-review AUTHZ-001: the role is the last visibility override
+      // of some channels — deleting it would make them public. Nothing was
+      // deleted; the admin must change those channels' visibility first.
+      const gated = asRoleGatesChannels(err);
+      if (!gated) throw err;
+      return roleGatesChannelsResponse(gated, {
+        serverId,
+        userId: session.uid,
+        actorIsOwner: access.actorIsOwner,
+        actorPermissions: access.actorPermissions,
+      });
+    }
     // 9th-audit: DELETE also strips permissions from every holder —
     // publish the same server-wide invalidation PATCH does.
     const { publishAccessInvalidation } = await import('@/lib/access-invalidation');
@@ -340,26 +363,62 @@ async function handleDelete(req: Request, ctx: { params: Promise<{ id: string; r
       targetId: roleId,
     }).catch((err) => console.error('[audit] role.delete failed:', (err as Error).message));
     return NextResponse.json({ ok: true }, { headers: { 'Cache-Control': 'no-store' } });
-  } catch (err) {
-    // security-review AUTHZ-001: the role is the last visibility override
-    // of some channels — deleting it would make them public. Nothing was
-    // deleted; the admin must change those channels' visibility first.
-    const gated = asRoleGatesChannels(err);
-    if (gated) {
-      return NextResponse.json(
-        {
-          error: 'This role is the only role that can see some channels. Change their visibility before deleting it.',
-          code: gated.code,
-          channels: gated.channels,
-        },
-        { status: 409, headers: { 'Cache-Control': 'no-store' } }
-      );
-    }
+  } catch {
     return NextResponse.json(
       { error: 'Failed to delete role' },
       { status: 500 }
     );
   }
+}
+
+/**
+ * The 409 for a role that is some channels' last gate. It names only the
+ * channels the ACTOR may see (owner / MANAGE_CHANNELS see all, everyone
+ * else the channels their roles open — the channel list's rule): a
+ * MANAGE_ROLES holder without access to a private channel learns how many
+ * such channels there are (`hiddenChannelCount`), never their names.
+ */
+async function roleGatesChannelsResponse(
+  gated: RoleGatesChannelsError,
+  actor: { serverId: string; userId: string; actorIsOwner: boolean; actorPermissions: string[] }
+): Promise<NextResponse> {
+  const seesAll = actor.actorIsOwner || hasPermission(actor.actorPermissions, CorePermission.MANAGE_CHANNELS);
+  const visible = seesAll
+    ? null
+    : new Set((await listVisibleChannelsForMember(getDb(), actor.serverId, actor.userId)).map((c) => c.id));
+  const channels = gated.channels.filter((channel) => visible === null || visible.has(channel.id));
+  return NextResponse.json(
+    {
+      error: 'This role is the only role that can see some channels. Change their visibility before deleting it.',
+      code: gated.code,
+      channels,
+      hiddenChannelCount: gated.channels.length - channels.length,
+    },
+    { status: 409, headers: { 'Cache-Control': 'no-store' } }
+  );
+}
+
+/**
+ * A position change that would move `@everyone` off the bottom: moving
+ * `@everyone` itself, or moving another role to (or under) its position —
+ * `updateRole` shifts the roles in between, `@everyone` included.
+ */
+async function refuseEveryoneReorder(
+  serverId: string,
+  role: RoleRow,
+  position: number
+): Promise<NextResponse | null> {
+  const refusal = () =>
+    NextResponse.json(
+      { error: 'The @everyone role always stays the lowest role', code: 'everyone_role_lowest' },
+      { status: 400 }
+    );
+  if (role.name === EVERYONE_ROLE_NAME) return refusal();
+  // The real @everyone is the lowest, oldest role of that name (names are
+  // not unique; `listRolesForServer` orders by position, then age).
+  const everyone = (await listRolesForServer(getDb(), serverId)).find((r) => r.name === EVERYONE_ROLE_NAME);
+  if (everyone && position <= everyone.position) return refusal();
+  return null;
 }
 
 /**

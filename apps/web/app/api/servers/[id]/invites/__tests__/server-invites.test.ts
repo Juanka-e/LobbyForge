@@ -152,6 +152,12 @@ describe('POST /api/servers/[id]/invites', () => {
       { __mockDb: true },
       expect.objectContaining({ serverId: SERVER_ID, createdBy: UID, maxUses: 5 })
     );
+    // security-review AUTHZ-010: the audit row names the invite by id, never by code.
+    expect(logAction).toHaveBeenCalledWith(
+      { __mockDb: true },
+      expect.objectContaining({ action: 'invite.create', targetId: 'inv-2', metadata: { maxUses: 5, expiresAt: null } })
+    );
+    expect(JSON.stringify(logAction.mock.calls)).not.toContain('NEWCODE12345');
   });
 
   it('returns 403 when CREATE_INVITE permission is missing', async () => {

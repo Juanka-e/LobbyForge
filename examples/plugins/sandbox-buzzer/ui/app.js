@@ -1,6 +1,7 @@
 /**
- * Sandbox Buzzer — frame UI. Plain ES module, no build step, no network
- * (its own buzz.wav is the one file it loads besides its scripts and styles).
+ * Sandbox Buzzer — frame UI. Plain ES module, no build step, no requests
+ * beyond its own files (buzz.wav is the one it loads besides its scripts and
+ * styles).
  *
  * Everything arrives through the frame client:
  *   onInit  → who is looking (viewer), names (players), language, theme

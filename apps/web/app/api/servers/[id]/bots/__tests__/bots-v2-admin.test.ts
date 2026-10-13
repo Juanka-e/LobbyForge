@@ -33,7 +33,7 @@ const db = {
   getBotCommandById: vi.fn(),
   updateBotCommandAdmin: vi.fn(),
 };
-vi.mock('@lobbyforge/db', () => db);
+vi.mock('@lobbyforge/db', () => ({ ...db, ENDPOINT_DISABLED_TOKEN_CHANGED: 'token_changed' }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
 vi.mock('@/lib/security-headers', () => ({
   withApiSecurity: (handler: unknown) => handler,
@@ -336,6 +336,36 @@ describe('event endpoint (managers)', () => {
     db.deleteBotEventEndpoint.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
     expect((await route.DELETE(req('DELETE', '/event-endpoint', MANAGER), botCtx)).status).toBe(200);
     expect((await route.DELETE(req('DELETE', '/event-endpoint', MANAGER), botCtx)).status).toBe(404);
+  });
+
+  it('404 to re-enable an endpoint that does not exist', async () => {
+    const route = await import('../[botId]/event-endpoint/route.js');
+    db.getBotEventEndpoint.mockResolvedValue(null);
+    expect((await route.PATCH(req('PATCH', '/event-endpoint', OWNER, { enabled: true }), botCtx)).status).toBe(404);
+    expect(db.reenableBotEventEndpoint).not.toHaveBeenCalled();
+  });
+
+  it('BOT-002: an endpoint switched off by a token change is never re-enabled by a manager — only removed', async () => {
+    const route = await import('../[botId]/event-endpoint/route.js');
+    db.getBotEventEndpoint.mockResolvedValue({ ...stored, failureCount: 0, disabledReason: 'token_changed' });
+    // Not even the owner: whoever held the old token chose this URL and knows its secret.
+    for (const uid of [MANAGER, OWNER]) {
+      const res = await route.PATCH(req('PATCH', '/event-endpoint', uid, { enabled: true }), botCtx);
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({ code: 'endpoint_token_changed' });
+    }
+    expect(db.reenableBotEventEndpoint).not.toHaveBeenCalled();
+    expect(db.logAction).not.toHaveBeenCalled();
+
+    // A rotation that lands between the read and the update: the query refuses it too.
+    db.getBotEventEndpoint.mockResolvedValueOnce(stored).mockResolvedValueOnce({ ...stored, disabledReason: 'token_changed' });
+    db.reenableBotEventEndpoint.mockResolvedValueOnce(null);
+    expect((await route.PATCH(req('PATCH', '/event-endpoint', OWNER, { enabled: true }), botCtx)).status).toBe(409);
+
+    db.deleteBotEventEndpoint.mockResolvedValueOnce(true);
+    const removed = await route.DELETE(req('DELETE', '/event-endpoint', MANAGER), botCtx);
+    expect(removed.status).toBe(200);
+    expect(db.logAction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: 'bot.event_endpoint.remove', actorUserId: MANAGER }));
   });
 });
 

@@ -10,9 +10,11 @@
  * Each message is a JSON blob with `{ status, state, at }`.
  *
  * Resilience: the publish call is fire-and-forget — a transient
- * Redis outage does NOT fail the action route. The SSE route
- * catches its own connection errors and the browser falls back to
- * polling. The polling fallback is `POLL_FALLBACK_MS` below.
+ * Redis outage does NOT fail the action route. The consumer is the
+ * ws-gateway (apps/ws-gateway); a panel whose socket is down polls the
+ * session GET instead. The in-process subscriber below served the M19
+ * SSE route, which was removed (security review ACT-001: nothing used it);
+ * it is kept, with its tests, for a future in-process consumer.
  */
 import type Redis from 'ioredis';
 import { redis as sharedRedis } from './redis';
@@ -77,7 +79,7 @@ async function getSubscriber(): Promise<Redis> {
  * contained Hushle's deck/currentCard and Quiz's correctIndex. The bus is
  * a raw fanout channel; anything on it reaches everyone. Consumers that
  * need state load the session and project it per viewer
- * (projectActivityState) — see the SSE route and the ws-gateway.
+ * (projectActivityState) — see the ws-gateway.
  */
 export interface ActivityStateMessage {
   status: string;

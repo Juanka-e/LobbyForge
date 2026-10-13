@@ -7,6 +7,7 @@ import { getDb } from '@/lib/db';
 import { withApiSecurity } from '@/lib/security-headers';
 import { installPluginBundle } from '@/lib/plugin-installer';
 import { parseApprovals, sandboxManifestOptions, type PluginApprovals } from '@/lib/plugin-approvals';
+import { isOfficialPluginId, officialPluginIdError } from '@/lib/official-plugin-ids';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -83,6 +84,14 @@ async function handlePost(req: Request): Promise<NextResponse> {
   const approve = parseApprovals(body.approve, sandboxManifestOptions());
   if (body.approve !== undefined && body.approve !== null && !approve) {
     return NextResponse.json({ error: 'Invalid approval', code: 'invalid_approval' }, { status: 400 });
+  }
+  // An official plugin's id is never a marketplace install, whatever the
+  // catalogue says (official-plugin-ids.ts; the installer refuses it too).
+  if (isOfficialPluginId(body.pluginId)) {
+    return NextResponse.json(
+      { error: officialPluginIdError(body.pluginId), code: 'reserved_plugin_id' },
+      { status: 409 }
+    );
   }
 
   try {

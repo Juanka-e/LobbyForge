@@ -10,7 +10,7 @@
  * messages for a channel; the route masks blocked authors before
  * returning the response.
  */
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
 import { userBlocks, users } from '../schema.js';
 import { profileVisibilitySql, sharesServerSql, toProfileVisibility, userImageRefSql } from './userImages.js';
@@ -116,6 +116,25 @@ export async function getBlockedUserIds(
     .from(userBlocks)
     .where(eq(userBlocks.blockerUserId, blockerUserId));
   return new Set(rows.map((r) => r.blockedUserId));
+}
+
+/**
+ * The other direction of {@link getBlockedUserIds}: which of `candidateIds`
+ * have blocked `blockedUserId`. Live signals about a user (typing) are not
+ * shown to someone they blocked. Bounded by the candidates; no query for
+ * an empty list.
+ */
+export async function getBlockersAmong(
+  db: DbClient,
+  blockedUserId: string,
+  candidateIds: readonly string[]
+): Promise<Set<string>> {
+  if (candidateIds.length === 0) return new Set();
+  const rows = await db
+    .select({ blockerUserId: userBlocks.blockerUserId })
+    .from(userBlocks)
+    .where(and(eq(userBlocks.blockedUserId, blockedUserId), inArray(userBlocks.blockerUserId, [...candidateIds])));
+  return new Set(rows.map((r) => r.blockerUserId));
 }
 
 /**

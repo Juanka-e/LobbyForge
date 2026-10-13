@@ -14,7 +14,9 @@
  * a device whose clock runs early does not re-read before the server
  * thinks anything is due.
  */
-import { hostDueTimes, pickNextCheck, type ActivityHostState } from './activity-host-view';
+import { hostDueTimes, pickNextCheck, type ActivityHostState, type CheckHistory } from './activity-host-view';
+
+export { recordCheck, type CheckHistory } from './activity-host-view';
 
 export interface ActivityCheckInput {
   host?: ActivityHostState | null;
@@ -38,18 +40,24 @@ export function serverClockOffset(serverNow: unknown, receivedAt: number): numbe
   return Number.isFinite(at) ? at - receivedAt : 0;
 }
 
+/** Every due time the panel re-reads for (ms): the host's and the plugin's timers. */
+export function activityDueTimes(input: ActivityCheckInput): number[] {
+  const timers = parseTimersDueAt(input.timersDueAt).map((at) => Date.parse(at));
+  return [...hostDueTimes(input.host), ...timers];
+}
+
 /**
  * When to re-read next, or null for "nothing is due": the earliest of the
  * host's due times and the plugin's timers. `now` is the server's clock as
- * this device estimates it; `firedFor` is the due time the last re-read was
- * for (see `pickNextCheck`: a time that is still pending after its re-read
- * is left to the next touch, not retried in a loop).
+ * this device estimates it; `history` counts the re-reads already made for
+ * each due time (`recordCheck`; see `pickNextCheck`: a time that is still
+ * pending after its re-read is retried with a back-off up to a minute,
+ * never in a loop).
  */
 export function nextActivityCheck(
   input: ActivityCheckInput,
   now: number,
-  firedFor: number | null = null
+  history: CheckHistory | null = null
 ): { at: number; delay: number } | null {
-  const timers = parseTimersDueAt(input.timersDueAt).map((at) => Date.parse(at));
-  return pickNextCheck([...hostDueTimes(input.host), ...timers], now, firedFor);
+  return pickNextCheck(activityDueTimes(input), now, history);
 }

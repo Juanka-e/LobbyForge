@@ -118,6 +118,24 @@ launches, reinstalls and uninstalls the NSIS build.
   builds). Credentials, query strings, and fragments are rejected.
 - Deep-link auth codes are never logged — the shell redacts `code=` before
   writing to logs (see `redactDesktopHandoff` in `src/index.ts`).
+- **Navigation is pinned** (security-review DESK-V-01). The window has no
+  address bar, so it only ever shows the connected instance (its exact
+  origin) and the bundled connect screen. Any other `http(s)` page — a link,
+  a redirect, a script navigating the window — opens in the system browser
+  instead (at most one a second); other schemes (`file:`, `data:`, custom
+  protocols) are dropped; `window.open` / `target=_blank` never creates a
+  second app window. The decision is `decide_top_level_navigation` in
+  `src-tauri/src/lib.rs`. On macOS and Linux the webview asks about iframe
+  navigations too, so embeds the instance frames on purpose (Watch Party's
+  YouTube player, a CAPTCHA widget) load, and a top-level page outside the
+  instance is caught on page load and replaced by the instance. One
+  consequence: sign-in pages of other sites (e.g. "Continue with Google")
+  open in the system browser — sign in with the instance's own form in the
+  app.
+- **The browser-login handoff goes to its instance only** (DESK-V-02). The
+  deep link's code + state are posted to the origin the login was started
+  for, never broadcast (`'*'`), and connecting to another instance or
+  disconnecting drops a login that is still pending.
 
 ## Layout
 

@@ -135,6 +135,76 @@ describe('loadAuditEntries', () => {
     expect(entries[0]!.channelName).toBeNull();
   });
 
+  describe('metadata projected per viewer (security-review AUTHZ-010)', () => {
+    const inviteRows = () => [
+      row({ action: 'invite.create', targetType: 'invite', targetId: 'inv-1', metadata: { code: 'SECRETCODE12', maxUses: 5, expiresAt: null } }),
+      row({ action: 'invite.redeem', targetType: 'membership', targetId: 'mem-1', metadata: { code: 'SECRETCODE12', roleId: 'r-1' } }),
+    ];
+
+    it('drops invite codes for a viewer without MANAGE_SERVER (old rows included)', async () => {
+      db.getUserPermissions.mockResolvedValue(['view_audit_log']);
+      db.listAuditLogsForServer.mockResolvedValue(inviteRows());
+      const entries = await loadAuditEntries(fakeDb, { serverId: SERVER_ID, ownerUserId: OWNER, viewerUserId: VIEWER });
+      expect(entries.map((e) => e.metadata)).toEqual([{ maxUses: 5, expiresAt: null }, { roleId: 'r-1' }]);
+      expect(JSON.stringify(entries)).not.toContain('SECRETCODE12');
+    });
+
+    it('keeps invite codes for MANAGE_SERVER, administrators and the owner', async () => {
+      db.listAuditLogsForServer.mockResolvedValue(inviteRows());
+      for (const permissions of [['view_audit_log', 'manage_server'], ['administrator']]) {
+        db.getUserPermissions.mockResolvedValue(permissions);
+        const entries = await loadAuditEntries(fakeDb, { serverId: SERVER_ID, ownerUserId: OWNER, viewerUserId: VIEWER });
+        expect(entries.map((e) => e.metadata.code)).toEqual(['SECRETCODE12', 'SECRETCODE12']);
+      }
+      const asOwner = await loadAuditEntries(fakeDb, { serverId: SERVER_ID, ownerUserId: OWNER, viewerUserId: OWNER });
+      expect(asOwner.map((e) => e.metadata.code)).toEqual(['SECRETCODE12', 'SECRETCODE12']);
+    });
+
+    it("drops a hidden channel's name, topic and roles from channel rows, and keeps a visible one's", async () => {
+      db.getUserPermissions.mockResolvedValue(['view_audit_log']);
+      db.listAuditLogsForServer.mockResolvedValue([
+        row({ action: 'channel.create', targetType: 'channel', targetId: SECRET_ROOM, metadata: { name: 'staff-only', type: 'text' } }),
+        row({
+          action: 'channel.update',
+          targetType: 'channel',
+          targetId: SECRET_ROOM,
+          metadata: { name: 'staff-only', topic: 'raises next week', visibleToRoleIds: ['r-staff'], position: 3 },
+        }),
+        row({ action: 'channel.update', targetType: 'channel', targetId: LOUNGE, metadata: { name: 'lounge', topic: 'hi' } }),
+      ]);
+      const entries = await loadAuditEntries(fakeDb, { serverId: SERVER_ID, ownerUserId: OWNER, viewerUserId: VIEWER });
+      expect(entries.map((e) => e.metadata)).toEqual([
+        { type: 'text' },
+        { position: 3 },
+        { name: 'lounge', topic: 'hi' },
+      ]);
+    });
+
+    it("drops the Moderation Bot's quote (detail, excerpt) of a message in a hidden channel", async () => {
+      db.getUserPermissions.mockResolvedValue(['view_audit_log']);
+      db.listAuditLogsForServer.mockResolvedValue([
+        row({ action: 'bot.moderation.block', metadata: { rule: 'blocked_word', detail: 'payroll', excerpt: null, channelId: SECRET_ROOM } }),
+        row({ action: 'bot.moderation.block', metadata: { rule: 'link', detail: 'evil.test', excerpt: 'see evil.test', channelId: LOUNGE } }),
+      ]);
+      const entries = await loadAuditEntries(fakeDb, { serverId: SERVER_ID, ownerUserId: OWNER, viewerUserId: VIEWER });
+      expect(entries[0]!.metadata).toEqual({ rule: 'blocked_word', channelId: SECRET_ROOM });
+      expect(entries[1]!.metadata).toEqual({ rule: 'link', detail: 'evil.test', excerpt: 'see evil.test', channelId: LOUNGE });
+    });
+
+    it('MANAGE_CHANNELS and the owner read hidden-channel metadata unchanged', async () => {
+      const rows = [
+        row({ action: 'channel.update', targetType: 'channel', targetId: SECRET_ROOM, metadata: { name: 'staff-only' } }),
+        row({ action: 'bot.moderation.block', metadata: { rule: 'blocked_word', detail: 'payroll', channelId: SECRET_ROOM } }),
+      ];
+      db.listAuditLogsForServer.mockResolvedValue(rows);
+      db.getUserPermissions.mockResolvedValue(['view_audit_log', 'manage_channels']);
+      const asManager = await loadAuditEntries(fakeDb, { serverId: SERVER_ID, ownerUserId: OWNER, viewerUserId: VIEWER });
+      expect(asManager.map((e) => e.metadata)).toEqual(rows.map((r) => r.metadata));
+      const asOwner = await loadAuditEntries(fakeDb, { serverId: SERVER_ID, ownerUserId: OWNER, viewerUserId: OWNER });
+      expect(asOwner.map((e) => e.metadata)).toEqual(rows.map((r) => r.metadata));
+    });
+  });
+
   it('skips the channel query when no row points at a channel, and returns [] for an empty log', async () => {
     db.listAuditLogsForServer.mockResolvedValue([row({ action: 'member.kick', metadata: {} })]);
     await loadAuditEntries(fakeDb, { serverId: SERVER_ID, ownerUserId: OWNER, viewerUserId: VIEWER });

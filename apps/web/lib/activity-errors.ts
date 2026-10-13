@@ -25,6 +25,14 @@
  *   effect_refused   the plugin's reducer asked for an effect that is
  *                    invalid or that it has no permission for: nothing of
  *                    the action was applied (docs/PLUGIN_SDK.md "Effects")
+ *   timed_out        the member is timed out in the community: no start,
+ *                    no action but leaving (with `until`)
+ *   app_not_installed the app is no longer installed or enabled in the
+ *                    community (starting it, or acting in a session that
+ *                    is still open)
+ *   timers_pending   (409, `retryable: true`) more of the app's timers were
+ *                    due than one request fires; those that fired
+ *                    committed and a retry continues (lib/activity-timers.ts)
  */
 import { NextResponse } from 'next/server';
 
@@ -37,7 +45,9 @@ export type ActivityErrorCode =
   | 'wrong_phase'
   | 'not_player'
   | 'system_action'
-  | 'effect_refused';
+  | 'effect_refused'
+  | 'timed_out'
+  | 'app_not_installed';
 
 export function activityError(
   status: number,

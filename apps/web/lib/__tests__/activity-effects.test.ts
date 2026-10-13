@@ -17,6 +17,8 @@ const db = vi.hoisted(() => ({
   logAction: vi.fn(async () => undefined),
   setGameSessionStateCAS: vi.fn(),
   withGameSessionWriteLock: vi.fn(),
+  getPluginInstall: vi.fn(async (..._args: unknown[]) => ({ enabled: true, settings: {} }) as { enabled: boolean; settings: object } | null),
+  endOpenGameSessionsForPlugin: vi.fn(async () => []),
 }));
 vi.mock('@lobbyforge/db', () => db);
 const postAppMessage = vi.hoisted(() => vi.fn(async (_input: { text: string }) => ({ posted: true })));
@@ -31,7 +33,9 @@ const {
   loadStorageEntries,
   planEffects,
 } = await import('../activity-effects');
-const { runDueTimers, readStoredTimers, timersDueAtJson } = await import('../activity-timers');
+const { collapseRearmedTimer, runDueTimers, readStoredTimers, timersDueAtJson, MAX_TIMER_FIRINGS_PER_TOUCH } = await import(
+  '../activity-timers'
+);
 
 function plugin(overrides: Partial<RegisteredGamePlugin> = {}): RegisteredGamePlugin {
   return {
@@ -61,6 +65,7 @@ function ctx(): GamePluginContext {
 
 beforeEach(() => {
   for (const fn of [db.listPluginData, db.writePluginDataBatch, db.logAction, postAppMessage]) fn.mockClear();
+  db.getPluginInstall.mockReset().mockResolvedValue({ enabled: true, settings: {} });
 });
 
 describe('effectGrantFor', () => {
@@ -157,6 +162,30 @@ describe('applyPostCommitEffects', () => {
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });
+
+  it('an app removed from the community (uninstalled or disabled) while the call ran writes nothing: storage and chat are dropped', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const effects = [
+      { type: 'storage.set' as const, key: 'a', value: 1 },
+      { type: 'chat.post' as const, text: 'x' },
+    ];
+    db.getPluginInstall.mockResolvedValueOnce(null);
+    await applyPostCommitEffects({ ...base, effects });
+    db.getPluginInstall.mockResolvedValueOnce({ enabled: false, settings: {} });
+    await applyPostCommitEffects({ ...base, effects });
+    // A check that fails drops them too (fail closed).
+    db.getPluginInstall.mockRejectedValueOnce(new Error('db down'));
+    await expect(applyPostCommitEffects({ ...base, effects })).resolves.toBeUndefined();
+    expect(db.writePluginDataBatch).not.toHaveBeenCalled();
+    expect(postAppMessage).not.toHaveBeenCalled();
+    expect(db.getPluginInstall).toHaveBeenCalledWith(expect.anything(), 's', 'p');
+    warn.mockRestore();
+  });
+
+  it('no effects: not even the install is read', async () => {
+    await applyPostCommitEffects({ ...base, effects: [] });
+    expect(db.getPluginInstall).not.toHaveBeenCalled();
+  });
 });
 
 describe('runDueTimers', () => {
@@ -209,25 +238,88 @@ describe('runDueTimers', () => {
     warn.mockRestore();
   });
 
-  it('a chain that keeps re-arming stops at the per-touch bound; the rest fires on the next touch', async () => {
+  it('a timer that re-arms itself while catching up collapses its backlog: the missed occurrences are skipped (security review)', async () => {
+    // A 1 s timer left idle for 1 000 s used to replay up to 32 of its
+    // missed seconds on every touch. Now: the first due firing, then the
+    // latest due occurrence — two reducer calls — and the next one is in
+    // the future.
+    const seen: Array<number | undefined> = [];
     const p = plugin({
-      handleAction: (c, state) =>
-        withEffects({ n: ((state as { n?: number }).n ?? 0) + 1 }, [
+      handleAction: (c, state) => {
+        seen.push(c.now);
+        return withEffects({ n: ((state as { n?: number }).n ?? 0) + 1 }, [
           { type: 'timer.set', id: 'loop', afterMs: 1_000, action: { type: 'tick' } },
-        ]),
+        ]);
+      },
     });
     const out = await runDueTimers({
       plugin: p,
       state: {},
       timers: [{ id: 'loop', at: 0, action: { type: 'tick' } }],
       storage: {},
+      now: 1_000_500,
+      ctx: ctx(),
+    });
+    expect(seen).toEqual([0, 1_000_000]);
+    expect(out).toMatchObject({ fired: 2, calls: 2, skipped: 999, pendingDue: false, state: { n: 2 } });
+    expect(out.timers).toEqual([{ id: 'loop', at: 1_001_000, action: { type: 'tick' } }]);
+  });
+
+  it('collapseRearmedTimer: only a timer re-armed under the same id and still due moves, to the latest occurrence of its period', () => {
+    const fired = { id: 'loop', at: 1_000, action: { type: 'tick' } };
+    const rearmed = { id: 'loop', at: 3_000, action: { type: 'tick' } };
+    expect(collapseRearmedTimer([rearmed], fired, 10_500)).toEqual({ timers: [{ ...rearmed, at: 9_000 }], skipped: 3 });
+    // Not due yet, or due but the very next occurrence: unchanged.
+    expect(collapseRearmedTimer([{ ...rearmed, at: 20_000 }], fired, 10_500)).toEqual({ timers: [{ ...rearmed, at: 20_000 }], skipped: 0 });
+    expect(collapseRearmedTimer([rearmed], fired, 4_000)).toEqual({ timers: [rearmed], skipped: 0 });
+    // Another id is another timer (a one-shot the firing set): never moved.
+    const other = { id: 'reveal', at: 3_000, action: { type: 'tick' } };
+    expect(collapseRearmedTimer([other], fired, 10_500)).toEqual({ timers: [other], skipped: 0 });
+  });
+
+  it('a chain that cannot collapse (a new id each time) stops at the per-touch bound of 8 reducer calls; the rest is still due', async () => {
+    const p = plugin({
+      handleAction: (_c, state, action) => {
+        const step = (action as { step: number }).step;
+        return withEffects({ n: ((state as { n?: number }).n ?? 0) + 1 }, [
+          { type: 'timer.set', id: `step-${step + 1}`, afterMs: 1_000, action: { type: 'tick', step: step + 1 } },
+        ]);
+      },
+    });
+    const out = await runDueTimers({
+      plugin: p,
+      state: {},
+      timers: [{ id: 'step-0', at: 0, action: { type: 'tick', step: 0 } }],
+      storage: {},
       now: 1_000_000,
       ctx: ctx(),
-      maxFirings: 5,
     });
-    expect(out.fired).toBe(5);
-    expect(out.state).toEqual({ n: 5 });
-    expect(out.timers).toEqual([{ id: 'loop', at: 5_000, action: { type: 'tick' } }]);
+    expect(MAX_TIMER_FIRINGS_PER_TOUCH).toBe(8);
+    expect(out).toMatchObject({ fired: 8, calls: 8, pendingDue: true, state: { n: 8 } });
+    expect(out.timers).toEqual([{ id: 'step-8', at: 8_000, action: { type: 'tick', step: 8 } }]);
+  });
+
+  it('a touch starts no firing after its wall-time budget (the first always runs)', async () => {
+    let wall = 0;
+    const p = plugin({
+      handleAction: (_c, state) => {
+        wall += 300; // a slow reducer (a sandboxed plugin's worker round trip)
+        return { n: ((state as { n?: number }).n ?? 0) + 1 };
+      },
+    });
+    const out = await runDueTimers({
+      plugin: p,
+      state: {},
+      timers: [1, 2, 3, 4].map((i) => ({ id: `t${i}`, at: i * 1_000, action: { type: 'tick' } })),
+      storage: {},
+      now: 10_000,
+      ctx: ctx(),
+      budgetMs: 500,
+      clock: () => wall,
+    });
+    // 0 ms: first call; 300 ms: second; 600 ms ≥ 500: stop.
+    expect(out).toMatchObject({ calls: 2, fired: 2, pendingDue: true, state: { n: 2 } });
+    expect(out.timers.map((t) => t.id)).toEqual(['t3', 't4']);
   });
 
   it('reads stored timers defensively and reports due times only', () => {

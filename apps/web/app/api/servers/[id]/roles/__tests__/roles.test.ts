@@ -10,6 +10,7 @@ const getRoleById = vi.fn();
 const updateRole = vi.fn();
 const deleteRole = vi.fn();
 const getUserPermissions = vi.fn();
+const listVisibleChannelsForMember = vi.fn();
 const logAction = vi.fn().mockResolvedValue(undefined);
 
 const { getHighestRolePosition } = vi.hoisted(() => ({
@@ -26,6 +27,7 @@ vi.mock('@lobbyforge/db', () => ({
   updateRole,
   deleteRole,
   getUserPermissions,
+  listVisibleChannelsForMember,
   logAction,
   EVERYONE_ROLE_NAME: '@everyone',
 }));
@@ -52,6 +54,7 @@ beforeEach(() => {
   updateRole.mockReset();
   deleteRole.mockReset();
   getUserPermissions.mockReset();
+  listVisibleChannelsForMember.mockReset();
   logAction.mockReset();
   logAction.mockResolvedValue(undefined);
 });
@@ -695,5 +698,146 @@ describe('beta-review S1: role permission grants are capped by the actor', () =>
     getUserPermissions.mockResolvedValue(['administrator']);
     const res = await createRoleWith(['administrator']);
     expect(res.status).toBe(201);
+  });
+});
+
+// The route's own comment promised that non-owners cannot move @everyone,
+// but any position below the actor's rank passed. @everyone is every
+// member's floor: it stays the lowest role, for the owner too — and no
+// other role may be moved to (or under) it, which would push it up.
+describe('@everyone stays the lowest role', () => {
+  const EVERYONE = {
+    id: 'role-everyone',
+    serverId: SERVER_ID,
+    name: '@everyone',
+    color: null,
+    icon: null,
+    displaySeparately: false,
+    position: 0,
+    permissions: ['send_messages'],
+    createdAt: new Date('2026-06-10T00:00:00Z'),
+  };
+  const MOD = { ...EVERYONE, id: 'role-mod', name: 'Mod', position: 4, permissions: [] };
+
+  async function patch(role: typeof EVERYONE, body: object) {
+    getRoleById.mockResolvedValue(role);
+    listRolesForServer.mockResolvedValue([EVERYONE, MOD]);
+    updateRole.mockImplementation(async (_db: unknown, _id: string, p: object) => ({ ...role, ...p }));
+    const { PATCH } = await loadItemRoute();
+    return PATCH(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/roles/${role.id}`, {
+        method: 'PATCH',
+        headers: { cookie: makeSessionCookie() },
+        body: JSON.stringify(body),
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, roleId: role.id }) }
+    );
+  }
+
+  it('a MANAGE_ROLES member cannot raise @everyone, even below their own rank', async () => {
+    getServerById.mockResolvedValue(mockServer(OWNER_ID));
+    isServerMember.mockResolvedValue(true);
+    getUserPermissions.mockResolvedValue(['manage_roles']);
+    getHighestRolePosition.mockResolvedValue(50);
+    const res = await patch(EVERYONE, { position: 3 });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: 'everyone_role_lowest' });
+    expect(updateRole).not.toHaveBeenCalled();
+  });
+
+  it('the owner cannot move @everyone either', async () => {
+    getServerById.mockResolvedValue(mockServer(USER_ID));
+    getUserPermissions.mockResolvedValue(['administrator']);
+    const res = await patch(EVERYONE, { position: 7 });
+    expect(res.status).toBe(400);
+    expect(updateRole).not.toHaveBeenCalled();
+  });
+
+  it('no role may be moved to or under @everyone (that would push it up)', async () => {
+    getServerById.mockResolvedValue(mockServer(USER_ID));
+    getUserPermissions.mockResolvedValue(['administrator']);
+    const res = await patch(MOD, { position: 0 });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: 'everyone_role_lowest' });
+    expect(updateRole).not.toHaveBeenCalled();
+  });
+
+  it('the settings form re-sending @everyone’s unchanged position still saves its other fields', async () => {
+    getServerById.mockResolvedValue(mockServer(USER_ID));
+    getUserPermissions.mockResolvedValue(['administrator']);
+    const res = await patch(EVERYONE, { position: 0, color: '#112233' });
+    expect(res.status).toBe(200);
+    expect(updateRole).toHaveBeenCalledWith(expect.anything(), EVERYONE.id, expect.objectContaining({ color: '#112233', position: 0 }));
+  });
+
+  it('other roles still move above @everyone', async () => {
+    getServerById.mockResolvedValue(mockServer(USER_ID));
+    getUserPermissions.mockResolvedValue(['administrator']);
+    const res = await patch(MOD, { position: 1 });
+    expect(res.status).toBe(200);
+    expect(updateRole).toHaveBeenCalledWith(expect.anything(), MOD.id, expect.objectContaining({ position: 1 }));
+  });
+});
+
+// The 409 named every gated channel — including private ones the actor
+// (MANAGE_ROLES without MANAGE_CHANNELS) cannot see.
+describe('DELETE 409 names only the channels the actor may see', () => {
+  const STAFF_ROLE = {
+    id: ROLE_ID,
+    serverId: SERVER_ID,
+    name: 'Staff',
+    color: null,
+    position: 3,
+    permissions: [],
+    createdAt: new Date('2026-06-10T00:00:00Z'),
+  };
+
+  async function deleteGatingRole() {
+    getRoleById.mockResolvedValue(STAFF_ROLE);
+    deleteRole.mockRejectedValue(
+      Object.assign(new Error('deleteRole: the role is the only visibility override of 3 channel(s)'), {
+        code: 'role_gates_channels',
+        channels: [
+          { id: 'ch-lobby-staff', name: 'lobby-staff' },
+          { id: 'ch-hr', name: 'hr-complaints' },
+          { id: 'ch-board', name: 'board-room' },
+        ],
+      })
+    );
+    const { DELETE } = await loadItemRoute();
+    const res = await DELETE(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/roles/${ROLE_ID}`, {
+        method: 'DELETE',
+        headers: { cookie: makeSessionCookie() },
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, roleId: ROLE_ID }) }
+    );
+    expect(res.status).toBe(409);
+    return (await res.json()) as { code: string; channels: Array<{ id: string; name: string }>; hiddenChannelCount: number };
+  }
+
+  it('a MANAGE_ROLES member without channel access gets the visible names and a count', async () => {
+    getServerById.mockResolvedValue(mockServer(OWNER_ID));
+    isServerMember.mockResolvedValue(true);
+    getUserPermissions.mockResolvedValue(['manage_roles']);
+    getHighestRolePosition.mockResolvedValue(50);
+    listVisibleChannelsForMember.mockResolvedValue([{ id: 'ch-lobby-staff', name: 'lobby-staff' }, { id: 'ch-general', name: 'general' }]);
+    const json = await deleteGatingRole();
+    expect(json.code).toBe('role_gates_channels');
+    expect(json.channels).toEqual([{ id: 'ch-lobby-staff', name: 'lobby-staff' }]);
+    expect(json.hiddenChannelCount).toBe(2);
+    expect(JSON.stringify(json)).not.toContain('hr-complaints');
+    expect(JSON.stringify(json)).not.toContain('board-room');
+  });
+
+  it('MANAGE_CHANNELS (and the owner) see every name', async () => {
+    getServerById.mockResolvedValue(mockServer(OWNER_ID));
+    isServerMember.mockResolvedValue(true);
+    getUserPermissions.mockResolvedValue(['manage_roles', 'manage_channels']);
+    getHighestRolePosition.mockResolvedValue(50);
+    const json = await deleteGatingRole();
+    expect(json.channels.map((c) => c.name)).toEqual(['lobby-staff', 'hr-complaints', 'board-room']);
+    expect(json.hiddenChannelCount).toBe(0);
+    expect(listVisibleChannelsForMember).not.toHaveBeenCalled();
   });
 });

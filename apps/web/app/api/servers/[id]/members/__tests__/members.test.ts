@@ -11,8 +11,10 @@ const getRoleById = vi.fn();
 const getUserPermissions = vi.fn();
 const getHighestRolePosition = vi.fn();
 const logAction = vi.fn().mockResolvedValue(undefined);
+const getActiveMemberTimeout = vi.fn().mockResolvedValue(null);
 
 vi.mock('@lobbyforge/db', () => ({
+  getActiveMemberTimeout,
   getServerById,
   isServerMember,
   listMembersForServer,

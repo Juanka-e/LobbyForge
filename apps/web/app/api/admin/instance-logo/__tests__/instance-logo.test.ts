@@ -35,11 +35,25 @@ function png1x1(width: number, height: number): string {
   return `data:image/png;base64,${buf.toString('base64')}`;
 }
 
+/** A real (structurally complete) one-frame GIF: the validator walks every block (FILE-V-01). */
 function gif(width: number, height: number): string {
-  const buf = Buffer.alloc(200);
-  buf.write('GIF89a', 0);
-  buf.writeUInt16LE(width, 6);
-  buf.writeUInt16LE(height, 8);
+  const screen = Buffer.alloc(7);
+  screen.writeUInt16LE(width, 0);
+  screen.writeUInt16LE(height, 2);
+  const descriptor = Buffer.alloc(10);
+  descriptor[0] = 0x2c;
+  descriptor.writeUInt16LE(width, 5);
+  descriptor.writeUInt16LE(height, 7);
+  const buf = Buffer.concat([
+    Buffer.from('GIF89a'),
+    screen,
+    // A comment extension pads the data URL past the route's 64-character floor.
+    Buffer.from([0x21, 0xfe, 0x40]),
+    Buffer.alloc(0x40, 0x61),
+    Buffer.from([0x00]),
+    descriptor,
+    Buffer.from([0x02, 0x02, 0x44, 0x01, 0x00, 0x3b]),
+  ]);
   return `data:image/gif;base64,${buf.toString('base64')}`;
 }
 

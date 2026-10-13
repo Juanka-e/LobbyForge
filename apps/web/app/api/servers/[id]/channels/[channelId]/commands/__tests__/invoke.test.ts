@@ -357,6 +357,17 @@ describe('bot_offline — fail fast instead of a 15-minute "thinking…"', () =>
     expect(db.createBotInteraction).not.toHaveBeenCalled();
   });
 
+  it('BOT-002: an endpoint switched off by a token rotate / revoke means bot_offline (no stream either)', async () => {
+    redisPubsub.mockImplementation(async (_sub: string, channel: string) => [channel, 0]);
+    db.getBotEventEndpoint.mockResolvedValue({
+      botId: BOT_ID, url: 'https://attacker.example.net/hook', events: ['interaction_create'], enabled: false, disabledReason: 'token_changed',
+    });
+    const res = await invoke(MEMBER, { options: { sides: 6 } });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: 'bot_offline' });
+    expect(db.createBotInteraction).not.toHaveBeenCalled();
+  });
+
   it('keeps the old behaviour (202) when Redis cannot say whether the stream is connected', async () => {
     redisPubsub.mockRejectedValue(new Error('connection refused'));
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);

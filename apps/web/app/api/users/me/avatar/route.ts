@@ -5,7 +5,8 @@ import { getDb } from '@/lib/db';
 import { requireMaterializedSession } from '@/lib/api-auth';
 import { withApiSecurity } from '@/lib/security-headers';
 import { AVATAR_LIMITS, checkImageDataUrl } from '@/lib/image-validation';
-import { checkUserImageQuota, quotaExceededResponse } from '@/lib/upload-quota';
+import { checkUserImageQuota, quotaExceededResponse, refuseGuestImageUpload } from '@/lib/upload-quota';
+import { consumeUploadBudget } from '@/lib/upload-budget';
 import { requireVerifiedEmail } from '@/lib/mail/verification';
 
 export const dynamic = 'force-dynamic';
@@ -25,6 +26,9 @@ const DataUrlSchema = z.object({
 async function handlePost(req: Request): Promise<NextResponse> {
   const session = requireMaterializedSession(req);
   if (!session.ok) return session.response;
+  // security-review FILE-001: guests may not store images.
+  const guest = await refuseGuestImageUpload(session.session.uid);
+  if (guest) return guest;
   // docs/EMAIL.md §4.2: an unverified account in `required` mode may read, not do this.
   const unverified = await requireVerifiedEmail(session.session.uid, 'upload');
   if (unverified) return unverified;
@@ -55,6 +59,9 @@ async function handlePost(req: Request): Promise<NextResponse> {
   // unbounded bytes by rotating uploads.
   const quota = await checkUserImageQuota(session.session.uid, body.dataUrl.length);
   if (!quota.ok) return quotaExceededResponse(quota);
+  // FILE-001: the caller's daily upload byte budget (per client address).
+  const overBudget = await consumeUploadBudget(req, body.dataUrl.length);
+  if (overBudget) return overBudget;
 
   const updated = await updateUserAvatar(getDb(), session.session.uid, body.dataUrl);
   return NextResponse.json(

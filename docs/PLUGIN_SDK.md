@@ -249,6 +249,11 @@ type GamePluginActionPolicy = {
   activity's voice room. Set this on an action that must work from outside
   the room — leaving the game is the usual one (Quiz, Vampire Village and
   Watch Party mark `leave`). `host` actions are never voice-checked.
+  It also marks the one thing a member who is **timed out** in the
+  community may still do: a timed-out member starts no activity and sends
+  no other action, host actions included (`403`, `code: "timed_out"`,
+  with `until`) — as they cannot chat, vote in a poll or run a slash
+  command. Mark leaving, so they can always get out of a game.
 
 Do not trust actor identity fields sent by the browser.
 
@@ -394,7 +399,7 @@ plugin and grant nothing.
 | `timer.clear` | `timers` | `id` | clearing a timer that is not pending is fine |
 | `storage.set` | `storage` | `key`, `value` | `key` is 1–128 of `a-z A-Z 0-9 . _ : -` (not `__proto__`); `value` any JSON; the plugin's storage in a community holds at most **64 KiB** (every key plus its value's JSON, in UTF-8) |
 | `storage.delete` | `storage` | `key` | |
-| `chat.post` | `chat` | `text` | 1–**500** characters after trimming, no control characters but tab and newline; at most **one per 5 s and 30 per hour** per session |
+| `chat.post` | `chat` | `text` | 1–**500** characters after trimming, no control characters but tab and newline; at most **one per 5 s and 30 per hour** per session, and **60 per hour** per community and plugin; checked by the community's Moderation Bot |
 
 At most 32 effects per call; an unknown key on an effect is refused (a
 typo never silently does something else). `voice.mute` is a known
@@ -427,12 +432,30 @@ nothing runs on a clock.
   an end request — every timer whose due time has passed fires under the
   session's write lock, **earliest first** (ties: the one set first), each
   as its system action through your reducer with `ctx.now` = its due time.
-  Its effects apply too, so a timer may set the next one; a chain that is
-  already due keeps firing, up to 32 timers per touch (the rest fires on
-  the next touch).
+  Its effects apply too, so a timer may set the next one, and a chain that
+  is already due keeps firing in the same touch.
+- **Catch-up is bounded.** A session nobody touched for a while can have a
+  backlog: a 1 s timer that re-arms itself and sat idle for an hour is
+  3 600 firings behind. The host does not replay it:
+  - **Missed occurrences collapse.** When a timer's firing sets a timer
+    with the **same id** (it re-arms itself) at a time that is already due,
+    the host moves that timer to the **latest** occurrence of the same
+    period that is due. The idle 1 s ticker fires twice — for its first
+    due time and for the last second that passed — and its next firing is
+    in the future again. Do not count ticks to measure time; read
+    `ctx.now` (the due time of the firing) and keep deadlines in your
+    state. A timer set under a **new** id is never moved.
+  - **A touch fires at most 8 timers**, and starts none after 500 ms of
+    wall time (the first always runs). What is still due fires on the next
+    touch: the session GET reports it in `timersDueAt`, so an open panel
+    re-reads for it at once.
 - Before an action, the timers due by then fire first and the action runs
   on the state they left — in one write. If the action is then refused,
-  the timers still commit.
+  the timers still commit. If more timers were due than one touch fires,
+  the action does **not** run ahead of them: what fired commits and the
+  action answers `409` with `code: "timers_pending"` and `retryable: true`.
+  The lobby retries it by itself (same `actionId`), each retry continuing
+  the catch-up.
 - **Exactly once**: the lock serializes touches and a fired timer is
   removed in the same write as the state it produced, so of two
   concurrent reads the second finds nothing due.
@@ -446,9 +469,19 @@ nothing runs on a clock.
   `apps/web/lib/activity-next-check.ts`, which also covers the host
   hand-over); setting, clearing or firing a timer tells every open panel
   to re-read (`publicSummary.timersChanged` on the activity bus), and an
-  action's answer carries the new `timersDueAt`.
-- Ending the activity fires what was already due, then drops every other
-  pending timer.
+  action's answer carries the new `timersDueAt`. A due time that is still
+  pending after the panel re-read for it (the server could not fire it
+  yet) is re-read for again after 2 s, then 4 s, 8 s … at most once a
+  minute — never in a loop.
+- Ending the activity fires what was already due (within the per-touch
+  bound above), then drops every other pending timer.
+- **Only while the app is installed.** If the community uninstalls or
+  disables the app (Server settings → Apps), its open sessions end there
+  and then (audited as `activity.end` with the reason `app_uninstalled` /
+  `app_disabled`; nothing fires on the way out). A session that is still
+  open by a race takes no more actions (`403`, `code:
+  "app_not_installed"`), its due timers are dropped without running, and
+  storage writes and chat lines asked for after the removal are dropped.
 
 So a timer is **never early, and late only when nobody is looking** —
 which is exactly when nobody would notice. Keep the deadline in your state
@@ -490,6 +523,11 @@ go to** (shown for apps with the `chat` permission). With no channel
 chosen, the default, the post is dropped: a game never writes into a
 channel nobody picked (which could also carry a private voice room's game
 into a public channel). The choice is checked again on every post.
+Choosing a **role-gated** (private) channel takes what granting a bot one
+takes: Manage Channels (owners and administrators have it), and seeing
+the channel — Manage Server alone is refused with `403`, `code:
+"chat_channel_not_allowed"`. Saving other settings of the app keeps a
+channel someone else chose.
 
 - The message has **no author** (no user, no bot) and `metadata.app = {
   pluginId, name }`; the lobby shows it with the plugin's name, an app
@@ -497,9 +535,17 @@ into a public channel). The choice is checked again on every post.
   notification says "(APP)". Members cannot set `metadata.app`.
 - Mentions are inert: every `@` that could start one gets a zero-width
   space after it, so `@everyone`, `@here` and `@<name>` ping nobody.
-- Over the rate (one per 5 s, 30 per hour, per session) a post is
-  **dropped** and logged; the action that asked for it still applies.
-  Chat is a side channel, never part of your game's state.
+- Over the rate (one per 5 s and 30 per hour per session, and 60 per hour
+  per community and plugin, so restarting the activity does not reset it)
+  a post is **dropped** and logged; the action that asked for it still
+  applies. Chat is a side channel, never part of your game's state.
+- **Moderated like everyone's messages.** When the community runs the
+  Moderation Bot, its blocked-word and link rules apply to the line as you
+  wrote it (the mention rule does not: your mentions are inert anyway). A
+  line the rules block is **dropped** and logged, and audited as
+  `bot.moderation.block` naming your plugin (without the line's words when
+  the channel is role-gated); the action still applies. No notice is
+  posted and there is no exemption.
 - It is posted after the commit (after the storage batch), published on
   the chat bus like any message and audited as `message.create` (actor:
   none, the plugin in the metadata).
@@ -515,7 +561,9 @@ names and numbers.
 ([below](#the-createtestharness-test-helper)): `performAction` throws an
 `EffectRefusedError` where the host would answer `effect_refused` (and
 applies nothing), refuses a system action from a client, and
-`advanceTime(ms)` fires due timers in order with `ctx.now` = each due time.
+`advanceTime(ms)` fires due timers in order with `ctx.now` = each due time
+— every occurrence, as for a session somebody watches the whole time (the
+host's idle catch-up collapse and per-touch bound above do not apply).
 `getTimers()`, `getStorage()` and `getChatPosts()` show what the host
 would have stored and posted; `permissions` and `storage` options set the
 plugin's permissions and its storage before the game.
@@ -913,14 +961,28 @@ Every file carries this CSP, where `<own>` is your version's own folder,
 ```
 default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline';
 img-src 'self' data:; font-src 'self'; media-src <own> data: blob:; connect-src <own>;
-frame-ancestors 'self'; base-uri 'none'; form-action 'none'; sandbox allow-scripts
+frame-ancestors 'self'; base-uri 'none'; form-action 'none'; webrtc 'block'; sandbox allow-scripts
 ```
 
-So by default: **no network beyond your own files.** `fetch()` and XHR can
-read your own files (level data, a `.wasm`, sound for the Web Audio API)
-and nothing else — not the app, not another plugin, not the web; WebSockets
-and remote images are blocked. The frame cannot send what it is shown
-anywhere.
+So by default: **no fetch, XHR, WebSocket, image or media requests beyond
+your own files.** `fetch()` and XHR can read your own files (level data, a
+`.wasm`, sound for the Web Audio API) and nothing else — not the app, not
+another plugin, not the web; WebSockets and remote images are blocked.
+
+That is what CSP guarantees, and it is less than "no network":
+
+- **WebRTC is not covered by CSP.** `connect-src` does not govern an
+  `RTCPeerConnection`'s STUN/TURN traffic. The policy adds `webrtc 'block'`,
+  which refuses it only in browsers that implement that directive; the
+  others ignore it.
+- **The frame can navigate itself** (`location.href = …`) to any origin the
+  lobby page may frame: that is the embedding page's `frame-src`, not your
+  page's policy.
+
+So write your UI as if its author — you — could read everything the frame
+is shown, because it can: the viewer's projected state, names and language.
+Keep secrets out of what a viewer receives with `projectState`, not with
+the frame.
 
 **Outside origins the owner approved.** A manifest may ask for outside
 origins under `network` ([PLUGIN_PUBLISHING.md → Asking for more than the
@@ -962,12 +1024,19 @@ The instance names `<own>` from its configured public origin
 (`LOBBYFORGE_APP_ORIGIN`, else `NEXT_PUBLIC_BASE_URL`), never from the
 request. Without either (a dev setup) it is `'self'`: the app's origin,
 reached without cookies, where every mutating route refuses a cross-site
-request. Navigating the
-frame elsewhere is stopped by the app's own `frame-src`. Assets other than
-the HTML are public and cached for a year (`immutable`, the version is in
-the path): ship a new version to change them. The HTML loads only as an iframe document, and the
+request. Where the frame can navigate itself is bounded by the app page's
+own `frame-src` — the app's origin, YouTube's privacy-enhanced player, the
+CAPTCHA provider's frames when one is configured, and the approved sites of
+plugins whose UI is their own page — not by your page's policy. Assets other than
+the HTML are public and cached for a year by browsers (`immutable`, the
+version is in the path): ship a new version to change them. Shared caches
+never store them (`CDN-Cache-Control: no-store`, see
+[DEPLOY_CLOUDFLARE.md](DEPLOY_CLOUDFLARE.md)). The HTML loads only as an iframe document, and the
 app's own pages can never load your scripts (Fetch Metadata), so do not
-link to your files from anywhere else.
+link to your files from anywhere else. Files are streamed (a `Range` reads
+only that range), and the route allows each address a burst of 1000
+requests, refilled at 50 per second, then answers 429 with `Retry-After`:
+plenty for a game's first load, but do not poll your own files in a loop.
 
 Everything the frame knows arrives in a message; everything it can do is an
 action the lobby sends **as the viewer**, through the normal actions route,
@@ -1272,5 +1341,6 @@ and `dice-bot` for small, complete panels.
   [`docs/HUSHLE.md`](./HUSHLE.md) for the full Hushle walkthrough.
 - `apps/web/lib/plugin-registry.ts` — the host's compiled-in plugin list.
 - `apps/web/lib/plugin-context.ts` — the HTTP host's `buildHttpPluginContext`.
-- `apps/web/lib/activity-bus.ts` — Redis pub/sub for activity state changes (M19).
-- `apps/web/app/api/servers/[id]/activities/[sessionId]/stream/route.ts` — SSE route (M19).
+- `apps/web/lib/activity-bus.ts` — Redis pub/sub for activity state changes (M19);
+  the WebSocket gateway (`apps/ws-gateway`) delivers them to open panels. The
+  M19 SSE route (`…/activities/{sessionId}/stream`) was removed: nothing used it.

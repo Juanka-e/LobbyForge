@@ -2,7 +2,8 @@
 /**
  * Copies the frame client (src/frame/client.ts, compiled to plain ESM) into a
  * plugin's `ui/` folder, so a marketplace plugin can ship it as a file — the
- * sandboxed frame has no network and no CDN.
+ * sandboxed frame loads scripts only from its own files (`script-src 'self'`),
+ * never from a CDN.
  *
  *   node packages/plugin-sdk/scripts/vendor-frame-client.mjs            # write
  *   node packages/plugin-sdk/scripts/vendor-frame-client.mjs --check    # exit 1 if stale

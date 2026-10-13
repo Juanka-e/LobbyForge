@@ -9,20 +9,106 @@
  * verified-IP pinning silently misbehaved on modern Node).
  */
 import * as https from 'node:https';
+import { isIP } from 'node:net';
 import { promises as dnsPromises } from 'node:dns';
 import { isBlockedNetworkIp } from './ip-ranges';
 
-/** Resolve a hostname and refuse private/loopback targets. */
-export async function resolvePublicAddresses(host: string): Promise<string[]> {
-  if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) {
-    throw new Error('Target must not point at a local name');
+/**
+ * Why a host was not accepted as a public target. `message` carries the
+ * detail (the resolver's error, the refused address) for the SERVER LOG
+ * only: a caller that answers someone outside (the Bot API endpoint save)
+ * maps every reason to one generic sentence (security review BOT-004).
+ */
+export class PublicAddressError extends Error {
+  constructor(
+    readonly reason: 'local_name' | 'unresolvable' | 'blocked_address' | 'timeout',
+    message: string
+  ) {
+    super(message);
+    this.name = 'PublicAddressError';
   }
-  const result = await dnsPromises.lookup(host, { all: true });
-  const addresses = result.map((r) => r.address);
-  if (addresses.length === 0) throw new Error(`Could not resolve hostname: ${host}`);
+}
+
+/** The c-ares resolver, async on its own sockets — no libuv threadpool. */
+export interface DeadlineResolver {
+  resolve4(host: string): Promise<string[]>;
+  resolve6(host: string): Promise<string[]>;
+  cancel(): void;
+}
+
+export interface ResolveOptions {
+  /**
+   * Bound the whole resolution. Without it the system resolver is used
+   * (`dns.lookup` → getaddrinfo on the libuv threadpool, which honours
+   * /etc/hosts), unchanged for the installer / directory / CAPTCHA callers.
+   * With it the names are asked over DNS with c-ares (`dns.Resolver`:
+   * own sockets, never a threadpool thread) and the answer must come
+   * within `timeoutMs`; a stalling authoritative server then costs one
+   * cancelled query, not a threadpool thread for the resolver's whole
+   * retry schedule (the pool is shared with scrypt, zlib and file I/O).
+   * Event deliveries use this — their host names come from bots.
+   */
+  timeoutMs?: number;
+  /** Test seam: the resolver used with `timeoutMs`. */
+  createResolver?: (timeoutMs: number) => DeadlineResolver;
+}
+
+function defaultResolver(timeoutMs: number): DeadlineResolver {
+  // One try per server; `timeout` is per query. The overall deadline below
+  // still applies when /etc/resolv.conf lists several servers.
+  return new dnsPromises.Resolver({ timeout: timeoutMs, tries: 1 });
+}
+
+const NO_RECORDS = new Set(['ENODATA', 'ENOTFOUND', 'ENONAME', 'NOTFOUND', 'NODATA']);
+
+async function resolveWithDeadline(host: string, options: Required<Pick<ResolveOptions, 'timeoutMs'>> & ResolveOptions): Promise<string[]> {
+  const resolver = (options.createResolver ?? defaultResolver)(options.timeoutMs);
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      resolver.cancel();
+      reject(new PublicAddressError('timeout', `DNS resolution of ${JSON.stringify(host)} exceeded ${options.timeoutMs} ms`));
+    }, options.timeoutMs);
+    timer.unref?.();
+  });
+  const lookup = Promise.allSettled([resolver.resolve4(host), resolver.resolve6(host)]).then(([v4, v6]) => {
+    const addresses = [
+      ...(v4.status === 'fulfilled' ? v4.value : []),
+      ...(v6.status === 'fulfilled' ? v6.value : []),
+    ];
+    if (addresses.length > 0) return addresses;
+    // Neither family answered: say why (the first real error wins over "no records").
+    const errors = [v4, v6]
+      .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+      .map((r) => r.reason as NodeJS.ErrnoException);
+    const real = errors.find((e) => !NO_RECORDS.has(String(e?.code)));
+    throw new PublicAddressError('unresolvable', `Could not resolve ${JSON.stringify(host)}: ${(real ?? errors[0])?.code ?? 'no addresses'}`);
+  });
+  try {
+    return await Promise.race([lookup, deadline]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** Resolve a hostname and refuse private/loopback targets. */
+export async function resolvePublicAddresses(host: string, options: ResolveOptions = {}): Promise<string[]> {
+  if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) {
+    throw new PublicAddressError('local_name', 'Target must not point at a local name');
+  }
+  let addresses: string[];
+  if (isIP(host)) {
+    addresses = [host];
+  } else if (options.timeoutMs !== undefined) {
+    addresses = await resolveWithDeadline(host, { ...options, timeoutMs: options.timeoutMs });
+  } else {
+    const result = await dnsPromises.lookup(host, { all: true });
+    addresses = result.map((r) => r.address);
+  }
+  if (addresses.length === 0) throw new PublicAddressError('unresolvable', `Could not resolve hostname: ${host}`);
   for (const ip of addresses) {
     if (isBlockedNetworkIp(ip)) {
-      throw new Error(`Target resolves to a blocked address: ${ip}`);
+      throw new PublicAddressError('blocked_address', `Target resolves to a blocked address: ${ip}`);
     }
   }
   return addresses;

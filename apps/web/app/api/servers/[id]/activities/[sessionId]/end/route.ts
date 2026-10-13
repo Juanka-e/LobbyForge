@@ -65,7 +65,7 @@ async function handlePost(
     if (!server) {
       return NextResponse.json({ error: 'Server not found' }, { status: 404 });
     }
-    // security-review PLUG-002: membership first, like GET/actions/SSE.
+    // security-review PLUG-002: membership first, like GET/actions.
     // Without it a host who was kicked or banned could still end their
     // game: visibility passes for anyone on a channel without overrides,
     // and the host shortcut below skips the permission check.

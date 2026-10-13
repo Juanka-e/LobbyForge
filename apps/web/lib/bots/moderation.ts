@@ -261,6 +261,64 @@ export async function moderateWebhookMessage(input: {
   return { action: 'block', rule: violation.rule, botId: bot.id, botName: bot.name };
 }
 
+/**
+ * An app message (a plugin's `chat.post`, lib/activity-app-chat.ts) goes
+ * through the same Moderation Bot, like an incoming webhook's post. An app
+ * is not a member, so:
+ *   - the blocked-word and link rules run; the mention rule does not (an
+ *     app's mentions are made inert before posting — they ping nobody) and
+ *     neither do the counting rules (app chat has its own limits);
+ *   - there is no staff exemption and no notice in the channel: the post
+ *     is simply dropped (the action that asked for it still applies);
+ *   - the audit entry names the plugin (`targetType: 'plugin'`, kind
+ *     `app`), with the session; like every block, the excerpt is left out
+ *     when the channel is role-gated, so readers of the audit log who
+ *     cannot see that channel learn nothing of what was said in it.
+ * Fails open on a bot that cannot be loaded, like member messages.
+ */
+export async function moderateAppMessage(input: {
+  serverId: string;
+  channelId: string;
+  pluginId: string;
+  pluginName: string;
+  sessionId: string;
+  content: string;
+}): Promise<ModerationVerdict> {
+  let bot: BotRow | null;
+  try {
+    bot = await getBuiltInBot(input.serverId, 'moderation');
+  } catch (err) {
+    console.error('[bots] moderation bot unavailable, app message allowed:', (err as Error).message);
+    return ALLOW;
+  }
+  if (!bot || !bot.enabled || !botHasPermission(bot, 'moderate_messages')) return ALLOW;
+  const settings = parseModerationSettings(bot.settings);
+  const violation = evaluateContentRules(input.content, { ...settings, maxMentions: 0 }, wordRulesFor(bot, settings));
+  if (!violation) return ALLOW;
+
+  const openChannel = await isChannelOpenToBots(getDb(), input.channelId).catch(() => false);
+  await logAction(getDb(), {
+    serverId: input.serverId,
+    actorUserId: null,
+    action: 'bot.moderation.block',
+    targetType: 'plugin',
+    targetId: input.pluginId,
+    metadata: {
+      botId: bot.id,
+      botName: bot.name,
+      rule: violation.rule,
+      detail: violation.detail,
+      channelId: input.channelId,
+      kind: 'app',
+      pluginName: input.pluginName,
+      sessionId: input.sessionId,
+      excerpt: openChannel ? excerptOf(input.content) : null,
+      contentSha256: sha256(input.content),
+    },
+  }).catch((err) => console.error('[audit] bot.moderation.block failed:', (err as Error).message));
+  return { action: 'block', rule: violation.rule, botId: bot.id, botName: bot.name };
+}
+
 /** The error a blocked sender gets; the lobby translates it by `code` + `rule`. */
 export function moderationBlockedBody(verdict: Extract<ModerationVerdict, { action: 'block' }>) {
   return {

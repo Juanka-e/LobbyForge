@@ -29,6 +29,16 @@ describe('describeFailure for invalid_request', () => {
     expect(describeFailure(en, 400, body)).toBe('These are not site addresses: nope, also bad');
   });
 
+  it('BOT-001: explains a token or permission refused over private channels the manager cannot see', () => {
+    const body = { error: 'This bot can reach private channels you cannot see', code: 'cannot_take_hidden_access' };
+    expect(describeFailure(en, 403, body)).toBe(
+      'This bot can reach private channels you cannot see. Only someone who can manage channels can give it a new token or more permissions.'
+    );
+    expect(describeFailure(tr, 403, body)).toBe(
+      'Bu bot göremediğin özel kanallara ulaşabiliyor. Ona yeni bir token ya da daha fazla izin yalnızca kanalları yönetebilen biri verebilir.'
+    );
+  });
+
   it('keeps the generic sentence for anything else', () => {
     expect(describeFailure(en, 400, { code: 'invalid_request', issues: ['name: Too big'] })).toBe(
       'Some of these values are not valid. Check the fields and try again.'

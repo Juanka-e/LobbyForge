@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildGuestSessionCookie, type GuestIdentity } from '@/lib/guest-session';
 
 const db = vi.hoisted(() => ({
+  getActiveMemberTimeout: vi.fn(),
   getServerById: vi.fn(),
   isServerMember: vi.fn(),
   getUserPermissions: vi.fn(),

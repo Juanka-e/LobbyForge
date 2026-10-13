@@ -24,6 +24,8 @@ const dbFns = {
   setGameSessionStateCAS: vi.fn(),
   withGameSessionWriteLock: vi.fn(),
   addPlayerToSession: vi.fn(),
+  getActiveMemberTimeout: vi.fn(),
+  getPluginInstall: vi.fn(),
 };
 class GameSessionBusyError extends Error {}
 vi.mock('@lobbyforge/db', () => ({ ...dbFns, GameSessionBusyError }));
@@ -138,6 +140,8 @@ beforeEach(() => {
     row: { id: 'sess-1', state, status: 'lobby', revision: rev + 1 },
   }));
   dbFns.logAction.mockResolvedValue(undefined);
+  dbFns.getActiveMemberTimeout.mockResolvedValue(null);
+  dbFns.getPluginInstall.mockResolvedValue({ enabled: true, settings: {} });
 });
 
 async function post(body: Record<string, unknown>, uid: string): Promise<Response> {

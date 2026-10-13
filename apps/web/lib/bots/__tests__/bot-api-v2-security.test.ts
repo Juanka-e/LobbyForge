@@ -145,7 +145,8 @@ describe('§8 members cannot forge bot-written metadata', () => {
       { params: Promise.resolve({ id: SERVER, channelId: CHANNEL }) }
     );
     expect(res.status).toBe(400);
-    expect(await res.json()).toMatchObject({ key });
+    // security-review AUTHZ-008: no client metadata at all, reserved or not.
+    expect(await res.json()).toMatchObject({ code: 'metadata_not_allowed' });
     expect(db.createMessage).not.toHaveBeenCalled();
   });
 });

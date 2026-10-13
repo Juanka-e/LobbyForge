@@ -190,7 +190,8 @@ describe('POST .../messages', () => {
     const { POST } = await import('../route.js');
     const res = await POST(req(VIEWER, 'POST', { content: 'not a poll', metadata: { poll: { id: 'forged' } } }), ctx);
     expect(res.status).toBe(400);
-    expect(await res.json()).toMatchObject({ key: 'poll' });
+    // security-review AUTHZ-008: no client metadata at all, reserved or not.
+    expect(await res.json()).toMatchObject({ code: 'metadata_not_allowed' });
     expect(createMessage).not.toHaveBeenCalled();
   });
 });

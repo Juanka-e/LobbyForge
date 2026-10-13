@@ -129,3 +129,77 @@ describe('fetchIpPinned clocks', () => {
     ).rejects.toThrow('Download exceeds the 10 byte cap');
   });
 });
+
+/**
+ * Bot event endpoints (security review, "needs verification"): their host
+ * names come from bots, so a stalling authoritative server must not pin a
+ * libuv threadpool thread (shared with scrypt) for the system resolver's
+ * whole retry schedule. With `timeoutMs` the names are asked with the
+ * c-ares resolver (own sockets) and the answer must come in time.
+ */
+describe('resolvePublicAddresses with a deadline', () => {
+  function fakeResolver(answers: { v4?: () => Promise<string[]>; v6?: () => Promise<string[]> }) {
+    const cancel = vi.fn();
+    const created: number[] = [];
+    const createResolver = (timeoutMs: number) => {
+      created.push(timeoutMs);
+      return {
+        resolve4: vi.fn(answers.v4 ?? (async () => [])),
+        resolve6: vi.fn(answers.v6 ?? (async () => Promise.reject(Object.assign(new Error('no AAAA'), { code: 'ENODATA' })))),
+        cancel,
+      };
+    };
+    return { createResolver, cancel, created };
+  }
+
+  it('gives up at the deadline and cancels the outstanding queries', async () => {
+    const { resolvePublicAddresses, PublicAddressError } = await import('../ip-pinned-https');
+    const never = () => new Promise<string[]>(() => {});
+    const fake = fakeResolver({ v4: never, v6: never });
+    const started = Date.now();
+    const error = await resolvePublicAddresses('stall.example.com', { timeoutMs: 40, createResolver: fake.createResolver }).catch((e) => e);
+    expect(error).toBeInstanceOf(PublicAddressError);
+    expect(error).toMatchObject({ reason: 'timeout' });
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(fake.cancel).toHaveBeenCalledTimes(1);
+    expect(fake.created).toEqual([40]);
+  });
+
+  it('returns A and AAAA answers; a family without records is fine', async () => {
+    const { resolvePublicAddresses } = await import('../ip-pinned-https');
+    const both = fakeResolver({ v4: async () => ['93.184.216.34'], v6: async () => ['2606:2800:220:1::248'] });
+    expect(await resolvePublicAddresses('bot.example.com', { timeoutMs: 2_000, createResolver: both.createResolver })).toEqual([
+      '93.184.216.34',
+      '2606:2800:220:1::248',
+    ]);
+    const v4only = fakeResolver({ v4: async () => ['93.184.216.34'] });
+    expect(await resolvePublicAddresses('bot.example.com', { timeoutMs: 2_000, createResolver: v4only.createResolver })).toEqual(['93.184.216.34']);
+  });
+
+  it('still refuses private answers, local names and unresolvable hosts — with a reason code, the detail only in the message', async () => {
+    const { resolvePublicAddresses } = await import('../ip-pinned-https');
+    const rebind = fakeResolver({ v4: async () => ['93.184.216.34', '10.0.0.5'] });
+    await expect(resolvePublicAddresses('evil.example.com', { timeoutMs: 2_000, createResolver: rebind.createResolver })).rejects.toMatchObject({
+      reason: 'blocked_address',
+    });
+    const missing = fakeResolver({ v4: async () => Promise.reject(Object.assign(new Error('nx'), { code: 'ENOTFOUND' })) });
+    await expect(resolvePublicAddresses('nx.example.com', { timeoutMs: 2_000, createResolver: missing.createResolver })).rejects.toMatchObject({
+      reason: 'unresolvable',
+    });
+    const unused = fakeResolver({});
+    await expect(resolvePublicAddresses('localhost', { timeoutMs: 2_000, createResolver: unused.createResolver })).rejects.toMatchObject({
+      reason: 'local_name',
+    });
+    expect(unused.created).toEqual([]);
+  });
+
+  it('an IP literal is judged as it is — no DNS query at all', async () => {
+    const { resolvePublicAddresses } = await import('../ip-pinned-https');
+    const unused = fakeResolver({});
+    expect(await resolvePublicAddresses('93.184.216.34', { timeoutMs: 2_000, createResolver: unused.createResolver })).toEqual(['93.184.216.34']);
+    await expect(resolvePublicAddresses('169.254.169.254', { timeoutMs: 2_000, createResolver: unused.createResolver })).rejects.toMatchObject({
+      reason: 'blocked_address',
+    });
+    expect(unused.created).toEqual([]);
+  });
+});

@@ -17,7 +17,7 @@ const OWN = `http://localhost:${PORT}/api/plugin-ui/probe/1.0.0/`;
 const PLUGIN_UI_CSP =
   "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
   `font-src 'self'; media-src ${OWN} data: blob:; connect-src ${OWN}; frame-ancestors 'self'; base-uri 'none'; ` +
-  "form-action 'none'; sandbox allow-scripts";
+  "form-action 'none'; webrtc 'block'; sandbox allow-scripts";
 
 const PLAYERS = [
   { userId: 'u1', name: 'Ayşe', isHost: true },
@@ -152,6 +152,11 @@ test('the asset route answers with the sandbox policy, and nothing that forbids 
   });
   expect(script.status()).toBe(200);
   expect(headerValues(script.headersArray(), 'cache-control')).toEqual(['public, max-age=31536000, immutable']);
+  // Browsers cache it; shared caches (a CDN that ignores Vary) never do.
+  for (const headers of [all, script.headersArray()]) {
+    expect(headerValues(headers, 'cdn-cache-control')).toEqual(['no-store']);
+    expect(headerValues(headers, 'cloudflare-cdn-cache-control')).toEqual(['no-store']);
+  }
   expect(headerValues(all, 'vary').join(',')).toContain('Sec-Fetch-Dest');
   expect(headerValues(all, 'set-cookie')).toEqual([]);
 
@@ -205,6 +210,9 @@ test('the frame runs in an opaque origin: no cookies, storage, parent DOM or net
   expect(probe.externalAudio).toBe('blocked');
   expect(probe.externalImage).toBe('blocked');
   expect(probe.ownImage).toBe('loaded');
+  // `webrtc 'block'` must not break the frame where the browser ignores it;
+  // whether this browser enforces it is logged above, not asserted.
+  expect(String(probe.webrtc)).toMatch(/^(allowed|blocked):/);
   const violations = probe.violations as string[];
   // The app, its API and another plugin's folder were refused by the CSP —
   // not merely unreadable under CORS, which would still send the request.

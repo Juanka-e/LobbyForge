@@ -11,13 +11,18 @@
  * `<iframe sandbox="allow-scripts">` (no `allow-same-origin`), and the asset
  * route's own CSP repeats `sandbox allow-scripts`. The frame therefore runs in
  * an OPAQUE origin: it cannot read the app's cookies, storage or DOM, and the
- * app's session cookie is not sent with its requests. Its CSP has
- * `connect-src` limited to its own files and only `'self'` images, so it has no network to send
- * anything to. Everything it knows arrives in the messages below, and the
- * state it is given is already PROJECTED for its viewer by the server — it
- * never sees more than that person could. Everything it can do is an `action`,
- * which the parent sends through the normal actions route with the viewer's
- * session, where the plugin's action policies apply.
+ * app's session cookie is not sent with its requests. Its CSP allows no
+ * fetch, XHR, WebSocket, image or media requests beyond its own files (and
+ * the outside origins the instance owner approved). That is not "no
+ * network": WebRTC is not covered by CSP (the policy's `webrtc 'block'`
+ * works only where browsers implement it), and the frame can navigate
+ * itself to any origin the lobby page may frame — so whatever it is shown
+ * must be treated as readable by the plugin's author. Everything it knows
+ * arrives in the messages below, and the state it is given is already
+ * PROJECTED for its viewer by the server — it never sees more than that
+ * person could. Everything it can do is an `action`, which the parent sends
+ * through the normal actions route with the viewer's session, where the
+ * plugin's action policies apply.
  *
  * Every message is a plain JSON object with `lf: 1` and a `type`.
  *

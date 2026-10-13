@@ -56,6 +56,21 @@ describe('validateGuestFromHeaders', () => {
     const result = validateGuestFromHeaders(`lf_guest=${tampered}`);
     expect(result.ok).toBe(false);
   });
+
+  it('security-review INFRA-V-02: refuses to verify with a published placeholder secret outside the dev stack', () => {
+    const placeholder = 'dev_session_secret_change_before_public_use_1234';
+    process.env.LOBBYFORGE_SESSION_SECRET = placeholder;
+    delete process.env.LOBBYFORGE_DEV_STACK;
+    const forged = buildGuestSessionCookie({ gid: 'g_'.padEnd(34, 'b'), uid: 'u-forged', name: 'Mallory' }, placeholder).raw;
+    expect(() => validateGuestFromHeaders(`lf_guest=${forged}`)).toThrow(/published placeholder/);
+
+    process.env.LOBBYFORGE_DEV_STACK = 'true';
+    try {
+      expect(validateGuestFromHeaders(`lf_guest=${forged}`).ok).toBe(true);
+    } finally {
+      delete process.env.LOBBYFORGE_DEV_STACK;
+    }
+  });
 });
 
 // ── LF-SEC-009: tri-state revocation status ─────────────────────────────

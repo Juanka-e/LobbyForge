@@ -91,6 +91,10 @@ export function describeFailure(t: Translator, status: number, body: ErrorBody):
       return t('bots.error.invalidChannel');
     case 'builtin_permissions_fixed':
       return t('bots.error.builtinFixed');
+    case 'cannot_take_hidden_access':
+      // A token, or a new channel permission, for a bot granted private
+      // channels this manager cannot see (security review BOT-001).
+      return t('bots.error.hiddenAccess');
     case 'invalid_request':
       return describeInvalidRequest(t, body.issues) ?? t('bots.error.invalid');
     default:

@@ -54,7 +54,8 @@ beforeEach(() => {
   mocks.getServerById.mockReset();
   mocks.isServerMember.mockReset();
   mocks.getGameSessionById.mockReset();
-  mocks.getUserPermissions.mockReset().mockResolvedValue([]);
+  // A plain member: @everyone's default READ_MESSAGE_HISTORY, nothing else.
+  mocks.getUserPermissions.mockReset().mockResolvedValue(['read_message_history']);
   mocks.canMemberAccessChannel.mockReset().mockResolvedValue(true);
   mocks.isDmChannelParticipant.mockReset();
   // beta-review (S6): chat topics require an existing channel of the
@@ -115,11 +116,12 @@ describe('authorizeTopicSubscribe — SEC-002 channel visibility', () => {
   it('rejects a chat topic for a channel the member cannot SEE (private room)', async () => {
     mocks.getServerById.mockResolvedValue(mockServer());
     mocks.isServerMember.mockResolvedValue(true);
-    mocks.getUserPermissions.mockResolvedValue([]);            // no manage bypass
+    mocks.getUserPermissions.mockResolvedValue(['read_message_history']); // no manage bypass
     mocks.canMemberAccessChannel.mockResolvedValue(false);    // gated channel
     const result = await authorizeTopicSubscribe(fakeDb, USER_ID, `chat:${SERVER_ID}:${CHANNEL_ID}`);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe('forbidden');
+    expect(mocks.canMemberAccessChannel).toHaveBeenCalledWith(fakeDb, SERVER_ID, CHANNEL_ID, USER_ID);
   });
 
   it('rejects an activity-state topic when the session lives in a private channel', async () => {
@@ -147,7 +149,7 @@ describe('authorizeTopicSubscribe — SEC-002 channel visibility', () => {
   it('manage_channels bypasses the channel gate', async () => {
     mocks.getServerById.mockResolvedValue(mockServer());
     mocks.isServerMember.mockResolvedValue(true);
-    mocks.getUserPermissions.mockResolvedValue(['manage_channels']);
+    mocks.getUserPermissions.mockResolvedValue(['manage_channels', 'read_message_history']);
     const result = await authorizeTopicSubscribe(fakeDb, USER_ID, `chat:${SERVER_ID}:${CHANNEL_ID}`);
     expect(result.ok).toBe(true);
     expect(mocks.canMemberAccessChannel).not.toHaveBeenCalled();
@@ -159,6 +161,52 @@ describe('authorizeTopicSubscribe — SEC-002 channel visibility', () => {
     const result = await authorizeTopicSubscribe(fakeDb, USER_ID, `presence:${SERVER_ID}`);
     expect(result.ok).toBe(true);
     expect(mocks.canMemberAccessChannel).not.toHaveBeenCalled();
+  });
+});
+
+// The REST read rule (apps/web/lib/message-authorization.ts, `read`) is
+// visibility + READ_MESSAGE_HISTORY; the live chat feed now asks the same.
+describe('authorizeTopicSubscribe — chat topics need READ_MESSAGE_HISTORY, like REST reads', () => {
+  const CHANNEL_ID = '30000000-0000-4000-8000-000000000001';
+  const SESSION_ID = '40000000-0000-4000-8000-000000000001';
+
+  beforeEach(() => {
+    mocks.getServerById.mockResolvedValue(mockServer());
+    mocks.isServerMember.mockResolvedValue(true);
+  });
+
+  it('refuses a member whose roles revoke message history, even in a visible channel', async () => {
+    mocks.getUserPermissions.mockResolvedValue(['send_messages']);
+    mocks.canMemberAccessChannel.mockResolvedValue(true);
+    const result = await authorizeTopicSubscribe(fakeDb, USER_ID, `chat:${SERVER_ID}:${CHANNEL_ID}`);
+    expect(result).toEqual({ ok: false, reason: 'forbidden' });
+  });
+
+  it('manage_channels does not stand in for the history permission (REST does not either)', async () => {
+    mocks.getUserPermissions.mockResolvedValue(['manage_channels']);
+    const result = await authorizeTopicSubscribe(fakeDb, USER_ID, `chat:${SERVER_ID}:${CHANNEL_ID}`);
+    expect(result).toEqual({ ok: false, reason: 'forbidden' });
+  });
+
+  it('administrators and the owner pass', async () => {
+    mocks.getUserPermissions.mockResolvedValue(['administrator']);
+    expect((await authorizeTopicSubscribe(fakeDb, USER_ID, `chat:${SERVER_ID}:${CHANNEL_ID}`)).ok).toBe(true);
+
+    mocks.getServerById.mockResolvedValue(mockServer({ ownerUserId: USER_ID }));
+    mocks.getUserPermissions.mockResolvedValue([]);
+    expect((await authorizeTopicSubscribe(fakeDb, USER_ID, `chat:${SERVER_ID}:${CHANNEL_ID}`)).ok).toBe(true);
+  });
+
+  it('a member with history in a visible channel passes', async () => {
+    mocks.getUserPermissions.mockResolvedValue(['read_message_history']);
+    expect((await authorizeTopicSubscribe(fakeDb, USER_ID, `chat:${SERVER_ID}:${CHANNEL_ID}`)).ok).toBe(true);
+  });
+
+  it('activity-state and presence topics are not chat: no history permission needed', async () => {
+    mocks.getUserPermissions.mockResolvedValue([]);
+    mocks.getGameSessionById.mockResolvedValue({ id: SESSION_ID, serverId: SERVER_ID, channelId: CHANNEL_ID, pluginId: 'hushle' });
+    expect((await authorizeTopicSubscribe(fakeDb, USER_ID, `activity-state:${SERVER_ID}:${SESSION_ID}`)).ok).toBe(true);
+    expect((await authorizeTopicSubscribe(fakeDb, USER_ID, `presence:${SERVER_ID}`)).ok).toBe(true);
   });
 });
 

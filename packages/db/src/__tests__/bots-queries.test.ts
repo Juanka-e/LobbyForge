@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import type { SQL } from 'drizzle-orm';
 import {
+  changeBotToken,
   deleteBot,
   ensureBuiltInBot,
   isBuiltInBotType,
@@ -54,13 +55,14 @@ function recordingDb(results: unknown[][]) {
     );
     return proxy;
   }
-  const db = {
+  const db: Record<string, unknown> = {
     select: (...args: unknown[]) => start('select', args),
     selectDistinct: (...args: unknown[]) => start('selectDistinct', args),
     insert: (...args: unknown[]) => start('insert', args),
     update: (...args: unknown[]) => start('update', args),
     delete: (...args: unknown[]) => start('delete', args),
   };
+  db.transaction = async (fn: (tx: unknown) => Promise<unknown>) => fn(db);
   return { db: db as never, chains };
 }
 
@@ -118,23 +120,43 @@ describe('bot rows', () => {
   });
 });
 
-describe('setBotTokenHash', () => {
+describe('setBotTokenHash / changeBotToken', () => {
   it('stores the hash and stamps when the token was issued', async () => {
-    const { db, chains } = recordingDb([[{ id: 'bot-1' }], [botRow({ tokenHash: 'sha256$ab' })]]);
+    const { db, chains } = recordingDb([[{ id: 'bot-1' }], [], [botRow({ tokenHash: 'sha256$ab' })]]);
     const row = await setBotTokenHash(db, 'bot-1', 'sha256$ab', NOW);
     expect(row?.tokenHash).toBe('sha256$ab');
     expect(stepArg(chains[0]!, 'set')).toEqual({ tokenHash: 'sha256$ab', tokenIssuedAt: NOW, updatedAt: NOW });
   });
 
   it('clears the issue date when the token is revoked', async () => {
-    const { db, chains } = recordingDb([[{ id: 'bot-1' }], [botRow()]]);
+    const { db, chains } = recordingDb([[{ id: 'bot-1' }], [], [botRow()]]);
     await setBotTokenHash(db, 'bot-1', null, NOW);
     expect(stepArg(chains[0]!, 'set')).toEqual({ tokenHash: null, tokenIssuedAt: null, updatedAt: NOW });
   });
 
-  it('returns null for an unknown bot', async () => {
-    const { db } = recordingDb([[]]);
+  it('returns null for an unknown bot (and touches no endpoint)', async () => {
+    const { db, chains } = recordingDb([[]]);
     expect(await setBotTokenHash(db, 'nope', 'sha256$ab', NOW)).toBeNull();
+    expect(chains).toHaveLength(1);
+  });
+
+  it('BOT-002: a rotate or revoke switches the outgoing endpoint off as token_changed, in the same transaction', async () => {
+    for (const hash of ['sha256$ab', null]) {
+      const { db, chains } = recordingDb([[{ id: 'bot-1' }], [{ botId: 'bot-1' }], [botRow({ tokenHash: hash })]]);
+      const change = await changeBotToken(db, 'bot-1', hash, NOW);
+      expect(change).toMatchObject({ bot: { id: 'bot-1', tokenHash: hash }, endpointDisabled: true });
+      const endpointUpdate = chains[1]!;
+      expect(stepArg(endpointUpdate, 'set')).toEqual({ enabled: false, disabledReason: 'token_changed', updatedAt: NOW });
+      const where = renderWhere(stepArg(endpointUpdate, 'where'));
+      expect(where).toMatch(/"bot_event_endpoints"."bot_id" = \$\d/);
+      // An endpoint already off for this reason is not "disabled again".
+      expect(where).toMatch(/"bot_event_endpoints"."disabled_reason" IS DISTINCT FROM \$\d/);
+    }
+  });
+
+  it('reports no switched-off endpoint when the bot had none (or it was already off for a token change)', async () => {
+    const { db } = recordingDb([[{ id: 'bot-1' }], [], [botRow()]]);
+    expect(await changeBotToken(db, 'bot-1', 'sha256$cd', NOW)).toMatchObject({ endpointDisabled: false });
   });
 });
 

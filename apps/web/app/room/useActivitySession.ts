@@ -5,7 +5,14 @@ import { getRealtimeClient } from '@/lib/realtime-client';
 import { postActivityAction } from '@/lib/activity-action-retry';
 import { activityRefusalMessage, parseActivityRefusal } from '@/lib/activity-refusal';
 import { parseActivityHost, type ActivityHostState } from '@/lib/activity-host-view';
-import { nextActivityCheck, parseTimersDueAt, serverClockOffset } from '@/lib/activity-next-check';
+import {
+  activityDueTimes,
+  nextActivityCheck,
+  parseTimersDueAt,
+  recordCheck,
+  serverClockOffset,
+  type CheckHistory,
+} from '@/lib/activity-next-check';
 import { useT } from '@/lib/i18n/client';
 
 /**
@@ -94,8 +101,9 @@ export function useActivitySession({
   tRef.current = t;
   // The current subscription's re-read, for the due-time timer below.
   const refreshRef = useRef<(() => Promise<void>) | null>(null);
-  // The due time the timer last re-read for (see nextActivityCheck).
-  const checkFiredForRef = useRef<number | null>(null);
+  // How many times the due-time timer re-read for each due time (see
+  // nextActivityCheck): a time still pending after that backs off.
+  const checkHistoryRef = useRef<CheckHistory | null>(null);
   // The server's clock minus this device's, from the last GET's `now`.
   const clockOffsetRef = useRef(0);
 
@@ -150,7 +158,8 @@ export function useActivitySession({
       }
     };
     refreshRef.current = fetchOnce;
-    checkFiredForRef.current = null;
+    // Another session: its due times start with no re-reads behind them.
+    checkHistoryRef.current = null;
 
     const handleEvent = (raw: unknown) => {
       if (cancelled || !raw || typeof raw !== 'object') return;
@@ -263,18 +272,20 @@ export function useActivitySession({
   // lazily, when somebody touches the session. Re-read once at the earliest
   // due moment so they happen even if nobody acts. Re-armed after every
   // read (each read gives a new `host` / `timersDueAt`); never a polling
-  // loop (see nextActivityCheck).
+  // loop: a due time still pending after its re-read is retried with a
+  // back-off up to a minute (see nextActivityCheck).
   const host = detail?.host ?? null;
   const timersDueAt = detail?.timersDueAt;
   useEffect(() => {
-    const next = nextActivityCheck(
-      { host, timersDueAt },
-      Date.now() + clockOffsetRef.current,
-      checkFiredForRef.current
-    );
+    const due = { host, timersDueAt };
+    const next = nextActivityCheck(due, Date.now() + clockOffsetRef.current, checkHistoryRef.current);
     if (!next) return;
     const timer = setTimeout(() => {
-      checkFiredForRef.current = next.at;
+      checkHistoryRef.current = recordCheck(
+        checkHistoryRef.current,
+        activityDueTimes(due),
+        Date.now() + clockOffsetRef.current
+      );
       void refreshRef.current?.();
     }, next.delay);
     return () => clearTimeout(timer);

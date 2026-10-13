@@ -17,10 +17,11 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import postgres from 'postgres';
 import { createDb } from '../client.js';
-import { createBot, deleteBot } from '../queries/bots.js';
+import { changeBotToken, createBot, deleteBot } from '../queries/bots.js';
 import {
   getBotChannelAccessState,
   getBotReachableChannel,
+  getChannelOpenToBots,
   grantBotChannelAccess,
   listBotChannelAccessIds,
   listBotChannelGrantsForChannel,
@@ -48,6 +49,7 @@ import {
 import { createChannelWebhook, createWebhookMessage, getActiveChannelWebhook } from '../queries/channelWebhooks.js';
 import {
   getBotEventEndpoint,
+  reenableBotEventEndpoint,
   recordBotEventDeliveryFailure,
   recordBotEventDeliverySuccess,
   upsertBotEventEndpoint,
@@ -293,6 +295,40 @@ describe.skipIf(!DB_URL)('Bot API v2 (integration)', () => {
     await recordBotEventDeliveryFailure(db, { botId: botB, status: 502, maxFailures: 20, reason: 'too_many_failures' });
     await recordBotEventDeliverySuccess(db, { botId: botB, status: 200 });
     expect((await getBotEventEndpoint(db, botB))?.failureCount).toBe(0);
+  });
+
+  it('BOT-002: a token rotate / revoke switches the endpoint off (token_changed); only a save with the NEW token re-arms it', async () => {
+    const leaked = (await createBot(db, { serverId, name: 'Leaky', type: 'custom', permissions: ['receive_events'], tokenHash: 'sha256$old', createdBy: owner })).id;
+    const saved = await upsertBotEventEndpoint(db, { botId: leaked, url: 'https://evil.example.com/hook', events: ['interaction_create'], secret: `whsec_${'e'.repeat(43)}`, expectTokenHash: 'sha256$old' });
+    expect(saved).toMatchObject({ enabled: true });
+
+    const rotated = await changeBotToken(db, leaked, 'sha256$new');
+    expect(rotated).toMatchObject({ bot: { tokenHash: 'sha256$new' }, endpointDisabled: true });
+    expect(await getBotEventEndpoint(db, leaked)).toMatchObject({ enabled: false, disabledReason: 'token_changed', url: 'https://evil.example.com/hook' });
+    // A manager cannot switch it back on; a second change reports nothing new.
+    expect(await reenableBotEventEndpoint(db, leaked)).toBeNull();
+    expect(await changeBotToken(db, leaked, null)).toMatchObject({ endpointDisabled: false });
+    expect((await getBotEventEndpoint(db, leaked))?.enabled).toBe(false);
+
+    // A save that authenticated with the old token is refused; the new token's holder re-arms it.
+    await changeBotToken(db, leaked, 'sha256$newer');
+    expect(await upsertBotEventEndpoint(db, { botId: leaked, url: 'https://evil.example.com/hook', events: [], secret: 'whsec_x', expectTokenHash: 'sha256$old' })).toBeNull();
+    const rearmed = await upsertBotEventEndpoint(db, { botId: leaked, url: 'https://bot.example.com/hook', events: ['interaction_create'], secret: `whsec_${'n'.repeat(43)}`, expectTokenHash: 'sha256$newer' });
+    expect(rearmed).toMatchObject({ enabled: true, disabledReason: null, url: 'https://bot.example.com/hook' });
+
+    // An endpoint switched off for failures is moved to token_changed by a rotation (the URL is still the old holder's).
+    await sql`UPDATE bot_event_endpoints SET enabled = false, disabled_reason = 'too_many_failures' WHERE bot_id = ${leaked}`;
+    expect(await changeBotToken(db, leaked, 'sha256$newest')).toMatchObject({ endpointDisabled: true });
+    expect((await getBotEventEndpoint(db, leaked))?.disabledReason).toBe('token_changed');
+  });
+
+  it('the all-mode rule without a bot row (a built-in bot’s first save) queries no bot id', async () => {
+    expect((await getChannelOpenToBots(db, serverId, general))?.id).toBe(general);
+    expect(await getChannelOpenToBots(db, serverId, staff)).toBeNull();
+    expect(await getChannelOpenToBots(db, serverId, voice)).toBeNull();
+    expect(await getChannelOpenToBots(db, serverId, foreign)).toBeNull();
+    // What the welcome route used to do: a made-up bot id against the uuid column is a query error (22P02), not "no access".
+    await expect(getBotReachableChannel(db, { id: 'welcome', serverId }, general)).rejects.toThrow();
   });
 
   it('a webhook post has no user and no bot; webhooks stop with a soft-deleted server', async () => {

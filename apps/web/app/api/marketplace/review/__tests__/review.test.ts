@@ -40,20 +40,24 @@ function tgz(files: Record<string, string>): ArrayBuffer {
   return gz.buffer.slice(gz.byteOffset, gz.byteOffset + gz.byteLength) as ArrayBuffer;
 }
 
-async function approve(): Promise<Response> {
+async function review(body: Record<string, unknown>): Promise<Response> {
   const { POST } = await import('../route');
   return (POST as unknown as (req: Request) => Promise<Response>)(
     new Request('http://localhost/api/marketplace/review', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ pluginId: 'buzzer', decision: 'approved' }),
+      body: JSON.stringify({ pluginId: 'buzzer', ...body }),
     })
   );
 }
 
+const approve = (extra: Record<string, unknown> = {}) => review({ decision: 'approved', ...extra });
+
+const URL_1 = 'https://plugins.example.com/buzzer.tgz';
+
 beforeEach(() => {
-  reviewPlugin.mockReset().mockResolvedValue(undefined);
-  getCatalogEntry.mockReset().mockResolvedValue({ manifestUrl: 'https://plugins.example.com/buzzer.tgz' });
+  reviewPlugin.mockReset().mockResolvedValue(true);
+  getCatalogEntry.mockReset().mockResolvedValue({ pluginId: 'buzzer', version: '1.0.0', manifestUrl: URL_1 });
   downloadBundleForReview.mockReset();
 });
 
@@ -70,7 +74,9 @@ describe('POST /api/marketplace/review — approval checks the bundle format', (
       'approved',
       null,
       null,
-      expect.objectContaining({ sha256: expect.stringMatching(/^[0-9a-f]{64}$/) })
+      expect.objectContaining({ sha256: expect.stringMatching(/^[0-9a-f]{64}$/) }),
+      // Written only while the row still has what was downloaded and pinned.
+      { version: '1.0.0', manifestUrl: URL_1 }
     );
   });
 
@@ -96,5 +102,78 @@ describe('POST /api/marketplace/review — approval checks the bundle format', (
     const res = await approve();
     expect(res.status).toBe(400);
     expect(reviewPlugin).not.toHaveBeenCalled();
+  });
+
+  it('PLUG-001: refuses a small gzip that inflates past the cap, without inflating it', async () => {
+    // 128 gzip members of 1 MiB of zeros each: ~130 KB that inflates to 128 MiB.
+    const member = gzipSync(Buffer.alloc(1024 * 1024), { level: 9 });
+    const bomb = Buffer.concat(Array.from({ length: 128 }, () => member));
+    expect(bomb.byteLength).toBeLessThan(1024 * 1024);
+    downloadBundleForReview.mockResolvedValue(bomb.buffer.slice(bomb.byteOffset, bomb.byteOffset + bomb.byteLength));
+    const res = await approve();
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain('tar bomb');
+    expect(reviewPlugin).not.toHaveBeenCalled();
+  });
+
+  it('PLUG-001: refuses a download over the installer’s 10 MB bundle cap before scanning it', async () => {
+    downloadBundleForReview.mockResolvedValue(new ArrayBuffer(10 * 1024 * 1024 + 1));
+    const res = await approve();
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain('Bundle exceeds 10485760 bytes');
+    expect(reviewPlugin).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/marketplace/review — the version the reviewer saw', () => {
+  const sandbox = () =>
+    tgz({ 'package/manifest.json': '{"id":"buzzer"}', 'package/server.js': 'globalThis.plugin = {};' });
+
+  it('approves when the version on screen is still the catalogue’s', async () => {
+    downloadBundleForReview.mockResolvedValue(sandbox());
+    const res = await approve({ version: '1.0.0' });
+    expect(res.status).toBe(200);
+    expect(reviewPlugin).toHaveBeenCalledWith(
+      { __db: true }, 'buzzer', 'approved', null, null,
+      expect.objectContaining({ sizeBytes: expect.any(Number) }),
+      { version: '1.0.0', manifestUrl: URL_1 }
+    );
+  });
+
+  it('refuses with 409 when the publisher resubmitted since — before downloading anything', async () => {
+    getCatalogEntry.mockResolvedValue({ pluginId: 'buzzer', version: '1.1.0', manifestUrl: URL_1 });
+    const res = await approve({ version: '1.0.0' });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: 'version_changed', version: '1.1.0' });
+    expect(downloadBundleForReview).not.toHaveBeenCalled();
+    expect(reviewPlugin).not.toHaveBeenCalled();
+  });
+
+  it('checks a rejection’s version too', async () => {
+    getCatalogEntry.mockResolvedValue({ pluginId: 'buzzer', version: '2.0.0', manifestUrl: URL_1 });
+    expect((await review({ decision: 'rejected', version: '1.0.0' })).status).toBe(409);
+    expect(reviewPlugin).not.toHaveBeenCalled();
+
+    getCatalogEntry.mockResolvedValue({ pluginId: 'buzzer', version: '1.0.0', manifestUrl: URL_1 });
+    expect((await review({ decision: 'rejected', version: '1.0.0' })).status).toBe(200);
+    expect(reviewPlugin).toHaveBeenCalledWith({ __db: true }, 'buzzer', 'rejected', null, null, undefined, { version: '1.0.0' });
+  });
+
+  it('a resubmission that lands while the bundle downloads is refused too (the guarded update matches nothing)', async () => {
+    downloadBundleForReview.mockResolvedValue(sandbox());
+    reviewPlugin.mockResolvedValue(false);
+    getCatalogEntry
+      .mockResolvedValueOnce({ pluginId: 'buzzer', version: '1.0.0', manifestUrl: URL_1 })
+      .mockResolvedValueOnce({ pluginId: 'buzzer', version: '1.0.1', manifestUrl: 'https://plugins.example.com/new.tgz' });
+    const res = await approve({ version: '1.0.0' });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: 'version_changed', version: '1.0.1' });
+  });
+
+  it('404s a plugin that is not in the catalogue', async () => {
+    getCatalogEntry.mockResolvedValue(null);
+    expect((await review({ decision: 'rejected', version: '1.0.0' })).status).toBe(404);
+    reviewPlugin.mockResolvedValue(false);
+    expect((await review({ decision: 'rejected' })).status).toBe(404);
   });
 });

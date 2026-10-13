@@ -4,6 +4,7 @@ import {
   deletePluginInstall,
   getChannelById,
   getPluginInstall,
+  isChannelOpenToBots,
   listPluginInstallsForServer,
   logAction,
   upsertPluginInstall,
@@ -12,6 +13,9 @@ import { getDb } from '@/lib/db';
 import { getPluginServer, listPluginSummariesServer } from '@/lib/plugin-server-registry';
 import { effectGrantFor } from '@/lib/activity-effects';
 import { APP_MESSAGE_CHANNEL_TYPES } from '@/lib/activity-app-chat';
+import { endAppSessions } from '@/lib/activity-app-install';
+import { canGrantGatedChannels } from '@/lib/bots/access';
+import { authorizeChannelVisibility } from '@/lib/permissions';
 import { pluginName, pluginSummary } from '@/lib/plugin-catalog-text';
 import { localeFromRequest } from '@/lib/i18n/server';
 import {
@@ -132,6 +136,33 @@ async function handlePost(
         { status: 400 }
       );
     }
+    // Pointing an app's messages at a role-gated channel takes what granting
+    // a bot one takes (lib/bots/access.ts `canGrantGatedChannels`): Manage
+    // Channels, and seeing the channel. Otherwise a member with only Manage
+    // Server could have a game write into a private channel they cannot
+    // read. Checked when the channel changes: saving other settings of an
+    // app whose channel someone else chose keeps it as it is.
+    const existing = await getPluginInstall(getDb(), serverId, plugin.manifest.id);
+    const storedChannelId =
+      existing?.settings && typeof existing.settings === 'object'
+        ? (existing.settings as Record<string, unknown>).chatChannelId
+        : undefined;
+    if (chatChannelId !== storedChannelId) {
+      const uid = session.session.uid;
+      const ownerUserId = member.server?.ownerUserId ?? null;
+      const gated = !(await isChannelOpenToBots(getDb(), chatChannelId));
+      const mayUseGated = canGrantGatedChannels({ uid, isOwner: ownerUserId === uid, permissions: permission.permissions });
+      const visible = (await authorizeChannelVisibility(uid, serverId, chatChannelId, ownerUserId)).ok;
+      if ((gated && !mayUseGated) || !visible) {
+        return NextResponse.json(
+          {
+            error: 'Only a member with Manage Channels can send app messages to a private channel',
+            code: 'chat_channel_not_allowed',
+          },
+          { status: 403 }
+        );
+      }
+    }
   }
 
   const install = await upsertPluginInstall(getDb(), {
@@ -148,6 +179,15 @@ async function handlePost(
     targetId: plugin.manifest.id,
     metadata: { enabled: install.enabled },
   }).catch((err) => console.error('[audit] app.upsert failed:', (err as Error).message));
+  // A disabled app runs nothing: its open sessions end (audited per session).
+  if (!install.enabled) {
+    await endAppSessions(getDb(), {
+      serverId,
+      pluginId: plugin.manifest.id,
+      actorUserId: session.session.uid,
+      reason: 'app_disabled',
+    }).catch((err) => console.error('[apps] ending the disabled app’s sessions failed:', (err as Error).message));
+  }
 
   return NextResponse.json(
     {
@@ -197,6 +237,15 @@ async function handleDelete(
     targetId: plugin.manifest.id,
     metadata: { deleted },
   }).catch((err) => console.error('[audit] app.uninstall failed:', (err as Error).message));
+  // An uninstalled app runs nothing: its open sessions end (audited per
+  // session). Done whether or not a row was deleted — a session can outlive
+  // an install that is already gone.
+  await endAppSessions(getDb(), {
+    serverId,
+    pluginId: plugin.manifest.id,
+    actorUserId: session.session.uid,
+    reason: 'app_uninstalled',
+  }).catch((err) => console.error('[apps] ending the uninstalled app’s sessions failed:', (err as Error).message));
 
   return NextResponse.json(
     { deleted },

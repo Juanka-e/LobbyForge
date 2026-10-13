@@ -348,4 +348,77 @@ describe('event endpoint', () => {
     await within(section).findByText('Olay uç noktası yok. Bot bunu Bot API üzerinden kendisi belirler.');
     expect(screen.getByTestId('bot-channel-access')).toHaveTextContent('Kanal erişimi');
   });
+
+  function tokenChangedEndpoint() {
+    return Response.json({
+      endpoint: {
+        url: 'https://attacker.example.net/hook',
+        events: ['interaction_create'],
+        enabled: false,
+        failureCount: 0,
+        disabledReason: 'token_changed',
+        lastDeliveryAt: null,
+        lastStatus: null,
+      },
+    });
+  }
+
+  it('BOT-002: after a token change it says why, offers no "Re-enable" — only removal', async () => {
+    routes[`GET ${BASE}/event-endpoint`] = tokenChangedEndpoint;
+    const user = userEvent.setup();
+    renderPage();
+    await openIntegrations(user);
+    const section = await screen.findByTestId('bot-event-endpoint');
+    await within(section).findByText('https://attacker.example.net/hook');
+    expect(section).toHaveTextContent("The bot's token was replaced or revoked. Whoever set this address had the old token.");
+    expect(within(section).getByTestId('endpoint-token-changed')).toHaveTextContent(
+      "Deliveries stay off until the bot sets its endpoint again with its new token. If you don't recognize this address, remove it."
+    );
+    expect(within(section).queryByRole('button', { name: 'Re-enable' })).toBeNull();
+    expect(within(section).getByRole('button', { name: 'Remove endpoint' })).toBeEnabled();
+  });
+
+  it('BOT-002: the same in Turkish', async () => {
+    routes[`GET ${BASE}/event-endpoint`] = tokenChangedEndpoint;
+    const user = userEvent.setup();
+    renderPage([bot()], 'tr');
+    await user.click(screen.getByRole('button', { name: 'Kanallar, komutlar ve olaylar' }));
+    const section = await screen.findByTestId('bot-event-endpoint');
+    await within(section).findByText('https://attacker.example.net/hook');
+    expect(section).toHaveTextContent("Botun token'ı yenilendi ya da iptal edildi.");
+    expect(within(section).getByRole('button', { name: 'Uç noktayı kaldır' })).toBeInTheDocument();
+  });
+
+  it('removes the endpoint after a confirmation (Cancel keeps it)', async () => {
+    routes[`DELETE ${BASE}/event-endpoint`] = () => Response.json({ ok: true });
+    const user = userEvent.setup();
+    renderPage();
+    await openIntegrations(user);
+    const section = await screen.findByTestId('bot-event-endpoint');
+    await within(section).findByText('https://bots.example.com/lobbyforge');
+
+    await user.click(within(section).getByRole('button', { name: 'Remove endpoint' }));
+    expect(section).toHaveTextContent('Remove this endpoint? Deliveries stop at once');
+    await user.click(within(section).getByRole('button', { name: 'Cancel' }));
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(false);
+
+    await user.click(within(section).getByRole('button', { name: 'Remove endpoint' }));
+    await user.click(within(section).getByRole('button', { name: 'Yes, remove' }));
+    await within(section).findByText('The event endpoint was removed.');
+    expect(calls.filter((c) => c.method === 'DELETE' && c.url === `${BASE}/event-endpoint`)).toHaveLength(1);
+    expect(within(section).getByText('No event endpoint. The bot sets one itself through the Bot API.')).toBeInTheDocument();
+  });
+
+  it('explains a re-enable refused because the token changed meanwhile (409 endpoint_token_changed)', async () => {
+    routes[`PATCH ${BASE}/event-endpoint`] = () =>
+      Response.json({ error: 'switched off', code: 'endpoint_token_changed' }, { status: 409 });
+    const user = userEvent.setup();
+    renderPage();
+    await openIntegrations(user);
+    const section = await screen.findByTestId('bot-event-endpoint');
+    await user.click(await within(section).findByRole('button', { name: 'Re-enable' }));
+    await within(section).findByText(
+      "This endpoint was switched off because the bot's token changed. The bot has to set it again with its new token."
+    );
+  });
 });

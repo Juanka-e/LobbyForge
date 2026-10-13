@@ -30,12 +30,17 @@ The owner override exists because moderation needs it: a server owner must be ab
 | Method | Path | Body | Description | Rate limit |
 |---|---|---|---|---|
 | `GET`    | `/api/servers/{id}/channels/{channelId}/messages`        | — | List messages in a channel, newest-first. Supports `?before=ISO` cursor and `?limit=N` (1-100, default 50). Soft-deleted messages are excluded. | 60 / min |
-| `POST`   | `/api/servers/{id}/channels/{channelId}/messages`        | `{ content, replyToId?, metadata? }` | Create a message. `content` is 1-4000 chars (`MessageContentSchema`). | 30 / min |
+| `POST`   | `/api/servers/{id}/channels/{channelId}/messages`        | `{ content, replyToId? }` | Create a message. `content` is 1-4000 chars (`MessageContentSchema`). | 30 / min |
 | `GET`    | `/api/servers/{id}/channels/{channelId}/messages/{messageId}`   | — | Fetch a single message (soft-deleted returns 404). | 60 / min |
-| `PATCH`  | `/api/servers/{id}/channels/{channelId}/messages/{messageId}`   | `{ content?, metadata? }` | Partial update. Always stamps `editedAt`. | 30 / min |
+| `PATCH`  | `/api/servers/{id}/channels/{channelId}/messages/{messageId}`   | `{ content?, pinned? }` | Partial update. Always stamps `editedAt`. | 30 / min |
 | `DELETE` | `/api/servers/{id}/channels/{channelId}/messages/{messageId}`   | — | **Soft delete** (sets `deletedAt`). | 10 / min |
 
 All five go through `withApiSecurity(...)` so they inherit the standard security headers, the 405 + `Allow` behavior, and the in-process token-bucket rate limit.
+
+**Body cap.** `POST` and `PATCH` refuse a body over **16 KiB** with `413`
+before the handler runs (`MESSAGE_BODY_MAX_BYTES`, `lib/message-limits.ts`;
+the same cap applies to `POST /api/dm/{channelId}/messages`). 4000
+characters are at most 12 000 bytes of UTF-8, so every valid message fits.
 
 ### `POST` body
 
@@ -43,9 +48,11 @@ All five go through `withApiSecurity(...)` so they inherit the standard security
 interface CreateMessageBody {
   content: string;          // 1..4000 chars, MessageContentSchema in @lobbyforge/core
   replyToId?: string;       // uuid of an existing message in the SAME channel
-  metadata?: Record<string, unknown>;  // free-form, plugin-attached data
 }
 ```
+
+The schema is strict: any other field is a `400`, and `metadata` gets its own
+`400 { code: "metadata_not_allowed" }` (see *`metadata` blob* below).
 
 The route enforces three things:
 
@@ -57,12 +64,12 @@ The route enforces three things:
 
 ```ts
 interface PatchMessageBody {
-  content?: string;         // 1..4000 chars
-  metadata?: Record<string, unknown>;
+  content?: string;         // 1..4000 chars — the author only
+  pinned?: boolean;         // owner / Manage Messages; stamps metadata.$pinnedAt / $pinnedBy
 }
 ```
 
-`userId`, `channelId`, `createdAt`, and `replyToId` are **immutable** through this route. An empty patch (no `content` and no `metadata`) returns 200 with the current row — the route treats it as a "re-read" rather than a 400.
+`userId`, `channelId`, `createdAt`, `replyToId` and `metadata` are **immutable** through this route (the schema is strict). An empty patch (no `content` and no `pinned`) returns 200 with the current row — the route treats it as a "re-read" rather than a 400.
 
 ### Common response shapes
 
@@ -87,8 +94,9 @@ interface MessageJson {
 |---:|---|
 | 200 | `GET` / `PATCH` success (PATCH also returns 200 for an empty patch) |
 | 201 | `POST` success |
-| 400 | Body fails zod validation (empty content, > 4000 chars, invalid `replyToId` uuid, etc.) — or query string fails (`?before=not-a-date`, `?limit=abc`) |
+| 400 | Body fails zod validation (empty content, > 4000 chars, invalid `replyToId` uuid, an unknown field, client `metadata` → `metadata_not_allowed`) — or query string fails (`?before=not-a-date`, `?limit=abc`) |
 | 401 | Cookie missing or signature invalid |
+| 413 | `POST` / `PATCH` body over 16 KiB |
 | 403 | Caller is not a member (reads) or not the author/owner (mutations) |
 | 404 | Server not found, channel not found, channel doesn't belong to the URL's server, message not found, or message doesn't belong to the URL's channel |
 | 500 | Drizzle threw (wrapped with a sanitized message) — including the "reply target is in a different channel" case |
@@ -120,22 +128,52 @@ This is the current rule, not a constraint in the schema. The schema's self-FK i
 
 ## `metadata` blob
 
-`metadata` is a JSONB column, free-form. Today it carries no schema — the route validates it as `Record<string, unknown>` and the DB helper reads it through. The intended consumers are:
+`metadata` is a JSONB column, free-form, and **written by the server only**:
+a poll (`poll`), a bot's command answer (`interaction`), an incoming
+webhook (`webhook`), a game plugin's chat line (`app`), a built-in bot's
+catalogue text (`i18n`) and pins (`$pinnedAt`, `$pinnedBy`).
 
-- **Reactions** (M14) — keys like `reactions: { '👍': 3, '🎉': 1 }`.
-- **Embeds** (M15) — keys like `embeds: [{ url, title, image }]`.
-- **Plugin payloads** (M16) — keys like `plugin: { id: 'hushle', data: { … } }`.
+**No client metadata (security-review AUTHZ-008).** A member's `POST` used
+to accept a free-form record and only checked its top-level key names, so
+about 1 MB could ride along on every message (30 a minute) into each lobby
+render, list response and live subscriber. No first-party client sends
+metadata, so `POST` now refuses it outright — `400 { code:
+"metadata_not_allowed" }`, whatever its keys — and `PATCH` has never taken
+it. A future client-written field gets an allowlisted key with a small
+serialized cap, not a free-form record.
 
-M12 just stores and returns the blob; the readers are not yet implemented.
-
-**Reserved keys.** A member's `POST` may not set server-only keys: `system`,
-`plugin`, `bot`, `app`, `trust`, `signature`, `moderation`, `interaction`,
-`webhook`, `poll`, or any key starting with `$` or `_` (400 with the `key`).
 `poll` belongs to polls in text channels (docs/CHAT_POLLS.md): a poll
 message stores `metadata.poll = { id }`, written by the poll route in the
 same transaction as the poll. `GET …/messages` adds a `poll` field
 (projected for the caller) to those messages only, and a poll message's
 `content` cannot be edited (403 `poll_message_readonly`).
+
+## Blocked authors
+
+A viewer never reads the words of someone they blocked. `GET …/messages`
+and the server-rendered lobby replace such a message with a placeholder
+(`blocked: true`, no author, no content, `poll: null`). The live chat
+(`LobbyLiveRoster`) applies the same rule to messages that arrive over the
+realtime feed and to the local echo, using the viewer's block list
+(`BlockListProvider`): the same placeholder, and **no desktop
+notification** for a blocked author. Someone blocked while the channel is
+open has their messages on screen masked at once (security-review
+AUTHZ-009).
+
+The typing indicator (`GET …/typing`) leaves out users the viewer blocked,
+users who blocked the viewer, and users whose *Online status* privacy hides
+them from the viewer — the presence rule (docs/PRESENCE.md).
+
+## Direct messages
+
+`POST /api/dm { recipientUserId }` opens (or reuses) a 1:1 conversation.
+The recipient must be a live user who **shares a community** with the
+caller — both current members of a live server, neither banned there — or
+one the caller **already has a conversation** with. Anything else (an
+unknown id, a stranger) is the same `404 { error: "User not found" }`: no
+existence oracle (an unknown id used to be an FK error and a 500). A block
+in either direction is still `403`. `POST /api/dm/{channelId}/messages`
+takes `{ content, replyToId? }` (strict) with the 16 KiB body cap above.
 
 ## DB schema (no delta from M3)
 

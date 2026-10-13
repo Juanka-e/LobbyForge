@@ -6,8 +6,9 @@
  *   const lf = connect({ onState: render });
  *   lf.dispatch({ type: 'buzz' });
  *
- * The frame runs in an opaque origin with no network (see ./protocol.ts for
- * the full security model). Dependency-free; the host imports the same
+ * The frame runs in an opaque origin whose CSP limits its requests to its own
+ * files (see ./protocol.ts for the full security model, and what CSP does
+ * not cover). Dependency-free; the host imports the same
  * protocol types and limits.
  */
 export { connect, type ConnectOptions, type FrameConnection, type FrameInit } from './client.js';

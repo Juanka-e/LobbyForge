@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { ensureBuiltInBot, updateBot, type BuiltInBotType, type UpdateBotInput } from '@lobbyforge/db';
+import { ensureBuiltInBot, getBuiltInBotForServer, updateBot, type BuiltInBotType, type UpdateBotInput } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { withApiSecurity } from '@/lib/security-headers';
 import {
@@ -14,7 +14,7 @@ import {
 } from '@/lib/bots/admin';
 import { invalidateBotCache } from '@/lib/bots/cache';
 import { BUILT_IN_BOT_PERMISSIONS, isBuiltInType } from '@/lib/bots/permissions';
-import { resolveBotChannel } from '@/lib/bots/messages';
+import { botCanAccessChannel, channelOpenToNewBot } from '@/lib/bots/access';
 import {
   ModerationSettingsInputSchema,
   WelcomeSettingsInputSchema,
@@ -99,11 +99,15 @@ async function handlePut(req: Request, ctx: RouteContext): Promise<NextResponse>
   }
 
   if (type === 'welcome' && typeof settingsPatch.channelId === 'string') {
-    const channel = await resolveBotChannel(
-      { id: 'welcome', serverId, name: '', type, enabled: true, permissions: [] },
-      settingsPatch.channelId
-    );
-    if (!channel.ok) {
+    // The channel must be one the Welcome Bot reaches: the existing bot's
+    // own rule (its §1.1 mode and grants), or — on its first save — the
+    // rule it will be created with (mode `all`: an open text channel of
+    // this server). Never a made-up bot id: `bots.id` is a uuid column.
+    const existing = await getBuiltInBotForServer(getDb(), serverId, 'welcome');
+    const channel = existing
+      ? await botCanAccessChannel(existing, settingsPatch.channelId)
+      : await channelOpenToNewBot(serverId, settingsPatch.channelId);
+    if (!channel) {
       return NextResponse.json(
         { error: 'Pick a text channel of this server that every member can see', code: 'invalid_channel' },
         { status: 400 }

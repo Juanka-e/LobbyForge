@@ -48,11 +48,17 @@ describe('nextHostCheck', () => {
     });
   });
 
-  it('re-reads once, at once, for a due time already passed — and not again for the same time', () => {
+  it('re-reads at once for a due time already passed — and then backs off for the same time instead of looping', () => {
     const host = away({ transferAt: at(-1_000) });
     expect(nextHostCheck(host, NOW)).toEqual({ at: NOW - 1_000, delay: HOST_CHECK_MARGIN_MS });
-    // The server could not hand over yet: wait for abandonment instead of looping.
-    expect(nextHostCheck(host, NOW, NOW - 1_000)).toEqual({ at: NOW + 150_000, delay: 150_000 + HOST_CHECK_MARGIN_MS });
+    // The server could not hand over yet: the next re-read for it waits 2 s, then 4 s …
+    expect(nextHostCheck(host, NOW, new Map([[NOW - 1_000, 1]]))).toEqual({ at: NOW - 1_000, delay: 2_000 + HOST_CHECK_MARGIN_MS });
+    expect(nextHostCheck(host, NOW, new Map([[NOW - 1_000, 3]]))).toEqual({ at: NOW - 1_000, delay: 8_000 + HOST_CHECK_MARGIN_MS });
+    // … and abandonment, when it comes first, wins.
+    expect(nextHostCheck(host, NOW + 149_000, new Map([[NOW - 1_000, 9]]))).toEqual({
+      at: NOW + 150_000,
+      delay: 1_000 + HOST_CHECK_MARGIN_MS,
+    });
   });
 
   it('stops once the session is abandoned and nothing else is due', () => {

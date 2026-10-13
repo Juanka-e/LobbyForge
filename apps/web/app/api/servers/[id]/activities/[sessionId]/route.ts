@@ -80,7 +80,7 @@ async function handleGet(
 
     // SEC-002: private-channel rules — membership alone is not enough;
     // the session's channel may be role-gated. Owner/manage_channels
-    // bypass (same policy as action/SSE/end).
+    // bypass (same policy as action/end).
     const visibility = await authorizeSessionChannelVisibility(
       session.uid,
       serverId,

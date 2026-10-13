@@ -135,12 +135,37 @@ export async function getBotReachableChannel(
   bot: BotAccessSubject,
   channelId: string
 ): Promise<ChannelRow | null> {
-  const rows = (await db.select().from(channels).where(eq(channels.id, channelId)).limit(1)) as ChannelRow[];
-  const channel = rows[0];
-  if (!channel || channel.serverId !== bot.serverId || !isBotChannelType(channel.type)) return null;
+  const channel = await getBotChannelOfServer(db, bot.serverId, channelId);
+  if (!channel) return null;
   const access = await getBotChannelAccessState(db, bot.id);
   if (access.mode === 'selected') return access.channelIds.includes(channel.id) ? channel : null;
   return (await isChannelOpenToBots(db, channel.id)) ? channel : null;
+}
+
+/**
+ * The `all`-mode rule for a bot that has no row yet: an open (no role gate)
+ * text / announcement channel of the server. A built-in bot's first save
+ * checks its channel with this — the bot is created in mode `all` (the
+ * column default). Never call `getBotReachableChannel` with a made-up bot
+ * id: `bots.id` is a uuid column, and a non-uuid id is a query error, not
+ * "no access".
+ */
+export async function getChannelOpenToBots(
+  db: DbClient,
+  serverId: string,
+  channelId: string
+): Promise<ChannelRow | null> {
+  const channel = await getBotChannelOfServer(db, serverId, channelId);
+  if (!channel) return null;
+  return (await isChannelOpenToBots(db, channel.id)) ? channel : null;
+}
+
+/** The channel when it is a text / announcement channel of that server, else null. */
+async function getBotChannelOfServer(db: DbClient, serverId: string, channelId: string): Promise<ChannelRow | null> {
+  const rows = (await db.select().from(channels).where(eq(channels.id, channelId)).limit(1)) as ChannelRow[];
+  const channel = rows[0];
+  if (!channel || channel.serverId !== serverId || !isBotChannelType(channel.type)) return null;
+  return channel;
 }
 
 /**

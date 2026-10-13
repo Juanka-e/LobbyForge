@@ -5,7 +5,8 @@ import { getDb } from '@/lib/db';
 import { requireMaterializedSession } from '@/lib/api-auth';
 import { withApiSecurity } from '@/lib/security-headers';
 import { BANNER_LIMITS, checkImageDataUrl } from '@/lib/image-validation';
-import { checkUserImageQuota, quotaExceededResponse } from '@/lib/upload-quota';
+import { checkUserImageQuota, quotaExceededResponse, refuseGuestImageUpload } from '@/lib/upload-quota';
+import { consumeUploadBudget } from '@/lib/upload-budget';
 import { requireVerifiedEmail } from '@/lib/mail/verification';
 
 export const dynamic = 'force-dynamic';
@@ -36,6 +37,10 @@ async function handlePost(req: Request): Promise<NextResponse> {
   }
 
   if (body.dataUrl !== null) {
+    // security-review FILE-001: guests may not store images (removing an
+    // old banner stays allowed).
+    const guest = await refuseGuestImageUpload(session.session.uid);
+    if (guest) return guest;
     // docs/EMAIL.md §4.2: an unverified account in `required` mode may not
     // upload an image (an abuse channel); removing the banner stays allowed.
     const unverified = await requireVerifiedEmail(session.session.uid, 'upload');
@@ -48,6 +53,9 @@ async function handlePost(req: Request): Promise<NextResponse> {
     // SEC-010: aggregate quota (null = banner REMOVAL, frees budget).
     const quota = await checkUserImageQuota(session.session.uid, body.dataUrl.length);
     if (!quota.ok) return quotaExceededResponse(quota);
+    // FILE-001: the caller's daily upload byte budget (per client address).
+    const overBudget = await consumeUploadBudget(req, body.dataUrl.length);
+    if (overBudget) return overBudget;
   }
 
   const updated = await updateUserBanner(getDb(), session.session.uid, body.dataUrl);

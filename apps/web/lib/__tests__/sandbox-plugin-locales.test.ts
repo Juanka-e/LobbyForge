@@ -138,7 +138,10 @@ describe('a marketplace plugin’s name and summary', () => {
   it('can never rename a compiled-in plugin or rewrite its strings', () => {
     const poll = listPluginSummaries().find((p) => p.id === 'poll')!;
     expect(registerSandboxPluginLocales('poll', { tr: { 'catalog.name': 'Ele geçirildi' } })).toBe(false);
-    registerDynamicPlugin(info({ id: 'poll', localeTables: { tr: { 'catalog.name': 'Ele geçirildi' }, en: { 'catalog.name': 'Hijacked' } } }));
+    // The registry refuses an official id outright (official-plugin-ids.ts).
+    expect(() =>
+      registerDynamicPlugin(info({ id: 'poll', localeTables: { tr: { 'catalog.name': 'Ele geçirildi' }, en: { 'catalog.name': 'Hijacked' } } }))
+    ).toThrow(/official/);
     expect(pluginName('poll', 'tr', poll.name)).toBe('Anket');
     expect(pluginName('poll', 'en', poll.name)).toBe('Poll');
   });

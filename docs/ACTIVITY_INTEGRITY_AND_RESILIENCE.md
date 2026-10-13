@@ -141,7 +141,7 @@ Kısa cevap: evet, ama ayrı bir ekran ya da ayrı bir çağrı değil.
 | Kendi rolünü ya da takımını seçmek | Olmaz. VV'de roller CSPRNG ile dağıtılır; `start` istemciden hiçbir şey taşımaz. Hushle takımlarını host kurar | VV `reducer.ts:428-465` |
 | Saat hilesi | Bitişler state'te mutlak sunucu zamanı; yeniden bağlanmak saati sıfırlamaz. Erken `timeout` ya da `time-up` hiçbir şey yapmaz | VV `reducer.ts:280-287`; Quiz `actions.ts:489-492`; Hushle `actions.ts:66-70` |
 | Rastgelelik | Hushle kart çekimi, VV rol dağıtımı, Quiz deste ve şık karıştırma, zar: hepsi `crypto.getRandomValues`. İstemci tohum veremez. Sandbox, host'tan CSPRNG listesi alır | `plugins/*/src/random.ts`; VV `reducer.ts:73-81`; ADR-007 |
-| Gizli bilgi, her yol | REST `GET`, eylem yanıtı, SSE ve WebSocket aynı projeksiyondan geçer. Bus'ta durum yok, yalnız `status`, `revision` ve `publicSummary` (deste boyutu, `rosterChanged`) var. Gateway her izleyici için ayrıca projeksiyon yapar; hata olursa durumsuz olay gider, ham durum asla gitmez | `packages/core/src/activity-projection.ts`; `ws-gateway/src/server.ts:97-137` |
+| Gizli bilgi, her yol | REST `GET`, eylem yanıtı ve WebSocket aynı projeksiyondan geçer (SSE yolu 2026-10-13'te kaldırıldı). Bus'ta durum yok, yalnız `status`, `revision` ve `publicSummary` (deste boyutu, `rosterChanged`) var. Gateway her izleyici için ayrıca projeksiyon yapar; hata olursa durumsuz olay gider, ham durum asla gitmez | `packages/core/src/activity-projection.ts`; `ws-gateway/src/server.ts:97-137` |
 | Oyun sonu | VV her şeyi açar (kural). Quiz yalnız sayıları gösterir, kim neyi seçti bitişte de açılmaz. Hushle destesi ve Poll'un oy sandığı hiçbir zaman gitmez | `activity-projection.ts:136-145, 161-164, 263` |
 | Denetim kaydı ve loglar | Oyun eylemleri denetim kaydına yazılmaz; yalnız host eylemleri, tür adıyla, hedefsiz yazılır. Loglarda durum ya da eylem gövdesi yok | `actions/route.ts:577-587` |
 | Geçmiş ve eklenti deposu | Biten oturum API'den okunamaz (`getGameSessionById` bitenleri dışlar). Eklenti deposu yok (`/api/internal/plugin-storage` kullanılmıyor) | `queries/gameSessions.ts` |
@@ -166,7 +166,7 @@ kontrol reducer'da. Açık değil.
 | B-07 | Düşük-Orta | Kaybederken bitirme; sonuç kaydı yok | Hushle `actions.ts:465`; Quiz `actions.ts:501`; `end/route.ts:93-131` |
 | B-08 | Düşük | Zar: tekrar tekrar atıp kötü atışı geçmişten itmek | Dice `index.ts:185-212` |
 | B-09 | Düşük (erişilebilirlik) | Gateway'de her olay için abone sayısı kadar DB okuması | `ws-gateway/src/server.ts:105` |
-| B-10 | Düşük | SSE yolu sandbox projeksiyonunda bağlantı anındaki host'u kullanıyor | `stream/route.ts:151-155` |
+| B-10 | Düşük | SSE yolu sandbox projeksiyonunda bağlantı anındaki host'u kullanıyor — **giderildi 2026-10-13: yol kaldırıldı** | ~~`stream/route.ts:151-155`~~ |
 | B-11 | Bilgi | Etkinlik oyuncu listesi "Görünmez" durumunu atlıyor | `[sessionId]/route.ts:112-179` |
 | B-12 | Bilgi | LiveKit'e ulaşılamazsa ses şartı atlanıyor; 2 sn önbellek | `lib/activity-voice.ts:58, 107-116` |
 | B-13 | Bilgi | Yerleşik Quiz cevapları ve Hushle kartları açık depoda | `plugins/quiz/src/packs/data/*.ts` |
@@ -296,6 +296,11 @@ kontrol reducer'da. Açık değil.
   eder.
 - Uygulama bu yolu kullanmıyor ama her üye çağırabiliyor.
 - **Düzeltme:** Host her olayda tazelensin ya da yol kaldırılsın.
+- **Durum (2026-10-13):** Yol ve testleri kaldırıldı. Güvenlik incelemesi
+  (ACT-001) bir sorun daha buldu: yol `withApiSecurity` dışındaydı, yalnız
+  oturum çerezini okuyordu ve oturum iptalini ilk kez 30 sn sonra (hata
+  olursa açık kalarak) denetliyordu. Hiçbir istemci kullanmadığı için
+  düzeltmek yerine silindi.
 
 **B-11 … B-15 (bilgi):**
 - **B-11:** Oyuna katılan "Görünmez" bir kullanıcı, kanalı gören herkese
@@ -325,8 +330,14 @@ Açıkça söylemek gerekirse aşağıdakileri kod engelleyemez:
 ### 2.4 Pazar yeri eklentileri: güven modeli
 
 - **Neler yapamaz** (ADR-007):
-  - Ağa çıkamaz: QuickJS'te ağ yok, iframe CSP'si `connect-src 'none'`. Yani
-    gördüğünü dışarı sızdıramaz.
+  - Sunucu kodu ağa çıkamaz: QuickJS'te ağ yok. Arayüzün (iframe) CSP'si
+    fetch, XHR, WebSocket, görsel ve medya isteklerini eklentinin kendi
+    dosyalarıyla ve sahibin onayladığı adreslerle sınırlar. Bu "hiç ağ yok"
+    demek değil: WebRTC CSP'nin kapsamında değil (`webrtc 'block'` yalnız
+    bu yönergeyi uygulayan tarayıcılarda işe yarar) ve çerçeve kendini lobi
+    sayfasının `frame-src`'indeki herhangi bir adrese yönlendirebilir.
+    Çerçeveye gösterilen her şey (izleyicinin projekte edilmiş durumu)
+    eklenti yazarınca okunabilir sayılmalı; gizliliği `projectState` sağlar.
   - Başka oturumu ya da başka bir eklentinin verisini okuyamaz.
   - Hangi eylemi kimin göndereceğini değiştiremez. Politikalar, web
     uygulamasının manifestten okuduğu haliyle uygulanır.
@@ -608,6 +619,16 @@ açık). Ama kaydı yalnız denetim kaydı yetkisi olanlar görüyor, masa görm
     kalan süresi de dahil.
   - Zamanlayıcı servisi yok. Kimse bakmıyorsa oyun ilerlemez; bakan ilk kişi
     birikmiş bütün olayları sırayla uygular.
+  - Eklenti zamanlayıcılarında (PLUGIN_SDK.md "Effects") birikmiş iş sınırlı
+    (güvenlik incelemesi, 2026-10-13): kendini aynı kimlikle yeniden kuran
+    bir zamanlayıcı kaçırdığı vadeleri tek tek değil, geçmiş en son vadeyle
+    bir kez çalıştırır; bir dokunuş en çok 8 zamanlayıcı ateşler ve 500 ms'den
+    sonra yenisine başlamaz. Kalanı sonraki dokunuş sürdürür; arada gelen bir
+    eylem yeniden denenebilir 409 (`timers_pending`) alır, zamanlayıcının
+    önüne geçmez.
+  - Panel, yeniden okumadan sonra hâlâ bekleyen bir vade için tekrar okumayı
+    2 sn'den başlayıp dakikada bire kadar seyreltir; iki takılı vade artık
+    1,5 sn'de bir okuma döngüsüne girmez.
 - **Tek kaynak:** Host devri ve varlık kararları aynı LiveKit anlık
   görüntüsünden ve aynı defterden hesaplanır.
 
@@ -695,7 +716,7 @@ Efor: **S** = 1 güne kadar, **M** = 2–4 gün, **L** = 1–2 hafta.
 | 13 | P2 | Bus `audience`: değişiklik yalnız gizliyse hedefli olay (B-05) | M | `actions/route.ts`, `lib/activity-bus.ts`, `ws-gateway/src/server.ts`, core'da yardımcı | Gece sürü sohbeti olunca köylüye olay gitmez |
 | 14 | P2 | Sonuç geçmişi, Hushle tur eşitliği, "erken bitti" etiketi (B-07) | M | yeni tablo ve göç; eklentiler | — |
 | 15 | P2 | Çift hesap hafifletmeleri: misafir rozeti, "yalnız hesaplılar", aynı cihaz uyarısı | M | lobi ve eklentiler | — |
-| 16 | P2 | SSE yolunu düzelt ya da kaldır (B-10); "hostluğu devret" eylemi; biten oturumları temizle (B-15); WS'de `visibilitychange` ile yeniden bağlan | Her biri S | ilgili dosyalar | — |
+| 16 | P2 | ~~SSE yolunu düzelt ya da kaldır (B-10)~~ (kaldırıldı); "hostluğu devret" eylemi; biten oturumları temizle (B-15); WS'de `visibilitychange` ile yeniden bağlan | Her biri S | ilgili dosyalar | — |
 | 17 | P2 | VV'de ölüleri sesli kanalda susturma (eklenti host'tan ister): önce ayrı bir tasarım | L | — | — |
 
 Belgede güncel olmayan bir bilgi: `docs/VAMPIRE_VILLAGE.md` hâlâ "adres başına

@@ -423,6 +423,36 @@ export async function endGameSession(
 }
 
 /**
+ * End every open session of one plugin in one community (the app was
+ * uninstalled or disabled there): `status = 'ended'`, `endedAt = now()`,
+ * pending timers dropped — like `endGameSession`, without firing anything.
+ * Returns the rows it ended (none when nothing was open).
+ */
+export async function endOpenGameSessionsForPlugin(
+  db: DbClient,
+  serverId: string,
+  pluginId: string
+): Promise<GameSessionRow[]> {
+  const rows = await db
+    .update(gameSessions)
+    .set({
+      status: 'ended',
+      endedAt: new Date(),
+      timers: [],
+    })
+    .where(
+      and(
+        eq(gameSessions.serverId, serverId),
+        eq(gameSessions.pluginId, pluginId),
+        isNull(gameSessions.endedAt),
+        sql`${gameSessions.status} in ('lobby', 'running', 'paused')`
+      )
+    )
+    .returning();
+  return rows as GameSessionRow[];
+}
+
+/**
  * Add a player to a session. Idempotent: if a row already exists for
  * (sessionId, userId) with `leftAt IS NULL`, returns it as-is;
  * otherwise inserts a new active row.

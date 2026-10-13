@@ -10,6 +10,7 @@ import type { SQL } from 'drizzle-orm';
 import {
   getBotChannelAccessState,
   getBotReachableChannel,
+  getChannelOpenToBots,
   grantBotChannelAccess,
   listBotChannelAccessForServer,
   listBotReachableChannels,
@@ -26,8 +27,10 @@ import {
   pruneBotInteractions,
 } from '../queries/botInteractions.js';
 import { createWebhookMessage } from '../queries/channelWebhooks.js';
+import { channelRoleOverrides, channels } from '../schema.js';
 import {
   listBotEventTargets,
+  reenableBotEventEndpoint,
   recordBotEventDeliveryFailure,
   upsertBotEventEndpoint,
 } from '../queries/botEventEndpoints.js';
@@ -137,6 +140,22 @@ describe('getBotReachableChannel — the §1.1 rule', () => {
   it('an unknown channel is null', async () => {
     const { db } = recordingDb([[]]);
     expect(await getBotReachableChannel(db, BOT, 'nope')).toBeNull();
+  });
+});
+
+describe('getChannelOpenToBots — the `all` rule without a bot row (a built-in bot’s first save)', () => {
+  it('an open text channel of the server; never a gated, foreign or voice channel; no bot id is queried', async () => {
+    const open = recordingDb([[channel('general')], []]);
+    expect((await getChannelOpenToBots(open.db, 'srv-1', 'general'))?.id).toBe('general');
+    // channel → role overrides; the bots table is never read.
+    expect(open.chains).toHaveLength(2);
+    expect(open.chains.map((steps) => steps.find((step) => step.op === 'from')?.args[0])).toEqual([channels, channelRoleOverrides]);
+    const gated = recordingDb([[channel('staff')], [{ id: 'override-1' }]]);
+    expect(await getChannelOpenToBots(gated.db, 'srv-1', 'staff')).toBeNull();
+    const foreign = recordingDb([[channel('theirs', { serverId: 'srv-2' })]]);
+    expect(await getChannelOpenToBots(foreign.db, 'srv-1', 'theirs')).toBeNull();
+    const voice = recordingDb([[channel('lounge', { type: 'voice' })]]);
+    expect(await getChannelOpenToBots(voice.db, 'srv-1', 'lounge')).toBeNull();
   });
 });
 
@@ -381,10 +400,35 @@ describe('event endpoints', () => {
     const existing = { botId: 'b', url: 'https://old.test', secret: 'whsec_old'.padEnd(40, 'x'), events: [], enabled: false, failureCount: 20 };
     const { db, chains } = recordingDb([[existing], [{ ...existing, url: 'https://new.test', enabled: true, failureCount: 0 }]]);
     const row = await upsertBotEventEndpoint(db, { botId: 'b', url: 'https://new.test', events: ['interaction_create'] }, NOW);
-    expect(row.enabled).toBe(true);
+    expect(row?.enabled).toBe(true);
     const values = stepArg(chains[1]!, 'values') as Record<string, unknown>;
     expect(values.secret).toBe(existing.secret);
     expect(values.failureCount).toBe(0);
+  });
+
+  it('BOT-002: with expectTokenHash the save only lands while the bot still has that token (row locked first)', async () => {
+    const existing = { botId: 'b', url: 'https://old.test', secret: 'whsec_old'.padEnd(40, 'x'), events: [], enabled: false, failureCount: 0, disabledReason: 'token_changed' };
+    const rotated = recordingDb([[{ tokenHash: 'sha256$new' }]]);
+    expect(
+      await upsertBotEventEndpoint(rotated.db, { botId: 'b', url: 'https://evil.test', events: [], secret: 'whsec_x', expectTokenHash: 'sha256$old' }, NOW)
+    ).toBeNull();
+    // Only the locked read ran: nothing was written.
+    expect(rotated.chains).toHaveLength(1);
+    expect(rotated.chains[0]!.some((step) => step.op === 'for' && step.args[0] === 'update')).toBe(true);
+    const gone = recordingDb([[]]);
+    expect(await upsertBotEventEndpoint(gone.db, { botId: 'b', url: 'https://x.test', events: [], secret: 'whsec_x', expectTokenHash: 'sha256$old' }, NOW)).toBeNull();
+
+    const same = recordingDb([[{ tokenHash: 'sha256$cur' }], [existing], [{ ...existing, url: 'https://new.test', enabled: true, disabledReason: null }]]);
+    const row = await upsertBotEventEndpoint(same.db, { botId: 'b', url: 'https://new.test', events: [], secret: 'whsec_n', expectTokenHash: 'sha256$cur' }, NOW);
+    expect(row).toMatchObject({ enabled: true, disabledReason: null });
+    expect(stepArg(same.chains[2]!, 'values')).toMatchObject({ enabled: true, disabledReason: null, secret: 'whsec_n' });
+  });
+
+  it('BOT-002: a manager re-enable never touches an endpoint switched off by a token change', async () => {
+    const { db, chains } = recordingDb([[]]);
+    expect(await reenableBotEventEndpoint(db, 'b', NOW)).toBeNull();
+    expect(stepArg(chains[0]!, 'set')).toEqual({ enabled: true, failureCount: 0, disabledReason: null, updatedAt: NOW });
+    expect(sqlOf(stepArg(chains[0]!, 'where'))).toMatch(/"bot_event_endpoints"."disabled_reason" IS DISTINCT FROM \$\d/);
   });
 
   it('reports the failure that switched the endpoint off — once', async () => {

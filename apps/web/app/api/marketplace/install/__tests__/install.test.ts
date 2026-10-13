@@ -100,6 +100,27 @@ describe('POST /api/marketplace/install', () => {
     );
   });
 
+  it('refuses an official plugin’s id with 409, whatever the catalogue says', async () => {
+    getCatalogEntry.mockResolvedValue({
+      pluginId: 'hushle', reviewStatus: 'approved', version: '9.0.0',
+      manifestUrl: 'https://cdn.example.dev/hushle.tgz',
+      bundleSha256: 'a'.repeat(64), bundleSizeBytes: 4096, id: 'h',
+    });
+    const { POST } = await import('../route.js');
+    for (const pluginId of ['hushle', 'Dice-Bot']) {
+      const res = await POST(
+        new Request('https://example.test/api/marketplace/install', {
+          method: 'POST',
+          body: JSON.stringify({ pluginId }),
+        }),
+        {}
+      );
+      expect(res.status, pluginId).toBe(409);
+      expect(((await res.json()) as { code?: string }).code).toBe('reserved_plugin_id');
+    }
+    expect(installPluginBundle).not.toHaveBeenCalled();
+  });
+
   it('returns 403 when the plugin is not approved', async () => {
     getCatalogEntry.mockResolvedValue({
       pluginId: 'pending-game', reviewStatus: 'pending', id: 'y',
