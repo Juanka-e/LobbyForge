@@ -2,15 +2,11 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { getRealtimeClient } from '@/lib/realtime-client';
-import { UserProfilePopover } from '@/components/modals/UserProfilePopover';
 import { MemberBlockButton } from './MemberBlockButton';
 import { BotAvatar, BotBadge, BotProfilePopover, type LobbyBot } from './BotIdentity';
-import { useLobbyVoice } from './LobbyVoiceProvider';
-import { useBlockList } from './BlockListProvider';
+import { useProfileCard } from './ProfileCardProvider';
 import { useT } from '@/lib/i18n/client';
 import { initialOf } from '@/lib/initial';
-import { userImageUrl } from '@/lib/user-image-url';
-import { handleEmailUnverified, requestVerificationFocus } from '@/components/email-verification/email-status-store';
 import {
   PRESENCE_DOT_CLASS,
   PRESENCE_LABEL_KEYS,
@@ -20,13 +16,16 @@ import {
 
 /**
  * Real-time members panel. Subscribes to presence WS topic + polls as
- * fallback. Renders LobbyMemberItem rows with shared popover state so
- * only one profile popover can be open at a time.
+ * fallback. A member row opens the lobby's one profile card
+ * (ProfileCardProvider), seeded with the row's LIVE status; a bot row
+ * opens the bot profile. Only one of them is open at a time.
  */
 
 interface Member {
   id: string;
   name: string;
+  globalDisplayName?: string;
+  nickname?: string | null;
   status: 'in-voice' | 'online' | 'offline';
   /** The status the member chose (drives the dot color). */
   presence?: PresenceStatus;
@@ -102,14 +101,17 @@ export function LobbyMembersClient({
   botSettingsHref?: string | null;
 }) {
   const t = useT();
-  const [members, setMembers] = useState<Member[]>(initialMembers);
-  const voice = useLobbyVoice();
-  const blockList = useBlockList();
+  const [allMembers, setMembers] = useState<Member[]>(initialMembers);
+  const profileCard = useProfileCard();
+  // Someone kicked or banned through a profile card leaves the list at once.
+  const removed = profileCard?.removedUserIds;
+  const members = removed && removed.size > 0 ? allMembers.filter((m) => !removed.has(m.id)) : allMembers;
   const voiceChannelIdsRef = useRef(new Set(voiceChannelIds));
   voiceChannelIdsRef.current = new Set(voiceChannelIds);
 
-  // Shared popover state — only one popover can be open at a time.
-  const [openUserId, setOpenUserId] = useState<string | null>(null);
+  // The profile card lives in ProfileCardProvider (one for the lobby); the
+  // bot popover stays here. Opening one closes the other.
+  const openUserId = profileCard?.openUserId ?? null;
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
   const [openBotId, setOpenBotId] = useState<string | null>(null);
   const closeBotPopover = useCallback(() => setOpenBotId(null), []);
@@ -191,20 +193,29 @@ export function LobbyMembersClient({
     }, new Map<string, { role: NonNullable<Member['roles']>[number]; members: Member[] }>()).values()
   ).sort((a, b) => b.role.position - a.role.position);
   const ungroupedOnline = online.filter((member) => !groupedUserIds.has(member.id));
-  const openMember = members.find((m) => m.id === openUserId);
 
-  function openPopover(m: Member, rect: DOMRect) {
-    setAnchorRect(rect);
+  function openPopover(m: Member, anchor: HTMLElement) {
     setOpenBotId(null);
-    setOpenUserId(m.id);
+    profileCard?.openProfile({
+      userId: m.id,
+      anchor,
+      // The status the member CHOSE (idle, do not disturb…), live from this
+      // list — not the voice state, which the card shows on its own.
+      seed: {
+        displayName: m.name,
+        presence: m.status === 'offline' ? 'offline' : (m.presence ?? 'online'),
+        inVoice: m.status === 'in-voice',
+      },
+    });
   }
 
   function toggleBotPopover(bot: LobbyBot, rect: DOMRect) {
-    setOpenUserId(null);
+    profileCard?.closeProfile();
     setAnchorRect(rect);
     setOpenBotId((current) => (current === bot.id ? null : bot.id));
   }
   const openBot = bots.find((b) => b.id === openBotId);
+  const closeProfile = () => profileCard?.closeProfile();
 
   return (
     <>
@@ -213,63 +224,14 @@ export function LobbyMembersClient({
           <p className="font-label-xs text-text-muted italic">{t('lobby.roster.empty')}</p>
         ) : null}
         {roleGroups.map(({ role, members: roleMembers }) => (
-          <MemberSection key={role.id} label={`${role.name} - ${roleMembers.length}`} members={roleMembers} roleColor={role.color} roleIcon={role.icon} currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} onClosePopover={() => setOpenUserId(null)} />
+          <MemberSection key={role.id} label={`${role.name} - ${roleMembers.length}`} members={roleMembers} roleColor={role.color} roleIcon={role.icon} currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} onClosePopover={closeProfile} />
         ))}
-        <MemberSection label={t('lobby.roster.onlineGroup', { count: ungroupedOnline.length })} members={ungroupedOnline} currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} onClosePopover={() => setOpenUserId(null)} />
+        <MemberSection label={t('lobby.roster.onlineGroup', { count: ungroupedOnline.length })} members={ungroupedOnline} currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} onClosePopover={closeProfile} />
         <BotSection bots={bots} openBotId={openBotId} onToggle={toggleBotPopover} />
-        <MemberSection label={t('lobby.roster.offlineGroup', { count: offline.length })} members={offline} dimmed currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} onClosePopover={() => setOpenUserId(null)} />
+        <MemberSection label={t('lobby.roster.offlineGroup', { count: offline.length })} members={offline} dimmed currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} onClosePopover={closeProfile} />
       </aside>
       {openBot ? (
         <BotProfilePopover bot={openBot} anchorRect={anchorRect} onClose={closeBotPopover} settingsHref={botSettingsHref} />
-      ) : null}
-      {openMember ? (
-        <UserProfilePopover
-          open={true}
-          onClose={() => setOpenUserId(null)}
-          anchorRect={anchorRect}
-          user={{
-            userId: openMember.id,
-            displayName: openMember.name,
-            avatarUrl: openMember.avatarUrl ?? null,
-            // security-review FILE-001: the banner is fetched only now, for
-            // the one profile being looked at — never part of the list.
-            bannerUrl: userImageUrl(openMember.id, 'banner', openMember.bannerRef),
-            isGuest: openMember.isGuest ?? false,
-            roleName: openMember.roleName,
-            roleColor: openMember.roleColor,
-            statusText: openMember.statusText,
-            bio: openMember.bio,
-            roles: openMember.roles ?? [],
-            onlineStatus: openMember.status === 'in-voice' ? 'in_voice' : openMember.status,
-          }}
-          getVolume={voice.getRemoteVolume}
-          onVolumeChange={voice.setRemoteVolume}
-          isBlocked={blockList.isBlocked(openMember.id)}
-          onToggleBlock={openMember.id === currentUserId ? undefined : (userId) => void blockList.toggleBlock(userId)}
-          onSendMessage={openMember.id === currentUserId ? undefined : (userId) => {
-            // Open a DM channel and navigate to the DM view.
-            void fetch('/api/dm', {
-              method: 'POST',
-              credentials: 'same-origin',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ recipientUserId: userId }),
-            })
-              .then(async (r) => {
-                if (r.ok) return r.json();
-                // EMAIL.md §4.2: refused for an unverified email — lock
-                // and point at the banner's code field, not a silent no-op.
-                if (handleEmailUnverified(r.status, await r.json().catch(() => null))) requestVerificationFocus();
-                return null;
-              })
-              .then((data) => {
-                if (data?.channel?.id) {
-                  window.location.assign(`/dm/${data.channel.id}`);
-                }
-              })
-              .catch(() => {});
-            setOpenUserId(null);
-          }}
-        />
       ) : null}
     </>
   );
@@ -335,7 +297,7 @@ function MemberSection({
   roleIcon?: string | null;
   currentUserId: string | null;
   openUserId: string | null;
-  onOpen: (m: Member, rect: DOMRect) => void;
+  onOpen: (m: Member, anchor: HTMLElement) => void;
   onClosePopover: () => void;
 }) {
   if (members.length === 0) return null;
@@ -358,7 +320,7 @@ function MemberSection({
             dimmed={dimmed}
             currentUserId={currentUserId}
             isOpen={openUserId === m.id}
-            onOpen={(rect) => onOpen(m, rect)}
+            onOpen={(anchor) => onOpen(m, anchor)}
             onClose={onClosePopover}
           />
         ))}
@@ -380,7 +342,7 @@ function MemberRow({
   dimmed?: boolean;
   currentUserId: string | null;
   isOpen: boolean;
-  onOpen: (rect: DOMRect) => void;
+  onOpen: (anchor: HTMLElement) => void;
   onClose: () => void;
 }) {
   const t = useT();
@@ -392,8 +354,7 @@ function MemberRow({
       onClose();
       return;
     }
-    const rect = e.currentTarget.getBoundingClientRect();
-    onOpen(rect);
+    onOpen(e.currentTarget);
   }
 
   return (
@@ -402,6 +363,8 @@ function MemberRow({
         <button
           type="button"
           data-user-popover-anchor
+          aria-haspopup="dialog"
+          aria-expanded={isOpen}
           onClick={handleClick}
           className="min-w-0 flex flex-1 items-center gap-3 text-left"
         >
