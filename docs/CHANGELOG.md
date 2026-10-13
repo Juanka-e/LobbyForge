@@ -2,7 +2,14 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
-## [Unreleased] - Fixes from the rc.8 → rc.9 update drill - 2026-10-13
+## [0.2.0-rc.10] - 2026-10-13
+
+rc.9 plus the fixes from its update drill. Update from rc.8 or rc.9 with `lfctl update apply`.
+
+**Upgrade notes:**
+- These are the same as rc.9's, and the session secret note matters most. An install whose `LOBBYFORGE_SESSION_SECRET` is a published placeholder no longer starts. The update now stops before it changes anything, and says why.
+- Nothing new needs migrating.
+- Optional, for an install updated from rc.8: check out the tag, then re-render the configs with `scripts/render-configs.sh` and recreate nginx. This adds rc.9's `/api/plugin-ui/` location.
 
 The rc.8 → rc.9 update drill on a local production stack passed. Apply, rollback, roll-forward, restore and forced failure all work, and an rc.8 session stays signed in and slides to 7 days. These are the fixes for what it found (docs/BETA_RELEASE.md, "Update drill — rc.8 → rc.9").
 
