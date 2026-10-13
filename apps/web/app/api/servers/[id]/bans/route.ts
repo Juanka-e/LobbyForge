@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { CorePermission, hasPermission } from '@lobbyforge/core';
 import {
   banUser,
+  getActiveMemberTimeout,
   getServerById,
   getUserPermissions,
   isServerMember,
@@ -245,6 +246,19 @@ async function handleDelete(
     const permissions = await getUserPermissions(getDb(), session.uid, serverId);
     if (!hasPermission(permissions, CorePermission.BAN_MEMBERS)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+    // A timed-out moderator moderates nobody (lib/member-authorization.ts,
+    // `actor_timed_out`): lifting a ban is as much a moderation act as
+    // setting one, and used to slip past the timeout. The owner cannot be
+    // timed out, so is never refused.
+    if (session.uid !== server.ownerUserId) {
+      const timedOutUntil = await getActiveMemberTimeout(getDb(), serverId, session.uid);
+      if (timedOutUntil) {
+        return NextResponse.json(
+          { error: 'You are timed out in this server', code: 'actor_timed_out', until: timedOutUntil.toISOString() },
+          { status: 403 }
+        );
+      }
     }
 
     const stillBanned = await isCurrentlyBanned(getDb(), serverId, userId);
