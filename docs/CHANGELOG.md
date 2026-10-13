@@ -21,8 +21,10 @@ All notable changes to the LobbyForge monorepo skeleton.
 - **Fixes:**
   - The member list's card showed the voice state instead of the status the member chose, so Idle never appeared. Do Not Disturb had no label at all.
   - The lobby smoke test counted an old placeholder ("No bio provided.") that could never appear. It now checks that About me says something.
+  - Found by the first run of `e2e/profile-card.spec.ts`: a screen reader read the community menu's button as "E E2E Compose Stack expand_more", and each entry with its icon's name first ("history Audit log"). The button is now named "{community} — open the community menu", and the icons are hidden from assistive technology.
+  - Found in its light-theme screenshots: someone without a photo is shown by their initial on a dark circle that ignored the theme. On the light theme the initial read 1.9:1 in the voice roster, chat, DMs, the member list and mentions. The circle (`secondary-container`) now follows the theme: unchanged on dark and dim, light grey-blue on light (12:1).
 - **Not in this change:** clickable mentions (messages don't store mention ids yet), pronouns, handles and profile accent colours (they need new columns).
-- **Tests:** route tests for every access, privacy, block and `viewerCan` rule; a test that checks `viewerCan` against the real moderation gate over every combination; db unit tests, plus an integration test that runs with `TEST_DATABASE_URL`; component tests for the card, the full profile, the viewer and every entry point; and `e2e/profile-card.spec.ts`, not run yet.
+- **Tests:** route tests for every access, privacy, block and `viewerCan` rule; a test that checks `viewerCan` against the real moderation gate over every combination; db unit tests, plus an integration test that runs with `TEST_DATABASE_URL`; component tests for the card, the full profile, the viewer and every entry point; and `e2e/profile-card.spec.ts`. It passes twice in a row on a freshly rebuilt compose stack, with registered members who have photos, a banner and bios, and covers every entry point, the keyboard, the image viewer, a DM that arrives on the other side, both tabs, Timeout and its lift, role add and remove with the member list regrouping, a hidden profile, your own card, the community menu and the roster's mute icon.
 
 ## [Unreleased] - The A-to-Z e2e run: fixes and three new specs - 2026-10-13
 
@@ -48,7 +50,7 @@ A run through the whole product against the compose stack, with several people a
 - **Mention Everyone:**
   - `(@everyone)` and `hi,@everyone` went out without the permission, and so did an edit that added `@everyone`. Posts, edits and chat polls now share one rule.
   - `@here` needs Mention Everyone too, as in Discord. The role editor calls it "Mention @everyone and @here".
-- **Tests:** unit, route and component tests for every fix. The specs are updated for the new menu entries, `@here`, the code on the owner refusal and the named mute icon. The updated specs have not been run again.
+- **Tests:** unit, route and component tests for every fix. The specs are updated for the new menu entries, `@here`, the code on the owner refusal and the named mute icon, and all three pass on a freshly rebuilt compose stack.
 
 ## [0.2.0-rc.10] - 2026-10-13
 
