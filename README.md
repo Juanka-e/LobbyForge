@@ -42,10 +42,14 @@ Honest assessment of what works today:
 | Direct messages (instance-local) | ✅ Available — block enforcement, reply integrity |
 | Multi-server lobby switching | ✅ Available (official instance) |
 | Discovery directory | 🟡 Beta — account-bound proof + domain verification + key rotation; real instances needed |
-| Hushle (Taboo-style game) | 🟡 Alpha |
-| Quiz | 🔬 Experimental |
-| Plugin SDK (bundled plugins) | ✅ Available |
-| Community plugin marketplace | 🟡 Reviewed-only — artifact hash pinning + fail-closed legacy; runs in isolated child-process container (NOT hostile-code sandbox, see [ADR-001](docs/ARCHITECTURE_DECISIONS.md)) |
+| Activities: Hushle, Quiz, Vampire Village, Watch Party, Poll, Dice | 🟡 Beta — server-authoritative reducers, per-viewer hidden state, late-press protection, voice-room rules, host hand-over; played end to end with 4–7 browsers |
+| Chat polls | ✅ Available — members with Create Polls post polls in text channels; voters stay anonymous |
+| Bots (Bot API v1 + v2) | ✅ Available — tokens, slash commands with options, public/ephemeral answers, signed HTTPS event endpoints, a WebSocket event stream, incoming webhooks, built-in Welcome and Moderation bots ([docs/BOTS.md](docs/BOTS.md), [docs/BOT_API_V2.md](docs/BOT_API_V2.md)) |
+| Plugin SDK (bundled plugins) | ✅ Available — reducers, effects (timers, storage, app chat lines), test harness |
+| Community plugin marketplace | 🟡 Beta — reviewed and SHA-256-pinned bundles run in a QuickJS WebAssembly sandbox in an isolated worker, UI in a sandboxed iframe ([ADR-007](docs/ARCHITECTURE_DECISIONS.md)); anything beyond the sandbox (outside sites, its own site as the UI, timers, storage, chat lines) needs the owner's approval at install ([docs/PLUGIN_UNLOCK_PLAN.md](docs/PLUGIN_UNLOCK_PLAN.md)) |
+| Bot protection | ✅ Available — ALTCHA by default, Turnstile or reCAPTCHA optional |
+| Email verification and password reset | ✅ Available — SMTP providers (SES, Scaleway and others) |
+| Languages | ✅ English and Turkish complete; a new language is a folder of JSON files, no code ([docs/TRANSLATING.md](docs/TRANSLATING.md)) |
 | Admin panel (settings, moderation, doctor) | ✅ Available |
 | Self-host updates (one-click upgrade) | ✅ Available — signed release manifests pin the immutable GHCR image digest; `lfctl update check/plan/apply` verifies the signature against the committed official public key, auto-creates + strictly verifies a backup, deploys exactly the signed digest, persists deployed-version state and records a rollback pointer (`lfctl update rollback`; app-level — DB migrations are forward-only) |
 | Backups (create/restore) | ✅ Available — streaming SHA-256, formatVersion:1 manifest, destructive restore drill in CI |
@@ -57,7 +61,8 @@ Honest assessment of what works today:
 
 - **Voice rooms** powered by [LiveKit](https://livekit.io) — WebRTC SFU, mic/camera/screen-share, speaking indicators, per-user volume.
 - **Plugin SDK** — pure reducer pattern (`State → Action → State`), declarative action policies, server-side state projection (anti-cheat), built-in test harness.
-- **Bundled games** — Hushle (Taboo-style, alpha) and Quiz (experimental). Vampire Village and Watch Party are planned.
+- **Bundled activities** — Hushle (Taboo-style), Quiz, Vampire Village (social deduction), Watch Party (synchronised YouTube), Poll and Dice; chat polls in text channels.
+- **Bots and marketplace plugins** — the Bot API (slash commands, events, webhooks) and sandboxed community plugins that ask the owner before they get more than the sandbox.
 - **Guest access** — invite link → one click into a voice room. No account required.
 - **Real-time** — WebSocket gateway + Redis pub/sub for presence, chat, DMs, and activity state.
 - **Game integrity** — optimistic concurrency (revision CAS), per-viewer state projection, phase-based action validation.
@@ -161,21 +166,25 @@ pnpm verify     # typecheck + lint + test across all workspaces
 apps/
   web/          Next.js app — lobby, admin, API routes, realtime
   desktop/      Tauri 2 shell (experimental)
+  plugin-worker/  Isolated QuickJS sandbox that runs marketplace plugins
   registry/     Instance registry service
   ws-gateway/   Standalone WebSocket gateway for realtime fan-out
 packages/
   core/         Shared helpers (cookies, guest sessions, doctor, update planner)
   db/           Drizzle schema, queries, migrations
   config/       Shared build/runtime config
-  i18n/         Platform UI translations (en, tr)
   ui/           Shared UI primitives
   plugin-sdk/   Plugin lifecycle, reducer types, test harness, locale
-  bot-sdk/      Bot manifest + client types (runtime planned)
+  bot-sdk/      Bot client: REST, slash commands, event stream, webhook signatures
 plugins/
   hushle/       Taboo-style voice game (flagship)
   quiz/         Quiz game
   vampire-village/  Werewolf/Mafia-style social deduction
   watch-party/  Synchronized video watching
+  poll/         Polls in voice rooms
+  dice-bot/     Dice rolls
+examples/
+  plugins/sandbox-buzzer/  A marketplace (sandbox-v1) plugin: UI, sound, timers, storage
 ```
 
 ## Desktop app (optional)

@@ -2,6 +2,8 @@
 
 > **Güncelleme (aynı gün): 17 bulgunun hepsi düzeltildi.** Ayrıntılar
 > §12'de. §1–§11 incelemenin ilk hâlidir ve kayıt olarak korunuyor.
+>
+> **Sonraki inceleme:** [SECURITY_REVIEW_2026-10-13.md](SECURITY_REVIEW_2026-10-13.md).
 
 Kapsam: `main` @ `38945b6` (PR #41 dahil), kod tabanının tamamı: web
 uygulaması ve 85 API rotası, ws-gateway, plugin worker sandbox'ı,
