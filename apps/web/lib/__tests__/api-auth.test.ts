@@ -67,6 +67,43 @@ describe('getSessionSecret', () => {
     const { getSessionSecret } = await import('../api-auth.js');
     expect(() => getSessionSecret()).toThrow(/at least 32 characters/);
   });
+
+  it('security-review INFRA-V-02: refuses a published placeholder unless the dev stack flag is set', async () => {
+    process.env.LOBBYFORGE_SESSION_SECRET = 'dev_session_secret_change_before_public_use_1234';
+    delete process.env.LOBBYFORGE_DEV_STACK;
+    const { getSessionSecret } = await import('../api-auth.js');
+    expect(() => getSessionSecret()).toThrow(/published placeholder/);
+    process.env.LOBBYFORGE_SESSION_SECRET = 'replace_me_with_at_least_32_chars_of_random_hex';
+    expect(() => getSessionSecret()).toThrow(/published placeholder/);
+    process.env.LOBBYFORGE_DEV_STACK = 'true';
+    expect(getSessionSecret()).toBe('replace_me_with_at_least_32_chars_of_random_hex');
+  });
+});
+
+// The top-level afterEach restores the environment after each case.
+describe('instrumentation (security-review INFRA-V-02)', () => {
+  it('refuses to boot the web runtime with a placeholder session secret, and boots in the dev stack', async () => {
+    process.env.NEXT_RUNTIME = 'nodejs';
+    delete process.env.NEXT_PHASE;
+    process.env.LOBBYFORGE_SESSION_SECRET = 'dev_session_secret_change_before_public_use_1234';
+    delete process.env.LOBBYFORGE_DEV_STACK;
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { register } = await import('../../instrumentation.js');
+    await expect(register()).rejects.toThrow(/published placeholder/);
+    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('[App Boot]'));
+    consoleError.mockRestore();
+
+    process.env.LOBBYFORGE_DEV_STACK = 'true';
+    await expect(register()).resolves.toBeUndefined();
+  });
+
+  it('does not check during `next build` (no runtime secrets there)', async () => {
+    process.env.NEXT_RUNTIME = 'nodejs';
+    process.env.NEXT_PHASE = 'phase-production-build';
+    delete process.env.LOBBYFORGE_SESSION_SECRET;
+    const { register } = await import('../../instrumentation.js');
+    await expect(register()).resolves.toBeUndefined();
+  });
 });
 
 describe('requireMaterializedSession', () => {

@@ -10,6 +10,9 @@ design_stitch
 .zcode
 .codex
 .agents
+# Agent tooling: local settings (they held a dev password) and worktrees —
+# nothing the image runs.
+.claude
 *.log
 .env
 .env.*

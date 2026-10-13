@@ -1,7 +1,9 @@
 import type { AlertLevel, DoctorCategory, DoctorReport } from '@lobbyforge/core';
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
 import { adminPageMetadata, requireAdminSection } from '@/lib/admin-access';
 import { collectDoctorReport } from '@/lib/doctor';
+import { resolveClientAddressFromHeaders } from '@/lib/security-headers';
 import { getDb } from '@/lib/db';
 import type { Translator } from '@/lib/i18n/core';
 import { getTranslator } from '@/lib/i18n/server';
@@ -30,7 +32,10 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function HealthPage() {
   const access = await requireAdminSection('health');
   const t = await getTranslator();
-  const { report } = await collectDoctorReport();
+  // INFRA-V-01: the admin's own address, as the app resolves it, is one
+  // signal for the `client_address` check.
+  const clientAddress = resolveClientAddressFromHeaders(await headers());
+  const { report } = await collectDoctorReport({ clientAddress });
 
   // Fetch bandwidth totals for the sidebar summary. Non-fatal — if Redis
   // is down, the health page still renders without the bandwidth card.

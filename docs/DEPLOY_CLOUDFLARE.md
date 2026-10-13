@@ -138,10 +138,71 @@ TTL) on `/api/plugin-ui/*` — that would override the headers.
 
 No Cloudflare account needed: point DNS at the server, open ports
 80/443, run `bash install.sh` and accept the certbot default. Let's
-Encrypt provisions and auto-renews via the certbot sidecar, and the
-visitor IP is always the real one (no proxy in the middle). This is the
-path most self-hosters should start with — you can move to Cloudflare
-later (re-run the installer with the own-certificate option).
+Encrypt provisions and auto-renews via the certbot sidecar, and there is
+no proxy in the middle — but check the IPv6 case below: with Docker's
+defaults, visitors arriving over IPv6 can all show up as one address.
+This is the path most self-hosters should start with — you can move to
+Cloudflare later (re-run the installer with the own-certificate option).
+
+## Client addresses behind Docker
+
+security-review INFRA-V-01. Docker publishes nginx's ports 80/443. For
+IPv4 it rewrites the destination in the kernel, so nginx sees each
+visitor's real address. For **IPv6**, when the `lobbyforge-edge` network
+has no IPv6 (the default), Docker's *userland proxy* (`docker-proxy`)
+accepts the connection on the host and opens a new IPv4 connection to
+nginx — from the bridge gateway, e.g. `172.18.0.1`. Every IPv6 visitor
+then has the same address. On some hosts (hairpin NAT, a proxy in front)
+every visitor does.
+
+Why it matters: LobbyForge keys sign-in rate limits, the guest limit
+and the daily image-upload budget on the client address. When everyone
+shares one address, one client can lock all of them out of sign-in, and
+the per-address budgets become instance-wide.
+
+**Detect it.** Admin → Health (Doctor) shows a `client_address` warning
+when the request asking for the report, or most recent requests, come
+from a gateway address (the container's default gateway, or a private
+`x.x.x.1`) while `LOBBYFORGE_TRUSTED_PROXY` is set. You can also look at
+nginx's log: `docker logs lobbyforge-nginx --tail 50` — every line
+starting with the same `172.x.0.1` is the problem.
+
+**Fix it** — one of these, on the Docker host:
+
+1. **Give the edge network IPv6** (keeps IPv6 working, with real
+   addresses). Docker Engine 27+ has `ip6tables` on by default. Add a
+   unique-local subnet to the `edge` network in
+   `infra/docker/docker-compose.prod.yml`:
+
+   ```yaml
+   networks:
+     edge:
+       name: lobbyforge-edge
+       enable_ipv6: true
+       ipam:
+         config:
+           - subnet: fd42:1f0b:c0de::/64
+   ```
+
+   then recreate the stack (`docker compose -f infra/docker/docker-compose.prod.yml --env-file .env.prod down && … up -d`;
+   the network must be recreated, volumes are kept). Keep the edit when
+   you update — it is a local change to a tracked file.
+2. **Turn off the userland proxy.** In `/etc/docker/daemon.json`:
+
+   ```json
+   { "userland-proxy": false, "ip6tables": true }
+   ```
+
+   and `sudo systemctl restart docker`. Docker then never proxies an IPv6
+   connection to an IPv4-only container: browsers fall back to IPv4 (Happy
+   Eyeballs) and arrive with their real IPv4 address. Combine with option 1
+   to serve IPv6 properly.
+3. **Publish no `AAAA` record** for the domain. Visitors connect over IPv4
+   only. Simplest, and fine for most communities.
+
+After the change, open Admin → Health again: `client_address` should say
+the addresses look like real visitors. `install.sh` does not change
+Docker's daemon settings for you.
 
 ## Troubleshooting
 
@@ -150,6 +211,7 @@ later (re-run the installer with the own-certificate option).
 | Voice connects for some users, never for others | TURN hostname proxied — set it DNS-only; verify UDP ranges open on the host firewall |
 | `curl https://<domain>` works, app shows CF IPs in logs | `cf-real-ip.conf` not installed / nginx not restarted |
 | Everyone gets "Rate limit exceeded" at once; Doctor shows `trusted_proxy` | `LOBBYFORGE_TRUSTED_PROXY` unset — set it to `x-forwarded-for` in `.env.prod` and recreate `web` |
+| IPv6 visitors share one rate limit; Doctor shows `client_address`; nginx logs show `172.x.0.1` | Docker's userland proxy — see [Client addresses behind Docker](#client-addresses-behind-docker) |
 | Browser certificate warning | SSL/TLS mode is not Full (strict), or you grey-clouded a hostname while using an Origin cert |
 | WS connects then drops every ~100s | A proxy in between without WebSocket support — keep the hostname proxied only via Cloudflare, which supports WS |
 | certbot log spam | Expected with an origin certificate — nothing renews, ignore |

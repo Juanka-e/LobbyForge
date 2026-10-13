@@ -43,6 +43,18 @@ export default function ProfileBody({
   }
 
   const initial = initialOf(displayName, { locale: t.locale });
+  // security-review FILE-001: guests cannot store images (the server
+  // refuses with 403 guest_upload_forbidden); the controls say so up front.
+  const isGuest = user.isGuest;
+
+  /** A refused image upload, in the viewer's language where the server gave a reason code. */
+  function uploadError(status: number, detail: { error?: string; code?: string }): Error {
+    // EMAIL.md §4.2 (uploads): explained in the viewer's language.
+    if (handleEmailUnverified(status, detail)) return new Error(t(RESTRICTED_ACTION_KEYS.upload));
+    if (detail.code === 'guest_upload_forbidden') return new Error(t('settings.profile.guestImages'));
+    if (detail.code === 'upload_budget_exceeded') return new Error(t('settings.profile.uploadBudgetExceeded'));
+    return new Error(detail.error ?? `HTTP ${status}`);
+  }
 
   async function saveAvatar({ croppedDataUrl }: { file: File; croppedDataUrl: string }) {
     setError(null);
@@ -52,10 +64,8 @@ export default function ProfileBody({
       body: JSON.stringify({ dataUrl: croppedDataUrl }),
     });
     if (!res.ok) {
-      const detail = (await res.json().catch(() => ({}))) as { error?: string };
-      // EMAIL.md §4.2 (uploads): explained in the viewer's language.
-      if (handleEmailUnverified(res.status, detail)) throw new Error(t(RESTRICTED_ACTION_KEYS.upload));
-      throw new Error(detail.error ?? `HTTP ${res.status}`);
+      const detail = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+      throw uploadError(res.status, detail);
     }
     const body = (await res.json()) as { avatarUrl: string };
     setAvatarUrl(body.avatarUrl);
@@ -71,9 +81,8 @@ export default function ProfileBody({
         body: JSON.stringify({ dataUrl }),
       });
       if (!res.ok) {
-        const detail = (await res.json().catch(() => ({}))) as { error?: string };
-        if (handleEmailUnverified(res.status, detail)) throw new Error(t(RESTRICTED_ACTION_KEYS.upload));
-        throw new Error(detail.error ?? `HTTP ${res.status}`);
+        const detail = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+        throw uploadError(res.status, detail);
       }
       const body = (await res.json()) as { bannerUrl: string | null };
       setBannerUrl(body.bannerUrl);
@@ -190,20 +199,22 @@ export default function ProfileBody({
                   {t('settings.profile.banner.remove')}
                 </button>
               ) : null}
-              <button
-                type="button"
-                disabled={bannerBusy || emailLock.restricted}
-                onClick={() => bannerInputRef.current?.click()}
-                className="rounded-md border border-white/20 bg-black/45 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-sm transition-colors hover:bg-black/60 disabled:opacity-50"
-              >
-                {t(
-                  bannerBusy
-                    ? 'settings.footer.saving'
-                    : bannerUrl
-                      ? 'settings.profile.banner.change'
-                      : 'settings.profile.banner.add'
-                )}
-              </button>
+              {isGuest ? null : (
+                <button
+                  type="button"
+                  disabled={bannerBusy || emailLock.restricted}
+                  onClick={() => bannerInputRef.current?.click()}
+                  className="rounded-md border border-white/20 bg-black/45 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-sm transition-colors hover:bg-black/60 disabled:opacity-50"
+                >
+                  {t(
+                    bannerBusy
+                      ? 'settings.footer.saving'
+                      : bannerUrl
+                        ? 'settings.profile.banner.change'
+                        : 'settings.profile.banner.add'
+                  )}
+                </button>
+              )}
             </div>
           </div>
           <div className="px-6 pb-6 -mt-12 flex items-end justify-between gap-4">
@@ -218,13 +229,19 @@ export default function ProfileBody({
             <button
               type="button"
               onClick={() => setAvatarOpen(true)}
-              disabled={emailLock.restricted}
+              disabled={emailLock.restricted || isGuest}
+              aria-describedby={isGuest ? 'profile-guest-images' : undefined}
               className="rounded-md border border-border-strong px-3 py-1.5 text-sm text-text-secondary hover:bg-surface-raised transition-colors disabled:cursor-not-allowed disabled:opacity-50"
             >
               {t('settings.profile.changeAvatar')}
             </button>
           </div>
         </div>
+        {isGuest ? (
+          <p id="profile-guest-images" className="text-sm text-text-secondary">
+            {t('settings.profile.guestImages')}
+          </p>
+        ) : null}
         {emailLock.restricted ? <EmailUnverifiedNotice action="upload" /> : null}
 
         <Section title={t('settings.nav.user.profile')}>
