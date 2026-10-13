@@ -203,13 +203,21 @@ test.describe('profile card', () => {
 
   /** Leftovers of an interrupted run: members, roles and the room with this spec's names. */
   async function removeLeftovers() {
+    // The members list carries ids, not names: each name comes from the
+    // profile API (names are shown even on a hidden profile).
     const res = await send(() => owner.api.get(`/api/servers/${serverId}/members`));
     if (res.ok()) {
-      const { members } = await json<{ members: Array<{ userId: string; displayName: string; isOwner: boolean }> }>(res);
-      const ours = members.filter(
-        (row) => !row.isOwner && ([MEMBER_NAME, MODERATOR_NAME, VIEWER_NAME].includes(row.displayName) || row.displayName.startsWith(HIDDEN_SEED))
-      );
-      for (const m of ours) await send(() => owner.api.delete(`/api/servers/${serverId}/members/${m.userId}`, { headers: ORIGIN }));
+      const { members } = await json<{ members: Array<{ userId: string; isOwner: boolean }> }>(res);
+      for (const row of members.filter((m) => !m.isOwner)) {
+        const profile = await send(() => owner.api.get(`/api/servers/${serverId}/members/${row.userId}/profile`));
+        if (!profile.ok()) continue;
+        const { displayName, globalDisplayName } = (
+          await json<{ profile: { displayName?: string | null; globalDisplayName?: string | null } }>(profile)
+        ).profile;
+        const names = [displayName ?? '', globalDisplayName ?? ''];
+        const ours = names.some((n) => [MEMBER_NAME, MODERATOR_NAME, VIEWER_NAME].includes(n) || n.includes(HIDDEN_SEED));
+        if (ours) await send(() => owner.api.delete(`/api/servers/${serverId}/members/${row.userId}`, { headers: ORIGIN }));
+      }
     }
     for (const role of (await listRoles(owner.api, serverId)).filter((r) => [MOD_ROLE, BUILDER_ROLE, CREW_ROLE].includes(r.name))) {
       await send(() => owner.api.delete(`/api/servers/${serverId}/roles/${role.id}`, { headers: ORIGIN }));
