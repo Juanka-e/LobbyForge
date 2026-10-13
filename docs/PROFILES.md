@@ -339,9 +339,11 @@ Tests:
   so none is in this change.
 - **Image viewer for chat attachments.** The viewer is generic; chat has no
   image attachments to open yet.
-- **Live role chips in the member list.** A role change made through the card
-  updates the card at once. The member list's role groups update on the next
-  page load.
+- **Role changes made elsewhere, live.** A role change made through your own
+  card regroups your member list at once (see "The member list follows"). One
+  made somewhere else (the admin Members page, another moderator's card)
+  reaches your member list on the next page load, or when you next open that
+  member's card.
 - **A DM with someone who is not in this community** opens a card with just
   the name and avatar from the DM. The profile API is per community.
 - **The two other places that give a block away**: the DM route's two
