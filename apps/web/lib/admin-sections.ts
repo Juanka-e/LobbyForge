@@ -122,12 +122,22 @@ export const NO_LOBBY_ADMIN_LINKS: LobbyAdminLinks = Object.freeze({
   botSettings: null,
 }) as LobbyAdminLinks;
 
+/**
+ * The community menu's settings entries, in the settings nav's order. Each
+ * shows exactly when its page opens for the viewer (`sections`, from
+ * `lib/admin-access.ts` — the same decision as the page guard), so a
+ * moderator with only View Audit Log finds the audit log here instead of
+ * by URL.
+ */
 const LOBBY_MENU: ReadonlyArray<{ section: AdminSection; icon: string; labelKey: string }> = [
   { section: 'members', icon: 'group', labelKey: 'lobby.server.members' },
   { section: 'channels', icon: 'forum', labelKey: 'lobby.server.channels' },
   { section: 'roles', icon: 'shield', labelKey: 'lobby.server.roles' },
   { section: 'invites', icon: 'link', labelKey: 'lobby.server.invites' },
+  { section: 'voiceMedia', icon: 'mic', labelKey: 'lobby.server.voiceMedia' },
   { section: 'apps', icon: 'extension', labelKey: 'lobby.server.apps' },
+  { section: 'bots', icon: 'smart_toy', labelKey: 'lobby.server.bots' },
+  { section: 'audit', icon: 'history', labelKey: 'lobby.server.audit' },
   { section: 'health', icon: 'health_and_safety', labelKey: 'lobby.server.health' },
 ];
 

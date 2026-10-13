@@ -818,12 +818,15 @@ test('the UI matches: community menu, admin pages, channel settings gear, the vo
       return (await menu.getByRole('menuitem').allInnerTexts()).map((t) => t.replace(/^\S+\s+/, '').trim());
     };
     const memberMenu = await menuEntries(member);
-    expect(memberMenu.join('|')).not.toMatch(/Members|Roles|Channels|Invites|Server settings|Apps/);
+    expect(memberMenu.join('|')).not.toMatch(/Members|Roles|Channels|Invites|Server settings|Apps|Audit log|Bots|Voice & media/);
     expect(memberMenu.join('|')).toMatch(/User settings/);
     const modMenu = await menuEntries(mod);
     expect(modMenu.join('|')).toMatch(/Members/);
     expect(modMenu.join('|')).toMatch(/Roles & permissions/);
-    expect(modMenu.join('|')).not.toMatch(/Channels|Invites|Server settings|Apps/);
+    // View Audit Log opens the audit log: the menu offers it (it was URL-only).
+    expect(modMenu.join('|')).toMatch(/Audit log/);
+    // Voice & media and Bots need Manage Community, which mod lacks.
+    expect(modMenu.join('|')).not.toMatch(/Channels|Invites|Server settings|Apps|Bots|Voice & media/);
     await shootBothThemes(mod, shot('matrix-1-mod-community-menu'));
     note(testInfo, { type: 'community menu', description: `member: ${memberMenu.join(', ')} | mod: ${modMenu.join(', ')}` });
     await mod.keyboard.press('Escape');

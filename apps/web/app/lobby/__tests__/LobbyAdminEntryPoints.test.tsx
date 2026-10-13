@@ -36,6 +36,8 @@ const VIEWERS: Record<string, readonly AdminSection[]> = {
   guest: [],
   member: [],
   'moderator (Kick Members)': ['members'],
+  'moderator (View Audit Log)': ['audit'],
+  'community manager (Manage Community)': ['members', 'invites', 'voiceMedia', 'apps', 'bots'],
   'channel manager': ['channels'],
   owner: ADMIN_SECTIONS,
 };
@@ -80,6 +82,23 @@ describe('the community menu', () => {
     expect(openMenu(VIEWERS['moderator (Kick Members)']!)).toEqual(['groupMembers', 'manage_accountsUser settings']);
   });
 
+  // The A-to-Z run: a moderator with only View Audit Log reached the audit
+  // log by URL alone — the menu had no entry for it.
+  it('offers a moderator with View Audit Log the Audit log, and nothing else of the admin area', () => {
+    expect(openMenu(VIEWERS['moderator (View Audit Log)']!)).toEqual(['historyAudit log', 'manage_accountsUser settings']);
+  });
+
+  it('offers a Manage Community holder Voice & media and Bots beside its other pages', () => {
+    expect(openMenu(VIEWERS['community manager (Manage Community)']!)).toEqual([
+      'groupMembers',
+      'linkInvites',
+      'micVoice & media',
+      'extensionApps & activities',
+      'smart_toyBots',
+      'manage_accountsUser settings',
+    ]);
+  });
+
   it('offers the owner every settings entry', () => {
     expect(openMenu(VIEWERS.owner!)).toEqual([
       'admin_panel_settingsServer settings',
@@ -87,7 +106,10 @@ describe('the community menu', () => {
       'forumChannels',
       'shieldRoles & permissions',
       'linkInvites',
+      'micVoice & media',
       'extensionApps & activities',
+      'smart_toyBots',
+      'historyAudit log',
       'health_and_safetyDoctor & health',
       'manage_accountsUser settings',
     ]);
@@ -99,7 +121,7 @@ describe('the community menu', () => {
       buildServerMenuItems({ adminMenu: buildLobbyAdminLinks({ sections: ['audit'] }).menu, isOfficial: false }).map(
         (item) => item.href
       )
-    ).toEqual(['/settings']);
+    ).toEqual(['/admin/audit', '/settings']);
   });
 });
 
