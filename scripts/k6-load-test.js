@@ -134,11 +134,17 @@ export function guestBurst() {
 }
 
 // One guest per presence VU, created on its first iteration and reused for
-// every heartbeat — a real client keeps its session.
-let presenceCookie = null;
+// every heartbeat — a real client keeps its session. The cookie goes through
+// `cookies` with `replace: true`, never a raw Cookie header: in the iteration
+// that created the guest, k6's per-VU jar already holds lf_guest, and a raw
+// header on top sent it twice — the server answers 400 "Duplicate session
+// cookie" (apps/web/lib/security-headers.ts), which failed http_req_failed's
+// threshold on every run (one 400 per presence VU). The jar is reset between
+// iterations, so only the first heartbeat of each VU was hit.
+let presenceSession = null;
 
 export function presenceSustain() {
-  if (!presenceCookie) {
+  if (!presenceSession) {
     const guestRes = createGuest();
     const value = guestRes.cookies?.lf_guest?.[0]?.value;
     if (!value) {
@@ -146,7 +152,7 @@ export function presenceSustain() {
       sleep(5);
       return;
     }
-    presenceCookie = `lf_guest=${value}`;
+    presenceSession = value;
   }
 
   // Send presence heartbeat to a test server/channel
@@ -159,7 +165,8 @@ export function presenceSustain() {
       status: 'online',
     }),
     {
-      headers: { ...JSON_POST.headers, Cookie: presenceCookie },
+      headers: JSON_POST.headers,
+      cookies: { lf_guest: { value: presenceSession, replace: true } },
       // The test server/channel does not exist: 403/404 are expected answers.
       responseCallback: http.expectedStatuses({ min: 200, max: 299 }, 403, 404),
     }

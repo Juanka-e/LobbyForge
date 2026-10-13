@@ -97,6 +97,22 @@ describe('instrumentation (security-review INFRA-V-02)', () => {
     await expect(register()).resolves.toBeUndefined();
   });
 
+  it('exits the process in production instead of serving 500s', async () => {
+    process.env.NEXT_RUNTIME = 'nodejs';
+    delete process.env.NEXT_PHASE;
+    vi.stubEnv('NODE_ENV', 'production');
+    process.env.LOBBYFORGE_SESSION_SECRET = 'replace_me_with_at_least_32_chars_of_random_hex';
+    delete process.env.LOBBYFORGE_DEV_STACK;
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    const { register } = await import('../../instrumentation.js');
+    await expect(register()).rejects.toThrow(/published placeholder/);
+    expect(exit).toHaveBeenCalledWith(1);
+    exit.mockRestore();
+    consoleError.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
   it('does not check during `next build` (no runtime secrets there)', async () => {
     process.env.NEXT_RUNTIME = 'nodejs';
     process.env.NEXT_PHASE = 'phase-production-build';

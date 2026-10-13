@@ -73,6 +73,10 @@ case " $* " in
     fi
     exit 0
     ;;
+  *" logs --no-color "*)
+    echo "ws-gateway-1  | fake: the reason the new container failed"
+    exit 0
+    ;;
   *" up -d --remove-orphans --wait "*)
     n=$(grep -c "up -d --remove-orphans --wait" "$FAKE_DOCKER_LOG" 2>/dev/null || true)
     rc=$(printf '%s' "$FAKE_UP_RCS" | cut -d, -f"$n")
@@ -245,6 +249,15 @@ describe('lfctl update apply — rollout failure recovery (23rd-audit)', () => {
     expect(rc, out).toBe(2);
     // THE regression: recovery must trigger even though `up` exited non-zero.
     expect(out).toContain('OLD CONTAINERS RESTORED AND HEALTHY');
+    // rc.8 → rc.9 drill: the new containers' last log lines (the reason)
+    // are shown BEFORE the recovery `up` replaces them.
+    expect(out).toContain('Last log lines of the new containers:');
+    expect(out).toContain('fake: the reason the new container failed');
+    const calls = dockerCalls(sandbox);
+    const logsAt = calls.findIndex((c) => c.includes('logs --no-color --tail 15 web ws-gateway plugin-worker'));
+    const ups = calls.map((c, i) => (c.includes('up -d --remove-orphans --wait') ? i : -1)).filter((i) => i >= 0);
+    expect(logsAt).toBeGreaterThan(ups[0]);
+    expect(logsAt).toBeLessThan(ups[1]);
     expect(upCount(sandbox)).toBe(2);
     // .env.prod points back at the byte-exact rollback anchor.
     expect(envValue(sandbox, 'LOBBYFORGE_IMAGE')).toMatch(/^lobbyforge-web:rollback-\d+$/);
@@ -366,6 +379,84 @@ describe('lfctl update apply — rollout failure recovery (23rd-audit)', () => {
     ).toBe(true);
     // And no deployment state was written either.
     expect(existsSync(join(sandbox.dir, 'infra', 'update', 'deployment-state.json'))).toBe(false);
+  });
+});
+
+describe('lfctl update apply — session-secret preflight (rc.8 → rc.9 drill)', () => {
+  const REAL_SECRET = '3f9a1c7e5b2d48a6c0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7';
+
+  function withSecret(sandbox: Sandbox, ...lines: string[]): void {
+    writeFileSync(
+      join(sandbox.dir, '.env.prod'),
+      ['LOBBYFORGE_VERSION=0.2.0', 'LOBBYFORGE_IMAGE=lobbyforge-web:latest', 'NODE_ENV=production', ...lines, ''].join('\n')
+    );
+  }
+
+  for (const [name, line] of [
+    ['the .env.example placeholder', 'LOBBYFORGE_SESSION_SECRET=replace_me_with_at_least_32_chars_of_random_hex'],
+    ['the .env.prod.example placeholder, quoted', 'LOBBYFORGE_SESSION_SECRET="CHANGE_ME_64_char_hex_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"'],
+    ['the dev compose default', 'LOBBYFORGE_SESSION_SECRET=dev_session_secret_change_before_public_use_1234'],
+  ] as const) {
+    it(`refuses ${name} before anything is touched`, () => {
+      const sandbox = makeSandbox();
+      withSecret(sandbox, line);
+      const before = readFileSync(join(sandbox.dir, '.env.prod'), 'utf8');
+      const { rc, out } = runApply(sandbox, '', { noBackupManifest: true });
+      expect(rc, out).toBe(2);
+      expect(out).toContain('is a published placeholder');
+      expect(out).toContain('openssl rand -hex 32');
+      expect(out).toContain('Nothing was changed.');
+      // Zero side effects: no docker call at all, no backup, no env or state write.
+      expect(dockerCalls(sandbox)).toEqual([]);
+      expect(readdirSync(sandbox.dir)).not.toContain('backups');
+      expect(readFileSync(join(sandbox.dir, '.env.prod'), 'utf8')).toBe(before);
+      expect(existsSync(join(sandbox.dir, 'infra', 'update', 'deployment-state.json'))).toBe(false);
+      // The secret itself is never echoed.
+      expect(out).not.toContain(line.split('=')[1].replace(/"/g, ''));
+    });
+  }
+
+  it('refuses a secret shorter than 32 characters', () => {
+    const sandbox = makeSandbox();
+    withSecret(sandbox, 'LOBBYFORGE_SESSION_SECRET=0123456789abcdef');
+    const { rc, out } = runApply(sandbox, '');
+    expect(rc, out).toBe(2);
+    expect(out).toContain('shorter than 32 characters');
+    expect(dockerCalls(sandbox)).toEqual([]);
+  });
+
+  it('lets a real secret through, and a placeholder on a declared dev stack', () => {
+    const real = makeSandbox();
+    withSecret(real, `LOBBYFORGE_SESSION_SECRET=${REAL_SECRET}`);
+    const realRun = runApply(real, '');
+    expect(realRun.rc, realRun.out).toBe(0);
+    expect(realRun.out).toContain('Update completed successfully');
+
+    const dev = makeSandbox();
+    withSecret(dev, 'LOBBYFORGE_SESSION_SECRET=dev_session_secret_change_before_public_use_1234', 'LOBBYFORGE_DEV_STACK=true');
+    const devRun = runApply(dev, '');
+    expect(devRun.rc, devRun.out).toBe(0);
+  });
+
+  it('keeps its placeholder list identical to @lobbyforge/core', () => {
+    // lfctl cannot import the built packages (it runs from a bare checkout),
+    // so it carries a copy of the list; a new placeholder must reach both.
+    const literals = (source: string, start: string): string[] => {
+      const from = source.indexOf(start);
+      expect(from, start).toBeGreaterThan(-1);
+      const body = source.slice(from + start.length, source.indexOf('];', from));
+      return body
+        .split('\n')
+        .map((line) => line.replace(/\s+\/\/.*$/, '').trim().replace(/,$/, ''))
+        .filter((line) => line.startsWith('/'));
+    };
+    const core = literals(
+      readFileSync(join(REPO_ROOT, 'packages', 'core', 'src', 'session-secret.ts'), 'utf8'),
+      'PLACEHOLDER_PATTERNS: readonly RegExp[] = ['
+    );
+    const lfctl = literals(readFileSync(LFCTL, 'utf8'), 'SESSION_SECRET_PLACEHOLDER_PATTERNS = [');
+    expect(core.length).toBeGreaterThan(5);
+    expect(lfctl).toEqual(core);
   });
 });
 

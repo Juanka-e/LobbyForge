@@ -15,6 +15,7 @@ import {
 } from '@lobbyforge/core';
 import type { InstanceStoredImageBytes } from '@lobbyforge/db';
 import { recentClientAddresses } from '@/lib/client-address-sample';
+import { getEphemeralTurnIceServers } from '@/lib/turn-credentials';
 
 const PROCESS_STARTED_AT = new Date();
 
@@ -117,11 +118,16 @@ function readDiskUsageRatioFromEnv(): number | null {
   return n;
 }
 
+/**
+ * TURN is configured when the app can hand out coturn credentials: the
+ * same test the voice token route uses (LOBBYFORGE_TURN_SECRET, which
+ * install.sh writes, plus LOBBYFORGE_TURN_HOST or NEXT_PUBLIC_BASE_URL).
+ * The check used to read LOBBYFORGE_TURN_URL and
+ * LOBBYFORGE_TURN_STATIC_AUTH_SECRET, which nothing sets, so every install
+ * read "not configured" (rc.8 → rc.9 drill).
+ */
 function hasTurnEnv(): boolean {
-  return Boolean(
-    process.env.LOBBYFORGE_TURN_URL &&
-      process.env.LOBBYFORGE_TURN_STATIC_AUTH_SECRET
-  );
+  return getEphemeralTurnIceServers('doctor') !== null;
 }
 
 function envUrl(name: string, fallback: string): string {

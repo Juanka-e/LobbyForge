@@ -160,6 +160,16 @@ describe('collectSystemStats disk resolution', () => {
     expect(stats.diskUsageRatio).toBe(0.5);
   });
 
+  it('reads TURN as configured from the variables install.sh writes (rc.8 → rc.9 drill)', async () => {
+    vi.stubEnv('LOBBYFORGE_TURN_SECRET', 'a'.repeat(64));
+    vi.stubEnv('LOBBYFORGE_TURN_HOST', '');
+    vi.stubEnv('NEXT_PUBLIC_BASE_URL', 'https://chat.example.com');
+    expect((await collectSystemStats()).turnConfigured).toBe(true);
+    vi.stubEnv('LOBBYFORGE_TURN_SECRET', '');
+    expect((await collectSystemStats()).turnConfigured).toBe(false);
+    vi.unstubAllEnvs();
+  });
+
   // Restore env after the suite so other tests are unaffected.
   afterAll(() => {
     if (originalEnv !== undefined) process.env.LOBBYFORGE_DISK_USAGE_RATIO = originalEnv;

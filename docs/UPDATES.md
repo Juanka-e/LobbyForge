@@ -32,17 +32,40 @@ pre-releases, so it answered 404 while every release was one. Forks set
 `--manifest` still name a manifest directly. The manifest found is verified
 exactly like one given by hand.
 
-`update apply` and `update rollback` are intentionally locked for now. They
-return a non-zero exit code until the self-host script runner can execute the
-allowlisted plan after verifying:
+`lfctl update apply --yes` runs on the server, from the install's checkout.
+**Checks that change nothing:**
 
-- admin confirmation
-- doctor preflight
-- successful backup
-- migration dry-run
-- compose pull/recreate
-- post-update health check
-- rollback command availability
+- the manifest's signature against the release key, which is required;
+- the version and channel;
+- a major upgrade needs `--force-major`;
+- the session secret in `.env.prod`. A published placeholder, or a secret under 32 characters, is refused with "Nothing was changed.", because 0.2.0-rc.9 and later do not start with one;
+- the running containers match the configured image, so there is no drift.
+
+**Then, in order:**
+
+1. A backup is created and verified (sha256 and size).
+2. The signed image digest is pulled.
+3. The new image's migrator runs. Since rc.10 it also refuses a placeholder secret before touching the schema, so even an older `lfctl` stops there.
+4. The services are recreated.
+5. A health check runs.
+6. `.env.prod` and `infra/update/deployment-state.json` (with a `previous` pointer) are updated.
+
+**If a step fails:**
+
+- **Before recreate:** the old containers are untouched.
+- **After recreate:** `lfctl` prints the last log lines of the new containers, then brings the previous image back up and health-checks it ("OLD CONTAINERS RESTORED AND HEALTHY").
+
+`lfctl update rollback` returns to `previous`. Migrations are expand-only, so the previous version runs on the newer schema.
+
+**What `update apply` does not change:** it deploys the image; the compose file, nginx and coturn templates and `install.sh` come from the checkout. When a release changes one of them, its upgrade notes say so. To pick the change up:
+
+1. Check out that release's tag.
+2. Re-render with `scripts/render-configs.sh`.
+3. Recreate nginx.
+
+For example, rc.9's `/api/plugin-ui/` nginx location. Without it, plugin frames still work, because the route's CSP `frame-ancestors` takes precedence over nginx's `X-Frame-Options`.
+
+The drills on a local production stack (BETA_RELEASE.md, "Update drill") ran every step above, the failure paths included.
 
 ## Manifest
 

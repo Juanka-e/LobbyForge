@@ -17,12 +17,16 @@ export async function register() {
   // PUBLISHED session secret (the .env.example placeholder, the dev compose
   // default) — anyone could forge sessions against it. Only the local dev
   // stack (LOBBYFORGE_DEV_STACK=true, set by docker-compose.dev.yml) may run
-  // with a placeholder. Thrown on purpose: `next start` exits on it.
+  // with a placeholder. In production the process exits: `next start`
+  // (16.4) only logs a throw from here ("Failed to prepare server") and keeps
+  // answering 500 on every route, /api/health included, so the container
+  // stayed "running" until its healthcheck gave up (rc.8 → rc.9 drill).
   const { requireSessionSecret } = await import('@lobbyforge/core');
   try {
     requireSessionSecret();
   } catch (err) {
     console.error(`[App Boot] ${(err as Error).message}`);
+    if (process.env.NODE_ENV === 'production') process.exit(1);
     throw err;
   }
 
