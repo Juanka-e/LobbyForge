@@ -836,6 +836,21 @@ test('the UI matches: community menu, admin pages, channel settings gear, the vo
     expect(await status(mod, '/admin/settings/members')).toBe(200);
     expect(await status(mod, '/admin/settings/roles')).toBe(200);
     expect(await status(mod, '/admin/audit')).toBe(200);
+    // The members page: actions only on rows the moderator outranks — none
+    // on the admin above them, none on mod2 at their own rank.
+    await mod.goto('/admin/settings/members');
+    const search = mod.getByPlaceholder('Search members...');
+    const manageButton = (name: string) => mod.getByRole('button', { name: `Manage ${name}`, exact: true });
+    await search.fill(people.member!.name);
+    await expect(manageButton(people.member!.name)).toBeVisible();
+    await manageButton(people.member!.name).click();
+    await expect(mod.getByRole('button', { name: 'Kick', exact: true })).toBeVisible();
+    for (const higher of ['admin', 'mod2'] as const) {
+      await search.fill(people[higher]!.name);
+      await expect(mod.getByText(people[higher]!.name, { exact: true }).first()).toBeVisible();
+      await expect(manageButton(people[higher]!.name)).toHaveCount(0);
+    }
+    await shootBothThemes(mod, shot('matrix-3-mod-members-page'));
     expect(await status(mod, '/admin/settings/channels')).toBe(404);
     expect(await status(mod, '/admin/settings/invites')).toBe(404);
     expect(await status(mod, '/admin/settings')).toBe(404);
