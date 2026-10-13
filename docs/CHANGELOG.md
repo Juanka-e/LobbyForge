@@ -41,7 +41,7 @@ A run through the whole product against the compose stack, with several people a
 - **Moderation and roles:**
   - A timed-out moderator could still lift a ban. The unban route now refuses them with `actor_timed_out`, like every other moderation action.
   - The Members page offered Kick, Ban and the role picker on members ranked at or above the viewer, and every role in the picker. Each action now needs the viewer to outrank the member, as the routes do, and roles at or above the viewer's highest aren't offered.
-  - The Members page showed "@EVERYONE" as a moderator's role. A member's display role is now the highest role other than `@everyone` everywhere: the Members page, the lobby member list and the members API. Rows saved the old way show right too, and the hub's Roles tab counts every holder of a role.
+  - The Members page showed "@EVERYONE" as a moderator's role. A member's display role is now the highest role other than `@everyone` everywhere: the Members page, the lobby member list and the members API. Rows saved the old way show right too. The admin Roles page counts each holder of a role once (a member's display role was counted twice), and the hub's Roles tab counts every holder.
   - Kick, ban, role and timeout refusals all carry a `code`. The Members page used to show the server's English error to every language. It now says each refusal in the viewer's language, like the profile card.
   - The community menu has entries for Voice & media, Bots and the Audit log, each shown when its page opens for you. A moderator with only View Audit Log reached the audit log by URL alone.
   - A role change made in a profile card now moves the member to the right group in the lobby member list at once, instead of on the next page load.
