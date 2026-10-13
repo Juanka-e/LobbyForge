@@ -49,7 +49,9 @@ export function VoiceResumeStrip({ placement }: { placement: 'lobby' | 'activity
       <span className="material-symbols-outlined text-[20px] text-ember" aria-hidden>
         headset_off
       </span>
-      <div className="min-w-0 flex-1">
+      {/* A floor for the message: on a phone the button wraps onto its own
+          line instead of squeezing the sentence to one word per line. */}
+      <div data-testid="voice-resume-message" className="min-w-[10rem] flex-1">
         <p className="text-sm font-medium text-text-primary">{t('lobby.voice.resume.message')}</p>
         {/* Why, when LiveKit said (a server restart) or the way back failed. */}
         {voice.error ? <p className="mt-0.5 text-pretty text-xs text-text-secondary">{voice.error}</p> : null}
