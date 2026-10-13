@@ -726,7 +726,9 @@ describe('POST message permission gates (role upgrade batch)', () => {
 
   // A mention glued to punctuation used to pass the old `(^|\s)@everyone`
   // test: "(@everyone)" went out without the permission.
-  it.each(['(@everyone)', 'hi,@everyone', '＠everyone'])('403 for %j without MENTION_EVERYONE', async (content) => {
+  // @here is the same mass ping (everyone online), so it needs the same
+  // permission, as in Discord; it used to need none.
+  it.each(['(@everyone)', 'hi,@everyone', '＠everyone', '@here', 'look @here!', 'ok,@here'])('403 for %j without MENTION_EVERYONE', async (content) => {
     mockServerAlive();
     mockChannelAlive();
     getUserPermissions.mockResolvedValue(['send_messages']);
@@ -799,6 +801,13 @@ describe('PATCH message: Mention Everyone holds for edits', () => {
   it('403 when the author edits @everyone in without the permission', async () => {
     asAuthorWith(['send_messages', 'read_message_history']);
     const res = await editTo('hi @everyone');
+    expect(res.status).toBe(403);
+    expect(updateMessage).not.toHaveBeenCalled();
+  });
+
+  it('403 when the author edits @here in without the permission', async () => {
+    asAuthorWith(['send_messages', 'read_message_history']);
+    const res = await editTo('everyone online? @here');
     expect(res.status).toBe(403);
     expect(updateMessage).not.toHaveBeenCalled();
   });

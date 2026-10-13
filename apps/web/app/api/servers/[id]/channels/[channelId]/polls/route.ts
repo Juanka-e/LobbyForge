@@ -21,7 +21,7 @@ import { emitMessageEvent } from '@/lib/bots/events';
 import { requireVerifiedEmail } from '@/lib/mail/verification';
 import { CreateChatPollSchema, isPollChannelType, projectChatPoll, type CreateChatPollBody } from '@/lib/chat-polls';
 import { messageJson, resolvePollSession } from '@/lib/chat-polls-server';
-import { mentionsEveryone } from '@/lib/everyone-mention';
+import { mentionsEveryoneOrHere } from '@/lib/everyone-mention';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -81,8 +81,8 @@ async function handlePost(
     // Everything a reader will see, as one text: the question and the options.
     const text = [body.question, ...body.options].join('\n');
 
-    // MENTION_EVERYONE: @everyone anywhere in the poll needs the permission, as in a message.
-    if (mentionsEveryone(text)) {
+    // MENTION_EVERYONE: @everyone or @here anywhere in the poll needs the permission, as in a message.
+    if (mentionsEveryoneOrHere(text)) {
       const mentionAuth = await authorizeServerPermission(session.uid, serverId, CorePermission.MENTION_EVERYONE);
       if (!mentionAuth.ok) return mentionAuth.response;
     }

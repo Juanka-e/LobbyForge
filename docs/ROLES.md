@@ -26,6 +26,8 @@ export const CorePermission = {
   BAN_MEMBERS: 'ban_members',
   CREATE_INVITE: 'create_invite',
   SEND_MESSAGES: 'send_messages',
+  READ_MESSAGE_HISTORY: 'read_message_history',
+  MENTION_EVERYONE: 'mention_everyone', // @everyone and @here (below)
   MANAGE_MESSAGES: 'manage_messages',
   ADD_REACTIONS: 'add_reactions',
   CONNECT_VOICE: 'connect_voice',
@@ -36,6 +38,13 @@ export const CorePermission = {
   CREATE_POLLS: 'create_polls', // polls in text channels (docs/CHAT_POLLS.md)
 } as const;
 ```
+
+**Mention Everyone** (`mention_everyone`) lets a member mention `@everyone`
+**and `@here`** in a message, an edit or a chat poll — one permission for
+both, as in Discord, since `@here` is the same mass ping for everyone
+online. Without it those are refused with `403`. It is one of the
+`@everyone` defaults. The rule and its edge cases are in docs/MESSAGES.md,
+"Mention Everyone".
 
 `hasPermission(userPermissions, required)` is the single authorization primitive. It short-circuits to `true` if `ADMINISTRATOR` is in the array — that's the "owner override" M11 + M12 used, but now it's data-driven instead of code-driven.
 

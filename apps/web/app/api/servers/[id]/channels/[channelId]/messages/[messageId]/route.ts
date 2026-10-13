@@ -25,7 +25,7 @@ import { requireVerifiedEmail } from '@/lib/mail/verification';
 import { readMessagePollId } from '@/lib/chat-polls';
 import { loadPollViewsForMessages } from '@/lib/chat-polls-server';
 import { MESSAGE_BODY_MAX_BYTES } from '@/lib/message-limits';
-import { mentionsEveryone } from '@/lib/everyone-mention';
+import { mentionsEveryoneOrHere } from '@/lib/everyone-mention';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -257,8 +257,9 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
       const sendAuth = await authorizeServerPermission(session.uid, serverId, CorePermission.SEND_MESSAGES);
       if (!sendAuth.ok) return sendAuth.response;
       // Mention Everyone holds for edits too: posting "hi" and editing it to
-      // "hi @everyone" used to get round the permission the POST checks.
-      if (mentionsEveryone(body.content)) {
+      // "hi @everyone" (or "@here") used to get round the permission the
+      // POST checks.
+      if (mentionsEveryoneOrHere(body.content)) {
         const mentionAuth = await authorizeServerPermission(session.uid, serverId, CorePermission.MENTION_EVERYONE);
         if (!mentionAuth.ok) return mentionAuth.response;
       }

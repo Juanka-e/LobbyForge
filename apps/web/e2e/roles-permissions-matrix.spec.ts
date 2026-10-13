@@ -382,6 +382,10 @@ test('mention everyone: refused without the permission, allowed with it', async 
   const glued = await post('nohist', 'chat', `(@everyone) ${RUN}`);
   note(testInfo, { type: 'glued @everyone without the permission', description: `HTTP ${glued.status()}` });
   expect(glued.status()).toBe(403);
+  // @here is the same mass ping (everyone online), under the same
+  // permission, as in Discord — it used to need none.
+  expect((await post('nohist', 'chat', `look @here ${RUN}`)).status()).toBe(403);
+  expect((await post('member', 'chat', `look @here ${RUN}`)).status()).toBe(201);
   // … and so does an edit: post something harmless, then edit @everyone in.
   const harmless = await post('nohist', 'chat', `hello ${RUN}`);
   expect(harmless.status()).toBe(201);
