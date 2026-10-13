@@ -1,6 +1,6 @@
 # Beta Release Checklist
 
-Status: Closed-beta release candidate — `v0.2.0-rc.10` (2026-10-13): rc.9 plus the fixes from its update drill.
+Status: Closed-beta release candidate — `v0.2.0-rc.11` (2026-10-13). It is rc.10 (rc.9 plus the fixes from its update drill), plus the Discord-like profile card and the fixes from an A-to-Z end-to-end run.
 
 Two reviews fed it:
 - The beta-readiness review ([BETA_READINESS_REVIEW.md](BETA_READINESS_REVIEW.md)) found moderation, voice, desktop and release-pipeline defects that the earlier "ready" claim missed.
@@ -202,7 +202,7 @@ pnpm setup order + SBOM artifact in the download; rc.2 — Windows MSI
 semver limit; rc.3 — cancelled duplicate check runs tripping the gate;
 rc.4 — clean end-to-end.
 
-- [ ] Fresh tagged install (`git clone --branch v0.2.0-rc.10` or later + install.sh) on a clean VPS
+- [ ] Fresh tagged install (`git clone --branch v0.2.0-rc.11` or later + install.sh) on a clean VPS
       (needs real DNS + Let's Encrypt — not reproducible locally)
 - [x] Real old → RC update via `lfctl update apply` (local production stack, see below)
 - [x] Forced failure drill: health fails after recreate → old containers restored (live, see below)

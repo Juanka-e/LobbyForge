@@ -2,6 +2,27 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [0.2.0-rc.11] - 2026-10-13
+
+rc.10 plus the two entries below: "A Discord-like profile card" and "The A-to-Z e2e run: fixes and three new specs". Update with `lfctl update apply`.
+
+- **Profiles:**
+  - Click anyone to open a Discord-like card. It has a banner, the chosen status, a photo viewer, About me, member-since dates, roles (add and remove them if you manage roles), mutual communities and a "Message @name" box.
+  - Its ⋯ menu offers Copy ID, Block, and only the moderation you may use: Timeout (the first timeout UI), Kick, Ban and Server mute.
+  - "View full profile" opens About and Mutual communities tabs.
+  - The data comes from a new route with the same privacy rules as the lobby.
+- **Fixes:**
+  - **Mention Everyone:** `(@everyone)`, `hi,@everyone` and edits slipped past it, and `@here` is now covered too.
+  - **Moderation:** a timed-out moderator could unban.
+  - **Voice:**
+    - deleting a voice channel left its voice room running;
+    - while reconnecting, the footer said "Voice Ready" and activities showed the Join bar.
+  - **Members page:** it offered actions on higher-ranked members, and showed "@EVERYONE" as the role.
+  - **Community menu:** it lacked Audit log, Bots and Voice & media.
+  - **Readability:** voice-roster icons were unlabeled for screen readers, and avatar initials were nearly unreadable in the light theme.
+- **Tests:** new end-to-end specs for the permission matrix, voice drops and drops during activities.
+- **Upgrade notes:** no migration and no configuration change.
+
 ## [Unreleased] - A Discord-like profile card - 2026-10-13
 
 - **Click anyone, see their profile:** the member list, a chat author's avatar or name, the voice roster (left click; right-click and "⋮" keep the moderator menu), the DM header and DM authors, and your own account avatar all open the same card. One card at a time; another person switches it. docs/PROFILES.md.
