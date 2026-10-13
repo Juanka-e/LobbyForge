@@ -395,10 +395,14 @@ The interaction contract is fixed:
 - `/lobby` member sidebars group members as Online and Offline. Users currently
   in voice remain in the Online group; a separate "In Voice" sidebar section is
   intentionally not part of the canonical lobby.
-- Lobby member rows and chat authors open the shared profile popover. The
-  block/unblock action uses `/api/settings/me/blocks` and remains server-side
-  authoritative; blocked message bodies are masked before they reach the
-  client.
+- Clicking a person anywhere in the lobby (member list, chat author, voice
+  roster, DM header, your own account avatar) opens the one profile card;
+  "View full profile" opens a modal with About and Mutual communities tabs.
+  The card fills in from `GET /api/servers/{id}/members/{userId}/profile`,
+  projected per viewer, and offers only the actions its `viewerCan` allows.
+  See [PROFILES.md](./PROFILES.md). The block/unblock action uses
+  `/api/settings/me/blocks` and remains server-side authoritative; blocked
+  message bodies are masked before they reach the client.
 - The lobby composer posts text messages through
   `/api/servers/{id}/channels/{channelId}/messages`. Attachment, gift, and GIF
   controls remain disabled until those feature-specific upload/picker flows are
@@ -454,8 +458,9 @@ The interaction contract is fixed:
 - Disconnect is optimistic and idempotent: it clears the local call UI and
   presence state even if the LiveKit room reference was already lost, then
   finishes transport cleanup when a room still exists.
-- Member popovers expose a separate bio, short status, all assigned roles,
-  and a local per-participant volume slider while that member is in voice.
+- The profile card shows the bio, the custom status, all assigned roles, and
+  a local per-participant volume slider while that member is in voice
+  ([PROFILES.md](./PROFILES.md)).
 - Role icons use a fixed Material Symbols allowlist validated by both Zod and
   a PostgreSQL check constraint. Role color values remain strict six-digit
   hex colors.

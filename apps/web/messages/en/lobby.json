@@ -26,6 +26,7 @@
   "lobby.presence.offline.label": "Invisible",
   "lobby.presence.online.description": "Visible to everyone in the community.",
   "lobby.presence.online.label": "Online",
+  "lobby.presence.openProfile": "Your profile",
   "lobby.presence.trigger": "{name} — set your status",
   "lobby.presence.you": "You",
   "lobby.rail.home": "LobbyForge Home",

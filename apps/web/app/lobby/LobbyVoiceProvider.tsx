@@ -145,6 +145,8 @@ export interface ActiveDm {
   channelId: string;
   name: string;
   avatarUrl: string | null;
+  /** The other person — the header and their messages open their profile card. */
+  otherUserId?: string | null;
 }
 
 export interface ActiveActivityChannel {

@@ -52,6 +52,7 @@ import { LobbyJoinRequestActions } from './LobbyJoinRequestActions';
 import DmLinkSection from './DmLinkSection';
 import MobileNav from './MobileNav';
 import { BlockListProvider } from './BlockListProvider';
+import { ProfileCardProvider } from './ProfileCardProvider';
 import EmailVerificationBanner from '@/components/email-verification/EmailVerificationBanner';
 import { EmailStatusSeed } from '@/components/email-verification/email-status-store';
 import type { EmailStatus } from '@/components/email-verification/email-status';
@@ -117,6 +118,9 @@ interface Member {
   roleName?: string | null;
   roleColor?: string | null;
   roleIcon?: string | null;
+  /** The account's own name, and the nickname that replaces it here (names are never hidden). */
+  globalDisplayName?: string;
+  nickname?: string | null;
   statusText?: string | null;
   bio?: string | null;
   roles?: Array<{ id: string; name: string; color: string | null; icon: string | null; position: number; displaySeparately: boolean }>;
@@ -314,6 +318,8 @@ function buildMembers(
         roleIcon: highestRole?.icon ?? s.roleIcon,
         roles: s.roles,
         isGuest: s.isGuest,
+        globalDisplayName: s.globalDisplayName,
+        nickname: s.nickname,
         // security-review FILE-001 / AUTHZ-005: short avatar URL + banner
         // reference (never data URLs), and avatar / banner / bio / status
         // only when the member's profile visibility allows this viewer.
@@ -896,7 +902,7 @@ export default async function LobbyPage({
   // centre column. Resolved server-side so the first paint already shows
   // the right name and avatar (the route already verified participation).
   const requestedDm = (await searchParams).dm;
-  let initialDm: { channelId: string; name: string; avatarUrl: string | null } | null = null;
+  let initialDm: { channelId: string; name: string; avatarUrl: string | null; otherUserId: string } | null = null;
   if (requestedDm && userId) {
     // security-review FILE-001 / AUTHZ-005: same projection as GET /api/dm.
     const conversation = await listDmChannelsForUser(getDb(), userId)
@@ -908,6 +914,7 @@ export default async function LobbyPage({
         channelId: conversation.id,
         name: conversation.otherUserDisplayName,
         avatarUrl: conversation.otherUserAvatarUrl,
+        otherUserId: conversation.otherUserId,
       };
     }
   }
@@ -1024,7 +1031,7 @@ function LobbyShell({
   hasUser: boolean;
   data: LobbyData;
   /** Conversation to open on first paint (from a /dm/<id> deep link). */
-  initialDm: { channelId: string; name: string; avatarUrl: string | null } | null;
+  initialDm: { channelId: string; name: string; avatarUrl: string | null; otherUserId: string } | null;
   /** The account's email status, read on the server (undefined: the banner asks). */
   emailStatus?: EmailStatus | null;
 }) {
@@ -1112,7 +1119,15 @@ function LobbyShell({
             initialDm={initialDm}
             voiceChannels={data.voiceChannels.map((c) => ({ id: c.id, name: c.name }))}
           >
-            {shell}
+            {/* One profile card for every place that shows a person (docs/PROFILES.md). */}
+            <ProfileCardProvider
+              serverId={data.serverId!}
+              serverName={data.serverName}
+              currentUserId={data.currentUserId}
+              members={data.members}
+            >
+              {shell}
+            </ProfileCardProvider>
           </LobbyVoiceProvider>
         </BlockListProvider>
       ) : (

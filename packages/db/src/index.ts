@@ -44,6 +44,8 @@ export * from './queries/channelVisibility.js';
 export * from './queries/pluginData.js';
 export * from './queries/uploadQuota.js';
 export * from './queries/userImages.js';
+// The profile card: one member's profile and the communities two people share.
+export * from './queries/memberProfiles.js';
 export * from './queries/instanceReports.js';
 export * from './queries/componentMigrations.js';
 export * from './queries/dmChannels.js';

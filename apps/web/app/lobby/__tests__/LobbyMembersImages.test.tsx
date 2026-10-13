@@ -36,22 +36,26 @@ afterEach(() => {
 describe('members panel images', () => {
   it('uses the avatar URL and loads the banner only for the opened profile', async () => {
     const { LobbyMembersClient } = await import('../LobbyMembersClient');
+    const { ProfileCardProvider } = await import('../ProfileCardProvider');
+    const members = [
+      {
+        id: MEMBER,
+        name: 'Alice',
+        status: 'online' as const,
+        avatarUrl: `/api/users/${MEMBER}/avatar?v=0123456789ab`,
+        bannerRef: 'abcdefabcdef',
+      },
+    ];
     const { container } = render(
       <I18nProvider {...providerPropsFor('en')}>
-        <LobbyMembersClient
-          serverId="srv-1"
-          initialMembers={[
-            {
-              id: MEMBER,
-              name: 'Alice',
-              status: 'online',
-              avatarUrl: `/api/users/${MEMBER}/avatar?v=0123456789ab`,
-              bannerRef: 'abcdefabcdef',
-            },
-          ]}
-          voiceChannelIds={[]}
-          currentUserId="00000000-0000-0000-0000-00000000000a"
-        />
+        <ProfileCardProvider serverId="srv-1" serverName="Test" currentUserId="00000000-0000-0000-0000-00000000000a" members={members}>
+          <LobbyMembersClient
+            serverId="srv-1"
+            initialMembers={members}
+            voiceChannelIds={[]}
+            currentUserId="00000000-0000-0000-0000-00000000000a"
+          />
+        </ProfileCardProvider>
       </I18nProvider>
     );
 
@@ -61,8 +65,8 @@ describe('members panel images', () => {
     expect(document.body.innerHTML).not.toContain('data:');
 
     fireEvent.click(screen.getByRole('button', { name: /Alice/ }));
-    const dialog = await screen.findByRole('dialog');
-    const banner = dialog.querySelector('[aria-hidden]') as HTMLElement | null;
+    const dialog = await screen.findByRole('dialog', { name: 'Alice profile' });
+    const banner = dialog.querySelector('[data-profile-banner] button') as HTMLElement | null;
     expect(banner?.style.backgroundImage).toContain(`/api/users/${MEMBER}/banner?v=abcdefabcdef`);
   });
 });

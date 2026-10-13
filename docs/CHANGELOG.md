@@ -2,6 +2,28 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - A Discord-like profile card - 2026-10-13
+
+- **Click anyone, see their profile:** the member list, a chat author's avatar or name, the voice roster (left click; right-click and "⋮" keep the moderator menu), the DM header and DM authors, and your own account avatar all open the same card. One card at a time; another person switches it. docs/PROFILES.md.
+- **The card:**
+  - Banner, or a band in the avatar's colour. Avatar with the status the member chose, and "In voice" apart from it. Names as Discord shows them, the custom status, About me, Member since (account and community, in the viewer's language), roles, mutual communities, and the volume slider in voice.
+  - **Message @name:** type and press Enter. The DM is opened or created, the message is sent, and the conversation opens in the centre column.
+  - **"⋯" menu:** Copy user ID, Block or Unblock, and for moderators only what they may do: Timeout (60 s to 1 week) or Remove timeout, Kick, Ban with an optional reason, and Server mute in your voice room. Each action asks first, through the existing routes. Your own card has Edit profile and the status choice.
+  - **Roles:** a role manager adds (+) and removes (×) roles through the existing role route. Refusals are shown inline, in the viewer's language.
+- **Full profile:** a larger modal with About and Mutual communities tabs. Each community links to its lobby.
+- **Image viewer:** `components/ImageLightbox.tsx`, a shared viewer for avatars and banners, with "Open original". It respects reduced motion.
+- **API:** `GET /api/servers/{id}/members/{userId}/profile` returns one member's profile, projected for the viewer:
+  - A 404 unless both people belong to the community.
+  - It uses the lobby's own privacy projection. A hidden profile keeps only names and roles, and a block in either direction keeps the payload just as small.
+  - A member who blocked you gets the same answer as a hidden profile. The card is cached per viewer and re-asked after 30 seconds, and roles are read fresh before each change, so a whole-set role update can't undo someone else's change.
+  - `viewerCan` follows the moderation gate's rules, which now share their permission map and rank check with it (`lib/member-capabilities.ts`).
+  - New queries in `@lobbyforge/db`: `getMemberProfileRecord` and `listMutualServers`.
+- **Fixes:**
+  - The member list's card showed the voice state instead of the status the member chose, so Idle never appeared. Do Not Disturb had no label at all.
+  - The lobby smoke test counted an old placeholder ("No bio provided.") that could never appear. It now checks that About me says something.
+- **Not in this change:** clickable mentions (messages don't store mention ids yet), pronouns, handles and profile accent colours (they need new columns).
+- **Tests:** route tests for every access, privacy, block and `viewerCan` rule; a test that checks `viewerCan` against the real moderation gate over every combination; db unit tests, plus an integration test that runs with `TEST_DATABASE_URL`; component tests for the card, the full profile, the viewer and every entry point; and `e2e/profile-card.spec.ts`, not run yet.
+
 ## [0.2.0-rc.10] - 2026-10-13
 
 rc.9 plus the fixes from its update drill. Update from rc.8 or rc.9 with `lfctl update apply`.
