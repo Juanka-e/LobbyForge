@@ -96,6 +96,23 @@ export async function getUserPresenceInServer(serverId: string) {
   return values.filter(Boolean).map(v => JSON.parse(v!) as UserPresenceSnapshot);
 }
 
+/**
+ * One member's server presence (the profile card), or null when the key
+ * expired or never existed. One GET instead of scanning the whole server.
+ */
+export async function getUserPresenceInServerForUser(
+  serverId: string,
+  userId: string
+): Promise<UserPresenceSnapshot | null> {
+  const raw = await redis.get(`lf:${process.env.NODE_ENV || 'dev'}:presence:server:${serverId}:${userId}`);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as UserPresenceSnapshot;
+  } catch {
+    return null;
+  }
+}
+
 export async function getUserPresenceInChannel(channelId: string) {
   const keys = await scanKeys(`lf:${process.env.NODE_ENV || 'dev'}:presence:channel:${channelId}:*`);
   if (keys.length === 0) return [];

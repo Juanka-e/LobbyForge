@@ -19,7 +19,7 @@
  * the wrong permission with the wrong action.
  */
 import { NextResponse } from 'next/server';
-import { CorePermission, hasPermission } from '@lobbyforge/core';
+import { hasPermission } from '@lobbyforge/core';
 import {
   getActiveMemberTimeout,
   getHighestRolePosition,
@@ -29,19 +29,16 @@ import {
   userExists,
 } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
+// The permission map and the rank comparison are shared with the profile
+// card's `viewerCan` (lib/member-capabilities.ts), so what the card offers
+// and what this gate accepts cannot drift apart.
+import {
+  isActorAboveTarget,
+  MODERATION_OPERATION_PERMISSION as OPERATION_PERMISSION,
+  type ModerationOperation,
+} from '@/lib/member-capabilities';
 
-export type ModerationOperation = 'kick' | 'ban' | 'timeout' | 'set_roles' | 'voice_mute' | 'voice_disconnect';
-
-const OPERATION_PERMISSION: Record<ModerationOperation, CorePermission> = {
-  kick: CorePermission.KICK_MEMBERS,
-  ban: CorePermission.BAN_MEMBERS,
-  timeout: CorePermission.MODERATE_MEMBERS,
-  set_roles: CorePermission.MANAGE_ROLES,
-  voice_mute: CorePermission.MUTE_MEMBERS,
-  // There is no move-members permission: Mute Members also allows
-  // disconnecting someone from a voice room (docs/ROLES.md).
-  voice_disconnect: CorePermission.MUTE_MEMBERS,
-};
+export { isActorAboveTarget, type ModerationOperation };
 
 const OPERATION_LABEL: Record<ModerationOperation, string> = {
   kick: 'kick',
@@ -77,15 +74,6 @@ export interface ModerationAuthContext {
   /** The actor's highest role position — role assignment reuses it to
    * also require every ASSIGNED role to sit strictly below the actor. */
   actorHighest: number;
-}
-
-/**
- * Pure hierarchy check: actor's highest role strictly above the
- * target's. Exposed separately for callers that already hold both
- * positions.
- */
-export function isActorAboveTarget(actorHighest: number, targetHighest: number): boolean {
-  return actorHighest > targetHighest;
 }
 
 /**
