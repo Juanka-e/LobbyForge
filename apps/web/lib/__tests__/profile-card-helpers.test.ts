@@ -8,7 +8,9 @@ import {
   THEME_ACCENT_COLOR,
   toCssColor,
 } from '@/lib/profile-accent';
-import { profileActionErrorMessage } from '@/lib/profile-action-errors';
+import { KNOWN_REFUSAL_CODES, profileActionErrorMessage } from '@/lib/profile-action-errors';
+import enShell from '@/messages/en/shell.json';
+import trShell from '@/messages/tr/shell.json';
 import { mergeProfileView, type MemberProfileResponse, type ProfileSeed } from '@/lib/member-profile';
 
 /**
@@ -66,6 +68,36 @@ describe('refusal messages', () => {
     expect(profileActionErrorMessage('ban', { status: 409 }).key).toBe('shell.profile.error.alreadyBanned');
     expect(profileActionErrorMessage('kick', { status: 429 }).key).toBe('shell.profile.error.rateLimited');
     expect(profileActionErrorMessage('kick', { status: 500 })).toEqual({ key: 'shell.profile.error.generic', params: { status: 500 } });
+  });
+
+  // The A-to-Z run: the kick, ban, role and timeout routes' refusals before
+  // the shared gate had no code; they do now, and each is said in words.
+  it('the codes the routes send before (and beside) the moderation gate', () => {
+    expect(profileActionErrorMessage('kick', { status: 401, code: 'unauthenticated' }).key).toBe('shell.profile.error.signIn');
+    expect(profileActionErrorMessage('ban', { status: 503, code: 'session_not_materialized' }).key).toBe('shell.profile.error.signIn');
+    expect(profileActionErrorMessage('kick', { status: 404, code: 'server_not_found' }).key).toBe('shell.profile.error.serverGone');
+    expect(profileActionErrorMessage('ban', { status: 400, code: 'invalid_request' }).key).toBe('shell.profile.error.invalidRequest');
+    expect(profileActionErrorMessage('ban', { status: 400, code: 'self_action' }).key).toBe('shell.profile.error.self');
+    expect(profileActionErrorMessage('kick', { status: 400, code: 'target_is_owner' }).key).toBe('shell.profile.error.owner');
+    expect(profileActionErrorMessage('ban', { status: 409, code: 'already_banned' }).key).toBe('shell.profile.error.alreadyBanned');
+    expect(profileActionErrorMessage('roles', { status: 404, code: 'role_not_found' }).key).toBe('shell.profile.error.notFound');
+    expect(profileActionErrorMessage('roles', { status: 403, code: 'role_above_actor' }).key).toBe('shell.profile.error.roleRank');
+    expect(profileActionErrorMessage('roles', { status: 403, code: 'ungrantable_permissions' }).key).toBe('shell.profile.error.roleGrant');
+  });
+
+  it('every code it knows has an English and a Turkish sentence', () => {
+    const en = enShell as Record<string, string>;
+    const tr = trShell as Record<string, string>;
+    for (const code of KNOWN_REFUSAL_CODES) {
+      const { key } = profileActionErrorMessage('kick', { status: 400, code });
+      expect(en[key], `${code} → ${key}`).toBeTruthy();
+      expect(tr[key], `${code} → ${key}`).toBeTruthy();
+    }
+  });
+
+  it('an unknown code falls back on the status, never on the server’s text', () => {
+    expect(profileActionErrorMessage('kick', { status: 403, code: 'something_new' }).key).toBe('shell.profile.error.forbidden');
+    expect(profileActionErrorMessage('kick', { status: 401 }).key).toBe('shell.profile.error.signIn');
   });
 
   it('a DM refusal never says why (blocked or not)', () => {

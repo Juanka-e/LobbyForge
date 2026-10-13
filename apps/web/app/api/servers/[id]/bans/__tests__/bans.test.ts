@@ -217,6 +217,7 @@ describe('POST /api/servers/{id}/bans', () => {
     });
     const res = await POST(req, { params: Promise.resolve({ id: SERVER_ID }) });
     expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: 'target_is_owner' });
   });
 
   it('returns 403 when the caller lacks BAN_MEMBERS', async () => {
@@ -231,6 +232,7 @@ describe('POST /api/servers/{id}/bans', () => {
     });
     const res = await POST(req, { params: Promise.resolve({ id: SERVER_ID }) });
     expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'forbidden' });
   });
 
   it('returns 400 when the body is malformed', async () => {
@@ -244,6 +246,7 @@ describe('POST /api/servers/{id}/bans', () => {
     });
     const res = await POST(req, { params: Promise.resolve({ id: SERVER_ID }) });
     expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: 'invalid_request' });
   });
 
   it('returns 400 when the caller tries to ban themselves', async () => {
@@ -259,6 +262,7 @@ describe('POST /api/servers/{id}/bans', () => {
     });
     const res = await POST(req, { params: Promise.resolve({ id: SERVER_ID }) });
     expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: 'self_action' });
   });
 
   it('returns 409 when the user is already banned', async () => {
@@ -274,6 +278,7 @@ describe('POST /api/servers/{id}/bans', () => {
     });
     const res = await POST(req, { params: Promise.resolve({ id: SERVER_ID }) });
     expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: 'already_banned' });
   });
 
   it('403 actor_timed_out: a timed-out moderator cannot ban', async () => {
@@ -423,6 +428,7 @@ describe('DELETE /api/servers/{id}/bans?userId=…', () => {
     });
     const res = await DELETE(req, { params: Promise.resolve({ id: SERVER_ID }) });
     expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: 'invalid_request' });
   });
 
   it('returns 403 when the caller lacks BAN_MEMBERS', async () => {
@@ -436,6 +442,7 @@ describe('DELETE /api/servers/{id}/bans?userId=…', () => {
     });
     const res = await DELETE(req, { params: Promise.resolve({ id: SERVER_ID }) });
     expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'forbidden' });
   });
 
   it('returns 200 with removed:false when the user is not banned', async () => {

@@ -1,10 +1,14 @@
 // @vitest-environment happy-dom
 /**
- * A finding of the A-to-Z e2e run on the Members page: the Role column
- * showed "@EVERYONE" for a moderator. The page (and the server) took the
- * FIRST role of the set as the display role, and the set starts with
- * @everyone. It is now the highest role other than @everyone, after a
- * save as on load.
+ * Two findings of the A-to-Z e2e run on the Members page:
+ *
+ *  - the Role column showed "@EVERYONE" for a moderator: the page (and the
+ *    server) took the FIRST role of the set as the display role, and the
+ *    set starts with @everyone. It is now the highest role other than
+ *    @everyone, after a save as on load;
+ *  - a refused kick, ban or role change showed the server's English
+ *    `error` to every language. It is now said from the route's `code`,
+ *    and a failure with no known reason keeps the page's own sentence.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
@@ -94,5 +98,66 @@ describe('the Role column after a role change', () => {
     const row = screen.getByText('Ada').closest('li')!.firstElementChild!;
     expect(row).toHaveTextContent('Member');
     expect(row).not.toHaveTextContent('@everyone');
+  });
+});
+
+describe('refusals in the viewer’s language', () => {
+  async function kickAda(locale = 'en') {
+    renderPage(locale);
+    fireEvent.click(screen.getByRole('button', { name: locale === 'tr' ? 'Ada kullanıcısını yönet' : 'Manage Ada' }));
+    fireEvent.click(screen.getByRole('button', { name: locale === 'tr' ? 'Sunucudan at' : 'Kick' }));
+  }
+
+  it('says a kick refused before the moderation gate from its code, in Turkish', async () => {
+    respond = () => json({ error: 'Cannot kick the server owner', code: 'target_is_owner' }, 400);
+    await kickAda('tr');
+    expect(await screen.findByText('Topluluk sahibine moderasyon uygulanamaz.')).toBeInTheDocument();
+    expect(screen.queryByText(/Cannot kick/)).toBeNull();
+  });
+
+  it.each([
+    ['insufficient_rank', 403, 'Their highest role is the same as yours or higher.'],
+    ['actor_timed_out', 403, "You're timed out in this community."],
+    ['forbidden', 403, "You don't have permission to do that."],
+    ['server_not_found', 404, 'This community no longer exists.'],
+    ['unauthenticated', 401, 'Your session has ended. Sign in again.'],
+  ])('says kick refusal %s in words', async (code, status, sentence) => {
+    respond = () => json({ error: 'English only', code }, status);
+    await kickAda();
+    expect(await screen.findByText(sentence)).toBeInTheDocument();
+    expect(screen.queryByText('English only')).toBeNull();
+  });
+
+  it('says a ban refusal from its code, and keeps its own sentence for an unknown failure', async () => {
+    respond = () => json({ error: 'User is already banned', code: 'already_banned' }, 409);
+    const { unmount } = renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'Manage Ada' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ban' }));
+    expect(await screen.findByText("They're already banned.")).toBeInTheDocument();
+    unmount();
+
+    respond = () => json({ error: 'Failed to create ban' }, 500);
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'Manage Ada' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ban' }));
+    expect(await screen.findByText('Could not ban member')).toBeInTheDocument();
+    expect(screen.queryByText('Failed to create ban')).toBeNull();
+  });
+
+  it('says a role change refused for an ungrantable permission', async () => {
+    respond = () =>
+      json({ error: 'You cannot grant permissions you do not have', code: 'ungrantable_permissions', permissions: ['ban_members'] }, 403);
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'Manage Ada' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save roles' }));
+    expect(await screen.findByText("That role has permissions you can't give out.")).toBeInTheDocument();
+  });
+
+  it('says a network failure as one, not the browser’s English', async () => {
+    fetchMock.mockImplementationOnce(async () => {
+      throw new TypeError('Failed to fetch');
+    });
+    await kickAda();
+    expect(await screen.findByText("Couldn't reach the server. Check your connection.")).toBeInTheDocument();
   });
 });

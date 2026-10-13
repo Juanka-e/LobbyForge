@@ -40,7 +40,10 @@ async function resolveSession(req: Request): Promise<
 > {
   const session = readGuestSession(req.headers.get('cookie'), getSessionSecret());
   if (!session || !session.uid) {
-    return { ok: false, response: NextResponse.json({ error: 'Authentication required' }, { status: 401 }) };
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'Authentication required', code: 'unauthenticated' }, { status: 401 }),
+    };
   }
   return { ok: true, uid: session.uid };
 }
@@ -53,6 +56,9 @@ async function resolveSession(req: Request): Promise<
  * Hierarchy (same semantics as role assignment): only the owner acts
  * freely; everyone else needs MODERATE_MEMBERS AND a strictly higher
  * role than the target. The owner can never be timed out.
+ *
+ * Every refusal carries a stable `code` (here and in the gate) so the
+ * profile card says it in the viewer's language.
  */
 async function handlePut(
   req: Request,
@@ -65,29 +71,29 @@ async function handlePut(
   try {
     const server = await getServerById(getDb(), serverId);
     if (!server) {
-      return NextResponse.json({ error: 'Server not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Server not found', code: 'server_not_found' }, { status: 404 });
     }
     if (!(await isServerMember(getDb(), session.uid, serverId))) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      return NextResponse.json({ error: 'Forbidden', code: 'forbidden' }, { status: 403 });
     }
 
     const permissions = await getUserPermissions(getDb(), session.uid, serverId);
     if (!hasPermission(permissions, CorePermission.MODERATE_MEMBERS)) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      return NextResponse.json({ error: 'Forbidden', code: 'forbidden' }, { status: 403 });
     }
 
     let body: z.infer<typeof TimeoutSchema>;
     try {
       body = TimeoutSchema.parse(await req.json());
     } catch {
-      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+      return NextResponse.json({ error: 'Invalid request body', code: 'invalid_request' }, { status: 400 });
     }
 
     let until: Date | null = null;
     if (body.until !== null) {
       until = new Date(body.until);
       if (Number.isNaN(until.getTime())) {
-        return NextResponse.json({ error: 'Invalid `until` timestamp' }, { status: 400 });
+        return NextResponse.json({ error: 'Invalid `until` timestamp', code: 'invalid_request' }, { status: 400 });
       }
       if (until.getTime() > Date.now() + MAX_TIMEOUT_MS) {
         until = new Date(Date.now() + MAX_TIMEOUT_MS);

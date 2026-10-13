@@ -282,6 +282,62 @@ describe('DELETE /api/servers/{id}/members/{userId}', () => {
   });
 });
 
+// The A-to-Z run: the refusals BEFORE the shared moderation gate carried
+// no `code`, so the Members page showed their English `error` to every
+// language. Each one now has a stable code (lib/profile-action-errors.ts
+// says it in words).
+describe('DELETE /api/servers/{id}/members/{userId} — every refusal has a code', () => {
+  const kick = async (target: string = TARGET_ID, cookie: string | null = makeSessionCookie()) => {
+    const { DELETE } = await loadItemRoute();
+    return DELETE(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/members/${target}`, {
+        method: 'DELETE',
+        headers: cookie ? { cookie } : {},
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, userId: target }) }
+    );
+  };
+
+  it('401 unauthenticated without a session', async () => {
+    const res = await kick(TARGET_ID, null);
+    expect(res.status).toBe(401);
+    expect(await res.json()).toMatchObject({ code: 'unauthenticated' });
+  });
+
+  it('404 server_not_found', async () => {
+    getServerById.mockResolvedValue(null);
+    const res = await kick();
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ code: 'server_not_found' });
+  });
+
+  it('403 forbidden for a caller who is not a member', async () => {
+    getServerById.mockResolvedValue(mockServer(OWNER_ID));
+    isServerMember.mockResolvedValue(false);
+    const res = await kick();
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'forbidden' });
+  });
+
+  it('400 target_is_owner for the owner', async () => {
+    getServerById.mockResolvedValue(mockServer(OWNER_ID));
+    isServerMember.mockResolvedValue(true);
+    const res = await kick(OWNER_ID);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: 'target_is_owner' });
+  });
+
+  it('the gate’s own refusals keep theirs (forbidden, insufficient_rank)', async () => {
+    getServerById.mockResolvedValue(mockServer(OWNER_ID));
+    isServerMember.mockResolvedValue(true);
+    getUserPermissions.mockResolvedValue(['send_messages']);
+    expect(await (await kick()).json()).toMatchObject({ code: 'forbidden' });
+    getUserPermissions.mockResolvedValue(['kick_members']);
+    getHighestRolePosition.mockResolvedValue(50);
+    expect(await (await kick()).json()).toMatchObject({ code: 'insufficient_rank' });
+  });
+});
+
 describe('PUT /api/servers/{id}/members/{userId}/role', () => {
   it('returns 403 when the caller is not a member', async () => {
     getServerById.mockResolvedValue(mockServer(OWNER_ID));

@@ -534,15 +534,22 @@ test('kick, ban and timeout: the hierarchy holds, the owner is immune, a timed-o
   expect(await code(await ban('mod', 'admin'))).toBe('insufficient_rank');
   expect(await code(await timeout('mod', 'admin', 5))).toBe('insufficient_rank');
   // The owner: immune to everyone, administrators included (kick and ban
-  // refuse the owner before the shared gate: 400 with their own message).
+  // refuse the owner before the shared gate: 400, with the gate's code so
+  // the Members page can say it in the viewer's language).
   for (const actor of ['admin', 'mod', 'helper']) {
     const res = await kick(actor, 'owner');
     expect(res.status(), `${actor} kicks the owner`).toBe(400);
-    expect((await json<{ error: string }>(res)).error).toBe('Cannot kick the server owner');
+    expect(await json<{ error: string; code: string }>(res)).toMatchObject({
+      error: 'Cannot kick the server owner',
+      code: 'target_is_owner',
+    });
   }
   const banOwner = await ban('admin', 'owner');
   expect(banOwner.status()).toBe(400);
-  expect((await json<{ error: string }>(banOwner)).error).toBe('Cannot ban the server owner');
+  expect(await json<{ error: string; code: string }>(banOwner)).toMatchObject({
+    error: 'Cannot ban the server owner',
+    code: 'target_is_owner',
+  });
   expect(await code(await timeout('admin', 'owner', 5))).toBe('target_is_owner');
   // Self.
   expect(await code(await ban('mod', 'mod'))).toBe('self_action');

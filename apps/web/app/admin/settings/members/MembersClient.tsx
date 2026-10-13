@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
 import { initialOf } from '@/lib/initial';
 import { displayRoleOf } from '@/lib/display-role';
+import { GENERIC_REFUSAL_KEY, profileActionErrorMessage } from '@/lib/profile-action-errors';
 import JoinRequestsSection from './JoinRequestsSection';
 
 export interface MemberView {
@@ -156,6 +157,21 @@ export default function MembersClient({
     setMessage(null);
   }
 
+  /**
+   * A refusal in the viewer's language, from the route's `code` — never
+   * its English `error`, which every language used to see. A failure with
+   * no known reason keeps this page's own "Could not …" sentence.
+   */
+  async function refusalText(action: 'roles' | 'kick' | 'ban', response: Response, fallbackKey: string): Promise<string> {
+    const detail = (await response.json().catch(() => ({}))) as { code?: unknown; permissions?: unknown };
+    const message = profileActionErrorMessage(action, {
+      status: response.status,
+      code: detail.code,
+      permissions: detail.permissions,
+    });
+    return message.key === GENERIC_REFUSAL_KEY ? t(fallbackKey) : t(message.key, message.params);
+  }
+
   async function saveRoles(member: MemberView) {
     if (!serverId || busyUserId) return;
     setBusyUserId(member.userId);
@@ -169,8 +185,10 @@ export default function MembersClient({
           body: JSON.stringify({ roleIds: draftRoles }),
         }
       );
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) throw new Error(data.error ?? t('adminSettings.members.rolesFailed'));
+      if (!response.ok) {
+        setMessage({ tone: 'danger', text: await refusalText('roles', response, 'adminSettings.members.rolesFailed') });
+        return;
+      }
       // The display role, as the server stores it: the highest role other
       // than @everyone (taking the first one sent showed "@everyone").
       const roleById = new Map(roles.map((role) => [role.id, role]));
@@ -185,8 +203,8 @@ export default function MembersClient({
         )
       );
       setMessage({ tone: 'success', text: t('adminSettings.members.rolesUpdated') });
-    } catch (err) {
-      setMessage({ tone: 'danger', text: (err as Error).message });
+    } catch {
+      setMessage({ tone: 'danger', text: t('shell.profile.error.network') });
     } finally {
       setBusyUserId(null);
     }
@@ -202,13 +220,15 @@ export default function MembersClient({
         `/api/servers/${encodeURIComponent(serverId)}/members/${encodeURIComponent(member.userId)}`,
         { method: 'DELETE' }
       );
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) throw new Error(data.error ?? t('adminSettings.members.kickFailed'));
+      if (!response.ok) {
+        setMessage({ tone: 'danger', text: await refusalText('kick', response, 'adminSettings.members.kickFailed') });
+        return;
+      }
       setMemberList((current) => current.filter((item) => item.userId !== member.userId));
       setExpandedUserId(null);
       setMessage({ tone: 'success', text: t('adminSettings.members.kicked') });
-    } catch (err) {
-      setMessage({ tone: 'danger', text: (err as Error).message });
+    } catch {
+      setMessage({ tone: 'danger', text: t('shell.profile.error.network') });
     } finally {
       setBusyUserId(null);
     }
@@ -226,13 +246,15 @@ export default function MembersClient({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: member.userId, reason: reason.trim() || undefined }),
       });
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) throw new Error(data.error ?? t('adminSettings.members.banFailed'));
+      if (!response.ok) {
+        setMessage({ tone: 'danger', text: await refusalText('ban', response, 'adminSettings.members.banFailed') });
+        return;
+      }
       setMemberList((current) => current.filter((item) => item.userId !== member.userId));
       setExpandedUserId(null);
       setMessage({ tone: 'success', text: t('adminSettings.members.banned') });
-    } catch (err) {
-      setMessage({ tone: 'danger', text: (err as Error).message });
+    } catch {
+      setMessage({ tone: 'danger', text: t('shell.profile.error.network') });
     } finally {
       setBusyUserId(null);
     }

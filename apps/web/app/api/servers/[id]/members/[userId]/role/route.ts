@@ -37,13 +37,20 @@ async function resolveSession(req: Request): Promise<
   const secret = getSessionSecret();
   const session = readGuestSession(req.headers.get('cookie'), secret);
   if (!session) {
-    return { ok: false, response: NextResponse.json({ error: 'Authentication required' }, { status: 401 }) };
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'Authentication required', code: 'unauthenticated' }, { status: 401 }),
+    };
   }
   if (!session.uid) {
     return {
       ok: false,
       response: NextResponse.json(
-        { error: 'Guest user has no materialized user record', howToFix: 'Re-issue POST /api/auth/guest' },
+        {
+          error: 'Guest user has no materialized user record',
+          code: 'session_not_materialized',
+          howToFix: 'Re-issue POST /api/auth/guest',
+        },
         { status: 503 }
       ),
     };
@@ -51,6 +58,12 @@ async function resolveSession(req: Request): Promise<
   return { ok: true, uid: session.uid };
 }
 
+/**
+ * Every refusal carries a stable `code` next to its English `error` — the
+ * ones below as well as the moderation gate's (lib/member-authorization.ts)
+ * — so the Members page and the profile card say it in the viewer's
+ * language (lib/profile-action-errors.ts).
+ */
 async function handlePut(
   req: Request,
   ctx: { params: Promise<{ id: string; userId: string }> }
@@ -63,7 +76,7 @@ async function handlePut(
   try {
     if (!serverId || !targetUserId) {
       return NextResponse.json(
-        { error: 'Server id and user id are required' },
+        { error: 'Server id and user id are required', code: 'invalid_request' },
         { status: 400 }
       );
     }
@@ -73,7 +86,7 @@ async function handlePut(
       body = AssignRoleSchema.parse(raw);
     } catch {
       return NextResponse.json(
-        { error: 'Invalid request body' },
+        { error: 'Invalid request body', code: 'invalid_request' },
         { status: 400 }
       );
     }
@@ -110,11 +123,14 @@ async function handlePut(
       for (const roleId of uniqueRoleIds) {
         const role = await getRoleById(getDb(), roleId);
         if (!role || role.serverId !== serverId) {
-          return NextResponse.json({ error: 'Role not found in this server' }, { status: 404 });
+          return NextResponse.json({ error: 'Role not found in this server', code: 'role_not_found' }, { status: 404 });
         }
         if (role.position >= gate.context.actorHighest) {
           return NextResponse.json(
-            { error: `You can only assign roles below your highest role (role "${role.name}" is at or above it)` },
+            {
+              error: `You can only assign roles below your highest role (role "${role.name}" is at or above it)`,
+              code: 'role_above_actor',
+            },
             { status: 403 }
           );
         }
@@ -126,7 +142,7 @@ async function handlePut(
         });
         if (ungrantable.length > 0) {
           return NextResponse.json(
-            { error: UNGRANTABLE_PERMISSIONS_ERROR, role: role.name, permissions: ungrantable },
+            { error: UNGRANTABLE_PERMISSIONS_ERROR, code: 'ungrantable_permissions', role: role.name, permissions: ungrantable },
             { status: 403 }
           );
         }
@@ -135,7 +151,7 @@ async function handlePut(
       for (const roleId of uniqueRoleIds) {
         const role = await getRoleById(getDb(), roleId);
         if (!role || role.serverId !== serverId) {
-          return NextResponse.json({ error: 'Role not found in this server' }, { status: 404 });
+          return NextResponse.json({ error: 'Role not found in this server', code: 'role_not_found' }, { status: 404 });
         }
       }
     }

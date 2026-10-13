@@ -90,7 +90,21 @@ describe('PUT members/[userId]/role — Discord hierarchy', () => {
   it('rejects assigning a role at/above the actor highest role (even with administrator)', async () => {
     const res = await put({ roleIds: [ROLE_HIGH] }, ADMIN_LOW);
     expect(res.status).toBe(403);
+    // A stable code, so the Members page and the profile card say it in
+    // the viewer's language instead of this English `error`.
+    expect(await res.json()).toMatchObject({ code: 'role_above_actor' });
     expect(dbFns.setMemberRoles).not.toHaveBeenCalled();
+  });
+
+  it('refuses a malformed body and a role of another server with a code', async () => {
+    const malformed = await put({ roleIds: 'not-a-list' }, ADMIN_LOW);
+    expect(malformed.status).toBe(400);
+    expect(await malformed.json()).toMatchObject({ code: 'invalid_request' });
+
+    dbFns.getRoleById.mockResolvedValue({ id: ROLE_LOW, serverId: 'another-server', name: 'Low', position: 1 });
+    const foreign = await put({ roleIds: [ROLE_LOW] }, OWNER);
+    expect(foreign.status).toBe(404);
+    expect(await foreign.json()).toMatchObject({ code: 'role_not_found' });
   });
 
   it('allows assigning a role strictly below the actor highest role', async () => {
@@ -184,8 +198,9 @@ describe('PUT members/[userId]/role — beta-review S1 grant cap', () => {
     dbFns.getUserPermissions.mockResolvedValue(['manage_roles', 'send_messages']);
     const res = await put({ roleIds: [ROLE_LOW_BAN] }, ADMIN_LOW);
     expect(res.status).toBe(403);
-    const json = (await res.json()) as { permissions: string[] };
+    const json = (await res.json()) as { permissions: string[]; code: string };
     expect(json.permissions).toEqual(['ban_members']);
+    expect(json.code).toBe('ungrantable_permissions');
     expect(dbFns.setMemberRoles).not.toHaveBeenCalled();
   });
 

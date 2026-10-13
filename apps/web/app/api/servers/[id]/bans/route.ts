@@ -44,18 +44,35 @@ async function resolveSession(req: Request): Promise<
   const secret = getSessionSecret();
   const session = readGuestSession(req.headers.get('cookie'), secret);
   if (!session) {
-    return { ok: false, response: NextResponse.json({ error: 'Authentication required' }, { status: 401 }) };
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'Authentication required', code: 'unauthenticated' }, { status: 401 }),
+    };
   }
   if (!session.uid) {
     return {
       ok: false,
       response: NextResponse.json(
-        { error: 'Guest user has no materialized user record', howToFix: 'Re-issue POST /api/auth/guest' },
+        {
+          error: 'Guest user has no materialized user record',
+          code: 'session_not_materialized',
+          howToFix: 'Re-issue POST /api/auth/guest',
+        },
         { status: 503 }
       ),
     };
   }
   return { ok: true, uid: session.uid };
+}
+
+/**
+ * Every refusal carries a stable `code` next to its English `error` — the
+ * ones below as well as the moderation gate's (lib/member-authorization.ts)
+ * — so the Members page and the profile card say it in the viewer's
+ * language (lib/profile-action-errors.ts).
+ */
+function refuse(error: string, code: string, status: number): NextResponse {
+  return NextResponse.json({ error, code }, { status });
 }
 
 function toJson(row: Awaited<ReturnType<typeof listBansForServer>>[number]) {
@@ -79,7 +96,7 @@ async function handleGet(req: Request, ctx: { params: Promise<{ id: string }> })
   try {
     const server = await getServerById(getDb(), serverId);
     if (!server) {
-      return NextResponse.json({ error: 'Server not found' }, { status: 404 });
+      return refuse('Server not found', 'server_not_found', 404);
     }
     // LF-SEC-011 (Policy A): the ban list exposes moderation-sensitive
     // data (reasons, moderator identities). It is readable only by the
@@ -87,7 +104,7 @@ async function handleGet(req: Request, ctx: { params: Promise<{ id: string }> })
     // ordinary member no longer sees who was banned or why.
     if (server.ownerUserId !== session.uid) {
       if (!(await isServerMember(getDb(), session.uid, serverId))) {
-        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        return refuse('Forbidden', 'forbidden', 403);
       }
       const permissions = await getUserPermissions(getDb(), session.uid, serverId);
       const mayViewBans =
@@ -95,7 +112,7 @@ async function handleGet(req: Request, ctx: { params: Promise<{ id: string }> })
         hasPermission(permissions, CorePermission.MODERATE_MEMBERS) ||
         hasPermission(permissions, CorePermission.VIEW_AUDIT_LOG);
       if (!mayViewBans) {
-        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        return refuse('Forbidden', 'forbidden', 403);
       }
     }
     const bans = await listBansForServer(getDb(), serverId);
@@ -119,11 +136,11 @@ async function handlePost(req: Request, ctx: { params: Promise<{ id: string }> }
   try {
     const server = await getServerById(getDb(), serverId);
     if (!server) {
-      return NextResponse.json({ error: 'Server not found' }, { status: 404 });
+      return refuse('Server not found', 'server_not_found', 404);
     }
     const permissions = await getUserPermissions(getDb(), session.uid, serverId);
     if (!hasPermission(permissions, CorePermission.BAN_MEMBERS)) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      return refuse('Forbidden', 'forbidden', 403);
     }
 
     let body: z.infer<typeof BanBodySchema>;
@@ -131,14 +148,11 @@ async function handlePost(req: Request, ctx: { params: Promise<{ id: string }> }
       const raw = await req.json();
       body = BanBodySchema.parse(raw);
     } catch {
-      return NextResponse.json(
-        { error: 'Invalid request body' },
-        { status: 400 }
-      );
+      return refuse('Invalid request body', 'invalid_request', 400);
     }
 
     if (body.userId === server.ownerUserId) {
-      return NextResponse.json({ error: 'Cannot ban the server owner' }, { status: 400 });
+      return refuse('Cannot ban the server owner', 'target_is_owner', 400);
     }
 
     // LF-SEC-005: bans follow the SAME hierarchy model as timeout/roles
@@ -154,7 +168,7 @@ async function handlePost(req: Request, ctx: { params: Promise<{ id: string }> }
 
     const expiresAt = body.expiresAt ? new Date(body.expiresAt) : null;
     if (expiresAt && Number.isNaN(expiresAt.getTime())) {
-      return NextResponse.json({ error: 'Invalid expiresAt' }, { status: 400 });
+      return refuse('Invalid expiresAt', 'invalid_request', 400);
     }
 
     // Bot API v2: a ban that removes a MEMBER is a member_leave for bots
@@ -179,11 +193,11 @@ async function handlePost(req: Request, ctx: { params: Promise<{ id: string }> }
     if (!result.ok) {
       switch (result.error) {
         case 'cannot_ban_self':
-          return NextResponse.json({ error: 'You cannot ban yourself' }, { status: 400 });
+          return refuse('You cannot ban yourself', 'self_action', 400);
         case 'cannot_ban_owner':
-          return NextResponse.json({ error: 'Cannot ban the server owner' }, { status: 400 });
+          return refuse('Cannot ban the server owner', 'target_is_owner', 400);
         case 'already_banned':
-          return NextResponse.json({ error: 'User is already banned' }, { status: 409 });
+          return refuse('User is already banned', 'already_banned', 409);
       }
     }
     // LF-SEC-003: a ban must close the target's live server topics
@@ -233,19 +247,19 @@ async function handleDelete(
     const url = new URL(req.url);
     const userId = url.searchParams.get('userId');
     if (!userId) {
-      return NextResponse.json({ error: 'userId query parameter is required' }, { status: 400 });
+      return refuse('userId query parameter is required', 'invalid_request', 400);
     }
     if (!/^[0-9a-f-]{36}$/i.test(userId)) {
-      return NextResponse.json({ error: 'Invalid userId' }, { status: 400 });
+      return refuse('Invalid userId', 'invalid_request', 400);
     }
 
     const server = await getServerById(getDb(), serverId);
     if (!server) {
-      return NextResponse.json({ error: 'Server not found' }, { status: 404 });
+      return refuse('Server not found', 'server_not_found', 404);
     }
     const permissions = await getUserPermissions(getDb(), session.uid, serverId);
     if (!hasPermission(permissions, CorePermission.BAN_MEMBERS)) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      return refuse('Forbidden', 'forbidden', 403);
     }
     // A timed-out moderator moderates nobody (lib/member-authorization.ts,
     // `actor_timed_out`): lifting a ban is as much a moderation act as
