@@ -8,6 +8,7 @@ import {
 // Server-only subpath: the built-in quiz packs WITH their answers. Never
 // import it from client code (the plugin's main entry deliberately cannot).
 import { hydrateQuizPackStart } from '@lobbyforge/quiz/packs';
+import { ensureBuiltInContentSeeded } from '@/lib/plugin-content-seeder';
 
 type PreparedAction =
   | { ok: true; action: Record<string, unknown> }
@@ -64,6 +65,10 @@ export async function preparePluginAction(
   // `hushle-en-basic`); the admin panel and older sessions may carry the
   // pack's UUID. Accept both so a session can always be (re)started.
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  // The built-in packs are seeded on first use. The pack list does it, but a
+  // start sent through the API before anything listed the packs found none
+  // (rc.8 → rc.9 drill: 404 on a fresh instance). Once per process.
+  await ensureBuiltInContentSeeded(db);
   const pack = UUID_RE.test(packId)
     ? await getCardPackById(db, packId)
     : await getCardPackBySlug(db, 'hushle', packId);

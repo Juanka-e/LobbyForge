@@ -15,12 +15,18 @@
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
+import { migrationPreflightRefusal } from './migrate-preflight.js';
 
 const url =
   process.env.DATABASE_URL ||
   'postgresql://lobbyforge:lobbyforge_dev@localhost:19532/lobbyforge';
 
 async function main() {
+  const refusal = migrationPreflightRefusal();
+  if (refusal) {
+    console.error(refusal);
+    process.exit(1);
+  }
   // `max: 1` because drizzle-orm's migrator holds a long-lived transaction;
   // a pool >1 throws on connection reuse inside the migration.
   const sql = postgres(url, { max: 1 });

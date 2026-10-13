@@ -2,6 +2,25 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Fixes from the rc.8 → rc.9 update drill - 2026-10-13
+
+The rc.8 → rc.9 update drill on a local production stack passed. Apply, rollback, roll-forward, restore and forced failure all work, and an rc.8 session stays signed in and slides to 7 days. These are the fixes for what it found (docs/BETA_RELEASE.md, "Update drill — rc.8 → rc.9").
+
+- **A placeholder session secret stops the update before anything changes.** On rc.8 with the `.env.example` secret, `update apply` used to back up, pull, **migrate** and recreate the services. It then failed with only "container … is unhealthy". It recovered the old containers, but never said why.
+  - `lfctl update apply` now checks `.env.prod` first. A published placeholder, or a secret under 32 characters, is refused with the reason and "Nothing was changed.": no backup, no docker call.
+  - The migrator (`packages/db`, `dist/migrate.js`) refuses the same secrets before it connects, unless `LOBBYFORGE_DEV_STACK=true`. Even the previous release's `lfctl`, which runs the new image's migrator first, now stops before any schema change and prints the reason. A migrator run without a secret (dev, CI) is unaffected.
+  - When the recreate fails, `lfctl` prints the new containers' last log lines before it restores the old ones.
+  - lfctl's copy of the placeholder list is tested against `@lobbyforge/core`'s.
+- **web exits on a refused secret.** In production, `next start` 16.4 only logged an error thrown from `instrumentation.register` ("Failed to prepare server"). It then answered 500 on every route, `/api/health` included, until the healthcheck gave up. web now exits with code 1.
+- **Doctor's TURN check reads the real configuration:** `LOBBYFORGE_TURN_SECRET`, plus `LOBBYFORGE_TURN_HOST` or the base URL's host, the same test the voice token uses. It read `LOBBYFORGE_TURN_URL` and `LOBBYFORGE_TURN_STATIC_AUTH_SECRET`, which nothing sets, so every install was reported as "not configured". `infra/docker/.env.example` documents the right variables.
+- **Hushle started through the API on a fresh instance:** the start now seeds the built-in card packs on first use. Before, the start answered 404 until something had listed the packs.
+- **k6 load script:** each presence user's first heartbeat sent the session cookie twice. The server refused those requests with 400 "Duplicate session cookie", so every run failed its own 5% error threshold. The cookie now goes through k6's cookie jar.
+- **Release image label:** `org.opencontainers.image.version` is the release version (`0.2.0-rc.10`), no longer `candidate-<sha>`.
+- **Docs:** UPDATES.md says what `update apply` really does, now that the "locked" note is gone. It also says what `update apply` doesn't change: compose, nginx and coturn templates come from the checkout. Re-render after checking out a release whose notes say so, for example for rc.9's `/api/plugin-ui/` nginx location. BETA_RELEASE.md has the drill.
+- **Tests:**
+  - CI's typecheck now covers the Playwright specs (`apps/web/tsconfig.e2e.json`). It caught two errors that nothing had checked before.
+  - A test that starts Node to load the operator script gets 60 s instead of 5 s; it timed out on a busy Windows runner.
+
 ## [0.2.0-rc.9] - 2026-10-13
 
 The release candidate after rc.8. It collects everything below, down to and including "Dependency cleanup, fourth batch".

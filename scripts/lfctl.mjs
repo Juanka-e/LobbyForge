@@ -27,6 +27,26 @@ const STATE_FILE = 'infra/update/deployment-state.json';
 const DEFAULT_BACKUP_MANIFEST = 'infra/update/backup-manifest.example.json';
 const DEFAULT_BACKUP_DIR = 'backups';
 
+// Since 0.2.0-rc.9, web and ws-gateway refuse a published placeholder
+// LOBBYFORGE_SESSION_SECRET (unless LOBBYFORGE_DEV_STACK=true). `update
+// apply` checks .env.prod against the same list before it touches anything.
+// MUST stay identical to PLACEHOLDER_PATTERNS in
+// packages/core/src/session-secret.ts (lfctl runs from a checkout without
+// built packages, so it cannot import them; lfctl-update-recovery.test.ts
+// compares the two lists).
+const SESSION_SECRET_MIN_LENGTH = 32;
+const SESSION_SECRET_PLACEHOLDER_PATTERNS = [
+  /replace[_\- ]?me/i,
+  /change[_\- ]?me/i,
+  /change[_\- ]?before/i,
+  /please[_\- ]?change/i,
+  /dev[_\- ]?session[_\- ]?secret/i,
+  /your[_\- ]?(session[_\- ]?)?secret/i,
+  /placeholder/i,
+  /random[_\- ]?hex/i,
+  /^<.*>$/,
+];
+
 // Security follow-up: DEFAULT paths (release public key, .env.prod, the
 // compose file, deployment state, backups) resolve from the checkout
 // this script lives in (scripts/..), never the caller's cwd. Run from
@@ -1408,6 +1428,33 @@ async function main() {
     return;
   }
 
+  // ── Session-secret preflight (rc.8 → rc.9 drill) ───────────────────
+  // rc.9 web and ws-gateway refuse a published placeholder secret. Without
+  // this check the drill's update backed up, pulled, MIGRATED and
+  // recreated, then failed with only "container … is unhealthy" (the reason
+  // was in the new containers' logs). READ-ONLY, before the backup. A secret
+  // missing from .env.prod is left alone: it may come from elsewhere, and
+  // the recovery below prints the new containers' logs.
+  {
+    const secret = await readEnvProdValue('LOBBYFORGE_SESSION_SECRET');
+    const devStack = (await readEnvProdValue('LOBBYFORGE_DEV_STACK')) === 'true';
+    const problem = !secret
+      ? null
+      : secret.length < SESSION_SECRET_MIN_LENGTH
+        ? `is shorter than ${SESSION_SECRET_MIN_LENGTH} characters`
+        : SESSION_SECRET_PLACEHOLDER_PATTERNS.some((pattern) => pattern.test(secret)) && !devStack
+          ? 'is a published placeholder (an example env file or the dev compose default), so anyone could forge sessions'
+          : null;
+    if (problem) {
+      console.error(`\nLOBBYFORGE_SESSION_SECRET in ${ENV_FILE} ${problem}.`);
+      console.error('LobbyForge 0.2.0-rc.9 and later refuse to start with it, so this update would fail.');
+      console.error(`Set a real one in ${ENV_FILE} first (openssl rand -hex 32; changing it signs everyone out), then run the update again.`);
+      console.error('Nothing was changed.');
+      process.exitCode = 2;
+      return;
+    }
+  }
+
   // ── Running-bytes preflight (22nd/24th/25th/26th audits) ───────────
   // READ-ONLY and BEFORE the backup: a drift abort must have ZERO side
   // effects — not even a backup file. The RUNNING containers decide what
@@ -1605,6 +1652,22 @@ async function main() {
       // restored ref and health-check it for real.
       let recovery = 'old containers untouched (failure happened before recreate)';
       if (servicesMayHaveChanged) {
+        // The new containers' logs are where they say WHY they failed, and
+        // the recovery `up` replaces them: show the last lines first (the
+        // rc.8 → rc.9 drill's refused session secret surfaced only as
+        // "container … is unhealthy"). Best effort.
+        try {
+          const { stdout: logs } = await composeExec(
+            ['logs', '--no-color', '--tail', '15', 'web', 'ws-gateway', 'plugin-worker'],
+            60_000
+          );
+          if (logs.trim()) {
+            console.error('    Last log lines of the new containers:');
+            for (const line of logs.trim().split(/\r?\n/).slice(-45)) console.error(`      ${line}`);
+          }
+        } catch {
+          // recovery matters more than the diagnosis
+        }
         try {
           await composeExec(['up', '-d', '--remove-orphans', '--wait'], 900_000);
           await composeHealthCheck();

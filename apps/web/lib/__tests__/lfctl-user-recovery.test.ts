@@ -185,7 +185,9 @@ function runEntry(args: string[], input?: string) {
   );
 }
 
-describe.skipIf(!canStripTypes)('scripts/operator-user.mjs under Node type stripping', () => {
+// Each case starts Node and loads the app modules: well past vitest's 5 s
+// default on a busy Windows runner, so the cases get spawnSync's own budget.
+describe.skipIf(!canStripTypes)('scripts/operator-user.mjs under Node type stripping', { timeout: 60_000 }, () => {
   it('loads the app modules it reuses (the --self-check the container can run)', () => {
     const res = runEntry(['--self-check']);
     expect(res.status, res.stderr).toBe(0);

@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DbClient } from '@lobbyforge/db';
 
-const { getCardPackById, getCardPackBySlug, listCardsForPack, listServerLocalCards } = vi.hoisted(() => ({
+const { getCardPackById, getCardPackBySlug, listCardsForPack, listServerLocalCards, ensureBuiltInContentSeeded } = vi.hoisted(() => ({
+  ensureBuiltInContentSeeded: vi.fn(),
   getCardPackById: vi.fn(),
   getCardPackBySlug: vi.fn(),
   listCardsForPack: vi.fn(),
@@ -15,6 +16,8 @@ vi.mock('@lobbyforge/db', () => ({
   listServerLocalCards,
 }));
 
+vi.mock('../plugin-content-seeder.js', () => ({ ensureBuiltInContentSeeded }));
+
 import { quizPlugin } from '@lobbyforge/quiz';
 import { preparePluginAction } from '../prepare-plugin-action.js';
 
@@ -25,6 +28,8 @@ beforeEach(() => {
   getCardPackBySlug.mockReset();
   listCardsForPack.mockReset();
   listServerLocalCards.mockReset();
+  ensureBuiltInContentSeeded.mockReset();
+  ensureBuiltInContentSeeded.mockResolvedValue(undefined);
 });
 
 describe('preparePluginAction', () => {
@@ -77,6 +82,12 @@ describe('preparePluginAction', () => {
 
     expect(getCardPackBySlug).toHaveBeenCalledWith(db, 'hushle', 'hushle-tr-basic');
     expect(getCardPackById).not.toHaveBeenCalled();
+    // A fresh instance seeds the built-in packs on first use; the start must
+    // do it too, before looking the pack up (rc.8 → rc.9 drill: 404).
+    expect(ensureBuiltInContentSeeded).toHaveBeenCalledWith(db);
+    expect(ensureBuiltInContentSeeded.mock.invocationCallOrder[0]).toBeLessThan(
+      getCardPackBySlug.mock.invocationCallOrder[0]!
+    );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     // The DB pack's language wins over whatever the client claimed.

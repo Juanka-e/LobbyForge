@@ -19,6 +19,13 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+declare global {
+  interface Window {
+    __room: any;
+    __voiceEvents: string[];
+  }
+}
+
 const here = dirname(fileURLToPath(import.meta.url));
 const baseUrl = process.env.LF_E2E_BASE_URL ?? '';
 const LIVEKIT_WS = process.env.LF_E2E_LIVEKIT_URL ?? 'ws://localhost:19580';

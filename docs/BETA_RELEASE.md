@@ -1,11 +1,15 @@
 # Beta Release Checklist
 
-Status: Closed-beta release candidate — `v0.2.0-rc.7` (2026-09-19). The
-beta-readiness review ([BETA_READINESS_REVIEW.md](BETA_READINESS_REVIEW.md))
-found moderation, voice, desktop and release-pipeline defects that the
-earlier "ready" claim missed. All are fixed and verified live (§8 of the
-review). The updater chain was drilled end to end against the real signed
-rc.6 release on a local production stack (see "Update drill" below).
+Status: Closed-beta release candidate — `v0.2.0-rc.9` (2026-10-13).
+
+Two reviews fed it:
+- The beta-readiness review ([BETA_READINESS_REVIEW.md](BETA_READINESS_REVIEW.md)) found moderation, voice, desktop and release-pipeline defects that the earlier "ready" claim missed.
+- The second security review ([SECURITY_REVIEW_2026-10-13.md](SECURITY_REVIEW_2026-10-13.md)) found 7 medium and 11 low findings.
+
+Everything both reviews found is fixed. Release checks:
+- The full end-to-end suite passes 148/148 against the production image.
+- The updater chain was drilled end to end against the real signed releases on a local production stack, rc.5 → rc.6 and rc.8 → rc.9 (see "Update drill" below).
+- The published rc.9 Windows installer passed the install smoke (install, launch, reinstall, uninstall).
 
 Before inviting testers, three things still need your infrastructure or
 hardware:
@@ -198,11 +202,52 @@ pnpm setup order + SBOM artifact in the download; rc.2 — Windows MSI
 semver limit; rc.3 — cancelled duplicate check runs tripping the gate;
 rc.4 — clean end-to-end.
 
-- [ ] Fresh tagged install (`git clone --branch v0.2.0-rc.7` + install.sh) on a clean VPS
+- [ ] Fresh tagged install (`git clone --branch v0.2.0-rc.9` or later + install.sh) on a clean VPS
       (needs real DNS + Let's Encrypt — not reproducible locally)
 - [x] Real old → RC update via `lfctl update apply` (local production stack, see below)
 - [x] Forced failure drill: health fails after recreate → old containers restored (live, see below)
 - [x] `lfctl backup restore` round-trip (live, see below)
+
+## Update drill — rc.8 → rc.9 (2026-10-13, local production stack)
+
+**Setup:**
+- rc.8's checkout and production compose file, with prefixed names and shifted ports;
+- configs from `render-configs.sh`, a `.env.prod` laid out as `install.sh` writes it, and a self-signed certificate;
+- rc.8 pinned to its signed digest.
+
+**Seeded through the TLS edge:**
+- the owner and a member who joined through an invite;
+- a role-gated channel;
+- 9 messages;
+- a bot with a token;
+- a Hushle session.
+
+rc.8's own `lfctl` ran every step.
+
+| Step | Result |
+|---|---|
+| `update check` against the real rc.9 manifest | The signature is **valid** against the committed key; rc.8 → rc.9 is offered. A digest changed by one character is refused. |
+| Published rc.9 image hygiene | No localhost media URL in the browser bundles. No pem/key/dump/env files besides the release public key. The revision label matches the manifest's `gitSha`. |
+| rc.8 running on the `.env.example` placeholder secret, then `update apply` | **Recovered, but silently.** The backup was verified and the digest pulled. **Migrations ran.** The rc.9 ws-gateway then refused the secret, and lfctl printed "OLD CONTAINERS RESTORED AND HEALTHY". `.env.prod` and the data are byte-identical. The reason never reached the operator: it was in the replaced containers' logs. |
+| `update apply` with a real secret | **25 s.** A fresh backup was created and verified. The rc.9 digest was deployed and migrations 0047–0049 are in place. Health is green. `.env.prod` and `deployment-state.json` have a `previous` pointer. |
+| After the update | **The data is intact:** same row counts and content hashes. **What works:** the voice token returns the runtime `livekitUrl` and the TURN servers, and the bot token works on v1 and v2. **Sessions:** an **rc.8 session cookie stays signed in and is re-signed for 7 days** (`Max-Age=604800`, same `auth_time`). **rc.9 features:** a chat poll and an account language work. A guest avatar upload now gets 403. |
+| `update rollback` | **18 s.** rc.8 is healthy on the expanded schema. rc.9 cookies, sign-in and the channel holding the rc.9 poll all work; the poll shows as a plain message. A `NULL` `users.locale` works. |
+| Roll forward again | 25 s, healthy, with `previous` set again. |
+| `backup restore` into an empty database | The newest dump matches the live database: 49 tables, the same counts and hashes. The pre-update dump restores the rc.8 schema. |
+| Forced failure **before** recreate (a manifest signed with a throwaway key, pointing at an image without node) | Stopped at `apply-migrations`. The container IDs did not change and `.env.prod` is byte-identical. The same manifest checked against the committed key is refused as INVALID. |
+| Load (k6 through the TLS edge, captcha off) | p95 28 ms; guest creation p95 36 ms; heartbeat p95 28 ms; 0 of 41 requests failed with the script fix below. |
+
+**Found by the drill and fixed after rc.9:**
+- **The placeholder secret:**
+  - `lfctl update apply` now refuses it before the backup ("Nothing was changed.").
+  - The migrator refuses it before touching the schema, so an older `lfctl` stops there too.
+  - After a failed recreate, `lfctl` prints the new containers' last log lines before restoring the old ones.
+- **web did not exit on a refused secret:** Next 16.4 logs "Failed to prepare server" and keeps answering 500. It now exits in production.
+- **Doctor TURN check:** it read two variables nothing writes and said TURN was not configured on installs that had it.
+- **k6 duplicate cookie:** the load script sent the session cookie twice on each presence user's first heartbeat. The server refused those requests (400), and every run failed its own threshold.
+- **Hushle start before the packs were listed:** a start sent through the API on a fresh instance found no packs (404), because the built-in packs were seeded only by the pack list.
+- **Image version label:** the release image said `candidate-<sha>`.
+- **Corrected here:** the comment in migration 0048 says an account created while rolled back gets `'en'`. rc.8 actually writes `NULL`, which is harmless.
 
 ## Update drill — rc.5 → rc.6 (2026-09-19, local production stack)
 
