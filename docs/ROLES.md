@@ -172,8 +172,9 @@ acts on the owner, and acting on yourself is refused (400
 
 **A timed-out member cannot moderate.** The same gate refuses an actor who
 is currently timed out — `403 { code: "actor_timed_out", until }` — for
-every operation it covers: kick, ban, timeout (setting or clearing one),
-role assignment, voice mute and voice disconnect. A timeout already
+every operation it covers: kick, ban (and lifting one — the unban route
+applies the same check), timeout (setting or clearing one), role
+assignment, voice mute and voice disconnect. A timeout already
 silences messages, invites and voice; moderation powers used to survive
 it. The owner cannot be timed out, so the owner is never refused.
 
