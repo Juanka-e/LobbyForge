@@ -21,11 +21,17 @@
  *   - An incoming webhook posts into #general with a username override:
  *     the message shows that name with the WEBHOOK badge.
  *   - Event endpoints on private addresses are refused (SSRF).
+ *   - BOT-002: rotating the token switches the bot's event endpoint off in
+ *     the same step; a manager cannot re-enable it (409); the old token
+ *     saves nothing and the new one sets it again. Needs a public https
+ *     host to save an endpoint at all — the publisher stand-in of
+ *     infra/docker/docker-compose.e2e-bundles.yml; skipped without it.
  *
  * Runs only against a compose stack (LF_E2E_BASE_URL) with the realtime
  * gateway up. Screenshots of each state, dark and light, go to the test's
  * output directory.
  */
+import { execFileSync } from 'node:child_process';
 import { expect, test, type APIRequestContext, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { createGuest, resetRateLimits, signIn } from './helpers/auth';
 // The SDK is not a dependency of apps/web: load its built ESM directly.
@@ -42,6 +48,14 @@ const PERMISSIONS = ['read_messages', 'send_messages', 'slash_commands', 'receiv
 
 test.skip(!baseUrl, 'Runs only against the compose stack (set LF_E2E_BASE_URL).');
 test.describe.configure({ mode: 'serial', timeout: 120_000 });
+
+function containerHealth(name: string): string {
+  try {
+    return execFileSync('docker', ['inspect', '-f', '{{.State.Health.Status}}', name], { encoding: 'utf8', timeout: 15_000 }).trim();
+  } catch {
+    return 'missing';
+  }
+}
 
 interface FeedMessage {
   id: string;
@@ -490,5 +504,52 @@ test.describe('Bot API v2: commands, interactions, events, access and webhooks',
     const endpoint = await botApi('GET', '/event-endpoint');
     expect(endpoint.status).toBe(200);
     expect(endpoint.json.endpoint).toBeNull();
+  });
+
+  test('BOT-002 (2026-10-13): a token rotation switches the event endpoint off; a manager cannot switch it back on; the new token sets it again', async () => {
+    // A public https host is needed to save an endpoint at all (BOT-004):
+    // the e2e publisher stand-in is one (docker-compose.e2e-bundles.yml).
+    test.skip(containerHealth('lobbyforge-e2e-bundle-host') !== 'healthy', 'Needs the public-looking HTTPS host of docker-compose.e2e-bundles.yml.');
+    const url = 'https://bundles.lobbyforge-e2e.test:8443/lf-bot-events';
+    const manager = (method: 'GET' | 'PATCH' | 'DELETE', data?: unknown) =>
+      owner.fetch(`/api/servers/${serverId}/bots/${botId}/event-endpoint`, { method, headers: ORIGIN, ...(data !== undefined ? { data } : {}) });
+    const endpointNow = async () => ((await (await manager('GET')).json()) as { endpoint: Record<string, unknown> | null }).endpoint;
+
+    const set = await botApi('PUT', '/event-endpoint', { url });
+    expect(set.status, JSON.stringify(set.json)).toBe(200);
+    expect(set.json.endpoint).toMatchObject({ url, enabled: true });
+    expect(typeof set.json.secret).toBe('string');
+
+    // The SDK client still holds the old token: put it away before the rotation.
+    await bot?.close();
+    bot = null;
+    const oldToken = botToken;
+    const rotate = await owner.post(`/api/servers/${serverId}/bots/${botId}/token`, { headers: ORIGIN, data: {} });
+    expect(rotate.status(), await rotate.text()).toBe(200);
+    botToken = ((await rotate.json()) as { token: string }).token;
+    expect(botToken).not.toBe(oldToken);
+
+    // Switched off in the same step: whoever held the old token chose that URL and knows its secret.
+    expect(await endpointNow()).toMatchObject({ url, enabled: false, disabledReason: 'token_changed' });
+    const reenable = await manager('PATCH', { enabled: true });
+    expect(reenable.status()).toBe(409);
+    expect(((await reenable.json()) as { code: string }).code).toBe('endpoint_token_changed');
+    expect(await endpointNow()).toMatchObject({ enabled: false, disabledReason: 'token_changed' });
+
+    // The old token saves nothing; the new one sets the endpoint again (with a new secret).
+    const stale = await fetch(new URL('/api/bot/v2/event-endpoint', baseUrl), {
+      method: 'PUT',
+      headers: { Authorization: `Bot ${oldToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    expect(stale.status).toBe(401);
+    const again = await botApi('PUT', '/event-endpoint', { url });
+    expect(again.status, JSON.stringify(again.json)).toBe(200);
+    expect(again.json.secret).not.toBe(set.json.secret);
+    expect(await endpointNow()).toMatchObject({ url, enabled: true, disabledReason: null });
+
+    // A manager removes it: nothing left to deliver to.
+    expect((await manager('DELETE')).status()).toBe(200);
+    expect(await endpointNow()).toBeNull();
   });
 });

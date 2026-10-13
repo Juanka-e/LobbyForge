@@ -104,3 +104,7 @@ apps/web/CLAUDE.md
 
 # Install root the no-Docker plugin-frame suite builds on every run.
 apps/web/e2e-sandbox/.install/
+
+# Throw-away CA, certificate and bundles of the e2e publisher stand-in
+# (infra/docker/e2e-bundle-host.sh, docker-compose.e2e-bundles.yml).
+infra/docker/.e2e-bundles/
