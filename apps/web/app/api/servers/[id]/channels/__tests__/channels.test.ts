@@ -38,6 +38,8 @@ vi.mock('@/lib/db', () => ({
 }));
 
 vi.mock('@/lib/access-invalidation', () => ({ publishAccessInvalidation: vi.fn() }));
+const queueCloseVoiceRoom = vi.fn();
+vi.mock('@/lib/voice-moderation', () => ({ queueCloseVoiceRoom, queueServerVoiceSync: vi.fn() }));
 
 const SECRET = 'x'.repeat(32);
 
@@ -58,6 +60,7 @@ beforeEach(() => {
   getUserPermissions.mockReset().mockResolvedValue([]);
   logAction.mockReset();
   logAction.mockResolvedValue(undefined);
+  queueCloseVoiceRoom.mockReset();
 });
 
 afterEach(() => {
@@ -516,5 +519,76 @@ describe('DELETE /api/servers/{id}/channels/{channelId}', () => {
     const res = await DELETE(req, { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID }) });
     expect(res.status).toBe(200);
     expect(deleteChannel).toHaveBeenCalledWith(expect.anything(), CHANNEL_ID);
+    // A text channel has no voice room to end.
+    expect(queueCloseVoiceRoom).not.toHaveBeenCalled();
+  });
+
+  it.each(['voice', 'stage'])('deleting a %s channel ends its voice room (everyone in it is disconnected)', async (type) => {
+    getServerById.mockResolvedValue({
+      id: SERVER_ID,
+      name: 'A',
+      slug: null,
+      ownerUserId: USER_ID,
+      iconUrl: null,
+      defaultLocale: 'en',
+      isPublic: false,
+      createdAt: new Date('2026-06-09T00:00:00Z'),
+      deletedAt: null,
+    });
+    getChannelById.mockResolvedValue({
+      id: CHANNEL_ID,
+      serverId: SERVER_ID,
+      name: 'Lounge',
+      type,
+      position: 1,
+      pluginId: null,
+      topic: null,
+      createdAt: new Date('2026-06-09T00:00:00Z'),
+    });
+    getUserPermissions.mockResolvedValue(['administrator']);
+    const { DELETE } = await loadItemRoute();
+    const req = new Request(`https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}`, {
+      method: 'DELETE',
+      headers: { cookie: makeSessionCookie() },
+    });
+    const res = await DELETE(req, { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID }) });
+    expect(res.status).toBe(200);
+    expect(deleteChannel).toHaveBeenCalledWith(expect.anything(), CHANNEL_ID);
+    expect(queueCloseVoiceRoom).toHaveBeenCalledWith(SERVER_ID, CHANNEL_ID);
+  });
+
+  it('a refused delete ends no voice room', async () => {
+    getServerById.mockResolvedValue({
+      id: SERVER_ID,
+      name: 'A',
+      slug: null,
+      ownerUserId: '00000000-0000-0000-0000-000000000099',
+      iconUrl: null,
+      defaultLocale: 'en',
+      isPublic: false,
+      createdAt: new Date('2026-06-09T00:00:00Z'),
+      deletedAt: null,
+    });
+    isServerMember.mockResolvedValue(true);
+    getChannelById.mockResolvedValue({
+      id: CHANNEL_ID,
+      serverId: SERVER_ID,
+      name: 'Lounge',
+      type: 'voice',
+      position: 1,
+      pluginId: null,
+      topic: null,
+      createdAt: new Date('2026-06-09T00:00:00Z'),
+    });
+    getUserPermissions.mockResolvedValue(['send_messages']);
+    const { DELETE } = await loadItemRoute();
+    const req = new Request(`https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}`, {
+      method: 'DELETE',
+      headers: { cookie: makeSessionCookie() },
+    });
+    const res = await DELETE(req, { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID }) });
+    expect(res.status).toBe(403);
+    expect(deleteChannel).not.toHaveBeenCalled();
+    expect(queueCloseVoiceRoom).not.toHaveBeenCalled();
   });
 });

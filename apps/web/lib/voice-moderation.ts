@@ -232,3 +232,26 @@ export function queueServerVoiceSync(serverId: string, channelIds?: string[]): v
     console.error('[voice-moderation] server sync failed:', (err as Error).message)
   );
 }
+
+/**
+ * End the LiveKit room of a voice channel that was deleted. Everyone in it
+ * is disconnected with ROOM_DELETED, which the lobby words as "The voice
+ * channel was closed." and never offers to come back to
+ * (lib/voice-resume.ts). Without it the room outlived its channel: the
+ * people in it stayed connected, in a room nobody could see, join or
+ * moderate any more (the syncs above only walk channels that still
+ * exist). A room that is not there — nobody was in it — is fine.
+ */
+export async function closeVoiceRoom(serverId: string, channelId: string): Promise<void> {
+  try {
+    await getRoomServiceClient().deleteRoom(liveKitRoomName(serverId, channelId));
+  } catch (err) {
+    if (!isNotFound(err)) throw err;
+  }
+}
+
+export function queueCloseVoiceRoom(serverId: string, channelId: string): void {
+  void closeVoiceRoom(serverId, channelId).catch((err) =>
+    console.error('[voice-moderation] closing the room failed:', (err as Error).message)
+  );
+}

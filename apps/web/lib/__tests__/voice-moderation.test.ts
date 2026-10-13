@@ -19,6 +19,7 @@ const lk = {
   removeParticipant: vi.fn(),
   updateParticipant: vi.fn(),
   mutePublishedTrack: vi.fn(),
+  deleteRoom: vi.fn(),
 };
 vi.mock('../livekit', () => ({ getRoomServiceClient: () => lk }));
 vi.mock('../livekit-room', () => ({ liveKitRoomName: (s: string, c: string) => `room-${s}-${c}` }));
@@ -206,5 +207,32 @@ describe('syncServerVoiceAccess', () => {
     expect(lk.listParticipants).toHaveBeenCalledTimes(1);
     expect(lk.removeParticipant).toHaveBeenCalledWith('room-srv-voice1', 'a');
     expect(lk.removeParticipant).toHaveBeenCalledWith('room-srv-voice1', 'b');
+  });
+});
+
+describe('closeVoiceRoom', () => {
+  // A deleted voice channel used to leave its LiveKit room running: the
+  // people in it stayed connected to a room nobody could see or moderate.
+  it('deletes the channel’s LiveKit room, which disconnects everyone in it', async () => {
+    lk.deleteRoom.mockResolvedValue(undefined);
+    const { closeVoiceRoom } = await load();
+    await closeVoiceRoom(SERVER, 'voice1');
+    expect(lk.deleteRoom).toHaveBeenCalledWith('room-srv-voice1');
+  });
+
+  it('a room that does not exist (nobody was in it) is not an error', async () => {
+    lk.deleteRoom.mockRejectedValue(Object.assign(new Error('requested room does not exist'), { status: 404 }));
+    const { closeVoiceRoom } = await load();
+    await expect(closeVoiceRoom(SERVER, 'voice1')).resolves.toBeUndefined();
+  });
+
+  it('any other failure is reported, and the queued form only logs it', async () => {
+    lk.deleteRoom.mockRejectedValue(new Error('connect ECONNREFUSED'));
+    const { closeVoiceRoom, queueCloseVoiceRoom } = await load();
+    await expect(closeVoiceRoom(SERVER, 'voice1')).rejects.toThrow('ECONNREFUSED');
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    queueCloseVoiceRoom(SERVER, 'voice1');
+    await vi.waitFor(() => expect(logged).toHaveBeenCalled());
+    logged.mockRestore();
   });
 });

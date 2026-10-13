@@ -271,6 +271,12 @@ async function handleDelete(req: Request, ctx: RouteContext): Promise<NextRespon
     const channelChanges = await import('@/lib/bots/channel-changes');
     const botIds = await channelChanges.listBotsGrantedChannel(channelId);
     await deleteChannel(getDb(), channelId);
+    // A voice room ends with its channel: nobody stays connected to a room
+    // that can no longer be seen, joined or moderated.
+    if (access.channel.type === 'voice' || access.channel.type === 'stage') {
+      const { queueCloseVoiceRoom } = await import('@/lib/voice-moderation');
+      queueCloseVoiceRoom(serverId, channelId);
+    }
     void logAction(getDb(), {
       serverId,
       actorUserId: session.uid,
