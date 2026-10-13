@@ -9,6 +9,7 @@
  * Client-safe (zod only): the admin page shares the types and defaults.
  */
 import { z } from 'zod';
+import { mentionsEveryoneOrHere } from '../everyone-mention';
 
 // ---------------------------------------------------------------------------
 // Shared
@@ -16,10 +17,12 @@ import { z } from 'zod';
 
 export const TEMPLATE_MAX_LENGTH = 500;
 
-/** `@everyone` / `@here` — a bot may never ping the whole server. */
+/**
+ * `@everyone` / `@here` — a bot may never ping the whole server. The same
+ * rule as the members' Mention Everyone gate (lib/everyone-mention.ts).
+ */
 export function containsMassMention(text: string): boolean {
-  // NFKC first: a fullwidth `＠everyone` is still @everyone to a reader.
-  return /(^|[^\p{L}\p{N}_])@(everyone|here)(?![\p{L}\p{N}_])/iu.test(text.normalize('NFKC'));
+  return mentionsEveryoneOrHere(text);
 }
 
 /**

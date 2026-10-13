@@ -2,6 +2,77 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [0.2.0-rc.11] - 2026-10-13
+
+rc.10 plus the two entries below: "A Discord-like profile card" and "The A-to-Z e2e run: fixes and three new specs". Update with `lfctl update apply`.
+
+- **Profiles:**
+  - Click anyone to open a Discord-like card. It has a banner, the chosen status, a photo viewer, About me, member-since dates, roles (add and remove them if you manage roles), mutual communities and a "Message @name" box.
+  - Its ⋯ menu offers Copy ID, Block, and only the moderation you may use: Timeout (the first timeout UI), Kick, Ban and Server mute.
+  - "View full profile" opens About and Mutual communities tabs.
+  - The data comes from a new route with the same privacy rules as the lobby.
+- **Fixes:**
+  - **Mention Everyone:** `(@everyone)`, `hi,@everyone` and edits slipped past it, and `@here` is now covered too.
+  - **Moderation:** a timed-out moderator could unban.
+  - **Voice:**
+    - deleting a voice channel left its voice room running;
+    - while reconnecting, the footer said "Voice Ready" and activities showed the Join bar.
+  - **Members page:** it offered actions on higher-ranked members, and showed "@EVERYONE" as the role.
+  - **Community menu:** it lacked Audit log, Bots and Voice & media.
+  - **Readability:** voice-roster icons were unlabeled for screen readers, and avatar initials were nearly unreadable in the light theme.
+- **Tests:** new end-to-end specs for the permission matrix, voice drops and drops during activities.
+- **Upgrade notes:** no migration and no configuration change.
+
+## [Unreleased] - A Discord-like profile card - 2026-10-13
+
+- **Click anyone, see their profile:** the member list, a chat author's avatar or name, the voice roster (left click; right-click and "⋮" keep the moderator menu), the DM header and DM authors, and your own account avatar all open the same card. One card at a time; another person switches it. docs/PROFILES.md.
+- **The card:**
+  - Banner, or a band in the avatar's colour. Avatar with the status the member chose, and "In voice" apart from it. Names as Discord shows them, the custom status, About me, Member since (account and community, in the viewer's language), roles, mutual communities, and the volume slider in voice.
+  - **Message @name:** type and press Enter. The DM is opened or created, the message is sent, and the conversation opens in the centre column.
+  - **"⋯" menu:** Copy user ID, Block or Unblock, and for moderators only what they may do: Timeout (60 s to 1 week) or Remove timeout, Kick, Ban with an optional reason, and Server mute in your voice room. Each action asks first, through the existing routes. Your own card has Edit profile and the status choice.
+  - **Roles:** a role manager adds (+) and removes (×) roles through the existing role route. Refusals are shown inline, in the viewer's language.
+- **Full profile:** a larger modal with About and Mutual communities tabs. Each community links to its lobby.
+- **Image viewer:** `components/ImageLightbox.tsx`, a shared viewer for avatars and banners, with "Open original". It respects reduced motion.
+- **API:** `GET /api/servers/{id}/members/{userId}/profile` returns one member's profile, projected for the viewer:
+  - A 404 unless both people belong to the community.
+  - It uses the lobby's own privacy projection. A hidden profile keeps only names and roles, and a block in either direction keeps the payload just as small.
+  - A member who blocked you gets the same answer as a hidden profile. The card is cached per viewer and re-asked after 30 seconds, and roles are read fresh before each change, so a whole-set role update can't undo someone else's change.
+  - `viewerCan` follows the moderation gate's rules, which now share their permission map and rank check with it (`lib/member-capabilities.ts`).
+  - New queries in `@lobbyforge/db`: `getMemberProfileRecord` and `listMutualServers`.
+- **Fixes:**
+  - The member list's card showed the voice state instead of the status the member chose, so Idle never appeared. Do Not Disturb had no label at all.
+  - The lobby smoke test counted an old placeholder ("No bio provided.") that could never appear. It now checks that About me says something.
+  - Found by the first run of `e2e/profile-card.spec.ts`: a screen reader read the community menu's button as "E E2E Compose Stack expand_more", and each entry with its icon's name first ("history Audit log"). The button is now named "{community} — open the community menu", and the icons are hidden from assistive technology.
+  - Found in its light-theme screenshots: someone without a photo is shown by their initial on a dark circle that ignored the theme. On the light theme the initial read 1.9:1 in the voice roster, chat, DMs, the member list and mentions. The circle (`secondary-container`) now follows the theme: unchanged on dark and dim, light grey-blue on light (12:1).
+- **Not in this change:** clickable mentions (messages don't store mention ids yet), pronouns, handles and profile accent colours (they need new columns).
+- **Tests:** route tests for every access, privacy, block and `viewerCan` rule; a test that checks `viewerCan` against the real moderation gate over every combination; db unit tests, plus an integration test that runs with `TEST_DATABASE_URL`; component tests for the card, the full profile, the viewer and every entry point; and `e2e/profile-card.spec.ts`. It passes twice in a row on a freshly rebuilt compose stack, with registered members who have photos, a banner and bios, and covers every entry point, the keyboard, the image viewer, a DM that arrives on the other side, both tabs, Timeout and its lift, role add and remove with the member list regrouping, a hidden profile, your own card, the community menu and the roster's mute icon.
+
+## [Unreleased] - The A-to-Z e2e run: fixes and three new specs - 2026-10-13
+
+A run through the whole product against the compose stack, with several people at once. It added three specs and fixed what they found.
+
+- **New specs** (compose stack only, `LF_E2E_BASE_URL`):
+  - `e2e/roles-permissions-matrix.spec.ts`: every permission, allowed and refused. Channel visibility, send, history and the live chat subscription, Manage Messages, Mention Everyone, polls, channels, roles and their escalation rules, the kick, ban and timeout hierarchy with `actor_timed_out`, voice grants, server mute and disconnect, Manage Community, the audit log, bots' hidden access, administrator, a channel's last gate role, and sanctions across leave and rejoin. It also checks the UI entry points.
+  - `e2e/voice-drop.spec.ts`: what others see of your voice controls, a 10-second blink, a drop past LiveKit's two minutes (others see it, the way back, the online and tab-visible retries, the 10-minute cap), reloads with and without the microphone permission, the endings that must not come back, and a duplicated tab.
+  - `e2e/activity-voice-drop.spec.ts`: Dice, Poll, Quiz, Hushle, Vampire Village and Watch Party with a player offline or reloading, the same-`actionId` retry and a lost answer, presence changes, host transfer, stale presses, hidden information in responses and WebSocket frames, `voice_required`, timeouts and one activity per channel.
+- **Voice:**
+  - While LiveKit resumed its signal connection, the footer said "Voice Ready" and Disconnect was disabled, as if the person had left. It now says "Reconnecting..." and Disconnect works.
+  - While LiveKit reconnects, the full-screen voice view stays open, and the activity view no longer offers "Join the voice channel to play".
+  - Deleting a voice channel left its LiveKit room running, and the people in it kept talking in a room nobody could see. The delete now ends the room, and they see "The voice channel was closed."
+  - At 390 px the voice drop strip squeezed its sentence to one word per line. The button now wraps onto a line of its own.
+  - The voice roster's status icons have names. A screen reader read the mute icon as "mic_off". Muted, server muted, camera on, sharing screen and, on your own row, Deafened are now named images, in English and Turkish.
+- **Moderation and roles:**
+  - A timed-out moderator could still lift a ban. The unban route now refuses them with `actor_timed_out`, like every other moderation action.
+  - The Members page offered Kick, Ban and the role picker on members ranked at or above the viewer, and every role in the picker. Each action now needs the viewer to outrank the member, as the routes do, and roles at or above the viewer's highest aren't offered.
+  - The Members page showed "@EVERYONE" as a moderator's role. A member's display role is now the highest role other than `@everyone` everywhere: the Members page, the lobby member list and the members API. Rows saved the old way show right too. The admin Roles page counts each holder of a role once (a member's display role was counted twice), and the hub's Roles tab counts every holder.
+  - Kick, ban, role and timeout refusals all carry a `code`. The Members page used to show the server's English error to every language. It now says each refusal in the viewer's language, like the profile card.
+  - The community menu has entries for Voice & media, Bots and the Audit log, each shown when its page opens for you. A moderator with only View Audit Log reached the audit log by URL alone.
+  - A role change made in a profile card now moves the member to the right group in the lobby member list at once, instead of on the next page load.
+- **Mention Everyone:**
+  - `(@everyone)` and `hi,@everyone` went out without the permission, and so did an edit that added `@everyone`. Posts, edits and chat polls now share one rule.
+  - `@here` needs Mention Everyone too, as in Discord. The role editor calls it "Mention @everyone and @here".
+- **Tests:** unit, route and component tests for every fix. The specs are updated for the new menu entries, `@here`, the code on the owner refusal and the named mute icon, and all three pass on a freshly rebuilt compose stack.
+
 ## [0.2.0-rc.10] - 2026-10-13
 
 rc.9 plus the fixes from its update drill. Update from rc.8 or rc.9 with `lfctl update apply`.

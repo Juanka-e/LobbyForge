@@ -96,7 +96,13 @@ export function LobbyServerMenu({
   }, [open, close]);
 
   const items = serverId ? buildServerMenuItems({ adminMenu, isOfficial }) : [];
+  const openLabel = t('lobby.server.openMenu', { name: serverName });
 
+  // The icons below are Material Symbols ligatures: their text IS the icon
+  // name, so each is hidden from assistive technology — a screen reader
+  // read the trigger as "N Night Owls expand_more" and every entry with its
+  // icon's name first ("history Audit log"). The trigger is named by what
+  // it does; without entries it is just the community's name.
   return (
     <div ref={rootRef} className="relative">
       <button
@@ -105,11 +111,8 @@ export function LobbyServerMenu({
         disabled={items.length === 0}
         aria-expanded={open}
         aria-haspopup="menu"
-        title={
-          items.length === 0
-            ? serverName
-            : t('lobby.server.openMenu', { name: serverName })
-        }
+        aria-label={items.length === 0 ? undefined : openLabel}
+        title={items.length === 0 ? serverName : openLabel}
         className="h-16 px-4 flex items-center justify-between hover:bg-surface-container transition-colors duration-150 w-full text-left group disabled:cursor-default"
       >
         <div className="flex items-center gap-3 min-w-0">
@@ -122,7 +125,7 @@ export function LobbyServerMenu({
               className="w-8 h-8 rounded-lg object-cover flex-shrink-0"
             />
           ) : (
-            <div className="w-8 h-8 rounded-lg bg-secondary-container flex items-center justify-center flex-shrink-0 font-bold text-text-primary">
+            <div className="w-8 h-8 rounded-lg bg-secondary-container flex items-center justify-center flex-shrink-0 font-bold text-text-primary" aria-hidden>
               {initialOf(serverName, { locale: t.locale })}
             </div>
           )}
@@ -135,6 +138,7 @@ export function LobbyServerMenu({
             className={`material-symbols-outlined transition-transform text-[20px] text-text-secondary group-hover:text-text-primary ${
               open ? 'rotate-180' : ''
             }`}
+            aria-hidden
           >
             expand_more
           </span>
@@ -155,7 +159,7 @@ export function LobbyServerMenu({
                 onClick={close}
                 className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-secondary hover:bg-surface-container hover:text-text-primary"
               >
-                <span className="material-symbols-outlined text-[18px]">{item.icon}</span>
+                <span className="material-symbols-outlined text-[18px]" aria-hidden>{item.icon}</span>
                 {t(item.labelKey)}
               </Link>
             </div>

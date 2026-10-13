@@ -31,13 +31,20 @@ async function resolveSession(req: Request): Promise<
   const secret = getSessionSecret();
   const session = readGuestSession(req.headers.get('cookie'), secret);
   if (!session) {
-    return { ok: false, response: NextResponse.json({ error: 'Authentication required' }, { status: 401 }) };
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'Authentication required', code: 'unauthenticated' }, { status: 401 }),
+    };
   }
   if (!session.uid) {
     return {
       ok: false,
       response: NextResponse.json(
-        { error: 'Guest user has no materialized user record', howToFix: 'Re-issue POST /api/auth/guest' },
+        {
+          error: 'Guest user has no materialized user record',
+          code: 'session_not_materialized',
+          howToFix: 'Re-issue POST /api/auth/guest',
+        },
         { status: 503 }
       ),
     };
@@ -45,6 +52,12 @@ async function resolveSession(req: Request): Promise<
   return { ok: true, uid: session.uid };
 }
 
+/**
+ * Every refusal carries a stable `code` next to its English `error` — the
+ * ones below as well as the moderation gate's (lib/member-authorization.ts)
+ * — so the Members page and the profile card say it in the viewer's
+ * language (lib/profile-action-errors.ts).
+ */
 async function handleDelete(
   req: Request,
   ctx: { params: Promise<{ id: string; userId: string }> }
@@ -57,23 +70,23 @@ async function handleDelete(
   try {
     if (!serverId || !targetUserId) {
       return NextResponse.json(
-        { error: 'Server id and user id are required' },
+        { error: 'Server id and user id are required', code: 'invalid_request' },
         { status: 400 }
       );
     }
     const server = await getServerById(getDb(), serverId);
     if (!server) {
-      return NextResponse.json({ error: 'Server not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Server not found', code: 'server_not_found' }, { status: 404 });
     }
     if (!(await isServerMember(getDb(), session.uid, serverId))) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      return NextResponse.json({ error: 'Forbidden', code: 'forbidden' }, { status: 403 });
     }
 
     // The owner cannot be kicked (use softDeleteServer or a "transfer
     // ownership" flow instead — both are M14+).
     if (targetUserId === server.ownerUserId) {
       return NextResponse.json(
-        { error: 'Cannot kick the server owner' },
+        { error: 'Cannot kick the server owner', code: 'target_is_owner' },
         { status: 400 }
       );
     }

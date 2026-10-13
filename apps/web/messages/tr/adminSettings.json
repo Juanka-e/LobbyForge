@@ -575,7 +575,7 @@
   "adminSettings.roles.perm.manageMessages": "Mesajları yönet",
   "adminSettings.roles.perm.manageRoles": "Rolleri yönet",
   "adminSettings.roles.perm.manageServer": "Topluluğu yönet",
-  "adminSettings.roles.perm.mentionEveryone": "@everyone’dan bahset",
+  "adminSettings.roles.perm.mentionEveryone": "@everyone ve @here’dan bahset",
   "adminSettings.roles.perm.moderateMembers": "Üyelere zaman aşımı uygula",
   "adminSettings.roles.perm.muteMembers": "Üyeleri sunucuda sustur",
   "adminSettings.roles.perm.readMessageHistory": "Mesaj geçmişini oku",

@@ -35,13 +35,19 @@ test.describe('authenticated lobby smoke without database reset', () => {
     await expect(page).toHaveURL(/\/lobby$/);
     await expect(page.getByTitle('LobbyForge Home')).toHaveCount(0);
 
-    const member = page.locator('[data-user-popover-anchor]').first();
+    // A row of the member list (chat authors, the voice roster and the
+    // account avatar open the same card, and come earlier in the page).
+    const member = page.locator('[data-user-popover-anchor]:has([data-member-avatar])').first();
     await expect(member).toBeVisible();
     await member.click();
     const profile = page.getByRole('dialog', { name: /profile$/ });
     await expect(profile).toBeVisible();
     await expect(profile.getByRole('heading', { name: 'About me' })).toBeVisible();
-    await expect(profile.getByText('No bio provided.')).toHaveCount(0);
+    // About me always says something: the member's bio, or the current
+    // "No bio yet." — never an empty section, never the old wording.
+    const about = profile.getByTestId('profile-about-body');
+    await expect(about).toHaveText(/\S/);
+    await expect(about).not.toHaveText('No bio provided.');
     await expect(profile.getByText('@everyone', { exact: true })).toHaveCount(0);
     await expect(profile.getByText('Voice settings')).toHaveCount(0);
     const profileBox = await profile.boundingBox();

@@ -146,4 +146,29 @@ describe('the text token the panel uses', () => {
     const body = block(selector);
     expect(contrast(token(body, '--lf-text-secondary'), token(body, '--lf-surface-dim'))).toBeGreaterThanOrEqual(4.5);
   });
+
+  // The profile-card e2e run: an avatar without a photo shows the
+  // person's initial in `text-text-primary` on `bg-secondary-container`
+  // (voice roster, chat, DMs, member list, mentions). The container was a
+  // fixed dark #3d4757 while the text follows the theme, so on light the
+  // initial was #101826 on #3d4757 — 1.9:1.
+  it.each([
+    ['dark', ':root'],
+    ['light', '.lf-theme-light'],
+  ])('an initial reaches 4.5:1 on its avatar circle (%s)', (_theme, selector) => {
+    const body = block(selector);
+    expect(contrast(token(body, '--lf-text-primary'), token(body, '--lf-secondary-container'))).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('the dim theme keeps the dark circle, under its own light text', () => {
+    const root = block(':root');
+    const dim = block('.lf-theme-dim');
+    expect(dim).not.toContain('--lf-secondary-container');
+    expect(contrast(token(dim, '--lf-text-primary'), token(root, '--lf-secondary-container'))).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('the avatar circle follows the theme instead of a fixed hex', () => {
+    const config = readFileSync(join(process.cwd(), 'tailwind.config.ts'), 'utf8');
+    expect(config).toMatch(/'secondary-container': themed\('--lf-secondary-container', '#3d4757'\)/);
+  });
 });

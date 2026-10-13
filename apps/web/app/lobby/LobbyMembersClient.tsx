@@ -1,16 +1,15 @@
 ﻿'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { getRealtimeClient } from '@/lib/realtime-client';
-import { UserProfilePopover } from '@/components/modals/UserProfilePopover';
 import { MemberBlockButton } from './MemberBlockButton';
 import { BotAvatar, BotBadge, BotProfilePopover, type LobbyBot } from './BotIdentity';
-import { useLobbyVoice } from './LobbyVoiceProvider';
-import { useBlockList } from './BlockListProvider';
+import { useProfileCard } from './ProfileCardProvider';
+import { VoiceStatusIcon } from './VoiceStatusIcon';
 import { useT } from '@/lib/i18n/client';
 import { initialOf } from '@/lib/initial';
-import { userImageUrl } from '@/lib/user-image-url';
-import { handleEmailUnverified, requestVerificationFocus } from '@/components/email-verification/email-status-store';
+import { displayRoleOf } from '@/lib/display-role';
+import type { ProfileRoleView } from '@/lib/member-profile';
 import {
   PRESENCE_DOT_CLASS,
   PRESENCE_LABEL_KEYS,
@@ -20,13 +19,16 @@ import {
 
 /**
  * Real-time members panel. Subscribes to presence WS topic + polls as
- * fallback. Renders LobbyMemberItem rows with shared popover state so
- * only one profile popover can be open at a time.
+ * fallback. A member row opens the lobby's one profile card
+ * (ProfileCardProvider), seeded with the row's LIVE status; a bot row
+ * opens the bot profile. Only one of them is open at a time.
  */
 
 interface Member {
   id: string;
   name: string;
+  globalDisplayName?: string;
+  nickname?: string | null;
   status: 'in-voice' | 'online' | 'offline';
   /** The status the member chose (drives the dot color). */
   presence?: PresenceStatus;
@@ -42,6 +44,28 @@ interface Member {
   statusText?: string | null;
   bio?: string | null;
   roles?: Array<{ id: string; name: string; color: string | null; icon: string | null; position: number; displaySeparately: boolean }>;
+}
+
+type MemberRole = NonNullable<Member['roles']>[number];
+
+/**
+ * A member with the roles the profile API answered last (see
+ * `memberRoles` in ProfileCardProvider): their role groups, name colour
+ * and display role follow a change made in a profile card at once.
+ * `displaySeparately` comes with the answer; a role it lacks it for keeps
+ * what the page render knew about that role.
+ */
+function withRoles(member: Member, roles: readonly ProfileRoleView[], separately: ReadonlyMap<string, boolean>): Member {
+  const next: MemberRole[] = roles.map((role) => ({
+    id: role.id,
+    name: role.name,
+    color: role.color,
+    icon: role.icon,
+    position: role.position,
+    displaySeparately: role.displaySeparately ?? separately.get(role.id) ?? false,
+  }));
+  const display = displayRoleOf(next);
+  return { ...member, roles: next, roleName: display?.name ?? null, roleColor: display?.color ?? null };
 }
 
 interface PresenceEntry {
@@ -102,14 +126,31 @@ export function LobbyMembersClient({
   botSettingsHref?: string | null;
 }) {
   const t = useT();
-  const [members, setMembers] = useState<Member[]>(initialMembers);
-  const voice = useLobbyVoice();
-  const blockList = useBlockList();
+  const [allMembers, setMembers] = useState<Member[]>(initialMembers);
+  const profileCard = useProfileCard();
+  // Someone kicked or banned through a profile card leaves the list at once;
+  // a role change made in a card regroups them at once (Discord does too).
+  const removed = profileCard?.removedUserIds;
+  const roleUpdates = profileCard?.memberRoles;
+  const separately = useMemo(() => {
+    const known = new Map<string, boolean>();
+    for (const member of initialMembers) for (const role of member.roles ?? []) known.set(role.id, role.displaySeparately);
+    return known;
+  }, [initialMembers]);
+  const members = useMemo(() => {
+    const present = removed && removed.size > 0 ? allMembers.filter((m) => !removed.has(m.id)) : allMembers;
+    if (!roleUpdates || roleUpdates.size === 0) return present;
+    return present.map((m) => {
+      const roles = roleUpdates.get(m.id);
+      return roles ? withRoles(m, roles, separately) : m;
+    });
+  }, [allMembers, removed, roleUpdates, separately]);
   const voiceChannelIdsRef = useRef(new Set(voiceChannelIds));
   voiceChannelIdsRef.current = new Set(voiceChannelIds);
 
-  // Shared popover state — only one popover can be open at a time.
-  const [openUserId, setOpenUserId] = useState<string | null>(null);
+  // The profile card lives in ProfileCardProvider (one for the lobby); the
+  // bot popover stays here. Opening one closes the other.
+  const openUserId = profileCard?.openUserId ?? null;
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
   const [openBotId, setOpenBotId] = useState<string | null>(null);
   const closeBotPopover = useCallback(() => setOpenBotId(null), []);
@@ -191,16 +232,24 @@ export function LobbyMembersClient({
     }, new Map<string, { role: NonNullable<Member['roles']>[number]; members: Member[] }>()).values()
   ).sort((a, b) => b.role.position - a.role.position);
   const ungroupedOnline = online.filter((member) => !groupedUserIds.has(member.id));
-  const openMember = members.find((m) => m.id === openUserId);
 
-  function openPopover(m: Member, rect: DOMRect) {
-    setAnchorRect(rect);
+  function openPopover(m: Member, anchor: HTMLElement) {
     setOpenBotId(null);
-    setOpenUserId(m.id);
+    profileCard?.openProfile({
+      userId: m.id,
+      anchor,
+      // The status the member CHOSE (idle, do not disturb…), live from this
+      // list — not the voice state, which the card shows on its own.
+      seed: {
+        displayName: m.name,
+        presence: m.status === 'offline' ? 'offline' : (m.presence ?? 'online'),
+        inVoice: m.status === 'in-voice',
+      },
+    });
   }
 
   function toggleBotPopover(bot: LobbyBot, rect: DOMRect) {
-    setOpenUserId(null);
+    profileCard?.closeProfile();
     setAnchorRect(rect);
     setOpenBotId((current) => (current === bot.id ? null : bot.id));
   }
@@ -213,63 +262,14 @@ export function LobbyMembersClient({
           <p className="font-label-xs text-text-muted italic">{t('lobby.roster.empty')}</p>
         ) : null}
         {roleGroups.map(({ role, members: roleMembers }) => (
-          <MemberSection key={role.id} label={`${role.name} - ${roleMembers.length}`} members={roleMembers} roleColor={role.color} roleIcon={role.icon} currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} onClosePopover={() => setOpenUserId(null)} />
+          <MemberSection key={role.id} label={`${role.name} - ${roleMembers.length}`} members={roleMembers} roleColor={role.color} roleIcon={role.icon} currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} />
         ))}
-        <MemberSection label={t('lobby.roster.onlineGroup', { count: ungroupedOnline.length })} members={ungroupedOnline} currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} onClosePopover={() => setOpenUserId(null)} />
+        <MemberSection label={t('lobby.roster.onlineGroup', { count: ungroupedOnline.length })} members={ungroupedOnline} currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} />
         <BotSection bots={bots} openBotId={openBotId} onToggle={toggleBotPopover} />
-        <MemberSection label={t('lobby.roster.offlineGroup', { count: offline.length })} members={offline} dimmed currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} onClosePopover={() => setOpenUserId(null)} />
+        <MemberSection label={t('lobby.roster.offlineGroup', { count: offline.length })} members={offline} dimmed currentUserId={currentUserId} openUserId={openUserId} onOpen={openPopover} />
       </aside>
       {openBot ? (
         <BotProfilePopover bot={openBot} anchorRect={anchorRect} onClose={closeBotPopover} settingsHref={botSettingsHref} />
-      ) : null}
-      {openMember ? (
-        <UserProfilePopover
-          open={true}
-          onClose={() => setOpenUserId(null)}
-          anchorRect={anchorRect}
-          user={{
-            userId: openMember.id,
-            displayName: openMember.name,
-            avatarUrl: openMember.avatarUrl ?? null,
-            // security-review FILE-001: the banner is fetched only now, for
-            // the one profile being looked at — never part of the list.
-            bannerUrl: userImageUrl(openMember.id, 'banner', openMember.bannerRef),
-            isGuest: openMember.isGuest ?? false,
-            roleName: openMember.roleName,
-            roleColor: openMember.roleColor,
-            statusText: openMember.statusText,
-            bio: openMember.bio,
-            roles: openMember.roles ?? [],
-            onlineStatus: openMember.status === 'in-voice' ? 'in_voice' : openMember.status,
-          }}
-          getVolume={voice.getRemoteVolume}
-          onVolumeChange={voice.setRemoteVolume}
-          isBlocked={blockList.isBlocked(openMember.id)}
-          onToggleBlock={openMember.id === currentUserId ? undefined : (userId) => void blockList.toggleBlock(userId)}
-          onSendMessage={openMember.id === currentUserId ? undefined : (userId) => {
-            // Open a DM channel and navigate to the DM view.
-            void fetch('/api/dm', {
-              method: 'POST',
-              credentials: 'same-origin',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ recipientUserId: userId }),
-            })
-              .then(async (r) => {
-                if (r.ok) return r.json();
-                // EMAIL.md §4.2: refused for an unverified email — lock
-                // and point at the banner's code field, not a silent no-op.
-                if (handleEmailUnverified(r.status, await r.json().catch(() => null))) requestVerificationFocus();
-                return null;
-              })
-              .then((data) => {
-                if (data?.channel?.id) {
-                  window.location.assign(`/dm/${data.channel.id}`);
-                }
-              })
-              .catch(() => {});
-            setOpenUserId(null);
-          }}
-        />
       ) : null}
     </>
   );
@@ -326,7 +326,6 @@ function MemberSection({
   currentUserId,
   openUserId,
   onOpen,
-  onClosePopover,
 }: {
   label: string;
   members: Member[];
@@ -335,8 +334,7 @@ function MemberSection({
   roleIcon?: string | null;
   currentUserId: string | null;
   openUserId: string | null;
-  onOpen: (m: Member, rect: DOMRect) => void;
-  onClosePopover: () => void;
+  onOpen: (m: Member, anchor: HTMLElement) => void;
 }) {
   if (members.length === 0) return null;
   // Offline rows are dimmed by their avatar and status dot only: an
@@ -358,8 +356,7 @@ function MemberSection({
             dimmed={dimmed}
             currentUserId={currentUserId}
             isOpen={openUserId === m.id}
-            onOpen={(rect) => onOpen(m, rect)}
-            onClose={onClosePopover}
+            onOpen={(anchor) => onOpen(m, anchor)}
           />
         ))}
       </ul>
@@ -373,27 +370,22 @@ function MemberRow({
   currentUserId,
   isOpen,
   onOpen,
-  onClose,
 }: {
   member: Member;
   /** In the offline group: fade the avatar and status dot, never the text. */
   dimmed?: boolean;
   currentUserId: string | null;
   isOpen: boolean;
-  onOpen: (rect: DOMRect) => void;
-  onClose: () => void;
+  onOpen: (anchor: HTMLElement) => void;
 }) {
   const t = useT();
   const roleColor = member.roleColor || undefined;
 
   function handleClick(e: React.MouseEvent<HTMLButtonElement>) {
     e.stopPropagation();
-    if (isOpen) {
-      onClose();
-      return;
-    }
-    const rect = e.currentTarget.getBoundingClientRect();
-    onOpen(rect);
+    // The provider decides: this row again closes the card, a card opened
+    // for this member elsewhere moves here, anyone else's switches.
+    onOpen(e.currentTarget);
   }
 
   return (
@@ -402,6 +394,8 @@ function MemberRow({
         <button
           type="button"
           data-user-popover-anchor
+          aria-haspopup="dialog"
+          aria-expanded={isOpen}
           onClick={handleClick}
           className="min-w-0 flex flex-1 items-center gap-3 text-left"
         >
@@ -443,7 +437,7 @@ function MemberRow({
           </div>
         </button>
         {member.muted ? (
-          <span className="material-symbols-outlined text-[16px] text-text-secondary">mic_off</span>
+          <VoiceStatusIcon icon="mic_off" label={t('lobby.voice.muted')} className="text-[16px] text-text-secondary" />
         ) : null}
         <MemberBlockButton userId={member.id} isSelf={member.id === currentUserId} />
       </div>

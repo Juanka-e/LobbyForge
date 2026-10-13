@@ -575,7 +575,7 @@
   "adminSettings.roles.perm.manageMessages": "Manage Messages",
   "adminSettings.roles.perm.manageRoles": "Manage Roles",
   "adminSettings.roles.perm.manageServer": "Manage Community",
-  "adminSettings.roles.perm.mentionEveryone": "Mention @everyone",
+  "adminSettings.roles.perm.mentionEveryone": "Mention @everyone and @here",
   "adminSettings.roles.perm.moderateMembers": "Timeout Members",
   "adminSettings.roles.perm.muteMembers": "Mute Members",
   "adminSettings.roles.perm.readMessageHistory": "Read Message History",

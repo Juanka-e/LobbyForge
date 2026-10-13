@@ -25,6 +25,7 @@ import { requireVerifiedEmail } from '@/lib/mail/verification';
 import { readMessagePollId } from '@/lib/chat-polls';
 import { loadPollViewsForMessages } from '@/lib/chat-polls-server';
 import { MESSAGE_BODY_MAX_BYTES } from '@/lib/message-limits';
+import { mentionsEveryoneOrHere } from '@/lib/everyone-mention';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -255,6 +256,13 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
       // gate above covers MODERATE_MEMBERS timeouts).
       const sendAuth = await authorizeServerPermission(session.uid, serverId, CorePermission.SEND_MESSAGES);
       if (!sendAuth.ok) return sendAuth.response;
+      // Mention Everyone holds for edits too: posting "hi" and editing it to
+      // "hi @everyone" (or "@here") used to get round the permission the
+      // POST checks.
+      if (mentionsEveryoneOrHere(body.content)) {
+        const mentionAuth = await authorizeServerPermission(session.uid, serverId, CorePermission.MENTION_EVERYONE);
+        if (!mentionAuth.ok) return mentionAuth.response;
+      }
     }
     // Bots milestone: an edit cannot slip past the Moderation Bot — its
     // content rules run on the new text (the counting rules only count

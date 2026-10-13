@@ -45,6 +45,26 @@ describe('the lobby’s settings links', () => {
     expect(links.botSettings).toBeNull();
   });
 
+  // The A-to-Z run: View Audit Log alone opened /admin/audit, but only by
+  // URL — the menu had no entry for it, nor for Voice & media or Bots.
+  it('gives a moderator with View Audit Log the Audit log entry and nothing else', () => {
+    const links = buildLobbyAdminLinks({ sections: ['audit'] });
+    expect(links.menu).toEqual([{ href: '/admin/audit', icon: 'history', labelKey: 'lobby.server.audit' }]);
+    expect(links.botSettings).toBeNull();
+  });
+
+  it('gives Voice & media and Bots entries exactly to viewers whose guard opens them', () => {
+    const links = buildLobbyAdminLinks({ sections: ['voiceMedia', 'bots'] });
+    expect(links.menu.map((item) => [item.href, item.labelKey])).toEqual([
+      ['/admin/settings/voice-media', 'lobby.server.voiceMedia'],
+      ['/admin/settings/bots', 'lobby.server.bots'],
+    ]);
+    const memberLabels = buildLobbyAdminLinks({ sections: ['members'] }).menu.map((item) => item.labelKey);
+    for (const key of ['lobby.server.voiceMedia', 'lobby.server.bots', 'lobby.server.audit']) {
+      expect(memberLabels).not.toContain(key);
+    }
+  });
+
   it('gives a channel manager the channel gear', () => {
     const links = buildLobbyAdminLinks({ sections: ['channels'] });
     expect(links.channelSettings).toBe('/admin/settings/channels');
@@ -59,7 +79,10 @@ describe('the lobby’s settings links', () => {
       '/admin/settings/channels',
       '/admin/settings/roles',
       '/admin/settings/invites',
+      '/admin/settings/voice-media',
       '/admin/apps',
+      '/admin/settings/bots',
+      '/admin/audit',
       '/admin/health',
     ]);
     expect(links).toMatchObject({

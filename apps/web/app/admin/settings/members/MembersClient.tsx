@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
 import { initialOf } from '@/lib/initial';
+import { displayRoleOf } from '@/lib/display-role';
+import { GENERIC_REFUSAL_KEY, profileActionErrorMessage } from '@/lib/profile-action-errors';
 import JoinRequestsSection from './JoinRequestsSection';
 
 export interface MemberView {
@@ -131,6 +133,20 @@ export default function MembersClient({
   const guests = memberList.filter((m) => m.isGuest).length;
   const moderators = memberList.filter((m) => /mod|admin|owner/i.test(m.roleName ?? '')).length;
 
+  // The hierarchy the member routes apply (lib/member-authorization.ts):
+  // only the owner skips it. Anyone else acts on a member only when their
+  // own highest role sits strictly above the member's, and hands out only
+  // roles below it. A member with no role ranks below every role.
+  const rolePosition = useMemo(() => new Map(roles.map((role) => [role.id, role.position])), [roles]);
+  const highestOf = (roleIds: readonly string[]) =>
+    roleIds.reduce((highest, id) => Math.max(highest, rolePosition.get(id) ?? -1), -1);
+  const viewerIsOwner = currentUserId !== null && currentUserId === ownerUserId;
+  const viewerHighest = viewerIsOwner
+    ? Number.POSITIVE_INFINITY
+    : highestOf(memberList.find((m) => m.userId === currentUserId)?.roleIds ?? []);
+  const outranksMember = (member: MemberView) => viewerIsOwner || viewerHighest > highestOf(member.roleIds);
+  const assignable = (role: RoleOption) => viewerIsOwner || role.position < viewerHighest;
+
   function openMember(member: MemberView) {
     if (expandedUserId === member.userId) {
       setExpandedUserId(null);
@@ -139,6 +155,21 @@ export default function MembersClient({
     setExpandedUserId(member.userId);
     setDraftRoles(member.roleIds);
     setMessage(null);
+  }
+
+  /**
+   * A refusal in the viewer's language, from the route's `code` — never
+   * its English `error`, which every language used to see. A failure with
+   * no known reason keeps this page's own "Could not …" sentence.
+   */
+  async function refusalText(action: 'roles' | 'kick' | 'ban', response: Response, fallbackKey: string): Promise<string> {
+    const detail = (await response.json().catch(() => ({}))) as { code?: unknown; permissions?: unknown };
+    const message = profileActionErrorMessage(action, {
+      status: response.status,
+      code: detail.code,
+      permissions: detail.permissions,
+    });
+    return message.key === GENERIC_REFUSAL_KEY ? t(fallbackKey) : t(message.key, message.params);
   }
 
   async function saveRoles(member: MemberView) {
@@ -154,10 +185,16 @@ export default function MembersClient({
           body: JSON.stringify({ roleIds: draftRoles }),
         }
       );
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) throw new Error(data.error ?? t('adminSettings.members.rolesFailed'));
+      if (!response.ok) {
+        setMessage({ tone: 'danger', text: await refusalText('roles', response, 'adminSettings.members.rolesFailed') });
+        return;
+      }
+      // The display role, as the server stores it: the highest role other
+      // than @everyone (taking the first one sent showed "@everyone").
       const roleById = new Map(roles.map((role) => [role.id, role]));
-      const primary = draftRoles.map((id) => roleById.get(id)).filter(Boolean)[0] ?? null;
+      const primary = displayRoleOf(
+        draftRoles.map((id) => roleById.get(id)).filter((role): role is RoleOption => role !== undefined)
+      );
       setMemberList((current) =>
         current.map((item) =>
           item.userId === member.userId
@@ -166,8 +203,8 @@ export default function MembersClient({
         )
       );
       setMessage({ tone: 'success', text: t('adminSettings.members.rolesUpdated') });
-    } catch (err) {
-      setMessage({ tone: 'danger', text: (err as Error).message });
+    } catch {
+      setMessage({ tone: 'danger', text: t('shell.profile.error.network') });
     } finally {
       setBusyUserId(null);
     }
@@ -183,13 +220,15 @@ export default function MembersClient({
         `/api/servers/${encodeURIComponent(serverId)}/members/${encodeURIComponent(member.userId)}`,
         { method: 'DELETE' }
       );
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) throw new Error(data.error ?? t('adminSettings.members.kickFailed'));
+      if (!response.ok) {
+        setMessage({ tone: 'danger', text: await refusalText('kick', response, 'adminSettings.members.kickFailed') });
+        return;
+      }
       setMemberList((current) => current.filter((item) => item.userId !== member.userId));
       setExpandedUserId(null);
       setMessage({ tone: 'success', text: t('adminSettings.members.kicked') });
-    } catch (err) {
-      setMessage({ tone: 'danger', text: (err as Error).message });
+    } catch {
+      setMessage({ tone: 'danger', text: t('shell.profile.error.network') });
     } finally {
       setBusyUserId(null);
     }
@@ -207,13 +246,15 @@ export default function MembersClient({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: member.userId, reason: reason.trim() || undefined }),
       });
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) throw new Error(data.error ?? t('adminSettings.members.banFailed'));
+      if (!response.ok) {
+        setMessage({ tone: 'danger', text: await refusalText('ban', response, 'adminSettings.members.banFailed') });
+        return;
+      }
       setMemberList((current) => current.filter((item) => item.userId !== member.userId));
       setExpandedUserId(null);
       setMessage({ tone: 'success', text: t('adminSettings.members.banned') });
-    } catch (err) {
-      setMessage({ tone: 'danger', text: (err as Error).message });
+    } catch {
+      setMessage({ tone: 'danger', text: t('shell.profile.error.network') });
     } finally {
       setBusyUserId(null);
     }
@@ -360,9 +401,15 @@ export default function MembersClient({
               // Only the actions this viewer may take on this member; with
               // none, the row offers no drawer at all.
               const showMarkVerified = capabilities.verifyEmail && member.emailState === 'unverified';
-              const showKick = !protectedMember && (capabilities.kick || self);
-              const showBan = capabilities.ban && !protectedMember && !self;
-              const hasActions = capabilities.setRoles || showMarkVerified || showKick || showBan;
+              // The routes' hierarchy (lib/member-authorization.ts): a
+              // permission is not enough, the viewer must also outrank the
+              // member. Leaving is always allowed; nobody changes their own
+              // roles or acts on the owner.
+              const outranks = outranksMember(member);
+              const showKick = !protectedMember && (self || (capabilities.kick && outranks));
+              const showBan = capabilities.ban && !protectedMember && !self && outranks;
+              const showRoles = capabilities.setRoles && !protectedMember && !self && outranks;
+              const hasActions = showRoles || showMarkVerified || showKick || showBan;
               return (
                 <li key={member.userId} className="hover:bg-surface-raised/50 transition-colors">
                   <div className="grid grid-cols-[auto_1fr_auto_auto_auto] gap-4 px-6 py-4 items-center">
@@ -413,7 +460,7 @@ export default function MembersClient({
                   {expanded && hasActions ? (
                     <div className="border-t border-border-subtle bg-surface-container-low px-6 py-4">
                       <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
-                        {capabilities.setRoles ? (
+                        {showRoles ? (
                         <div>
                           <p className="mb-3 text-xs uppercase tracking-wider text-text-muted">
                             {t('adminSettings.members.roles')}
@@ -426,7 +473,8 @@ export default function MembersClient({
                                   key={role.id}
                                   type="button"
                                   onClick={() => toggleDraftRole(role.id)}
-                                  disabled={busy}
+                                  // Only roles below the viewer's own can be handed out or taken away.
+                                  disabled={busy || !assignable(role)}
                                   className={
                                     checked
                                       ? 'rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary disabled:opacity-50'
@@ -456,7 +504,7 @@ export default function MembersClient({
                               {t('adminSettings.members.email.mark')}
                             </button>
                           ) : null}
-                          {capabilities.setRoles ? (
+                          {showRoles ? (
                             <button
                               type="button"
                               onClick={() => saveRoles(member)}

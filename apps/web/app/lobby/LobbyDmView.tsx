@@ -5,6 +5,7 @@ import { getRealtimeClient } from '@/lib/realtime-client';
 import { useT } from '@/lib/i18n/client';
 import { initialOf } from '@/lib/initial';
 import { useLobbyVoice, type ActiveDm } from './LobbyVoiceProvider';
+import { ProfileTrigger } from './ProfileCardProvider';
 import {
   formatDaySeparator,
   formatFullTimestamp,
@@ -174,15 +175,25 @@ export function LobbyDmView({
     <main className="flex-1 flex flex-col bg-background min-w-0 relative text-[14px] animate-fade-in-up">
       <header className="h-16 pl-16 pr-6 md:pl-6 flex items-center justify-between border-b border-border-subtle bg-surface-dim/80 backdrop-blur-md z-10 sticky top-0 shadow-sm">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="w-8 h-8 rounded-full bg-secondary-container flex items-center justify-center overflow-hidden flex-shrink-0">
-            {dm.avatarUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element -- user avatar, may be a data URL
-              <img src={dm.avatarUrl} alt="" className="w-full h-full object-cover" />
-            ) : (
-              <span className="text-label-sm font-bold text-text-primary">{initial}</span>
-            )}
-          </div>
-          <h2 className="font-body-lg font-bold text-text-primary truncate">{dm.name}</h2>
+          {/* The other person: a click opens their profile card. */}
+          <h2 className="min-w-0 font-body-lg font-bold text-text-primary">
+            <ProfileTrigger
+              userId={dm.otherUserId}
+              seed={{ displayName: dm.name, avatarUrl: dm.avatarUrl }}
+              className="flex min-w-0 max-w-full items-center gap-3 rounded-md text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+              testId="dm-header-profile"
+            >
+              <span className="w-8 h-8 rounded-full bg-secondary-container flex items-center justify-center overflow-hidden flex-shrink-0">
+                {dm.avatarUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- user avatar, may be a data URL
+                  <img src={dm.avatarUrl} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-label-sm font-bold text-text-primary">{initial}</span>
+                )}
+              </span>
+              <span className="truncate">{dm.name}</span>
+            </ProfileTrigger>
+          </h2>
           <div className="h-4 w-[1px] bg-border-subtle mx-1" />
           <p className="font-label-sm hidden md:block text-text-secondary">{t('lobbyMain.dm.subtitle')}</p>
         </div>
@@ -233,21 +244,28 @@ export function LobbyDmView({
                     </div>
                   ) : null}
                   <div className="flex gap-4 group hover:bg-surface-container/30 p-2 -mx-2 rounded-lg transition-colors">
-                    <div className="w-10 h-10 rounded-full bg-secondary-container flex-shrink-0 mt-1 flex items-center justify-center font-bold text-text-primary overflow-hidden">
+                    <ProfileTrigger
+                      userId={mine ? currentUserId : dm.otherUserId}
+                      seed={mine ? undefined : { displayName: dm.name, avatarUrl: dm.avatarUrl }}
+                      decorative
+                      className="w-10 h-10 rounded-full bg-secondary-container flex-shrink-0 mt-1 flex items-center justify-center font-bold text-text-primary overflow-hidden"
+                    >
                       {!mine && dm.avatarUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element -- user avatar, may be a data URL
                         <img src={dm.avatarUrl} alt="" className="w-full h-full object-cover" />
                       ) : (
                         initialOf(author, { locale: t.locale })
                       )}
-                    </div>
+                    </ProfileTrigger>
                     <div className="flex flex-col w-full min-w-0">
                       <div className="flex items-baseline gap-2">
-                        <span
-                          className={`font-label-sm font-medium ${mine ? 'text-primary' : 'text-text-primary'}`}
+                        <ProfileTrigger
+                          userId={mine ? currentUserId : dm.otherUserId}
+                          seed={mine ? undefined : { displayName: dm.name, avatarUrl: dm.avatarUrl }}
+                          className={`font-label-sm font-medium ${mine ? 'text-primary' : 'text-text-primary'} rounded-sm hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary`}
                         >
                           {author}
-                        </span>
+                        </ProfileTrigger>
                         <span
                           className="font-label-xs text-[11px] text-text-secondary"
                           title={formatFullTimestamp(group.at, t)}

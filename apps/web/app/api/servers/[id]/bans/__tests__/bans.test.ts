@@ -217,6 +217,7 @@ describe('POST /api/servers/{id}/bans', () => {
     });
     const res = await POST(req, { params: Promise.resolve({ id: SERVER_ID }) });
     expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: 'target_is_owner' });
   });
 
   it('returns 403 when the caller lacks BAN_MEMBERS', async () => {
@@ -231,6 +232,7 @@ describe('POST /api/servers/{id}/bans', () => {
     });
     const res = await POST(req, { params: Promise.resolve({ id: SERVER_ID }) });
     expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'forbidden' });
   });
 
   it('returns 400 when the body is malformed', async () => {
@@ -244,6 +246,7 @@ describe('POST /api/servers/{id}/bans', () => {
     });
     const res = await POST(req, { params: Promise.resolve({ id: SERVER_ID }) });
     expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: 'invalid_request' });
   });
 
   it('returns 400 when the caller tries to ban themselves', async () => {
@@ -259,6 +262,7 @@ describe('POST /api/servers/{id}/bans', () => {
     });
     const res = await POST(req, { params: Promise.resolve({ id: SERVER_ID }) });
     expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: 'self_action' });
   });
 
   it('returns 409 when the user is already banned', async () => {
@@ -274,6 +278,7 @@ describe('POST /api/servers/{id}/bans', () => {
     });
     const res = await POST(req, { params: Promise.resolve({ id: SERVER_ID }) });
     expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: 'already_banned' });
   });
 
   it('403 actor_timed_out: a timed-out moderator cannot ban', async () => {
@@ -423,6 +428,7 @@ describe('DELETE /api/servers/{id}/bans?userId=…', () => {
     });
     const res = await DELETE(req, { params: Promise.resolve({ id: SERVER_ID }) });
     expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: 'invalid_request' });
   });
 
   it('returns 403 when the caller lacks BAN_MEMBERS', async () => {
@@ -436,6 +442,7 @@ describe('DELETE /api/servers/{id}/bans?userId=…', () => {
     });
     const res = await DELETE(req, { params: Promise.resolve({ id: SERVER_ID }) });
     expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'forbidden' });
   });
 
   it('returns 200 with removed:false when the user is not banned', async () => {
@@ -478,6 +485,43 @@ describe('DELETE /api/servers/{id}/bans?userId=…', () => {
     expect(res.status).toBe(200);
     const json = (await res.json()) as { ok: boolean; removed: boolean };
     expect(json.removed).toBe(true);
+    expect(unbanUser).toHaveBeenCalledWith(expect.anything(), SERVER_ID, TARGET_ID);
+  });
+
+  // The actor_timed_out gate covers banning; lifting a ban used to slip
+  // past it, so a timed-out moderator could still unban.
+  it('403 actor_timed_out: a timed-out moderator cannot lift a ban', async () => {
+    getServerById.mockResolvedValue(mockServer(OWNER_ID));
+    isServerMember.mockResolvedValue(true);
+    getUserPermissions.mockResolvedValue(['ban_members']);
+    isCurrentlyBanned.mockResolvedValue(true);
+    const until = new Date(Date.now() + 60_000);
+    getActiveMemberTimeout.mockResolvedValueOnce(until);
+    const { DELETE } = await loadRoute();
+    const req = new Request(`https://example.test/api/servers/${SERVER_ID}/bans?userId=${TARGET_ID}`, {
+      method: 'DELETE',
+      headers: { cookie: makeSessionCookie() },
+    });
+    const res = await DELETE(req, { params: Promise.resolve({ id: SERVER_ID }) });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'actor_timed_out', until: until.toISOString() });
+    expect(unbanUser).not.toHaveBeenCalled();
+  });
+
+  it('the owner is never refused as timed out (the owner cannot be timed out)', async () => {
+    getServerById.mockResolvedValue(mockServer(USER_ID));
+    getUserPermissions.mockResolvedValue(['administrator']);
+    isCurrentlyBanned.mockResolvedValue(true);
+    getActiveMemberTimeout.mockClear();
+    unbanUser.mockResolvedValue({ id: 'ban-1', serverId: SERVER_ID, userId: TARGET_ID });
+    const { DELETE } = await loadRoute();
+    const req = new Request(`https://example.test/api/servers/${SERVER_ID}/bans?userId=${TARGET_ID}`, {
+      method: 'DELETE',
+      headers: { cookie: makeSessionCookie() },
+    });
+    const res = await DELETE(req, { params: Promise.resolve({ id: SERVER_ID }) });
+    expect(res.status).toBe(200);
+    expect(getActiveMemberTimeout).not.toHaveBeenCalled();
     expect(unbanUser).toHaveBeenCalledWith(expect.anything(), SERVER_ID, TARGET_ID);
   });
 });

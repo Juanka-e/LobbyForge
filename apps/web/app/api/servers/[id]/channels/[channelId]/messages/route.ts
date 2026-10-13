@@ -26,6 +26,7 @@ import { requireVerifiedEmail } from '@/lib/mail/verification';
 import { readMessagePollId } from '@/lib/chat-polls';
 import { loadPollViewsForMessages } from '@/lib/chat-polls-server';
 import { MESSAGE_BODY_MAX_BYTES } from '@/lib/message-limits';
+import { mentionsEveryoneOrHere } from '@/lib/everyone-mention';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -219,10 +220,9 @@ async function handlePost(
       );
     }
 
-    // MENTION_EVERYONE: @everyone in the content requires the explicit
-    // permission (notification-spam control, Discord semantics).
-    const mentionsEveryone = /(^|\s)@everyone\b/i.test(body.content);
-    if (mentionsEveryone) {
+    // MENTION_EVERYONE: @everyone or @here in the content requires the
+    // explicit permission (notification-spam control, Discord semantics).
+    if (mentionsEveryoneOrHere(body.content)) {
       const mentionAuth = await authorizeServerPermission(
         session.uid,
         serverId,

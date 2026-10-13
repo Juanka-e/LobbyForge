@@ -47,7 +47,10 @@ type Member = {
   userId: string;
   displayName: string;
   isOwner: boolean;
+  /** The display role (the highest other than @everyone), or null. */
   roleId: string | null;
+  /** Every role the member holds. */
+  roleIds?: string[];
 };
 
 type Role = {
@@ -986,7 +989,12 @@ function RolesPanel({ roles, members }: { roles: Role[]; members: Member[] }) {
         </thead>
         <tbody>
           {roles.map((r) => {
-            const count = members.filter((m) => m.roleId === r.id).length;
+            // Everyone holds @everyone; any other role counts its holders,
+            // not only the members it is the display role of.
+            const count =
+              r.name === '@everyone'
+                ? members.length
+                : members.filter((m) => (m.roleIds ?? (m.roleId ? [m.roleId] : [])).includes(r.id)).length;
             return (
               <tr key={r.id} className="border-t border-border-subtle">
                 <td className="px-4 py-3 font-medium text-text-primary">

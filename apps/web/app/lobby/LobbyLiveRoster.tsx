@@ -23,6 +23,7 @@ import { AppAvatar, AppBadge } from './AppIdentity';
 import { EphemeralAnswerRow, InteractionHeader, PendingInteractionRow } from './slash/InteractionRows';
 import { ChatPollCard } from './ChatPollCard';
 import { useBlockList } from './BlockListProvider';
+import { ProfileTrigger, useProfileCard } from './ProfileCardProvider';
 import {
   applyChatPollUpdate,
   asChatPollUpdate,
@@ -801,9 +802,7 @@ function LiveMessage({ message, invokedByName, currentUserId, serverId, channelI
       ) : message.app ? (
         <AppAvatar className="mt-1" />
       ) : (
-        <div data-chat-avatar className="chat-avatar w-10 h-10 rounded-full bg-secondary-container flex-shrink-0 mt-1 flex items-center justify-center font-bold text-text-primary">
-          {initialOf(message.author, { locale: t.locale })}
-        </div>
+        <ChatAuthorAvatar authorId={message.authorId} name={message.author} />
       )}
       <div className="flex flex-col w-full min-w-0">
         {message.bot && message.interaction ? (
@@ -813,7 +812,18 @@ function LiveMessage({ message, invokedByName, currentUserId, serverId, channelI
           />
         ) : null}
         <div className="flex items-baseline gap-2">
-          <span className={`font-label-sm font-medium ${authorColorClass}`}>{message.author}</span>
+          {message.authorId && !message.bot && !message.webhook && !message.app ? (
+            <ProfileTrigger
+              userId={message.authorId}
+              seed={{ displayName: message.author }}
+              className={`font-label-sm font-medium ${authorColorClass} rounded-sm hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary`}
+              testId="chat-author"
+            >
+              {message.author}
+            </ProfileTrigger>
+          ) : (
+            <span className={`font-label-sm font-medium ${authorColorClass}`}>{message.author}</span>
+          )}
           {message.bot ? (
             <BotBadge className="self-center" />
           ) : message.webhook ? (
@@ -883,6 +893,35 @@ function LiveMessage({ message, invokedByName, currentUserId, serverId, channelI
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * A member's avatar beside their message: their photo when the lobby knows
+ * it (the member list's projected avatar), else their initial. A click
+ * opens their profile card — the author's name next to it is the keyboard
+ * path to the same card, so this one stays out of the tab order.
+ */
+function ChatAuthorAvatar({ authorId, name }: { authorId: string | null; name: string }) {
+  const t = useT();
+  const profile = useProfileCard();
+  const avatarUrl = authorId ? (profile?.seedFor(authorId)?.avatarUrl ?? null) : null;
+  return (
+    <ProfileTrigger
+      userId={authorId}
+      seed={{ displayName: name }}
+      decorative
+      className="chat-avatar w-10 h-10 rounded-full bg-secondary-container flex-shrink-0 mt-1 flex items-center justify-center overflow-hidden font-bold text-text-primary transition-[filter] hover:brightness-90"
+      testId="chat-avatar"
+      markers={{ 'data-chat-avatar': true }}
+    >
+      {avatarUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element -- same-origin avatar route
+        <img src={avatarUrl} alt="" className="size-full object-cover" />
+      ) : (
+        initialOf(name, { locale: t.locale })
+      )}
+    </ProfileTrigger>
   );
 }
 

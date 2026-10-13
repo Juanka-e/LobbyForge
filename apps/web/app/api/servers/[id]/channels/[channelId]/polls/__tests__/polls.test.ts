@@ -277,6 +277,13 @@ describe('POST .../polls — who may post', () => {
     expect(res.status).toBe(403);
     expect(createMessagePoll).not.toHaveBeenCalled();
   });
+
+  it('@here in a poll needs it too', async () => {
+    const { POST } = await import('../route.js');
+    const res = await POST(request(POLLER, 'POST', { ...goodPoll, question: 'Who is free? @here' }), listCtx);
+    expect(res.status).toBe(403);
+    expect(createMessagePoll).not.toHaveBeenCalled();
+  });
 });
 
 describe('POST .../polls — validation', () => {

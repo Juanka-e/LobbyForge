@@ -26,6 +26,8 @@ export const CorePermission = {
   BAN_MEMBERS: 'ban_members',
   CREATE_INVITE: 'create_invite',
   SEND_MESSAGES: 'send_messages',
+  READ_MESSAGE_HISTORY: 'read_message_history',
+  MENTION_EVERYONE: 'mention_everyone', // @everyone and @here (below)
   MANAGE_MESSAGES: 'manage_messages',
   ADD_REACTIONS: 'add_reactions',
   CONNECT_VOICE: 'connect_voice',
@@ -36,6 +38,13 @@ export const CorePermission = {
   CREATE_POLLS: 'create_polls', // polls in text channels (docs/CHAT_POLLS.md)
 } as const;
 ```
+
+**Mention Everyone** (`mention_everyone`) lets a member mention `@everyone`
+**and `@here`** in a message, an edit or a chat poll — one permission for
+both, as in Discord, since `@here` is the same mass ping for everyone
+online. Without it those are refused with `403`. It is one of the
+`@everyone` defaults. The rule and its edge cases are in docs/MESSAGES.md,
+"Mention Everyone".
 
 `hasPermission(userPermissions, required)` is the single authorization primitive. It short-circuits to `true` if `ADMINISTRATOR` is in the array — that's the "owner override" M11 + M12 used, but now it's data-driven instead of code-driven.
 
@@ -54,7 +63,9 @@ export const CorePermission = {
 
 ## Display hierarchy and member grouping
 
-Roles are ordered by descending `position`. A member's highest assigned non-`@everyone` role supplies the visible name color and role icon. Profiles show all assigned non-structural roles.
+Roles are ordered by descending `position`. A member's highest assigned non-`@everyone` role — the **display role** — supplies the visible name color and role icon, and is what the admin Members page's Role column shows (a member with only `@everyone` shows as "Member", or "Guest"). Profiles show all assigned non-structural roles.
+
+The rule lives in `pickDisplayRole` (`packages/db/src/queries/roles.ts`; a tie in position goes to the role listed first) and its client-side copy `lib/display-role.ts`. `setMemberRoles` stores it in `memberships.role_id`, and every list works it out from the whole set held (`listMemberSummariesForServer`, `listMembersForServer`), so a row written before the rule — when the FIRST role sent was stored, and the role UI sent `@everyone` first — still shows right.
 
 `displaySeparately` is independent from permissions. When enabled, online members whose highest separately displayed role is that role appear under its own heading in the right member list. Each member appears once. Other online members remain under Online, and offline members remain under Offline.
 
@@ -172,8 +183,9 @@ acts on the owner, and acting on yourself is refused (400
 
 **A timed-out member cannot moderate.** The same gate refuses an actor who
 is currently timed out — `403 { code: "actor_timed_out", until }` — for
-every operation it covers: kick, ban, timeout (setting or clearing one),
-role assignment, voice mute and voice disconnect. A timeout already
+every operation it covers: kick, ban (and lifting one — the unban route
+applies the same check), timeout (setting or clearing one), role
+assignment, voice mute and voice disconnect. A timeout already
 silences messages, invites and voice; moderation powers used to survive
 it. The owner cannot be timed out, so the owner is never refused.
 
@@ -183,7 +195,7 @@ it. The owner cannot be timed out, so the owner is never refused.
 
 ### Multi-role per member (M15.5)
 
-Members can now hold multiple roles. The `memberships.roleId` remains the primary/display role, but additional roles are stored in the `membership_roles` join table. `getUserPermissions` returns the union of permissions from all assigned roles. `PUT /api/servers/{id}/members/{userId}/role` now accepts an array of `roleIds`.
+Members can now hold multiple roles. The `memberships.roleId` remains the primary/display role (the highest one other than `@everyone`, above), but every role, that one included, is stored in the `membership_roles` join table. `getUserPermissions` returns the union of permissions from all assigned roles. `PUT /api/servers/{id}/members/{userId}/role` now accepts an array of `roleIds`.
 
 ### Body / response shapes
 
@@ -204,11 +216,12 @@ interface RoleJson {
 // Member JSON (listMembersForServer + decoration)
 interface MemberJson {
   userId: string;
-  roleId: string | null;
-  roleName: string | null;
+  roleIds: string[];          // every role held, @everyone included
+  roleId: string | null;      // the display role (highest other than @everyone), or null
+  roleName: string | null;    // …its name
   rolePosition: number | null;
-  permissions: string[];  // empty for a member with no role assigned
-  isOwner: boolean;       // owner is always true + has ADMINISTRATOR injected
+  permissions: string[];      // …its permissions; empty without a display role
+  isOwner: boolean;           // owner is always true + has ADMINISTRATOR injected
 }
 ```
 
@@ -283,9 +296,13 @@ getUserPermissions(db, userId, serverId)
   // [administrator] without joining.
 
 listMembersForServer(db, serverId)
-  // Returns { userId, roleId, roleName, rolePosition, permissions }
-  // for every member of the server. The route decorates the owner
-  // with isOwner + ADMINISTRATOR.
+  // Returns { userId, roleIds, roleId, roleName, rolePosition, permissions }
+  // for every member of the server: every role held, and the display
+  // role (pickDisplayRole) worked out from them. The route decorates the
+  // owner with isOwner + ADMINISTRATOR.
+
+pickDisplayRole(heldRoles)
+  // The highest-positioned role other than @everyone, or null.
 ```
 
 ```ts

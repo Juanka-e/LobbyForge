@@ -9,7 +9,10 @@
  * As of M15.5 a member can hold multiple roles via the `membership_roles`
  * join table. The `memberships.roleId` column is kept as the "primary /
  * display role" (the one shown in the member list) and is mirrored in
- * the join table so the union read path returns the right set.
+ * the join table so the union read path returns the right set. The
+ * display role is the highest one other than `@everyone`
+ * (`pickDisplayRole` in roles.ts); readers work it out from the whole
+ * set, so a row stored before that rule still shows right.
  *
  * Conventions:
  *   - The first argument is always a `DbClient`.
@@ -21,7 +24,7 @@ import { and, asc, eq, inArray, isNull, not } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
 import { membershipRoles, memberships, roles, users } from '../schema.js';
 import { activeBanOnMembershipSql, isCurrentlyBanned } from './bans.js';
-import { EVERYONE_ROLE_NAME } from './roles.js';
+import { EVERYONE_ROLE_NAME, pickDisplayRole } from './roles.js';
 import { getMemberSanction, membershipValuesFromSanction, recordMemberSanction } from './memberSanctions.js';
 import { isNewMemberApprovalRequired } from './serverAccessPolicies.js';
 import { profileVisibilitySql, toProfileVisibility, userImageRefSql } from './userImages.js';
@@ -267,9 +270,13 @@ export async function assignRole(
 
 /**
  * Set the full set of roles a member holds (M15.5 — multi-role). An
- * empty array clears all role assignments. The first id in the list, if
- * any, is mirrored to `memberships.roleId` so the UI's "display role"
- * stays stable; the rest land in the join table.
+ * empty array clears all role assignments. Every id lands in the join
+ * table; `memberships.roleId` gets the display role (`pickDisplayRole`:
+ * the highest one in this server other than `@everyone`, else null).
+ *
+ * It used to take the FIRST id sent, and the Members page and the profile
+ * card send the set with `@everyone` first — the Members page then showed
+ * "@everyone" as a moderator's role.
  *
  * Throws if the user is not a member of the server.
  */
@@ -286,7 +293,17 @@ export async function setMemberRoles(
   // Dedupe so the unique (membershipId, roleId) index doesn't reject
   // a list like ['a', 'a'] from a careless caller.
   const unique = Array.from(new Set(roleIds));
-  const primary = unique[0] ?? null;
+  const found = unique.length === 0
+    ? []
+    : await db
+        .select({ id: roles.id, name: roles.name, position: roles.position })
+        .from(roles)
+        .where(and(eq(roles.serverId, serverId), inArray(roles.id, unique)));
+  // In the order sent, so a tie in position goes to the role listed first.
+  const held = unique
+    .map((id) => found.find((role) => role.id === id))
+    .filter((role): role is (typeof found)[number] => role !== undefined);
+  const primary = pickDisplayRole(held)?.id ?? null;
   await db
     .update(memberships)
     .set({ roleId: primary })
@@ -370,10 +387,13 @@ export async function listRoleIdsForMemberships(
  * oldest member (usually the owner) shows up first. Used by the
  * Community Settings → Members screen.
  *
- * "Display role" is read from `memberships.roleId`; we join `roles` for
- * the name and color, falling back to "Member" / "Guest" if no role is
- * assigned. Online/voice presence is intentionally omitted — the admin
- * screen is for offline review.
+ * `roleName` / `roleColor` / `roleIcon` are the DISPLAY role's
+ * (`pickDisplayRole`: the highest role held other than `@everyone`), null
+ * when there is none — the UI then says "Member" / "Guest". They are
+ * worked out from `roles` (the join table plus the legacy
+ * `memberships.roleId`), not read from that column, so a row stored with
+ * `@everyone` as its primary role shows right. Online/voice presence is
+ * intentionally omitted — the admin screen is for offline review.
  *
  * security-review FILE-001: images are returned as short references
  * (`userImageRefSql`), never as the stored data URLs — the list is
@@ -428,9 +448,14 @@ export async function listMemberSummariesForServer(
       bannerRef: userImageRefSql(users.bannerUrl),
       profileVisibility: profileVisibilitySql(users.id),
       isGuest: users.isGuest,
-      roleName: roles.name,
-      roleColor: roles.color,
-      roleIcon: roles.icon,
+      // The legacy single-role column's role: folded into `roles` below
+      // when the join table does not list it.
+      legacyRoleId: memberships.roleId,
+      legacyRoleName: roles.name,
+      legacyRoleColor: roles.color,
+      legacyRoleIcon: roles.icon,
+      legacyRolePosition: roles.position,
+      legacyRoleDisplaySeparately: roles.displaySeparately,
       statusText: users.statusText,
       bio: users.bio,
       joinedAt: memberships.createdAt,
@@ -474,14 +499,43 @@ export async function listMemberSummariesForServer(
     current.push({ id: role.id, name: role.name, color: role.color, icon: role.icon, position: role.position, displaySeparately: role.displaySeparately });
     rolesByMembership.set(role.membershipId, current);
   }
-  return rows.map(({ membershipId, ...row }) => ({
-    ...row,
-    displayName: row.displayName || row.globalDisplayName,
-    avatarRef: row.avatarRef ?? null,
-    bannerRef: row.bannerRef ?? null,
-    profileVisibility: toProfileVisibility(row.profileVisibility),
-    roles: (rolesByMembership.get(membershipId) ?? []).sort((a, b) => b.position - a.position),
-  }));
+  return rows.map(
+    ({
+      membershipId,
+      legacyRoleId,
+      legacyRoleName,
+      legacyRoleColor,
+      legacyRoleIcon,
+      legacyRolePosition,
+      legacyRoleDisplaySeparately,
+      ...row
+    }) => {
+      const held = [...(rolesByMembership.get(membershipId) ?? [])];
+      if (legacyRoleId && legacyRoleName !== null && !held.some((role) => role.id === legacyRoleId)) {
+        held.push({
+          id: legacyRoleId,
+          name: legacyRoleName,
+          color: legacyRoleColor ?? null,
+          icon: legacyRoleIcon ?? null,
+          position: legacyRolePosition ?? 0,
+          displaySeparately: legacyRoleDisplaySeparately ?? false,
+        });
+      }
+      held.sort((a, b) => b.position - a.position);
+      const display = pickDisplayRole(held);
+      return {
+        ...row,
+        displayName: row.displayName || row.globalDisplayName,
+        avatarRef: row.avatarRef ?? null,
+        bannerRef: row.bannerRef ?? null,
+        profileVisibility: toProfileVisibility(row.profileVisibility),
+        roleName: display?.name ?? null,
+        roleColor: display?.color ?? null,
+        roleIcon: display?.icon ?? null,
+        roles: held,
+      };
+    }
+  );
 }
 
 /**

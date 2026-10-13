@@ -125,7 +125,12 @@ describe('localeFromRequest', () => {
 
   it('a forged session cookie is not read', async () => {
     db.getUserLocale.mockResolvedValue('tr');
-    const forged = session().replace(/.$/, (c) => (c === 'a' ? 'b' : 'a'));
+    // Change a character in the MIDDLE of the signature: the last base64url
+    // character carries padding bits, so flipping a↔b there can decode to the
+    // same bytes and leave the signature valid (a flaky test, not a forgery).
+    const cookie = session();
+    const at = cookie.lastIndexOf('.') + 8;
+    const forged = cookie.slice(0, at) + (cookie[at] === 'A' ? 'Q' : 'A') + cookie.slice(at + 1);
     expect(await localeFromRequest(request({ cookie: [forged], lang: 'en' }))).toBe('en');
     expect(db.getUserLocale).not.toHaveBeenCalled();
   });

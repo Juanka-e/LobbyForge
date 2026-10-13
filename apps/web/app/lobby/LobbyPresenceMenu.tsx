@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
 import { initialOf } from '@/lib/initial';
+import { useProfileCard } from './ProfileCardProvider';
 import {
   PRESENCE_DESCRIPTION_KEYS,
   PRESENCE_DOT_CLASS,
@@ -66,9 +67,49 @@ export function LobbyPresenceMenu({
     : t('common.guest');
   const initial = initialOf(name, { locale: t.locale });
   const subLabel = voiceLabel ?? t(PRESENCE_LABEL_KEYS[status]);
+  // In the live lobby your avatar opens your own profile card (with Edit
+  // profile and the status choice); the name beside it keeps opening this
+  // status menu, so nothing that was here is lost.
+  const profile = useProfileCard();
+  const selfId = hasUser ? (profile?.currentUserId ?? null) : null;
+  const avatarUrl = selfId ? (profile?.seedFor(selfId)?.avatarUrl ?? null) : null;
+  const avatar = (
+    <span className="w-8 h-8 rounded-full bg-secondary-container relative flex-shrink-0 block">
+      <span className="absolute inset-0 overflow-hidden rounded-full flex items-center justify-center text-label-sm font-bold text-text-primary">
+        {avatarUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element -- same-origin avatar route
+          <img src={avatarUrl} alt="" className="size-full object-cover" />
+        ) : (
+          initial
+        )}
+      </span>
+      <span
+        aria-label={t(PRESENCE_LABEL_KEYS[status])}
+        className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-surface-raised ${PRESENCE_DOT_CLASS[status]}`}
+      />
+    </span>
+  );
 
   return (
-    <div ref={rootRef} className="relative min-w-0">
+    <div ref={rootRef} className="relative min-w-0 flex items-center gap-1">
+      {profile && selfId ? (
+        <button
+          type="button"
+          data-user-popover-anchor
+          aria-haspopup="dialog"
+          aria-expanded={profile.openUserId === selfId}
+          aria-label={t('lobby.presence.openProfile')}
+          title={t('lobby.presence.openProfile')}
+          onClick={(event) => {
+            event.stopPropagation();
+            setOpen(false);
+            profile.openProfile({ userId: selfId, anchor: event.currentTarget });
+          }}
+          className="flex-none rounded-full p-0.5 -m-0.5 hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+        >
+          {avatar}
+        </button>
+      ) : null}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -78,15 +119,7 @@ export function LobbyPresenceMenu({
         title={hasUser ? t('lobby.presence.trigger', { name }) : t('lobby.presence.guestSession')}
         className="flex items-center gap-2 min-w-0 rounded-md p-1 -m-1 text-left hover:bg-surface-container transition-colors disabled:cursor-default disabled:hover:bg-transparent"
       >
-        <div className="w-8 h-8 rounded-full bg-secondary-container relative flex-shrink-0">
-          <span className="absolute inset-0 flex items-center justify-center text-label-sm font-bold text-text-primary">
-            {initial}
-          </span>
-          <div
-            aria-label={t(PRESENCE_LABEL_KEYS[status])}
-            className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-surface-raised ${PRESENCE_DOT_CLASS[status]}`}
-          />
-        </div>
+        {profile && selfId ? null : avatar}
         <div className="flex flex-col min-w-0">
           <span className="text-[13px] text-text-primary font-medium truncate">{name}</span>
           <span className="text-[11px] text-text-secondary truncate">{subLabel}</span>

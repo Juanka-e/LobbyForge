@@ -158,6 +158,19 @@ describe('the way back to voice after a reload', () => {
     expect(stored()).not.toBeNull();
   });
 
+  // At 390 px the message used to shrink to nothing next to the button
+  // ("You / dropped / out / of / voice." one word per line): it keeps a
+  // floor, so the strip's flex-wrap moves the button to the next line.
+  it('keeps a minimum width for the sentence so the button wraps on a phone', async () => {
+    seedRecord();
+    renderLobby();
+    const strip = await screen.findByTestId('voice-resume-strip');
+    expect(strip.className).toContain('flex-wrap');
+    const message = screen.getByTestId('voice-resume-message');
+    expect(message.className).toMatch(/\bmin-w-\[10rem\]/);
+    expect(message.className).not.toMatch(/\bmin-w-0\b/);
+  });
+
   it('says it in Turkish', async () => {
     seedRecord();
     renderLobby('tr');

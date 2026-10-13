@@ -236,4 +236,39 @@ describe('LobbyVoiceFooter', () => {
     const link = screen.getByRole('link');
     expect(link).toHaveAttribute('href', '/settings/voice-video');
   });
+
+  // A dropped network: LiveKit first resumes the signal connection
+  // (SignalReconnecting), and only falls back to a full Reconnecting when
+  // that fails. The person is still in the room the whole time (up to two
+  // minutes) and must be told so — not shown "Voice Ready" as if they had
+  // left — and must be able to give up and leave.
+  it.each([ConnectionState.SignalReconnecting, ConnectionState.Reconnecting])(
+    'says "Reconnecting..." and keeps Disconnect usable while LiveKit is %s',
+    (state) => {
+      const disconnect = vi.fn();
+      renderFooter(makeVoice({ connectionState: state, activeChannelId: 'ch-1', disconnect }));
+      expect(screen.getByText('Reconnecting...')).toBeInTheDocument();
+      expect(screen.queryByText('Voice Ready')).not.toBeInTheDocument();
+      const leave = screen.getByRole('button', { name: 'Disconnect from voice' });
+      expect(leave).not.toBeDisabled();
+      fireEvent.click(leave);
+      expect(disconnect).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('says "Reconnecting..." in the active language', () => {
+    renderFooter(
+      makeVoice({ connectionState: ConnectionState.SignalReconnecting, activeChannelId: 'ch-1' }),
+      { serverName: 'Community', hasUser: true },
+      'tr'
+    );
+    expect(screen.getByText('Yeniden bağlanılıyor...')).toBeInTheDocument();
+    expect(screen.queryByText('Ses Hazır')).not.toBeInTheDocument();
+  });
+
+  it('a reconnect state left over after leaving the channel is not "Reconnecting..."', () => {
+    renderFooter(makeVoice({ connectionState: ConnectionState.SignalReconnecting, activeChannelId: null }));
+    expect(screen.getByText('Voice Ready')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Disconnect from voice' })).toBeDisabled();
+  });
 });

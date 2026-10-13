@@ -1,12 +1,13 @@
 'use client';
 
-import { useLobbyVoice, ConnectionState } from './LobbyVoiceProvider';
+import { useLobbyVoice } from './LobbyVoiceProvider';
 import { LobbyVoiceView } from './LobbyVoiceView';
 import { LobbyDmView } from './LobbyDmView';
 import { LobbyActivityView } from './LobbyActivityView';
 import { LobbyLiveRoster } from './LobbyLiveRoster';
 import { LobbyComposer } from './LobbyComposer';
 import { useT } from '@/lib/i18n/client';
+import { isInVoiceRoom } from '@/lib/voice-connection';
 import { initialOf } from '@/lib/initial';
 import type { LobbyAdminLinks } from '@/lib/admin-sections';
 import { BotAvatar, BotBadge } from './BotIdentity';
@@ -107,7 +108,9 @@ function LobbyMainAreaLive({ data }: { data: LobbyData }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showPinned, setShowPinned] = useState(false);
   const [notificationsMuted, setNotificationsMuted] = useState(false);
-  const connected = voice.connectionState === ConnectionState.Connected && !!voice.activeChannelId;
+  // In the room — connected, or LiveKit reconnecting: a network blip must
+  // not close the full-screen voice view (the footer says "Reconnecting...").
+  const inVoice = isInVoiceRoom(voice.connectionState) && !!voice.activeChannelId;
   // Use the provider's active text channel (switchable from sidebar) or
   // fall back to the SSR-provided one.
   const activeTextChannel = data.textChannels.find((c) => c.id === voice.activeTextChannelId)
@@ -177,7 +180,7 @@ function LobbyMainAreaLive({ data }: { data: LobbyData }) {
     );
   }
 
-  if (connected && voice.mainViewMode === 'voice' && voice.activeChannelId) {
+  if (inVoice && voice.mainViewMode === 'voice' && voice.activeChannelId) {
     return (
       <main className="flex-1 flex flex-col bg-background min-w-0 relative animate-fade-in-up">
         <LobbyVoiceView channelId={voice.activeChannelId} channelName={voiceChannelName} />

@@ -6,6 +6,8 @@ import { useT } from '@/lib/i18n/client';
 import type { Params } from '@/lib/i18n/core';
 import { initialOf } from '@/lib/initial';
 import { useLobbyVoice, type LobbyVoiceParticipant } from './LobbyVoiceProvider';
+import { ProfileTrigger } from './ProfileCardProvider';
+import { VoiceStatusIcon } from './VoiceStatusIcon';
 import Link from 'next/link';
 import { useEmailRestriction, useVerifyEmailAction } from '@/components/email-verification/EmailUnverifiedNotice';
 
@@ -415,38 +417,44 @@ export function LobbyVoiceChannels({
                           : []
                       }
                     >
-                      <div
-                        className={
-                          u.isSpeaking
-                            ? 'w-6 h-6 rounded-full bg-secondary-container relative border-2 border-success is-speaking'
-                            : 'w-6 h-6 rounded-full bg-secondary-container relative border-2 border-transparent'
-                        }
+                      {/* A left click opens the profile card; right-click and
+                          "⋮" keep the moderator menu. */}
+                      <ProfileTrigger
+                        userId={u.identity}
+                        // A placeholder ("Unknown member") or "You" is no name for a card.
+                        seed={u.nameKnown === false || u.isLocal ? { inVoice: true } : { displayName: u.name, inVoice: true }}
+                        className="flex min-w-0 flex-1 items-center gap-2 rounded text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
                       >
-                        <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-text-primary">
-                          {initialOf(u.name, { locale: t.locale })}
-                        </span>
-                      </div>
-                      <span
-                        className={
-                          u.isSpeaking
-                            ? 'font-label-sm text-text-primary flex-1 truncate'
-                            : 'font-label-sm text-text-secondary flex-1 truncate'
-                        }
-                      >
-                        {u.name}
-                      </span>
-                      {u.serverMuted ? (
                         <span
-                          className="material-symbols-outlined text-[14px] text-danger"
-                          title={t('lobbyMain.voice.serverMuted')}
-                          aria-label={t('lobbyMain.voice.serverMuted')}
+                          className={
+                            u.isSpeaking
+                              ? 'w-6 h-6 flex-none rounded-full bg-secondary-container relative border-2 border-success is-speaking'
+                              : 'w-6 h-6 flex-none rounded-full bg-secondary-container relative border-2 border-transparent'
+                          }
                         >
-                          block
+                          <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-text-primary">
+                            {initialOf(u.name, { locale: t.locale })}
+                          </span>
                         </span>
+                        <span
+                          className={
+                            u.isSpeaking
+                              ? 'font-label-sm text-text-primary flex-1 truncate'
+                              : 'font-label-sm text-text-secondary flex-1 truncate'
+                          }
+                        >
+                          {u.name}
+                        </span>
+                      </ProfileTrigger>
+                      {/* Icon-only statuses, each a named image (VoiceStatusIcon):
+                          a screen reader used to read "mic_off". Deafen is a
+                          local setting, so only your own row knows it. */}
+                      {u.serverMuted ? (
+                        <VoiceStatusIcon icon="block" label={t('lobbyMain.voice.serverMuted')} className="text-[14px] text-danger" />
+                      ) : u.isLocal && voice.deafenEnabled ? (
+                        <VoiceStatusIcon icon="headphones_off" label={t('lobbyMain.voice.deafened')} className="text-[14px] text-danger" />
                       ) : !u.micEnabled ? (
-                        <span className="material-symbols-outlined text-[14px] text-danger">
-                          mic_off
-                        </span>
+                        <VoiceStatusIcon icon="mic_off" label={t('lobby.voice.muted')} className="text-[14px] text-danger" />
                       ) : null}
                       {isConnected && canMuteMembers && !u.isLocal ? (
                         <button
@@ -474,10 +482,10 @@ export function LobbyVoiceChannels({
                         </button>
                       ) : null}
                       {u.cameraEnabled ? (
-                        <span className="material-symbols-outlined text-[14px] text-primary" title={t('lobbyMain.voice.cameraOn')} aria-label={t('lobbyMain.voice.cameraOn')}>videocam</span>
+                        <VoiceStatusIcon icon="videocam" label={t('lobbyMain.voice.cameraOn')} className="text-[14px] text-primary" />
                       ) : null}
                       {u.hasScreenShare ? (
-                        <span className="material-symbols-outlined text-[14px] text-success" title={t('lobbyMain.voice.sharingScreen')} aria-label={t('lobbyMain.voice.sharingScreen')}>present_to_all</span>
+                        <VoiceStatusIcon icon="present_to_all" label={t('lobbyMain.voice.sharingScreen')} className="text-[14px] text-success" />
                       ) : null}
                     </ParticipantRow>
                   ))}

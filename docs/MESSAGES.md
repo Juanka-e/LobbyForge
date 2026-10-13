@@ -60,6 +60,26 @@ The route enforces three things:
 2. The body passes zod validation (the `replyToId`, if present, is a valid uuid).
 3. The reply target, if present, is in the same channel — the DB helper rejects cross-channel replies with a 500 wrapped error.
 
+### Mention Everyone
+
+Content that mentions `@everyone` **or `@here`** needs the **Mention
+Everyone** permission (`mention_everyone`); without it the route answers
+`403`. As in Discord, the one permission covers both: `@here` pings everyone
+online, the same mass ping for the people it reaches. The check
+(`mentionsEveryoneOrHere`, `lib/everyone-mention.ts`) runs on:
+
+- a new message (`POST`);
+- an edit (`PATCH` with `content`) — posting "hi" and editing it to
+  "hi @everyone" no longer gets round it;
+- a chat poll's question and options together (docs/CHAT_POLLS.md).
+
+Every mention a reader sees counts, wherever it sits: `(@everyone)`,
+`hi,@here` and a full-width `＠everyone` (the text is NFKC-normalised
+first) all need the permission. A letter, digit or `_` right before the `@`
+or right after the word means it is not a mention, so `ada@everyone.example`
+and `@everyones` pass. Bots and webhooks may never mention either; that is
+the same rule (`containsMassMention`, docs/BOTS.md).
+
 ### `PATCH` body
 
 ```ts
@@ -97,7 +117,7 @@ interface MessageJson {
 | 400 | Body fails zod validation (empty content, > 4000 chars, invalid `replyToId` uuid, an unknown field, client `metadata` → `metadata_not_allowed`) — or query string fails (`?before=not-a-date`, `?limit=abc`) |
 | 401 | Cookie missing or signature invalid |
 | 413 | `POST` / `PATCH` body over 16 KiB |
-| 403 | Caller is not a member (reads) or not the author/owner (mutations) |
+| 403 | Caller is not a member (reads) or not the author/owner (mutations); `@everyone` / `@here` in the content without Mention Everyone |
 | 404 | Server not found, channel not found, channel doesn't belong to the URL's server, message not found, or message doesn't belong to the URL's channel |
 | 500 | Drizzle threw (wrapped with a sanitized message) — including the "reply target is in a different channel" case |
 | 503 | Cookie has no `uid` (DB not migrated / down) — see "503 contract" below |

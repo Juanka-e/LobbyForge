@@ -57,8 +57,8 @@ installed: chat polls don't depend on it.
   be `text` or `announcement`.
 
 The same gates as a message apply to posting a poll: email verification
-(`message`), channel visibility, member timeouts, `@everyone` needing
-**Mention Everyone**, the Moderation Bot (it judges the question and every
+(`message`), channel visibility, member timeouts, `@everyone` or `@here`
+needing **Mention Everyone**, the Moderation Bot (it judges the question and every
 answer together, exactly like a new message), and the message rate limit
 (polls share the `messages-create` budget). Voting is gated like a reaction:
 a timed-out member, or an unverified account in `required` mode
