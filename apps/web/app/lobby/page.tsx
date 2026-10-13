@@ -306,16 +306,18 @@ function buildMembers(
         status = p.channelId && voiceChannelIds.has(p.channelId) ? 'in-voice' : 'online';
       }
       const presence: PresenceStatus = status === 'offline' ? 'offline' : toPresenceStatus(p?.status);
-      const highestRole = s.roles.find((role) => role.name !== '@everyone');
       return {
         id: s.userId,
         name: s.displayName,
         status,
         presence,
         grayscale: status === 'offline' || undefined,
-        roleName: highestRole?.name ?? (s.roleName === '@everyone' ? null : s.roleName),
-        roleColor: highestRole?.color ?? s.roleColor,
-        roleIcon: highestRole?.icon ?? s.roleIcon,
+        // The display role (`pickDisplayRole`): the highest one other than
+        // @everyone, worked out by the query from every role held — the
+        // same one the Members page shows.
+        roleName: s.roleName,
+        roleColor: s.roleColor,
+        roleIcon: s.roleIcon,
         roles: s.roles,
         isGuest: s.isGuest,
         globalDisplayName: s.globalDisplayName,

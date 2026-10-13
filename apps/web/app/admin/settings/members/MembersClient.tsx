@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
 import { initialOf } from '@/lib/initial';
+import { displayRoleOf } from '@/lib/display-role';
 import JoinRequestsSection from './JoinRequestsSection';
 
 export interface MemberView {
@@ -170,8 +171,12 @@ export default function MembersClient({
       );
       const data = (await response.json().catch(() => ({}))) as { error?: string };
       if (!response.ok) throw new Error(data.error ?? t('adminSettings.members.rolesFailed'));
+      // The display role, as the server stores it: the highest role other
+      // than @everyone (taking the first one sent showed "@everyone").
       const roleById = new Map(roles.map((role) => [role.id, role]));
-      const primary = draftRoles.map((id) => roleById.get(id)).filter(Boolean)[0] ?? null;
+      const primary = displayRoleOf(
+        draftRoles.map((id) => roleById.get(id)).filter((role): role is RoleOption => role !== undefined)
+      );
       setMemberList((current) =>
         current.map((item) =>
           item.userId === member.userId

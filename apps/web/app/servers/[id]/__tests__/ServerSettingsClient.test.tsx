@@ -186,3 +186,42 @@ describe('controls', () => {
     expect(await screen.findByRole('button', { name: 'Save access policy' })).toBeEnabled();
   });
 });
+
+describe('roles', () => {
+  // The members API names each member's DISPLAY role (the highest other
+  // than @everyone) in `roleId`; counting that alone hid every holder of a
+  // lower role, and the A-to-Z run's fix moved @everyone out of it.
+  it('counts every holder of a role, and everyone for @everyone', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
+        if (url.endsWith('/members'))
+          return json({
+            members: [
+              { userId: OWNER, displayName: 'Olivia', isOwner: true, roleId: null, roleIds: [] },
+              { userId: ME, displayName: 'Me', isOwner: false, roleId: 'r-mod', roleIds: ['r-everyone', 'r-vip', 'r-mod'] },
+              { userId: ADA, displayName: 'Ada', isOwner: false, roleId: 'r-vip', roleIds: ['r-everyone', 'r-vip'] },
+            ],
+          });
+        if (url.endsWith('/roles'))
+          return json({
+            roles: [
+              { id: 'r-mod', name: 'Moderator', color: null, position: 5, permissions: [] },
+              { id: 'r-vip', name: 'VIP', color: null, position: 2, permissions: [] },
+              { id: 'r-everyone', name: '@everyone', color: null, position: 0, permissions: [] },
+            ],
+          });
+        return fetchMock(input);
+      })
+    );
+    renderAs({});
+    await screen.findByText('Ada');
+    fireEvent.click(screen.getByRole('button', { name: /Roles$/ }));
+    const countOf = async (name: string) => (await screen.findByRole('cell', { name })).nextElementSibling?.textContent;
+    expect(await countOf('Moderator')).toBe('1');
+    expect(await countOf('VIP')).toBe('2');
+    expect(await countOf('@everyone')).toBe('3');
+  });
+});

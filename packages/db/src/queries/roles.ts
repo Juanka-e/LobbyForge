@@ -53,6 +53,26 @@ export const EVERYONE_ROLE_NAME = '@everyone';
 export const ADMIN_ROLE_NAME = 'Owner';
 
 /**
+ * The role a member is SHOWN with — the Members page's Role column, the
+ * lobby's name colour, `memberships.role_id`: the highest-positioned role
+ * they hold other than `@everyone`. A tie goes to the role listed first.
+ * Null when they hold nothing else (shown as "Member" or "Guest").
+ *
+ * `@everyone` is every member's base role, never a rank to show: the role
+ * PUT sends the whole set with `@everyone` in it (the profile card sends it
+ * first), and taking the first id made `@everyone` the display role. The
+ * web app's client-side copy of this rule is `apps/web/lib/display-role.ts`.
+ */
+export function pickDisplayRole<T extends { name: string; position: number }>(held: readonly T[]): T | null {
+  let best: T | null = null;
+  for (const role of held) {
+    if (role.name === EVERYONE_ROLE_NAME) continue;
+    if (!best || role.position > best.position) best = role;
+  }
+  return best;
+}
+
+/**
  * The default permission set for `@everyone`. New members get exactly
  * these unless a server admin changes the role.
  */
@@ -473,11 +493,15 @@ export async function getUserPermissions(
 }
 
 /**
- * Used by tests / introspection: list the members of a server with their
- * joined role(s). Returns a list of `MemberRoleInfo` tuples. As of
- * M15.5 the union of `memberships.roleId` + `membership_roles` is
- * returned as `roleIds`, and the role with the highest position wins
- * as `roleName` / `rolePosition` for UI display purposes.
+ * The members of a server with their roles (`GET /api/servers/{id}/members`,
+ * the admin pages). `roleIds` is every role a member holds — the
+ * `membership_roles` join table plus the legacy `memberships.roleId`.
+ * `roleId` / `roleName` / `rolePosition` / `permissions` describe the
+ * DISPLAY role (`pickDisplayRole`: the highest one other than
+ * `@everyone`), all null / empty when there is none. They are worked out
+ * from the whole set rather than read from `memberships.roleId`, so a
+ * row written before the display rule (with `@everyone` stored there)
+ * shows right too.
  */
 export interface MemberRoleInfo {
   userId: string;
@@ -492,15 +516,15 @@ export async function listMembersForServer(
   db: DbClient,
   serverId: string
 ): Promise<MemberRoleInfo[]> {
-  // First fetch the (membership, primary role) pairs.
+  // The memberships, with the legacy single-role column's role.
   const rows = await db
     .select({
       membershipId: memberships.id,
       userId: memberships.userId,
-      roleId: memberships.roleId,
-      roleName: roles.name,
-      rolePosition: roles.position,
-      permissions: roles.permissions,
+      legacyRoleId: memberships.roleId,
+      legacyRoleName: roles.name,
+      legacyRolePosition: roles.position,
+      legacyRolePermissions: roles.permissions,
     })
     .from(memberships)
     .leftJoin(roles, eq(roles.id, memberships.roleId))
@@ -509,26 +533,58 @@ export async function listMembersForServer(
 
   if (rows.length === 0) return [];
 
-  // Then load the full role set per member from the join table.
-  const { listRoleIdsForMemberships } = await import('./memberships.js');
-  const roleIdsByMembership = await listRoleIdsForMemberships(
-    db,
-    rows.map((r) => r.membershipId)
-  );
+  // Every held role, scoped by server through a join — not one bind
+  // parameter per membership, which a very large server would push past
+  // Postgres' 65,535-parameter ceiling.
+  const links = await db
+    .select({
+      membershipId: membershipRoles.membershipId,
+      id: roles.id,
+      name: roles.name,
+      position: roles.position,
+      permissions: roles.permissions,
+    })
+    .from(membershipRoles)
+    .innerJoin(roles, eq(roles.id, membershipRoles.roleId))
+    .innerJoin(memberships, eq(memberships.id, membershipRoles.membershipId))
+    .where(eq(memberships.serverId, serverId));
+
+  type HeldRole = { id: string; name: string; position: number; permissions: string[] };
+  const heldByMembership = new Map<string, HeldRole[]>();
+  for (const link of links) {
+    const list = heldByMembership.get(link.membershipId) ?? [];
+    if (!list.some((role) => role.id === link.id)) {
+      list.push({
+        id: link.id,
+        name: link.name,
+        position: link.position,
+        permissions: (link.permissions as string[] | null) ?? [],
+      });
+    }
+    heldByMembership.set(link.membershipId, list);
+  }
 
   return rows.map((r) => {
-    const allRoleIds = new Set<string>();
-    if (r.roleId) allRoleIds.add(r.roleId);
-    for (const id of roleIdsByMembership.get(r.membershipId) ?? []) {
-      allRoleIds.add(id);
+    const held = heldByMembership.get(r.membershipId) ?? [];
+    if (r.legacyRoleId && r.legacyRoleName !== null && !held.some((role) => role.id === r.legacyRoleId)) {
+      held.unshift({
+        id: r.legacyRoleId,
+        name: r.legacyRoleName,
+        position: r.legacyRolePosition ?? 0,
+        permissions: (r.legacyRolePermissions as string[] | null) ?? [],
+      });
     }
+    const roleIds = held.map((role) => role.id);
+    // A legacy id whose role row is gone still lists (as before).
+    if (r.legacyRoleId && !roleIds.includes(r.legacyRoleId)) roleIds.unshift(r.legacyRoleId);
+    const display = pickDisplayRole(held);
     return {
       userId: r.userId,
-      roleId: r.roleId,
-      roleIds: Array.from(allRoleIds),
-      roleName: r.roleName,
-      rolePosition: r.rolePosition,
-      permissions: (r.permissions as string[] | null) ?? [],
+      roleId: display?.id ?? null,
+      roleIds,
+      roleName: display?.name ?? null,
+      rolePosition: display?.position ?? null,
+      permissions: display?.permissions ?? [],
     };
   });
 }
