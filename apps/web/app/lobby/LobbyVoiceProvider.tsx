@@ -45,6 +45,7 @@ import {
 import { VOICE_TEST_STATE_EVENT, type VoiceTestKind } from '@/lib/voice-test-events';
 import { voiceBlockedNotice } from '@/lib/voice-block-notice';
 import { disconnectReasonNotice } from '@/lib/voice-disconnect-notice';
+import { isInVoiceRoom } from '@/lib/voice-connection';
 import { handleEmailUnverified } from '@/components/email-verification/email-status-store';
 import {
   isMicrophoneBlocked,
@@ -1895,12 +1896,7 @@ export function LobbyVoiceProvider({
 
   // In the room — connected, or LiveKit still reconnecting — and not in
   // the middle of a join.
-  const voiceLive =
-    !!activeChannelId &&
-    !connecting &&
-    (connectionState === ConnectionState.Connected ||
-      connectionState === ConnectionState.Reconnecting ||
-      connectionState === ConnectionState.SignalReconnecting);
+  const voiceLive = !!activeChannelId && !connecting && isInVoiceRoom(connectionState);
 
   // Remember the channel while this tab is in it, refreshed every 5 s (also
   // while LiveKit reconnects, so a drop it gives up on is still fresh), and

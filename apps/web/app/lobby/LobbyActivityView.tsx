@@ -9,7 +9,8 @@ import { activityRefusalMessage, parseActivityRefusal } from '@/lib/activity-ref
 import type { ActivityHostState } from '@/lib/activity-host-view';
 import { PluginSurface } from '../room/PluginSurface';
 import { findOpenActivity, useActivitySession } from '../room/useActivitySession';
-import { ConnectionState, useLobbyVoice } from './LobbyVoiceProvider';
+import { useLobbyVoice } from './LobbyVoiceProvider';
+import { isInVoiceRoom } from '@/lib/voice-connection';
 import { PluginFrameSurface } from './PluginFrame';
 import { VoiceResumeStrip } from './VoiceResumeStrip';
 import { buildPanelPlayers } from './panel-players';
@@ -252,7 +253,9 @@ export function LobbyActivityView({
   // with START_ACTIVITY, and — once the host has abandoned a game played
   // over voice — anyone in its voice room.
   const isHost = Boolean(detail?.createdBy && currentUserId === detail.createdBy);
-  const inVoiceRoom = voice.activeChannelId === channelId && voice.connectionState === ConnectionState.Connected;
+  // Still in the room while LiveKit reconnects (the footer says so): the
+  // Join bar and the host notes must not read a drop as having left.
+  const inVoiceRoom = voice.activeChannelId === channelId && isInVoiceRoom(voice.connectionState);
   const host = detail?.host ?? null;
   const canEnd = isHost || canStartActivities || Boolean(host?.abandoned && inVoiceRoom);
   const hostNote = hostNoteKey(host, { isHost, inVoiceRoom });

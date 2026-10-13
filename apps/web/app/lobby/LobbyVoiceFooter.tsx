@@ -3,6 +3,7 @@
 import { useLobbyVoice, ConnectionState } from './LobbyVoiceProvider';
 import { LobbyPresenceMenu } from './LobbyPresenceMenu';
 import { useT } from '@/lib/i18n/client';
+import { isVoiceReconnecting } from '@/lib/voice-connection';
 import Link from 'next/link';
 
 /**
@@ -31,10 +32,7 @@ export function LobbyVoiceFooter({ serverName, hasUser, displayName }: LobbyVoic
   // full Reconnecting when that fails. Either way the person is still in
   // the room — for up to two minutes (lib/voice-resume.ts) — so say so,
   // and keep Disconnect usable to stop waiting.
-  const reconnecting =
-    !!voice.activeChannelId &&
-    (voice.connectionState === ConnectionState.Reconnecting ||
-      voice.connectionState === ConnectionState.SignalReconnecting);
+  const reconnecting = !!voice.activeChannelId && isVoiceReconnecting(voice.connectionState);
   const connecting = voice.connecting || voice.connectionState === ConnectionState.Connecting || reconnecting;
   const stateLabel = connecting
     ? reconnecting
