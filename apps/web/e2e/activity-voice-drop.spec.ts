@@ -94,10 +94,18 @@ async function inVoice(p: Player): Promise<void> {
 /** The activities view of the voice channel, from the chat header (in voice) or the sidebar. */
 async function openHub(p: Player): Promise<void> {
   const close = p.page.getByRole('button', { name: 'Close activities', exact: true });
-  if (await close.isVisible().catch(() => false)) return;
   const header = p.page.getByTitle('Start a game or activity in this voice room');
-  if (await header.isVisible().catch(() => false)) await header.click();
-  else await p.page.getByTitle(`Open activities in ${voiceName}`).click();
+  const sidebar = p.page.getByTitle(`Open activities in ${voiceName}`);
+  // Right after a navigation the lobby may still reopen the view this tab
+  // had open (lf.view.v1): let the page settle on one or the other first.
+  await expect(close.or(header).or(sidebar).first()).toBeVisible(SYNC);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (await close.isVisible().catch(() => false)) return;
+    const entry = (await header.isVisible().catch(() => false)) ? header : sidebar;
+    await entry.click({ timeout: 5_000 }).catch(() => undefined);
+    if (await close.waitFor({ state: 'visible', timeout: 3_000 }).then(() => true, () => false)) return;
+    await p.page.waitForTimeout(500);
+  }
   await expect(close).toBeVisible(SYNC);
 }
 
