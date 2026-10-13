@@ -115,6 +115,33 @@ describe('the community menu', () => {
     ]);
   });
 
+  // The profile-card e2e run: a screen reader read the trigger as
+  // "N Night Owls expand_more" and each entry with its icon's ligature
+  // first ("history Audit log").
+  it('names the trigger by what it does and each entry by its label alone', () => {
+    wrap(
+      <LobbyServerMenu
+        serverName="Night Owls"
+        instanceLogoUrl={null}
+        serverId="srv-1"
+        adminMenu={buildLobbyAdminLinks({ sections: ['audit'] }).menu}
+        isOfficial={false}
+      />
+    );
+    const trigger = screen.getByRole('button', { name: 'Night Owls — open the community menu' });
+    fireEvent.click(trigger);
+    const menu = screen.getByRole('menu', { name: 'Night Owls menu' });
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.getAttribute('href'))).toEqual(['/admin/audit', '/settings']);
+    expect(within(menu).getByRole('menuitem', { name: 'Audit log' })).toBeTruthy();
+    expect(within(menu).getByRole('menuitem', { name: 'User settings' })).toBeTruthy();
+  });
+
+  it('names a trigger with no entries by the community alone', () => {
+    wrap(<LobbyServerMenu serverName="Night Owls" instanceLogoUrl={null} serverId={null} adminMenu={[]} isOfficial={false} />);
+    const trigger = screen.getByRole('button', { name: 'Night Owls' });
+    expect((trigger as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('builds the items from the resolved links only', () => {
     expect(buildServerMenuItems({ adminMenu: [], isOfficial: false }).map((item) => item.href)).toEqual(['/settings']);
     expect(
