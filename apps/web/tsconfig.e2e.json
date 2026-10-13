@@ -1,0 +1,12 @@
+{
+  // The Playwright specs (e2e/, e2e-sandbox/) run outside the Next build, so
+  // the app's tsconfig never sees them; `pnpm typecheck` checks them here.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": [],
+    "types": ["node"]
+  },
+  "include": ["e2e/**/*.ts", "e2e-sandbox/**/*.ts", "playwright.config.ts"],
+  "exclude": ["node_modules", "e2e-sandbox/.install"]
+}

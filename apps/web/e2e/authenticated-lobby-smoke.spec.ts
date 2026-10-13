@@ -74,7 +74,7 @@ test.describe('authenticated lobby smoke without database reset', () => {
     await ownStreamPreview.getByRole('button', { name: 'Join stream' }).click();
     await expect(focus.locator('main section')).toHaveCount(2);
     await expect(focus.locator('main video')).toHaveCount(2);
-    await expect.poll(() => focus.locator('main video').evaluateAll((videos) => videos.every((video) => video.readyState >= 2))).toBe(true);
+    await expect.poll(() => focus.locator('main video').evaluateAll((videos) => videos.every((video) => (video as HTMLVideoElement).readyState >= 2))).toBe(true);
     const overflow = await focus.evaluate((element) => ({
       horizontal: element.scrollWidth > element.clientWidth,
       vertical: element.scrollHeight > element.clientHeight,
