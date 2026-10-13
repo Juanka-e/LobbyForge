@@ -15,6 +15,7 @@ All notable changes to the LobbyForge monorepo skeleton.
 - **API:** `GET /api/servers/{id}/members/{userId}/profile` returns one member's profile, projected for the viewer:
   - A 404 unless both people belong to the community.
   - It uses the lobby's own privacy projection. A hidden profile keeps only names and roles, and a block in either direction keeps the payload just as small.
+  - A member who blocked you gets the same answer as a hidden profile. The card is cached per viewer and re-asked after 30 seconds, and roles are read fresh before each change, so a whole-set role update can't undo someone else's change.
   - `viewerCan` follows the moderation gate's rules, which now share their permission map and rank check with it (`lib/member-capabilities.ts`).
   - New queries in `@lobbyforge/db`: `getMemberProfileRecord` and `listMutualServers`.
 - **Fixes:**

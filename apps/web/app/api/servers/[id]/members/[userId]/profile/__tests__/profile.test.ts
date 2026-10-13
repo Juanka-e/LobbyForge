@@ -45,6 +45,9 @@ vi.mock('@/lib/security-headers', () => ({
 }));
 const getUserPresenceInServerForUser = vi.fn();
 vi.mock('@/lib/redis', () => ({ getUserPresenceInServerForUser }));
+/** Channels the viewer may see; null = every channel (owner / Manage Channels). */
+const resolveVisibleChannelIds = vi.fn();
+vi.mock('@/lib/presence-view', () => ({ resolveVisibleChannelIds }));
 
 const SECRET = 'x'.repeat(32);
 const SERVER = '11111111-1111-4111-8111-111111111111';
@@ -96,6 +99,7 @@ beforeEach(() => {
   process.env.LOBBYFORGE_SESSION_SECRET = SECRET;
   for (const fn of Object.values(dbFns)) if (typeof fn === 'function') fn.mockReset();
   getUserPresenceInServerForUser.mockReset();
+  resolveVisibleChannelIds.mockReset().mockResolvedValue(null);
   records = {
     [OWNER]: record(OWNER, { roles: [EVERYONE], nickname: null, globalDisplayName: 'Olivia' }),
     [MOD]: record(MOD, { roles: [MODS, EVERYONE] }),
@@ -119,6 +123,9 @@ beforeEach(() => {
   });
   dbFns.listRolesForServer.mockResolvedValue(SERVER_ROLES);
   getUserPresenceInServerForUser.mockResolvedValue({ userId: MEMBER, status: 'idle', channelId: 'ch-1', lastSeen: Date.now() });
+  dbFns.getChannelById.mockImplementation(async (_db: unknown, id: string) =>
+    id === 'ch-voice' ? { id, serverId: SERVER, type: 'voice' } : id === 'ch-1' ? { id, serverId: SERVER, type: 'text' } : null
+  );
 });
 
 async function get(viewer: string | null, target: string = MEMBER, serverId: string = SERVER): Promise<Response> {
@@ -282,20 +289,30 @@ describe('blocks', () => {
     expect(await res.text()).not.toContain('secret-bio-text');
   });
 
-  it('the member blocked the viewer: the same small payload, and nothing says who blocked whom', async () => {
+  it('the member blocked the viewer: the same small payload, and nothing tells it apart from a hidden profile', async () => {
     dbFns.isUserBlocked.mockImplementation(async (_db: unknown, blocker: string) => blocker === MEMBER);
     const res = await get(VIEWER);
     const { profile, viewerCan } = await body(res.clone());
-    expect(profile).toMatchObject({ blockedByMe: false, limited: true, presence: null, bio: null, statusText: null });
-    expect(viewerCan.message).toBe(false);
+    expect(profile).toMatchObject({ blockedByMe: false, limited: true, bio: null, statusText: null, memberSince: null });
+    // Like the member list (the presence feed drops only users YOU blocked)…
+    expect(profile.presence).toBe('idle');
+    // …and the message box stays: the DM route refuses, as it always did.
+    expect(viewerCan.message).toBe(true);
     const raw = await res.text();
     expect(raw).not.toMatch(/blockedMe|blockedBy"|blockedViewer/);
+
+    // The same member with a hidden profile instead, and no block: the same answer.
+    dbFns.isUserBlocked.mockResolvedValue(false);
+    records[MEMBER] = record(MEMBER, { profileVisibility: 'nobody' });
+    const hidden = await body(await get(VIEWER));
+    expect({ ...hidden.profile }).toEqual({ ...profile });
+    expect(hidden.viewerCan).toEqual(viewerCan);
   });
 
   it('a block does not take moderation away: a blocked moderator can still act', async () => {
     dbFns.isUserBlocked.mockImplementation(async (_db: unknown, blocker: string) => blocker === MEMBER);
     const { viewerCan } = await body(await get(MOD));
-    expect(viewerCan).toMatchObject({ kick: true, ban: true, timeout: true, message: false });
+    expect(viewerCan).toMatchObject({ kick: true, ban: true, timeout: true, message: true });
   });
 });
 
@@ -326,6 +343,31 @@ describe('presence', () => {
   it('Redis down: offline, not an error', async () => {
     getUserPresenceInServerForUser.mockRejectedValueOnce(new Error('down'));
     expect((await body(await get(VIEWER))).profile.presence).toBe('offline');
+  });
+});
+
+describe('in voice', () => {
+  it('true in a voice room the viewer can see, false in a text channel', async () => {
+    getUserPresenceInServerForUser.mockResolvedValueOnce({ userId: MEMBER, status: 'dnd', channelId: 'ch-voice', lastSeen: Date.now() });
+    expect((await body(await get(VIEWER))).profile).toMatchObject({ presence: 'dnd', inVoice: true });
+    expect((await body(await get(VIEWER))).profile).toMatchObject({ presence: 'idle', inVoice: false });
+  });
+
+  it('false in a voice room the viewer cannot see, for a hidden status, Invisible and a block', async () => {
+    resolveVisibleChannelIds.mockResolvedValueOnce(new Set(['ch-1']));
+    getUserPresenceInServerForUser.mockResolvedValueOnce({ userId: MEMBER, status: 'online', channelId: 'ch-voice', lastSeen: Date.now() });
+    expect((await body(await get(VIEWER))).profile).toMatchObject({ presence: 'online', inVoice: false });
+
+    dbFns.getUserSettings.mockResolvedValueOnce({ privacy: { ...dbFns.DEFAULT_USER_PRIVACY_SETTINGS, onlineStatusVisibility: 'nobody' } });
+    getUserPresenceInServerForUser.mockResolvedValueOnce({ userId: MEMBER, status: 'online', channelId: 'ch-voice', lastSeen: Date.now() });
+    expect((await body(await get(VIEWER))).profile).toMatchObject({ presence: 'offline', inVoice: false });
+
+    getUserPresenceInServerForUser.mockResolvedValueOnce({ userId: MEMBER, status: 'offline', channelId: 'ch-voice', lastSeen: Date.now() });
+    expect((await body(await get(VIEWER))).profile).toMatchObject({ presence: 'offline', inVoice: false });
+
+    dbFns.isUserBlocked.mockImplementation(async (_db: unknown, blocker: string) => blocker === VIEWER);
+    getUserPresenceInServerForUser.mockResolvedValue({ userId: MEMBER, status: 'online', channelId: 'ch-voice', lastSeen: Date.now() });
+    expect((await body(await get(VIEWER))).profile).toMatchObject({ presence: null, inVoice: false });
   });
 });
 

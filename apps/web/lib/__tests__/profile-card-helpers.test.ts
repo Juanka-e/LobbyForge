@@ -102,6 +102,7 @@ describe('mergeProfileView', () => {
         statusText: 'api status',
         bio: 'api bio',
         presence: 'online',
+        inVoice: false,
         roles: [],
         memberSince: null,
         accountCreatedAt: null,
@@ -137,6 +138,13 @@ describe('mergeProfileView', () => {
   it('the API wins for everything it projects — a withheld field never comes back from the seed', () => {
     const view = mergeProfileView(seed, api({ bio: null, statusText: null, avatarUrl: null, limited: true }));
     expect(view).toMatchObject({ bio: null, statusText: null, avatarUrl: null, limited: true, loaded: true });
+  });
+
+  it('in voice: a live seed fact first, else the API; never while the API withholds presence', () => {
+    expect(mergeProfileView({ ...seed, inVoice: undefined }, api({ inVoice: true })).inVoice).toBe(true);
+    expect(mergeProfileView({ ...seed, inVoice: false }, api({ inVoice: true })).inVoice).toBe(false);
+    expect(mergeProfileView(seed, api({ presence: null, inVoice: false })).inVoice).toBe(false);
+    expect(mergeProfileView({ ...seed, inVoice: undefined }, null).inVoice).toBe(false);
   });
 
   it('presence: the live seed beats the API snapshot, unless the API withholds it; yours is what you picked', () => {

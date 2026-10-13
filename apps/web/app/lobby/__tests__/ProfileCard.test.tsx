@@ -61,6 +61,7 @@ function profileFor(userId: string, overrides: Partial<MemberProfileResponse['vi
       statusText: null,
       bio: `${name} bio`,
       presence: 'online',
+      inVoice: false,
       roles: [],
       memberSince: '2026-02-03T04:05:06.000Z',
       accountCreatedAt: '2025-01-02T03:04:05.000Z',
@@ -298,6 +299,17 @@ describe('every place that shows a person', () => {
     fireEvent.click(avatar);
     expect(screen.getByRole('dialog', { name: 'Alice profile' })).toBeInTheDocument();
     expect(screen.getAllByTestId('chat-author')).toHaveLength(1);
+  });
+
+  it('a card opened from chat shows the API’s status and voice state, not the stale page render’s', async () => {
+    const { ProfileTrigger } = await import('../ProfileCardProvider');
+    // The page rendered Bob idle and in voice; the API says online, not in voice.
+    await renderLobby(<ProfileTrigger userId={BOB}>Bob</ProfileTrigger>);
+    fireEvent.click(screen.getByRole('button', { name: 'Bob' }));
+    const card = screen.getByRole('dialog', { name: 'Bob profile' });
+    await waitFor(() => expect(within(card).getByRole('img', { name: 'Online' })).toBeInTheDocument());
+    expect(within(card).queryByText('In voice')).toBeNull();
+    expect(within(card).queryByRole('img', { name: 'Idle' })).toBeNull();
   });
 
   it('voice roster: a left click opens the card; right-click still opens the moderator menu', async () => {

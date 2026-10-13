@@ -3,7 +3,7 @@
 import { useCallback, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
 import { profileActionErrorMessage, type ProfileAction } from '@/lib/profile-action-errors';
-import type { MemberProfileResponse } from '@/lib/member-profile';
+import { fetchMemberProfile } from '@/lib/member-profile';
 import type { ModerationKind, ModerationRequest } from './ModerationDialog';
 
 export interface ProfileNotice {
@@ -26,15 +26,16 @@ export interface ProfileNotice {
 export function useProfileActions({
   serverId,
   userId,
+  viewerId,
   name,
-  data,
   onChanged,
   onRemoved,
 }: {
   serverId: string;
   userId: string;
+  /** Whose projection the profile cache holds (see lib/member-profile.ts). */
+  viewerId?: string | null;
   name: string;
-  data: MemberProfileResponse | null;
   /** Refetch the profile after a change. */
   onChanged?: () => void;
   /** The member left the community (kick, ban). */
@@ -57,11 +58,33 @@ export function useProfileActions({
 
   const base = `/api/servers/${encodeURIComponent(serverId)}/members/${encodeURIComponent(userId)}`;
 
-  const putRoles = useCallback(
-    async (roleIds: string[]) => {
+  /**
+   * The role PUT replaces the WHOLE set. Built from a profile shown a while
+   * ago, it would silently undo a change someone else made since (another
+   * moderator, the admin Members page). So the set is read fresh right
+   * before every change and the edit is applied to that.
+   */
+  const changeRoles = useCallback(
+    async (edit: (current: string[]) => string[]) => {
       setRolesBusy(true);
       setRolesError(null);
       try {
+        const fresh = await fetchMemberProfile(serverId, userId, { force: true, viewerId }).catch(() => undefined);
+        if (fresh === undefined) {
+          setRolesError(t('shell.profile.error.network'));
+          return;
+        }
+        if (!fresh || !fresh.viewerCan.manageRoles) {
+          setRolesError(t(fresh ? 'shell.profile.error.forbidden' : 'shell.profile.error.notMember'));
+          onChanged?.();
+          return;
+        }
+        const current = fresh.viewerCan.currentRoleIds;
+        const roleIds = edit(current);
+        if (roleIds.length === current.length && roleIds.every((id) => current.includes(id))) {
+          onChanged?.();
+          return;
+        }
         const res = await fetch(`${base}/role`, {
           method: 'PUT',
           credentials: 'same-origin',
@@ -79,24 +102,17 @@ export function useProfileActions({
         setRolesBusy(false);
       }
     },
-    [base, onChanged, refusal, t]
+    [base, onChanged, refusal, serverId, t, userId, viewerId]
   );
 
   const addRole = useCallback(
-    (roleId: string) => {
-      const current = data?.viewerCan.currentRoleIds ?? [];
-      if (current.includes(roleId)) return;
-      void putRoles([...current, roleId]);
-    },
-    [data, putRoles]
+    (roleId: string) => void changeRoles((current) => (current.includes(roleId) ? current : [...current, roleId])),
+    [changeRoles]
   );
 
   const removeRole = useCallback(
-    (roleId: string) => {
-      const current = data?.viewerCan.currentRoleIds ?? [];
-      void putRoles(current.filter((id) => id !== roleId));
-    },
-    [data, putRoles]
+    (roleId: string) => void changeRoles((current) => current.filter((id) => id !== roleId)),
+    [changeRoles]
   );
 
   /** Run a confirmed moderation action. Resolves to the error to show in the dialog, or null. */

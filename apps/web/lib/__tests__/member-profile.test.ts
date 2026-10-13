@@ -3,7 +3,9 @@ import {
   __clearMemberProfileCacheForTests,
   fetchMemberProfile,
   invalidateMemberProfile,
+  isMemberProfileFresh,
   MemberProfileError,
+  PROFILE_FRESH_MS,
   readCachedMemberProfile,
 } from '@/lib/member-profile';
 
@@ -54,6 +56,26 @@ describe('fetchMemberProfile', () => {
     expect(fetcher).toHaveBeenCalledTimes(3);
     invalidateMemberProfile('s1');
     expect(readCachedMemberProfile('s1', 'u1')).toBeNull();
+  });
+
+  it('is per viewer: another account signing in on the same tab never reads the last one’s answers', async () => {
+    const fetcher = vi.fn(async () => Response.json(body('u1')));
+    await fetchMemberProfile('s1', 'u1', { fetcher: fetcher as unknown as typeof fetch, viewerId: 'viewer-a' });
+    expect(readCachedMemberProfile('s1', 'u1', 'viewer-a')).not.toBeNull();
+    expect(readCachedMemberProfile('s1', 'u1', 'viewer-b')).toBeNull();
+    // …and viewer A's answer is gone, not kept for later.
+    expect(readCachedMemberProfile('s1', 'u1', 'viewer-a')).toBeNull();
+    await fetchMemberProfile('s1', 'u1', { fetcher: fetcher as unknown as typeof fetch, viewerId: 'viewer-b' });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('knows when an answer is old enough to ask again', async () => {
+    const fetcher = vi.fn(async () => Response.json(body('u1')));
+    await fetchMemberProfile('s1', 'u1', { fetcher: fetcher as unknown as typeof fetch });
+    expect(isMemberProfileFresh('s1', 'u1')).toBe(true);
+    expect(isMemberProfileFresh('s1', 'u1', 0)).toBe(false);
+    expect(isMemberProfileFresh('s1', 'nobody')).toBe(false);
+    expect(PROFILE_FRESH_MS).toBeGreaterThan(0);
   });
 
   it('a 404 is null and not cached; another failure throws with its status', async () => {

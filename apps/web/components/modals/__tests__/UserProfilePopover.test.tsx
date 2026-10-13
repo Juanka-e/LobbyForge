@@ -53,6 +53,7 @@ function response(overrides: Partial<MemberProfileResponse['profile']> = {}, can
       statusText: 'Building a castle',
       bio: 'Hello from the API',
       presence: 'idle',
+      inVoice: false,
       roles: [{ id: 'r-vet', name: 'Veteran', color: '#22aa66', icon: null, position: 5 }],
       memberSince: '2026-02-03T04:05:06.000Z',
       accountCreatedAt: '2025-01-02T03:04:05.000Z',
@@ -379,30 +380,52 @@ describe('the ⋯ menu', () => {
 });
 
 describe('roles', () => {
+  /** The role routes: the profile GET (read fresh before each change) and the role PUT. */
+  function roleRoutes(heldRoleIds: string[], put: () => Response = () => Response.json({ membership: {} })) {
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/profile')) return Response.json(response({}, { ...MODERATOR_CAN, currentRoleIds: heldRoleIds }));
+      if (url.endsWith('/role') && init?.method === 'PUT') return put();
+      return Response.json({});
+    });
+  }
+  const puts = () => fetchMock.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'PUT');
+
   it('a role manager adds a role with "+" and removes one with "×", through the role route', async () => {
     const onProfileChanged = vi.fn();
-    fetchMock.mockImplementation(async () => Response.json({ membership: {} }));
+    roleRoutes(['r-vet', 'r-everyone']);
     render(<Harness profile={response({}, MODERATOR_CAN)} onProfileChanged={onProfileChanged} />);
     fireEvent.click(within(card()).getByRole('button', { name: 'Add role' }));
     const list = screen.getByRole('listbox', { name: 'Add role' });
     await act(async () => {
       fireEvent.keyDown(list, { key: 'Enter' });
     });
-    let [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    // The set is read fresh first, then the whole new set is PUT.
+    expect(String(fetchMock.mock.calls[0]![0])).toBe(`/api/servers/${SERVER}/members/${ALICE}/profile`);
+    let [url, init] = puts()[0] as [string, RequestInit];
     expect(url).toBe(`/api/servers/${SERVER}/members/${ALICE}/role`);
-    expect(init.method).toBe('PUT');
     expect(JSON.parse(String(init.body))).toEqual({ roleIds: ['r-vet', 'r-everyone', 'r-helper'] });
     expect(onProfileChanged).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       fireEvent.click(within(card()).getByRole('button', { name: 'Remove role Veteran' }));
     });
-    [url, init] = fetchMock.mock.calls[1] as [string, RequestInit];
+    [url, init] = puts()[1] as [string, RequestInit];
     expect(JSON.parse(String(init.body))).toEqual({ roleIds: ['r-everyone'] });
   });
 
+  it('a role someone else gave meanwhile is kept: the change applies to the set as it is now', async () => {
+    // The card was opened before another moderator added "r-trusted".
+    roleRoutes(['r-vet', 'r-everyone', 'r-trusted']);
+    render(<Harness profile={response({}, MODERATOR_CAN)} />);
+    fireEvent.click(within(card()).getByRole('button', { name: 'Add role' }));
+    await act(async () => {
+      fireEvent.keyDown(screen.getByRole('listbox', { name: 'Add role' }), { key: 'Enter' });
+    });
+    expect(JSON.parse(String((puts()[0]![1] as RequestInit).body))).toEqual({ roleIds: ['r-vet', 'r-everyone', 'r-trusted', 'r-helper'] });
+  });
+
   it('a refusal shows under the roles', async () => {
-    fetchMock.mockImplementation(async () => Response.json({ error: 'x', permissions: ['ban_members'] }, { status: 403 }));
+    roleRoutes(['r-vet', 'r-everyone'], () => Response.json({ error: 'x', permissions: ['ban_members'] }, { status: 403 }));
     render(<Harness profile={response({}, MODERATOR_CAN)} />);
     await act(async () => {
       fireEvent.click(within(card()).getByRole('button', { name: 'Remove role Veteran' }));
@@ -434,6 +457,14 @@ describe('dialog contract', () => {
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(document.activeElement).toBe(opener);
+  });
+
+  it('Escape closes the card even when focus is outside it — but not while another menu has it', () => {
+    render(<Harness />);
+    const opener = screen.getByRole('button', { name: 'opener' });
+    opener.focus();
+    fireEvent.keyDown(opener, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('View full profile and the mutual strip ask for the full profile', () => {

@@ -60,6 +60,13 @@ export function useFocusTrap(containerRef: RefObject<HTMLElement | null>, option
     const target = initialFocus?.current ?? focusableWithin(container)[0] ?? container;
     if (target === container && !container.hasAttribute('tabindex')) container.setAttribute('tabindex', '-1');
     target.focus({ preventScroll: true });
+    // A layer that is still being placed may not take focus yet: try once more on the next frame.
+    const retry =
+      document.activeElement === target || typeof requestAnimationFrame === 'undefined'
+        ? null
+        : requestAnimationFrame(() => {
+            if (container.isConnected && !container.contains(document.activeElement)) target.focus({ preventScroll: true });
+          });
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
@@ -92,6 +99,7 @@ export function useFocusTrap(containerRef: RefObject<HTMLElement | null>, option
     };
     document.addEventListener('keydown', onKeyDown);
     return () => {
+      if (retry !== null) cancelAnimationFrame(retry);
       document.removeEventListener('keydown', onKeyDown);
       const focused = document.activeElement;
       const focusLeftWithLayer = !focused || focused === document.body || container.contains(focused);

@@ -65,10 +65,21 @@ From top to bottom:
 - **Message @name**, and a **View full profile** link.
 
 The card opens at once with what the lobby already rendered: name, avatar,
-bio, status text, roles and status. Then it fills in from the profile API,
-with grey placeholders for the parts still loading. Answers are cached per
-(community, member) for the browser session. A change made through the card
-(roles, a timeout, a block) reloads that one profile.
+bio, status text and roles. Then it fills in from the profile API, with grey
+placeholders for the parts still loading.
+
+- **Status and "In voice"** come from the opener only when it knows them
+  live. The member list knows the live status, and the voice room knows who
+  is in it. Every other opener takes both from the API, because the page's
+  own copy is stale.
+- **Cache.** Answers are cached per (community, member) for the browser
+  session. The cache belongs to one viewer: it empties when someone else
+  signs in on the same tab.
+- **Refreshing.** A cached answer shows at once. If it is older than 30
+  seconds, the card asks again in the background. It always asks again for
+  your own card, since you may have just edited it.
+- **After a change** made through the card (roles, a timeout, a block), that
+  one profile reloads.
 
 ## What you can do from it
 
@@ -78,7 +89,7 @@ everything again.
 
 | Action | Route | Shown when |
 |---|---|---|
-| Message @name: type, press Enter | `POST /api/dm`, then `POST /api/dm/{id}/messages`. The conversation then opens in the centre column. | `viewerCan.message`: not yourself, and no block either way |
+| Message @name: type, press Enter | `POST /api/dm`, then `POST /api/dm/{id}/messages`. The conversation then opens in the centre column, titled with the account's name like the DM list. | `viewerCan.message`: not yourself, and not someone you blocked. If they blocked you, the DM route refuses with "You can't message this member." |
 | Copy user ID | — | always |
 | Block / Unblock | `POST /api/settings/me/blocks`, `DELETE …/{userId}` (BlockListProvider) | not yourself |
 | Add role (+), remove role (×) | `PUT /api/servers/{id}/members/{userId}/role` with the whole new set, `@everyone` kept | `viewerCan.manageRoles`, and only the roles listed |
@@ -98,6 +109,11 @@ viewer's language. The message comes from the route's `code`
 (`insufficient_rank`, `actor_timed_out`, `target_is_owner`, …), never from its
 English `error` (`lib/profile-action-errors.ts`). A member who is kicked or
 banned leaves the member list at once, and a short notice says so.
+
+Because the role route replaces the whole set, the card reads the member's
+roles fresh right before each change and applies the edit to that set. A set
+built from an answer cached minutes ago would quietly undo a role that
+another moderator, or the admin Members page, gave in the meantime.
 
 ## The full profile
 
@@ -149,13 +165,14 @@ requests a minute. The answer has `Cache-Control: no-store`.
     "statusText": "Building",             // custom status, or null
     "bio": "…",                           // or null
     "presence": "idle",                   // online | idle | dnd | offline, or null
+    "inVoice": false,                     // in a voice room of this community the viewer can see
     "roles": [{ "id": "…", "name": "Mods", "color": "#ff8800", "icon": "shield", "position": 10 }],
     "memberSince": "2026-02-03T04:05:06.000Z",      // or null
     "accountCreatedAt": "2025-01-02T03:04:05.000Z", // or null
     "mutualServers": [{ "id": "…", "name": "…", "iconUrl": null }],
     "mutualServerCount": 2,
     "blockedByMe": false,
-    "limited": false,          // details withheld: a hidden profile, or a block either way
+    "limited": false,          // details withheld: a hidden profile, or a block either way (which, is not said)
     "isOwner": false,          // the member owns this community
     "timedOutUntil": null      // ISO time, only for viewers who may time the member out
   },
@@ -184,6 +201,10 @@ can't be used to find out who belongs where.
   (`applyPresencePrivacy`). A hidden online status, a heartbeat older than 90
   seconds, no heartbeat at all, or the Invisible choice all read as
   `offline`. If Redis is down, presence also reads `offline`, not an error.
+- **In voice** follows the member list's rule. The member must be in a voice
+  or stage channel of this community that the viewer can see, with a status
+  the viewer may see. A role-gated room the viewer can't see counts as not
+  in voice.
 - **Mutual communities** are the communities both people currently belong to,
   on a live server, where neither has an active ban. There is no list for
   your own profile. The answer names up to 50 of them, and the count covers
@@ -200,22 +221,31 @@ The route uses the lobby's own projection: `canViewProfile` and
 `projectMemberProfile` in `lib/profile-privacy.ts`, the same functions that
 build the member list. Nothing the lobby would hide comes through the API.
 
-| | Full profile | Hidden profile (`profileVisibility` shuts the viewer out) | Block, either direction |
-|---|---|---|---|
-| Names, Guest tag, roles, owner crown | yes | yes | yes |
-| Avatar | yes | no | if the privacy setting allows (the block list's rule, `projectBlockedUser`) |
-| Banner, bio, custom status | yes | no | no |
-| Member since, account created | yes | no | no |
-| Mutual communities | yes | no | no |
-| Presence | per presence privacy | per presence privacy | no |
-| `limited` | false | true | true |
+| | Full profile | Hidden profile (`profileVisibility` shuts the viewer out) | They blocked you | You blocked them |
+|---|---|---|---|---|
+| Names, Guest tag, roles, owner crown | yes | yes | yes | yes |
+| Avatar | yes | no | no | if the privacy setting allows (the block list's rule, `projectBlockedUser`) |
+| Banner, bio, custom status | yes | no | no | no |
+| Member since, account created | yes | no | no | no |
+| Mutual communities | yes | no | no | no |
+| Presence, in voice | per presence privacy | per presence privacy | per presence privacy | no (like the presence feed) |
+| Message @name | yes | yes | yes (the DM route refuses) | no |
+| `limited` | false | true | true | true |
 
 - The viewer always shares this server with the member, so "Server members"
   passes. "Nobody" shuts out everyone but the member themselves. Owners and
   moderators get no bypass, the same as the member list.
-- A block hides the payload in both directions. The answer doesn't say who
-  blocked whom: `blockedByMe` is only your own block, which you can already
-  see in your block list.
+- A block hides the payload in both directions.
+- A member who blocked you gets exactly the answer a hidden profile gets, so
+  the card is no way to find out you were blocked. `blockedByMe` is only
+  your own block, which your block list already shows.
+- **Two places still give a block away**, and this change does not add a
+  third:
+  - the DM route answers a different refusal in each direction;
+  - the member list still shows the avatar and bio of someone who blocked
+    you, because the lobby projects privacy, not blocks.
+
+  Closing these is a next step.
 - A block doesn't change what a moderator may do. `viewerCan` is about the
   viewer's rights, not the member's data.
 
@@ -245,7 +275,10 @@ and never removed.
 
 - The card is a dialog named "{name} profile". Focus moves into it when it
   opens, stays inside on Tab and Shift+Tab, and returns to whatever opened it
-  when you close it with Escape or the X (`lib/use-focus-trap.ts`).
+  when you close it with Escape or the X (`lib/use-focus-trap.ts`). Escape
+  closes the card even when focus is somewhere else, unless another dialog
+  or menu has it. Until the card is placed it is only transparent, never
+  `visibility: hidden`, so it can take focus as soon as it opens.
 - The full profile, the image viewer and the confirmations are modal dialogs
   with the same focus handling. Escape closes only the topmost one. In the
   "⋯" menu and the role list, Escape closes only that menu or list.
@@ -301,3 +334,9 @@ Tests:
   page load.
 - **A DM with someone who is not in this community** opens a card with just
   the name and avatar from the DM. The profile API is per community.
+- **The two other places that give a block away**: the DM route's two
+  refusals, and the member list's profile fields (see [Privacy](#privacy)).
+- **A role-set precondition.** The role route has no `expectedRoleIds` check
+  (answering 409 on a mismatch). The card works around this by reading the set
+  fresh before each change, but two changes at the very same moment could
+  still race.

@@ -16,6 +16,7 @@ import { FullProfileModal } from '@/components/modals/FullProfileModal';
 import {
   fetchMemberProfile,
   invalidateMemberProfile,
+  isMemberProfileFresh,
   readCachedMemberProfile,
   type MemberProfileResponse,
   type ProfileRoleView,
@@ -84,6 +85,8 @@ export function useProfileCard(): ProfileCardContextValue | null {
 
 interface CardState {
   userId: string;
+  /** Which opening this is: a card that moves to another opener is a new one (focus returns there). */
+  seq: number;
   anchor: HTMLElement | null;
   rect: DOMRect | null;
   seed: Partial<ProfileSeed>;
@@ -122,6 +125,7 @@ export function ProfileCardProvider({
   const [removedUserIds, setRemovedUserIds] = useState<ReadonlySet<string>>(() => new Set());
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<number | null>(null);
+  const openSeq = useRef(0);
 
   const membersById = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
   const participants = voice.participants ?? [];
@@ -144,8 +148,9 @@ export function ProfileCardProvider({
         statusText: member.statusText ?? null,
         bio: member.bio ?? null,
         roles: member.roles ?? [],
-        presence: member.status === 'offline' ? 'offline' : (member.presence ?? null),
-        inVoice: member.status === 'in-voice',
+        // No presence or voice state from the page render: it goes stale.
+        // The member list passes its live ones when it opens a card; any
+        // other opener gets the API's.
       };
     },
     [membersById]
@@ -156,22 +161,27 @@ export function ProfileCardProvider({
   // Load (or reuse) the profile of whoever is showing.
   useEffect(() => {
     if (!activeUserId) return;
-    const cached = refreshTick === 0 ? readCachedMemberProfile(serverId, activeUserId) : null;
-    if (cached) {
-      setLoaded({ userId: activeUserId, data: cached });
+    // The cache is per viewer (signing in as someone else empties it).
+    const cached = readCachedMemberProfile(serverId, activeUserId, currentUserId);
+    if (cached) setLoaded({ userId: activeUserId, data: cached });
+    // A cached answer shows at once; an old one (or your own, which you may
+    // just have edited) is asked for again in the background.
+    const revalidate =
+      refreshTick > 0 || !cached || activeUserId === currentUserId || !isMemberProfileFresh(serverId, activeUserId);
+    if (!revalidate) {
       setLoadingUserId(null);
       return;
     }
     let cancelled = false;
-    setLoadingUserId(activeUserId);
-    fetchMemberProfile(serverId, activeUserId, { force: refreshTick > 0 })
+    setLoadingUserId(cached ? null : activeUserId);
+    fetchMemberProfile(serverId, activeUserId, { force: Boolean(cached) || refreshTick > 0, viewerId: currentUserId })
       .then((data) => {
         if (!cancelled) setLoaded({ userId: activeUserId, data });
       })
       .catch(() => {
-        // The card keeps what the lobby knew (no endless skeletons); the
-        // next opening retries — a failure is not cached.
-        if (!cancelled) setLoaded({ userId: activeUserId, data: null });
+        // Keep a cached answer; without one the card keeps what the lobby
+        // knew (no endless skeletons). A failure is not cached.
+        if (!cancelled && !cached) setLoaded({ userId: activeUserId, data: null });
       })
       .finally(() => {
         if (!cancelled) setLoadingUserId((current) => (current === activeUserId ? null : current));
@@ -179,7 +189,7 @@ export function ProfileCardProvider({
     return () => {
       cancelled = true;
     };
-  }, [serverId, activeUserId, refreshTick]);
+  }, [serverId, activeUserId, refreshTick, currentUserId]);
 
   const refresh = useCallback(() => {
     if (activeUserId) invalidateMemberProfile(serverId, activeUserId);
@@ -204,7 +214,7 @@ export function ProfileCardProvider({
       setCard((current) =>
         current && current.userId === userId && (current.anchor === anchor || !anchor)
           ? null
-          : { userId, anchor, rect: anchor ? anchor.getBoundingClientRect() : null, seed }
+          : { userId, seq: ++openSeq.current, anchor, rect: anchor ? anchor.getBoundingClientRect() : null, seed }
       );
     },
     []
@@ -268,9 +278,10 @@ export function ProfileCardProvider({
         const seed = { ...seedFor(userId), ...(card?.userId === userId ? card.seed : full?.seed) };
         const data = loaded?.userId === userId ? loaded.data : null;
         // The conversation opens in the centre column, like one picked from the DM list.
+        // Titled with the account's name, like the DM list and a /dm link.
         voice.openDm({
           channelId: channel.id,
-          name: data?.profile.displayName ?? seed.displayName ?? t('lobbyMain.chat.unknownUser'),
+          name: data?.profile.globalDisplayName ?? seed.globalDisplayName ?? seed.displayName ?? t('lobbyMain.chat.unknownUser'),
           avatarUrl: data ? data.profile.avatarUrl : (seed.avatarUrl ?? null),
           otherUserId: userId,
         });
@@ -315,7 +326,9 @@ export function ProfileCardProvider({
       ...override,
       userId,
       displayName: override.displayName ?? base.displayName,
-      inVoice: Boolean(override.inVoice ?? base.inVoice) || inRoom,
+      // In the viewer's own voice room: known live. Otherwise only what the
+      // opener knows live; without it the API decides.
+      inVoice: inRoom ? true : override.inVoice,
     };
   };
 
@@ -332,19 +345,21 @@ export function ProfileCardProvider({
   };
 
   const dataFor = (userId: string) => (loaded?.userId === userId ? loaded.data : null);
-  const isLoading = (userId: string) => loadingUserId === userId || (loaded?.userId !== userId && !readCachedMemberProfile(serverId, userId));
+  const isLoading = (userId: string) =>
+    loadingUserId === userId || (loaded?.userId !== userId && !readCachedMemberProfile(serverId, userId, currentUserId));
 
   return (
     <ProfileCardContext.Provider value={value}>
       {children}
       {card ? (
         <UserProfilePopover
-          key={card.userId}
+          key={`${card.userId}:${card.seq}`}
           open
           onClose={closeProfile}
           user={seedOf(card.userId, card.seed)}
           serverId={serverId}
           serverName={serverName}
+          viewerId={currentUserId}
           profile={dataFor(card.userId)}
           loading={isLoading(card.userId)}
           anchorRect={card.rect}
@@ -369,6 +384,7 @@ export function ProfileCardProvider({
           user={seedOf(full.userId, full.seed)}
           serverId={serverId}
           serverName={serverName}
+          viewerId={currentUserId}
           profile={dataFor(full.userId)}
           loading={isLoading(full.userId)}
           initialTab={full.tab}

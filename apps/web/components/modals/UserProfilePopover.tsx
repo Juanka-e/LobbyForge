@@ -35,6 +35,8 @@ export interface UserProfilePopoverProps {
   user: ProfileSeed | null;
   /** The community the card is opened in (the profile API and its actions are per server). */
   serverId: string;
+  /** The signed-in viewer (the profile cache is per viewer). */
+  viewerId?: string | null;
   serverName?: string;
   /** The profile API's answer; null while it loads (skeletons fill the gaps). */
   profile?: MemberProfileResponse | null;
@@ -115,6 +117,7 @@ export function UserProfilePopover({
   onProfileChanged,
   onMemberRemoved,
   self = null,
+  viewerId,
   serverMute = null,
 }: UserProfilePopoverProps) {
   const t = useT();
@@ -135,7 +138,7 @@ export function UserProfilePopover({
     serverId,
     userId,
     name: view?.displayName ?? '',
-    data: profile,
+    viewerId,
     onChanged: onProfileChanged,
     onRemoved: (removed, message) => {
       onMemberRemoved?.(removed, message);
@@ -182,8 +185,20 @@ export function UserProfilePopover({
       if (target.closest('[data-user-popover-anchor], [data-profile-layer]')) return;
       onClose();
     };
+    // Escape closes the card even when focus is not in it (the old
+    // popover's behaviour) — unless another dialog or menu has the key.
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest?.('[data-profile-layer], [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]')) return;
+      onClose();
+    };
     document.addEventListener('mousedown', onPointerDown);
-    return () => document.removeEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
   }, [visible, onClose]);
 
   if (!visible || !view || typeof document === 'undefined') return null;
@@ -219,7 +234,9 @@ export function UserProfilePopover({
         data-profile-card
         data-user-id={userId}
         className="lf-pop-in fixed z-[70] max-h-[calc(100dvh-24px)] w-[360px] max-w-[calc(100vw-24px)] overflow-y-auto overflow-x-hidden rounded-xl border border-border-subtle bg-surface-floating shadow-2xl outline-none"
-        style={position ?? { left: '50%', top: '50%', transform: 'translate(-50%, -50%)', visibility: 'hidden' }}
+        // Until it is placed: transparent, not `visibility: hidden` — a
+        // hidden element cannot take focus, and focus moves in on open.
+        style={position ?? { left: '50%', top: '50%', transform: 'translate(-50%, -50%)', opacity: 0, pointerEvents: 'none' }}
       >
         <ProfileBanner name={view.displayName} bannerUrl={view.bannerUrl} color={bandColor} onOpen={openViewer('banner')}>
           <div className="absolute right-2.5 top-2.5 flex items-center gap-1.5">

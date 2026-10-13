@@ -33,6 +33,8 @@ export interface FullProfileModalProps {
   onClose: () => void;
   user: ProfileSeed | null;
   serverId: string;
+  /** The signed-in viewer (the profile cache is per viewer). */
+  viewerId?: string | null;
   serverName?: string;
   profile?: MemberProfileResponse | null;
   loading?: boolean;
@@ -73,6 +75,7 @@ export function FullProfileModal({
   onProfileChanged,
   onMemberRemoved,
   self = null,
+  viewerId,
   serverMute = null,
 }: FullProfileModalProps) {
   const t = useT();
@@ -93,7 +96,7 @@ export function FullProfileModal({
     serverId,
     userId,
     name: view?.displayName ?? '',
-    data: profile,
+    viewerId,
     onChanged: onProfileChanged,
     onRemoved: (removed, message) => onMemberRemoved?.(removed, message),
   });
@@ -244,40 +247,47 @@ export function FullProfileModal({
                 ))}
               </div>
 
+              {/* Both panels stay in the page (the inactive one hidden) so each tab's aria-controls has its panel. */}
               <div
                 role="tabpanel"
-                id={`${tabsId}-panel-${tab}`}
-                aria-labelledby={`${tabsId}-tab-${tab}`}
+                id={`${tabsId}-panel-about`}
+                aria-labelledby={`${tabsId}-tab-about`}
+                hidden={tab !== 'about'}
                 className="pt-4"
               >
-                {tab === 'about' ? (
-                  <div className="space-y-5">
-                    <AboutSection bio={view.bio} loading={loading && !view.loaded} limited={view.limited} sectionId={sectionId} />
-                    {view.limited ? null : (
-                      <>
-                        <MemberSinceSection
-                          accountCreatedAt={profile?.profile.accountCreatedAt}
-                          memberSince={profile?.profile.memberSince}
-                          communityName={serverName}
-                          loading={!view.loaded && loading}
-                          sectionId={sectionId}
-                        />
-                      </>
-                    )}
-                    <RolesSection
-                      roles={view.roles}
+                <div className="space-y-5">
+                  <AboutSection bio={view.bio} loading={loading && !view.loaded} limited={view.limited} sectionId={sectionId} />
+                  {view.limited ? null : (
+                    <MemberSinceSection
+                      accountCreatedAt={profile?.profile.accountCreatedAt}
+                      memberSince={profile?.profile.memberSince}
+                      communityName={serverName}
+                      loading={!view.loaded && loading}
                       sectionId={sectionId}
-                      loading={loading && !view.loaded}
-                      canManage={Boolean(can?.manageRoles)}
-                      assignableRoles={can?.assignableRoles}
-                      removableRoleIds={can?.removableRoleIds}
-                      busy={actions.rolesBusy}
-                      error={actions.rolesError}
-                      onAdd={actions.addRole}
-                      onRemove={actions.removeRole}
                     />
-                  </div>
-                ) : view.limited ? (
+                  )}
+                  <RolesSection
+                    roles={view.roles}
+                    sectionId={sectionId}
+                    loading={loading && !view.loaded}
+                    canManage={Boolean(can?.manageRoles)}
+                    assignableRoles={can?.assignableRoles}
+                    removableRoleIds={can?.removableRoleIds}
+                    busy={actions.rolesBusy}
+                    error={actions.rolesError}
+                    onAdd={actions.addRole}
+                    onRemove={actions.removeRole}
+                  />
+                </div>
+              </div>
+              <div
+                role="tabpanel"
+                id={`${tabsId}-panel-mutual`}
+                aria-labelledby={`${tabsId}-tab-mutual`}
+                hidden={tab !== 'mutual'}
+                className="pt-4"
+              >
+                {view.limited ? (
                   <LimitedNotice />
                 ) : (
                   <MutualServersList
