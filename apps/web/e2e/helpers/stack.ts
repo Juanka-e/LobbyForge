@@ -15,6 +15,7 @@
  *    keys (helpers/auth.ts), or waited out.
  */
 import { execFileSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { expect, type APIRequestContext, type APIResponse, type Browser, type BrowserContext, type BrowserType, type Page } from '@playwright/test';
 import { createGuest, registerAccount, resetRateLimits, signIn } from './auth';
 
@@ -150,7 +151,7 @@ export async function accountMember(
 ): Promise<Person & { email: string; password: string }> {
   const ctx = await browser.newContext({ baseURL: baseUrl, locale: 'en-US', ...contextOptions });
   const email = `${displayName.toLowerCase().replace(/[^a-z0-9]+/g, '.')}.${Date.now().toString(36)}@e2e.local`;
-  const password = `pw-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
+  const password = `pw-${randomBytes(12).toString('hex')}`;
   const code = await newInviteCode(owner, serverId);
   const res = await registerAccount(ctx.request, { headers: ORIGIN, data: { email, password, displayName, inviteCode: code } });
   expect(res.status(), `register ${displayName}: ${await res.text()}`).toBe(201);
