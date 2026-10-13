@@ -84,7 +84,10 @@ const config: Config = {
         'on-primary-fixed-variant': '#124686',
         secondary: '#bcc7da',
         'on-secondary': '#26313f',
-        'secondary-container': '#3d4757',
+        // The circle behind an initial when there is no photo (roster,
+        // chat, DMs, member list), under `text-text-primary` — so it
+        // follows the theme too: dark ink on a fixed dark circle read 1.9:1.
+        'secondary-container': themed('--lf-secondary-container', '#3d4757'),
         'on-secondary-container': '#abb6c8',
         'secondary-fixed': '#d8e3f6',
         'secondary-fixed-dim': '#bcc7da',

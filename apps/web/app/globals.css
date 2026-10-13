@@ -54,6 +54,9 @@
     --lf-text-primary: #f4f7fb;
     --lf-text-secondary: #b7c0cc;
     --lf-text-muted: #7f8a99;
+    /* The circle behind an initial when someone has no photo, under
+       text-primary (`bg-secondary-container`). Dim keeps this one. */
+    --lf-secondary-container: #3d4757;
     /* The accent is used two ways: as INK (`text-primary`, borders,
        tints — ~500 call sites) and as a FILL behind `on-accent` text.
        Both need a per-theme value, because an accent that reads on a
@@ -94,6 +97,8 @@
     --lf-border-subtle: #c9d3e0;
     --lf-text-primary: #101826;
     --lf-text-secondary: #3d4a5c;
+    /* An initial (text-primary) reads 12:1 on it; #3d4757 gave 1.9:1. */
+    --lf-secondary-container: #cfd8e5;
     /* 4.8:1 on surface-dim, 4.6:1 on surface-container (WCAG AA); #6b7787 was 4.05 / 3.87. */
     --lf-text-muted: #5f6b7b;
     /* Only the FIRST paint uses these. The accent is a user preference
