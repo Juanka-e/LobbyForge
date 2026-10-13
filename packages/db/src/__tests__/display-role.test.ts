@@ -11,24 +11,32 @@
  * Against a recording fake client — no Postgres needed.
  */
 import { describe, expect, it } from 'vitest';
+import { PgDialect } from 'drizzle-orm/pg-core';
+import type { SQL } from 'drizzle-orm';
 import { listMemberSummariesForServer, setMemberRoles } from '../queries/memberships.js';
-import { listMembersForServer, pickDisplayRole } from '../queries/roles.js';
+import { countRoleHolders, listMembersForServer, pickDisplayRole } from '../queries/roles.js';
 
 interface Recorded {
   /** `update(...).set(values)` */
   sets: Array<Record<string, unknown>>;
   /** `insert(...).values(values)` */
   inserted: unknown[];
+  /** `.where(condition)`, in call order */
+  wheres: unknown[];
 }
 
 /** Every awaited chain resolves the next queued result, in call order. */
 function fakeDb(results: unknown[][]) {
-  const recorded: Recorded = { sets: [], inserted: [] };
+  const recorded: Recorded = { sets: [], inserted: [], wheres: [] };
   function chain(): Record<string, unknown> {
     const c: Record<string, unknown> = {};
-    for (const method of ['from', 'innerJoin', 'leftJoin', 'where', 'orderBy', 'limit', 'returning', 'onConflictDoNothing']) {
+    for (const method of ['from', 'innerJoin', 'leftJoin', 'orderBy', 'groupBy', 'limit', 'returning', 'onConflictDoNothing']) {
       c[method] = () => c;
     }
+    c.where = (condition: unknown) => {
+      recorded.wheres.push(condition);
+      return c;
+    };
     c.set = (values: Record<string, unknown>) => {
       recorded.sets.push(values);
       return c;
@@ -198,5 +206,30 @@ describe('listMemberSummariesForServer', () => {
     const [summary] = await listMemberSummariesForServer(db, 's-1');
     expect(summary!.roleName).toBe('Moderator');
     expect(summary!.roles[0]).toEqual({ id: MOD.id, name: 'Moderator', color: null, icon: null, position: 5, displaySeparately: true });
+  });
+});
+
+describe('countRoleHolders — the Roles page', () => {
+  it('counts each holder once: the legacy column only where the join table lacks the role', async () => {
+    const { db, recorded } = fakeDb([
+      // The join table: three hold @everyone, two hold Moderator.
+      [
+        { roleId: EVERYONE.id, count: 3 },
+        { roleId: MOD.id, count: 2 },
+      ],
+      // The legacy column, rows the join table does not mirror: one VIP.
+      [{ roleId: VIP.id, count: 1 }],
+    ]);
+    const counts = await countRoleHolders(db, 's-1');
+    expect(Object.fromEntries(counts)).toEqual({ [EVERYONE.id]: 3, [MOD.id]: 2, [VIP.id]: 1 });
+
+    const legacy = new PgDialect().sqlToQuery(recorded.wheres[1] as SQL);
+    // The subquery names "memberships" itself: a single-table select renders
+    // its own columns unqualified, and membership_roles has an "id" and a
+    // "role_id" of its own.
+    expect(legacy.sql).toContain(
+      'NOT EXISTS (SELECT 1 FROM "membership_roles" AS "held" WHERE "held"."membership_id" = "memberships"."id" AND "held"."role_id" = "memberships"."role_id")'
+    );
+    expect(legacy.params).toEqual(['s-1']);
   });
 });

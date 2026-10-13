@@ -1,11 +1,5 @@
 import type { Metadata } from 'next';
-import { sql } from 'drizzle-orm';
-import {
-  listRolesForServer,
-  membershipRoles,
-  memberships,
-  type RoleRow,
-} from '@lobbyforge/db';
+import { countRoleHolders, listRolesForServer, type RoleRow } from '@lobbyforge/db';
 import { adminPageMetadata, requireAdminSection } from '@/lib/admin-access';
 import { getDb } from '@/lib/db';
 import SettingsShell from '@/app/SettingsShell';
@@ -36,7 +30,8 @@ export default async function RolesSettingsPage() {
       if (firstServer) {
         serverId = firstServer.id;
         const raw = await listRolesForServer(db, firstServer.id);
-        const counts = await countMembersForRoles(db, firstServer.id, raw.map((role) => role.id));
+        // Each holder once (the display role sits in both role columns).
+        const counts = await countRoleHolders(db, firstServer.id);
         roles = raw
           .slice()
           .sort((a, b) => b.position - a.position)
@@ -56,34 +51,6 @@ export default async function RolesSettingsPage() {
       />
     </SettingsShell>
   );
-}
-
-async function countMembersForRoles(
-  db: ReturnType<typeof getDb>,
-  serverId: string,
-  roleIds: string[]
-): Promise<Map<string, number>> {
-  const map = new Map<string, number>();
-  if (roleIds.length === 0) return map;
-
-  const fromJoin = await db
-    .select({ roleId: membershipRoles.roleId, count: sql<number>`COUNT(*)::int` })
-    .from(membershipRoles)
-    .innerJoin(memberships, sql`${memberships.id} = ${membershipRoles.membershipId}`)
-    .where(sql`${memberships.serverId} = ${serverId}`)
-    .groupBy(membershipRoles.roleId);
-  for (const row of fromJoin) map.set(row.roleId, Number(row.count ?? 0));
-
-  const fromPrimary = await db
-    .select({ roleId: memberships.roleId, count: sql<number>`COUNT(*)::int` })
-    .from(memberships)
-    .where(sql`${memberships.serverId} = ${serverId} AND ${memberships.roleId} IS NOT NULL`)
-    .groupBy(memberships.roleId);
-  for (const row of fromPrimary) {
-    const id = row.roleId as string;
-    map.set(id, (map.get(id) ?? 0) + Number(row.count ?? 0));
-  }
-  return map;
 }
 
 function toRoleView(role: RoleWithCount): RoleView {

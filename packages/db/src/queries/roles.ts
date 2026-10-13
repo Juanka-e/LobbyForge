@@ -590,6 +590,46 @@ export async function listMembersForServer(
 }
 
 /**
+ * How many members of a server hold each role (the admin Roles page): the
+ * join table plus the legacy `memberships.roleId`, each member once.
+ *
+ * `setMemberRoles` mirrors the display role in the join table, so adding
+ * both counts counted those members twice — `@everyone` while the first
+ * role sent was stored, a member's highest role since the display rule.
+ * The legacy column now counts only where the join table lacks that role.
+ */
+export async function countRoleHolders(db: DbClient, serverId: string): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  const fromJoin = await db
+    .select({ roleId: membershipRoles.roleId, count: sql<number>`COUNT(*)::int` })
+    .from(membershipRoles)
+    .innerJoin(memberships, eq(memberships.id, membershipRoles.membershipId))
+    .where(eq(memberships.serverId, serverId))
+    .groupBy(membershipRoles.roleId);
+  for (const row of fromJoin) counts.set(row.roleId, Number(row.count ?? 0));
+
+  // A single-table select renders its own columns unqualified, so the
+  // subquery names "memberships" explicitly (membership_roles has an "id"
+  // and a "role_id" of its own).
+  const fromLegacy = await db
+    .select({ roleId: memberships.roleId, count: sql<number>`COUNT(*)::int` })
+    .from(memberships)
+    .where(
+      and(
+        eq(memberships.serverId, serverId),
+        sql`"memberships"."role_id" IS NOT NULL`,
+        sql`NOT EXISTS (SELECT 1 FROM "membership_roles" AS "held" WHERE "held"."membership_id" = "memberships"."id" AND "held"."role_id" = "memberships"."role_id")`
+      )
+    )
+    .groupBy(memberships.roleId);
+  for (const row of fromLegacy) {
+    if (!row.roleId) continue;
+    counts.set(row.roleId, (counts.get(row.roleId) ?? 0) + Number(row.count ?? 0));
+  }
+  return counts;
+}
+
+/**
  * Discord-style role hierarchy: a member's effective rank is the HIGHEST
  * position among their roles. The server OWNER outranks every role
  * (Infinity). Members with no roles rank lowest (below every role).
