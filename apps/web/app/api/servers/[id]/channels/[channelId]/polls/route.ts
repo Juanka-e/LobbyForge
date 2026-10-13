@@ -21,6 +21,7 @@ import { emitMessageEvent } from '@/lib/bots/events';
 import { requireVerifiedEmail } from '@/lib/mail/verification';
 import { CreateChatPollSchema, isPollChannelType, projectChatPoll, type CreateChatPollBody } from '@/lib/chat-polls';
 import { messageJson, resolvePollSession } from '@/lib/chat-polls-server';
+import { mentionsEveryone } from '@/lib/everyone-mention';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -81,7 +82,7 @@ async function handlePost(
     const text = [body.question, ...body.options].join('\n');
 
     // MENTION_EVERYONE: @everyone anywhere in the poll needs the permission, as in a message.
-    if (/(^|\s)@everyone\b/i.test(text)) {
+    if (mentionsEveryone(text)) {
       const mentionAuth = await authorizeServerPermission(session.uid, serverId, CorePermission.MENTION_EVERYONE);
       if (!mentionAuth.ok) return mentionAuth.response;
     }

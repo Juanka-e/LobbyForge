@@ -724,6 +724,25 @@ describe('POST message permission gates (role upgrade batch)', () => {
     expect(createMessage).not.toHaveBeenCalled();
   });
 
+  // A mention glued to punctuation used to pass the old `(^|\s)@everyone`
+  // test: "(@everyone)" went out without the permission.
+  it.each(['(@everyone)', 'hi,@everyone', '＠everyone'])('403 for %j without MENTION_EVERYONE', async (content) => {
+    mockServerAlive();
+    mockChannelAlive();
+    getUserPermissions.mockResolvedValue(['send_messages']);
+    const { POST } = await import('../route.js');
+    const res = await POST(
+      new Request('https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: makeSessionCookie() },
+        body: JSON.stringify({ content }),
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID }) }
+    );
+    expect(res.status).toBe(403);
+    expect(createMessage).not.toHaveBeenCalled();
+  });
+
   it('allows @everyone with the permission', async () => {
     mockServerAlive();
     mockChannelAlive();
@@ -743,6 +762,54 @@ describe('POST message permission gates (role upgrade batch)', () => {
     );
     expect(res.status).toBe(201);
     expect(createMessage).toHaveBeenCalled();
+  });
+});
+
+describe('PATCH message: Mention Everyone holds for edits', () => {
+  const editTo = async (content: string) => {
+    const { PATCH } = await loadItemRoute();
+    return PATCH(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}/messages/${MESSAGE_ID}`, {
+        method: 'PATCH',
+        headers: { cookie: makeSessionCookie() },
+        body: JSON.stringify({ content }),
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID, messageId: MESSAGE_ID }) }
+    );
+  };
+  const asAuthorWith = (permissions: string[]) => {
+    getServerById.mockResolvedValue({
+      id: SERVER_ID,
+      name: 'A',
+      slug: null,
+      ownerUserId: '00000000-0000-0000-0000-000000000099',
+      iconUrl: null,
+      defaultLocale: 'en',
+      isPublic: false,
+      createdAt: new Date('2026-06-09T00:00:00Z'),
+      deletedAt: null,
+    });
+    isServerMember.mockResolvedValue(true);
+    getUserPermissions.mockResolvedValue(permissions);
+    mockChannelAlive();
+    getMessageById.mockResolvedValue(mockMessageRow());
+  };
+
+  // Posting "hi" and editing it to "hi @everyone" got round the gate the POST applies.
+  it('403 when the author edits @everyone in without the permission', async () => {
+    asAuthorWith(['send_messages', 'read_message_history']);
+    const res = await editTo('hi @everyone');
+    expect(res.status).toBe(403);
+    expect(updateMessage).not.toHaveBeenCalled();
+  });
+
+  it('allows it with the permission, and a plain edit without it', async () => {
+    asAuthorWith(['send_messages', 'read_message_history', 'mention_everyone']);
+    updateMessage.mockResolvedValue(mockMessageRow({ content: 'hi @everyone', editedAt: new Date() }));
+    expect((await editTo('hi @everyone')).status).toBe(200);
+    asAuthorWith(['send_messages', 'read_message_history']);
+    updateMessage.mockResolvedValue(mockMessageRow({ content: 'hi everyone', editedAt: new Date() }));
+    expect((await editTo('hi everyone')).status).toBe(200);
   });
 });
 
