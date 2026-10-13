@@ -62,7 +62,7 @@ function profileFor(userId: string, overrides: Partial<MemberProfileResponse['vi
       bio: `${name} bio`,
       presence: 'online',
       inVoice: false,
-      roles: [],
+      roles: rolesFor[userId] ?? [],
       memberSince: '2026-02-03T04:05:06.000Z',
       accountCreatedAt: '2025-01-02T03:04:05.000Z',
       mutualServers: [
@@ -100,10 +100,13 @@ const PRESENCES = () => [
 
 let fetchMock: ReturnType<typeof vi.fn>;
 let canFor: Record<string, Partial<MemberProfileResponse['viewerCan']>> = {};
+/** What the profile API answers as each member's roles (without @everyone). */
+let rolesFor: Record<string, MemberProfileResponse['profile']['roles']> = {};
 
 beforeEach(() => {
   __clearMemberProfileCacheForTests();
   canFor = {};
+  rolesFor = {};
   fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const profile = url.match(/\/members\/([^/]+)\/profile$/);
@@ -208,6 +211,44 @@ describe('member list', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(within(screen.getByRole('complementary')).queryByRole('button', { name: /Alice/ })).toBeNull();
     expect(screen.getByRole('status')).toHaveTextContent('Alice was kicked.');
+  });
+});
+
+describe('a role change made in the card', () => {
+  const MODS = { id: 'r-mods', name: 'Mods', color: '#ff8800', icon: 'shield', position: 10 };
+
+  // The A-to-Z run: the card showed the new role at once, but the member
+  // list's role groups only followed on the next page load.
+  it('regroups the member list at once, with the role’s heading and colour', async () => {
+    canFor[ALICE] = { manageRoles: true, assignableRoles: [MODS], currentRoleIds: ['r-everyone'] };
+    const puts: unknown[] = [];
+    const base = fetchMock.getMockImplementation() as (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith(`/members/${ALICE}/role`) && init?.method === 'PUT') {
+        puts.push(JSON.parse(String(init.body)));
+        rolesFor[ALICE] = [{ ...MODS, displaySeparately: true }];
+        canFor[ALICE] = { manageRoles: true, assignableRoles: [], currentRoleIds: ['r-everyone', MODS.id], removableRoleIds: [MODS.id] };
+        return Response.json({ membership: { roleIds: ['r-everyone', MODS.id] } });
+      }
+      return base(input, init);
+    });
+    const { LobbyMembersClient } = await import('../LobbyMembersClient');
+    await renderLobby(<LobbyMembersClient serverId={SERVER} initialMembers={MEMBERS} voiceChannelIds={['ch-voice']} currentUserId={ME} />);
+    const list = screen.getByRole('complementary');
+    await waitFor(() => expect(within(list).getByText(/^Online/)).toBeInTheDocument());
+    expect(within(list).queryByText('Mods - 1')).toBeNull();
+
+    fireEvent.click(row(/Alice/));
+    await waitFor(() => expect(screen.getByText('Alice bio')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Add role' }));
+    fireEvent.click(screen.getByRole('option', { name: /Mods/ }));
+
+    await waitFor(() => expect(within(list).getByText('Mods - 1')).toBeInTheDocument());
+    expect(puts).toEqual([{ roleIds: ['r-everyone', MODS.id] }]);
+    // Alice sits under the role's heading, in its colour.
+    const group = within(list).getByText('Mods - 1').closest('div')!;
+    expect(within(group).getByRole('button', { name: /Alice/ })).toBeInTheDocument();
+    expect(within(group).getByText('Alice')).toHaveStyle({ color: '#ff8800' });
   });
 });
 

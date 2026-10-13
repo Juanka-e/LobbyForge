@@ -57,12 +57,12 @@ const VIEWER = '00000000-0000-4000-8000-0000000000a2';
 const MEMBER = '00000000-0000-4000-8000-0000000000a3';
 const STRANGER = '00000000-0000-4000-8000-0000000000a4';
 
-const EVERYONE = { id: 'r-everyone', name: '@everyone', color: null, icon: null, position: 0, permissions: ['send_messages', 'connect_voice'] };
-const VETERAN = { id: 'r-veteran', name: 'Veteran', color: '#22aa66', icon: 'star', position: 5, permissions: [] };
-const LOW_ADMIN = { id: 'r-low-admin', name: 'Sneaky', color: null, icon: null, position: 2, permissions: ['administrator'] };
-const HELPER = { id: 'r-helper', name: 'Helper', color: '#3366ff', icon: null, position: 3, permissions: ['kick_members'] };
-const MODS = { id: 'r-mods', name: 'Mods', color: '#ff8800', icon: 'shield', position: 10, permissions: ['kick_members', 'ban_members', 'moderate_members', 'manage_roles', 'mute_members'] };
-const ADMINS = { id: 'r-admins', name: 'Admins', color: '#ff0000', icon: null, position: 20, permissions: ['administrator'] };
+const EVERYONE = { id: 'r-everyone', name: '@everyone', color: null, icon: null, position: 0, displaySeparately: false, permissions: ['send_messages', 'connect_voice'] };
+const VETERAN = { id: 'r-veteran', name: 'Veteran', color: '#22aa66', icon: 'star', position: 5, displaySeparately: true, permissions: [] };
+const LOW_ADMIN = { id: 'r-low-admin', name: 'Sneaky', color: null, icon: null, position: 2, displaySeparately: false, permissions: ['administrator'] };
+const HELPER = { id: 'r-helper', name: 'Helper', color: '#3366ff', icon: null, position: 3, displaySeparately: false, permissions: ['kick_members'] };
+const MODS = { id: 'r-mods', name: 'Mods', color: '#ff8800', icon: 'shield', position: 10, displaySeparately: false, permissions: ['kick_members', 'ban_members', 'moderate_members', 'manage_roles', 'mute_members'] };
+const ADMINS = { id: 'r-admins', name: 'Admins', color: '#ff0000', icon: null, position: 20, displaySeparately: false, permissions: ['administrator'] };
 const SERVER_ROLES = [EVERYONE, LOW_ADMIN, HELPER, VETERAN, MODS, ADMINS];
 
 const POSITIONS: Record<string, number> = { [OWNER]: Number.POSITIVE_INFINITY, [MOD]: 10, [VIEWER]: 0, [MEMBER]: 5 };
@@ -211,7 +211,8 @@ describe('profile fields and privacy', () => {
       isOwner: false,
       timedOutUntil: null,
     });
-    expect(profile.roles).toEqual([{ id: VETERAN.id, name: 'Veteran', color: '#22aa66', icon: 'star', position: 5 }]);
+    // displaySeparately: the lobby member list regroups from it after a role change.
+    expect(profile.roles).toEqual([{ id: VETERAN.id, name: 'Veteran', color: '#22aa66', icon: 'star', position: 5, displaySeparately: true }]);
     expect(JSON.stringify(profile)).not.toContain('permissions');
     expect(dbFns.listMutualServers).toHaveBeenCalledWith(expect.anything(), VIEWER, MEMBER, { limit: 50 });
   });

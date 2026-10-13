@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { getRealtimeClient } from '@/lib/realtime-client';
 import { MemberBlockButton } from './MemberBlockButton';
 import { BotAvatar, BotBadge, BotProfilePopover, type LobbyBot } from './BotIdentity';
@@ -8,6 +8,8 @@ import { useProfileCard } from './ProfileCardProvider';
 import { VoiceStatusIcon } from './VoiceStatusIcon';
 import { useT } from '@/lib/i18n/client';
 import { initialOf } from '@/lib/initial';
+import { displayRoleOf } from '@/lib/display-role';
+import type { ProfileRoleView } from '@/lib/member-profile';
 import {
   PRESENCE_DOT_CLASS,
   PRESENCE_LABEL_KEYS,
@@ -42,6 +44,28 @@ interface Member {
   statusText?: string | null;
   bio?: string | null;
   roles?: Array<{ id: string; name: string; color: string | null; icon: string | null; position: number; displaySeparately: boolean }>;
+}
+
+type MemberRole = NonNullable<Member['roles']>[number];
+
+/**
+ * A member with the roles the profile API answered last (see
+ * `memberRoles` in ProfileCardProvider): their role groups, name colour
+ * and display role follow a change made in a profile card at once.
+ * `displaySeparately` comes with the answer; a role it lacks it for keeps
+ * what the page render knew about that role.
+ */
+function withRoles(member: Member, roles: readonly ProfileRoleView[], separately: ReadonlyMap<string, boolean>): Member {
+  const next: MemberRole[] = roles.map((role) => ({
+    id: role.id,
+    name: role.name,
+    color: role.color,
+    icon: role.icon,
+    position: role.position,
+    displaySeparately: role.displaySeparately ?? separately.get(role.id) ?? false,
+  }));
+  const display = displayRoleOf(next);
+  return { ...member, roles: next, roleName: display?.name ?? null, roleColor: display?.color ?? null };
 }
 
 interface PresenceEntry {
@@ -104,9 +128,23 @@ export function LobbyMembersClient({
   const t = useT();
   const [allMembers, setMembers] = useState<Member[]>(initialMembers);
   const profileCard = useProfileCard();
-  // Someone kicked or banned through a profile card leaves the list at once.
+  // Someone kicked or banned through a profile card leaves the list at once;
+  // a role change made in a card regroups them at once (Discord does too).
   const removed = profileCard?.removedUserIds;
-  const members = removed && removed.size > 0 ? allMembers.filter((m) => !removed.has(m.id)) : allMembers;
+  const roleUpdates = profileCard?.memberRoles;
+  const separately = useMemo(() => {
+    const known = new Map<string, boolean>();
+    for (const member of initialMembers) for (const role of member.roles ?? []) known.set(role.id, role.displaySeparately);
+    return known;
+  }, [initialMembers]);
+  const members = useMemo(() => {
+    const present = removed && removed.size > 0 ? allMembers.filter((m) => !removed.has(m.id)) : allMembers;
+    if (!roleUpdates || roleUpdates.size === 0) return present;
+    return present.map((m) => {
+      const roles = roleUpdates.get(m.id);
+      return roles ? withRoles(m, roles, separately) : m;
+    });
+  }, [allMembers, removed, roleUpdates, separately]);
   const voiceChannelIdsRef = useRef(new Set(voiceChannelIds));
   voiceChannelIdsRef.current = new Set(voiceChannelIds);
 

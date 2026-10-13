@@ -80,7 +80,15 @@ async function isVoiceChannelOf(db: ReturnType<typeof getDb>, serverId: string, 
 function visibleRoles(record: MemberProfileRecord): MemberProfileView['roles'] {
   return record.roles
     .filter((role) => role.name !== EVERYONE_ROLE_NAME)
-    .map((role) => ({ id: role.id, name: role.name, color: role.color, icon: role.icon, position: role.position }));
+    .map((role) => ({
+      id: role.id,
+      name: role.name,
+      color: role.color,
+      icon: role.icon,
+      position: role.position,
+      // The lobby member list regroups from this after a role change.
+      displaySeparately: role.displaySeparately,
+    }));
 }
 
 /**

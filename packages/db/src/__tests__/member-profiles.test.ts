@@ -99,7 +99,7 @@ describe('getMemberProfileRecord', () => {
       [{ ...baseRow, legacyRoleId: 'r-legacy', nickname: '  ' }],
       [
         { id: 'r-everyone', name: '@everyone', color: null, icon: null, position: 0, permissions: ['send_messages'] },
-        { id: 'r-mod', name: 'Mods', color: '#ff0000', icon: 'shield', position: 10, permissions: ['kick_members', 42] },
+        { id: 'r-mod', name: 'Mods', color: '#ff0000', icon: 'shield', position: 10, displaySeparately: true, permissions: ['kick_members', 42] },
       ],
       [{ id: 'r-legacy', name: 'Veteran', color: '#00ff00', icon: null, position: 5, permissions: null }],
     ]);
@@ -118,6 +118,9 @@ describe('getMemberProfileRecord', () => {
     // Malformed permission entries are dropped.
     expect(record!.roles[0]!.permissions).toEqual(['kick_members']);
     expect(record!.roles[1]!.permissions).toEqual([]);
+    // Whether a role gets its own heading in the member list (the lobby
+    // regroups a member after a role change made in the card).
+    expect(record!.roles.map((r) => r.displaySeparately)).toEqual([true, false, false]);
     // Both role reads stay inside this server.
     expect(render(chains[1]!.find((s) => s.op === 'where')!.args[0]).params).toEqual(['m-1', SERVER]);
     expect(render(chains[2]!.find((s) => s.op === 'where')!.args[0]).params).toEqual(['r-legacy', SERVER]);

@@ -80,6 +80,12 @@ placeholders for the parts still loading.
   your own card, since you may have just edited it.
 - **After a change** made through the card (roles, a timeout, a block), that
   one profile reloads.
+- **The member list follows.** Every fresh answer from the profile API
+  (not one read from the cache) hands the member's roles to the lobby's
+  member list, which is otherwise the page render's. A role added or removed
+  in the card moves the member to the right role heading, with the right
+  name colour, at once, instead of on the next page load
+  (`memberRoles` in `ProfileCardProvider`).
 
 ## What you can do from it
 
@@ -107,7 +113,10 @@ cap. The ban reason is optional and up to 512 characters, like the admin
 page's prompt. A refusal shows inside the dialog, or under the roles, in the
 viewer's language. The message comes from the route's `code`
 (`insufficient_rank`, `actor_timed_out`, `target_is_owner`, …), never from its
-English `error` (`lib/profile-action-errors.ts`). A member who is kicked or
+English `error` (`lib/profile-action-errors.ts`). The kick, ban, role and
+timeout routes give their own refusals a code too (`unauthenticated`,
+`server_not_found`, `invalid_request`, `already_banned`, `role_above_actor`,
+`ungrantable_permissions`, …); the admin Members page says them the same way. A member who is kicked or
 banned leaves the member list at once, and a short notice says so.
 
 Because the role route replaces the whole set, the card reads the member's
@@ -166,7 +175,7 @@ requests a minute. The answer has `Cache-Control: no-store`.
     "bio": "…",                           // or null
     "presence": "idle",                   // online | idle | dnd | offline, or null
     "inVoice": false,                     // in a voice room of this community the viewer can see
-    "roles": [{ "id": "…", "name": "Mods", "color": "#ff8800", "icon": "shield", "position": 10 }],
+    "roles": [{ "id": "…", "name": "Mods", "color": "#ff8800", "icon": "shield", "position": 10, "displaySeparately": true }],
     "memberSince": "2026-02-03T04:05:06.000Z",      // or null
     "accountCreatedAt": "2025-01-02T03:04:05.000Z", // or null
     "mutualServers": [{ "id": "…", "name": "…", "iconUrl": null }],
@@ -196,7 +205,8 @@ can't be used to find out who belongs where.
 
 - **Roles** are the ones the member holds in this server: the join table plus
   the legacy primary role, highest first, without `@everyone` and without
-  their permissions.
+  their permissions. `displaySeparately` says whether online holders get
+  their own heading in the member list.
 - **Presence** goes through the same projection as `GET /api/presence`
   (`applyPresencePrivacy`). A hidden online status, a heartbeat older than 90
   seconds, no heartbeat at all, or the Invisible choice all read as

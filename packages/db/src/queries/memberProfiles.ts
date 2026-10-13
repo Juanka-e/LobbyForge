@@ -25,6 +25,8 @@ export interface MemberProfileRole {
   color: string | null;
   icon: string | null;
   position: number;
+  /** Online holders get their own heading in the lobby member list. */
+  displaySeparately: boolean;
   permissions: string[];
 }
 
@@ -61,16 +63,26 @@ const ROLE_FIELDS = {
   color: roles.color,
   icon: roles.icon,
   position: roles.position,
+  displaySeparately: roles.displaySeparately,
   permissions: roles.permissions,
 };
 
-function toRole(row: { id: string; name: string; color: string | null; icon: string | null; position: number; permissions: unknown }): MemberProfileRole {
+function toRole(row: {
+  id: string;
+  name: string;
+  color: string | null;
+  icon: string | null;
+  position: number;
+  displaySeparately?: boolean | null;
+  permissions: unknown;
+}): MemberProfileRole {
   return {
     id: row.id,
     name: row.name,
     color: row.color,
     icon: row.icon,
     position: row.position,
+    displaySeparately: row.displaySeparately === true,
     permissions: Array.isArray(row.permissions) ? (row.permissions as unknown[]).filter((p): p is string => typeof p === 'string') : [],
   };
 }

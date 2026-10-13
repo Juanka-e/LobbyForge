@@ -17,6 +17,12 @@ export interface ProfileRoleView {
   /** A Material Symbols name from the role-icon allowlist, or null. */
   icon: string | null;
   position: number;
+  /**
+   * Online holders get their own heading in the lobby member list. Sent
+   * for the member's own roles (`profile.roles`); the lobby's seed and
+   * `assignableRoles` may leave it out.
+   */
+  displaySeparately?: boolean;
 }
 
 export interface MutualServerView {

@@ -73,6 +73,13 @@ export interface ProfileCardContextValue {
   seedFor: (userId: string) => ProfileSeed | null;
   /** Members removed through a card (kick, ban) — lists drop them. */
   removedUserIds: ReadonlySet<string>;
+  /**
+   * Members' roles as the profile API last answered them — fresher than the
+   * page render. A role change made in a card shows here as soon as the
+   * card re-reads the profile, so the member list regroups at once instead
+   * of on the next page load. Without `@everyone`.
+   */
+  memberRoles: ReadonlyMap<string, ProfileRoleView[]>;
   currentUserId: string | null;
 }
 
@@ -101,6 +108,22 @@ interface FullState {
 
 const TOAST_MS = 5_000;
 
+/** The same roles, in the same order, shown the same way. */
+function sameRoles(a: readonly ProfileRoleView[] | undefined, b: readonly ProfileRoleView[]): boolean {
+  if (!a || a.length !== b.length) return false;
+  return a.every((role, i) => {
+    const other = b[i]!;
+    return (
+      role.id === other.id &&
+      role.name === other.name &&
+      role.color === other.color &&
+      role.icon === other.icon &&
+      role.position === other.position &&
+      role.displaySeparately === other.displaySeparately
+    );
+  });
+}
+
 export function ProfileCardProvider({
   serverId,
   serverName,
@@ -123,11 +146,17 @@ export function ProfileCardProvider({
   const [loadingUserId, setLoadingUserId] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
   const [removedUserIds, setRemovedUserIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [memberRoles, setMemberRoles] = useState<ReadonlyMap<string, ProfileRoleView[]>>(() => new Map());
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<number | null>(null);
   const openSeq = useRef(0);
 
   const membersById = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
+
+  /** Keep the roles of a fresh profile answer, for the lists (see `memberRoles`). */
+  const noteRoles = useCallback((userId: string, roles: ProfileRoleView[]) => {
+    setMemberRoles((current) => (sameRoles(current.get(userId), roles) ? current : new Map(current).set(userId, roles)));
+  }, []);
   const participants = voice.participants ?? [];
   const connectedChannelId = voice.activeChannelId ?? null;
 
@@ -147,13 +176,13 @@ export function ProfileCardProvider({
         isGuest: member.isGuest ?? false,
         statusText: member.statusText ?? null,
         bio: member.bio ?? null,
-        roles: member.roles ?? [],
+        roles: memberRoles.get(userId) ?? member.roles ?? [],
         // No presence or voice state from the page render: it goes stale.
         // The member list passes its live ones when it opens a card; any
         // other opener gets the API's.
       };
     },
-    [membersById]
+    [membersById, memberRoles]
   );
 
   const activeUserId = full?.userId ?? card?.userId ?? null;
@@ -176,6 +205,10 @@ export function ProfileCardProvider({
     setLoadingUserId(cached ? null : activeUserId);
     fetchMemberProfile(serverId, activeUserId, { force: Boolean(cached) || refreshTick > 0, viewerId: currentUserId })
       .then((data) => {
+        // A fresh answer (after a role change made in the card, too): the
+        // member list follows it even if the card has closed meanwhile.
+        // Not from the cache above — it may be older than the page render.
+        if (data) noteRoles(activeUserId, data.profile.roles);
         if (!cancelled) setLoaded({ userId: activeUserId, data });
       })
       .catch(() => {
@@ -189,7 +222,7 @@ export function ProfileCardProvider({
     return () => {
       cancelled = true;
     };
-  }, [serverId, activeUserId, refreshTick, currentUserId]);
+  }, [serverId, activeUserId, refreshTick, currentUserId, noteRoles]);
 
   const refresh = useCallback(() => {
     if (activeUserId) invalidateMemberProfile(serverId, activeUserId);
@@ -312,9 +345,10 @@ export function ProfileCardProvider({
       openUserId: card?.userId ?? null,
       seedFor,
       removedUserIds,
+      memberRoles,
       currentUserId,
     }),
-    [openProfile, closeProfile, card?.userId, seedFor, removedUserIds, currentUserId]
+    [openProfile, closeProfile, card?.userId, seedFor, removedUserIds, memberRoles, currentUserId]
   );
 
   /** The seed for a card or the full profile: the page render, the opener's fresher facts, live voice. */
