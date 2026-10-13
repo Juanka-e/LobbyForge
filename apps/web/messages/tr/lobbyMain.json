@@ -180,6 +180,7 @@
   "lobbyMain.voice.connecting": "bağlanıyor…",
   "lobbyMain.voice.connectingHint": "Katılımcılar burada görünecek.",
   "lobbyMain.voice.connectingTitle": "Sese bağlanılıyor",
+  "lobbyMain.voice.deafened": "Sağırlaştırıldı",
   "lobbyMain.voice.disconnectError.forbidden": "Üyelerin ses bağlantısını kesme iznin yok.",
   "lobbyMain.voice.disconnectError.generic": "{name} kullanıcısının ses bağlantısı kesilemedi ({status}).",
   "lobbyMain.voice.disconnectError.insufficientRank": "Yalnızca en yüksek rolü seninkinden aşağıda olan üyelerin ses bağlantısını kesebilirsin.",

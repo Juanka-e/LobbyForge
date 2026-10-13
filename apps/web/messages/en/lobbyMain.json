@@ -180,6 +180,7 @@
   "lobbyMain.voice.connecting": "connecting…",
   "lobbyMain.voice.connectingHint": "Participants will appear here.",
   "lobbyMain.voice.connectingTitle": "Connecting to voice",
+  "lobbyMain.voice.deafened": "Deafened",
   "lobbyMain.voice.disconnectError.forbidden": "You don’t have permission to disconnect members from voice.",
   "lobbyMain.voice.disconnectError.generic": "Could not disconnect {name} from voice ({status}).",
   "lobbyMain.voice.disconnectError.insufficientRank": "You can only disconnect members whose highest role is below yours.",

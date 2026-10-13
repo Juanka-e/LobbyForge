@@ -41,6 +41,7 @@ import { listPluginSummaries } from '@/lib/plugin-registry';
 import { getUserPresenceInChannel, getUserPresenceInServer, setUserPresence } from '@/lib/redis';
 import { LobbyVoiceProvider } from './LobbyVoiceProvider';
 import { LobbyVoiceChannels } from './LobbyVoiceChannels';
+import { VoiceStatusIcon } from './VoiceStatusIcon';
 import { LobbyVoiceFooter } from './LobbyVoiceFooter';
 import { VoiceResumeStrip } from './VoiceResumeStrip';
 import { LobbyTextChannels } from './LobbyTextChannels';
@@ -1540,9 +1541,7 @@ async function ChannelGroup({
                         {u.name}
                       </span>
                       {u.muted ? (
-                        <span className="material-symbols-outlined text-[14px] text-danger">
-                          mic_off
-                        </span>
+                        <VoiceStatusIcon icon="mic_off" label={t('lobby.voice.muted')} className="text-[14px] text-danger" />
                       ) : null}
                     </li>
                   ))}

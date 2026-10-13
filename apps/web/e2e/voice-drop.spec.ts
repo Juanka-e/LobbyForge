@@ -104,6 +104,11 @@ function rosterRow(page: Page, name: string): Locator {
   return page.getByTestId('mobile-nav-drawer').locator('li.cursor-pointer').filter({ hasText: name });
 }
 
+/** A roster row's mute status — a named image, not the "mic_off" ligature a screen reader used to read. */
+function mutedIcon(row: Locator): Locator {
+  return row.getByRole('img', { name: 'Muted', exact: true });
+}
+
 /** Ada in `room` and connected, whatever the previous test left behind. */
 async function ensureInVoice(page: Page, serverId: string, room: string) {
   if (!page.url().includes('/lobby')) await page.goto(`/lobby?server=${serverId}`);
@@ -167,23 +172,23 @@ test.describe('voice: connect, controls, and dropping out', () => {
     await expect(benOnAda).toHaveCount(1, { timeout: 15_000 });
     // Joined with the microphone on (voice activity is the default mode).
     await expect(adaPage.getByTitle('Mute', { exact: true })).toBeVisible();
-    await expect(adaOnBen.getByText('mic_off')).toHaveCount(0);
+    await expect(mutedIcon(adaOnBen)).toHaveCount(0);
 
     // ── Mute / unmute.
     await adaPage.getByTitle('Mute', { exact: true }).click();
     await expect(adaPage.getByTitle('Unmute', { exact: true })).toBeVisible();
-    await expect(adaOnBen.getByText('mic_off')).toHaveCount(1, { timeout: 10_000 });
+    await expect(mutedIcon(adaOnBen)).toHaveCount(1, { timeout: 10_000 });
     await adaPage.getByTitle('Unmute', { exact: true }).click();
-    await expect(adaOnBen.getByText('mic_off')).toHaveCount(0, { timeout: 10_000 });
+    await expect(mutedIcon(adaOnBen)).toHaveCount(0, { timeout: 10_000 });
 
     // ── Deafen: also closes the microphone (others see that); undeafen restores it.
     await adaPage.getByTitle('Deafen', { exact: true }).click();
     await expect(adaPage.getByTitle('Undeafen', { exact: true })).toBeVisible();
     await expect(adaPage.getByTitle('Unmute', { exact: true })).toBeVisible();
-    await expect(adaOnBen.getByText('mic_off')).toHaveCount(1, { timeout: 10_000 });
+    await expect(mutedIcon(adaOnBen)).toHaveCount(1, { timeout: 10_000 });
     await adaPage.getByTitle('Undeafen', { exact: true }).click();
     await expect(adaPage.getByTitle('Mute', { exact: true })).toBeVisible({ timeout: 10_000 });
-    await expect(adaOnBen.getByText('mic_off')).toHaveCount(0, { timeout: 10_000 });
+    await expect(mutedIcon(adaOnBen)).toHaveCount(0, { timeout: 10_000 });
 
     // ── Camera.
     // Turning the camera or a screen share on opens the voice view over the
@@ -222,12 +227,12 @@ test.describe('voice: connect, controls, and dropping out', () => {
       await adaPage.getByTitle('Disconnect', { exact: true }).click();
       await join_(adaPage, serverId, ROOM_A, { navigate: false });
       await expect(adaPage.getByTitle('Unmute', { exact: true })).toBeVisible();
-      await expect(rosterRow(benPage, ada.name).getByText('mic_off')).toHaveCount(1, { timeout: 15_000 });
+      await expect(mutedIcon(rosterRow(benPage, ada.name))).toHaveCount(1, { timeout: 15_000 });
       await adaPage.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
       await adaPage.keyboard.down('Space');
-      await expect(rosterRow(benPage, ada.name).getByText('mic_off')).toHaveCount(0, { timeout: 10_000 });
+      await expect(mutedIcon(rosterRow(benPage, ada.name))).toHaveCount(0, { timeout: 10_000 });
       await adaPage.keyboard.up('Space');
-      await expect(rosterRow(benPage, ada.name).getByText('mic_off')).toHaveCount(1, { timeout: 10_000 });
+      await expect(mutedIcon(rosterRow(benPage, ada.name))).toHaveCount(1, { timeout: 10_000 });
     } finally {
       expect((await ptt(false)).status()).toBe(200);
     }
@@ -267,9 +272,9 @@ test.describe('voice: connect, controls, and dropping out', () => {
     await expect(rosterRow(benPage, ada.name)).toHaveCount(1);
     await expect(rosterRow(adaPage, ben.name)).toHaveCount(1);
     await adaPage.getByTitle('Mute', { exact: true }).click();
-    await expect(rosterRow(benPage, ada.name).getByText('mic_off')).toHaveCount(1, { timeout: 10_000 });
+    await expect(mutedIcon(rosterRow(benPage, ada.name))).toHaveCount(1, { timeout: 10_000 });
     await adaPage.getByTitle('Unmute', { exact: true }).click();
-    await expect(rosterRow(benPage, ada.name).getByText('mic_off')).toHaveCount(0, { timeout: 10_000 });
+    await expect(mutedIcon(rosterRow(benPage, ada.name))).toHaveCount(0, { timeout: 10_000 });
   });
 
   test('long drop (> 2 min, signal and media): the others see it, the strip appears, the online and tab-visible retries rejoin', async ({}, testInfo) => {

@@ -7,6 +7,7 @@ import { createPortal } from 'react-dom';
 import { useT } from '@/lib/i18n/client';
 import { initialOf } from '@/lib/initial';
 import { useLobbyVoice, type LobbyVoiceParticipant } from './LobbyVoiceProvider';
+import { VoiceStatusIcon } from './VoiceStatusIcon';
 
 export function LobbyVoiceView({ channelId, channelName }: { channelId: string; channelName: string }) {
   const t = useT();
@@ -323,12 +324,12 @@ function VoiceOnlyStage({ participants }: { participants: LobbyVoiceParticipant[
             <div className="flex max-w-full items-center gap-1.5 text-xs text-white/80">
               <span className="truncate font-medium">{participant.name}</span>
               {!participant.micEnabled ? (
-                <span className="material-symbols-outlined flex-none text-[14px] text-red-300" aria-label={t('lobby.voice.muted')}>mic_off</span>
+                <VoiceStatusIcon icon="mic_off" label={t('lobby.voice.muted')} className="text-[14px] text-red-300" />
               ) : participant.isSpeaking ? (
-                <span className="material-symbols-outlined flex-none text-[14px] text-emerald-300" aria-label={t('lobbyMain.voice.speaking')}>graphic_eq</span>
+                <VoiceStatusIcon icon="graphic_eq" label={t('lobbyMain.voice.speaking')} className="text-[14px] text-emerald-300" />
               ) : null}
-              {participant.cameraEnabled ? <span className="material-symbols-outlined flex-none text-[14px] text-sky-300" aria-label={t('lobbyMain.voice.cameraOn')}>videocam</span> : null}
-              {participant.hasScreenShare ? <span className="material-symbols-outlined flex-none text-[14px] text-emerald-300" aria-label={t('lobbyMain.voice.sharingScreen')}>present_to_all</span> : null}
+              {participant.cameraEnabled ? <VoiceStatusIcon icon="videocam" label={t('lobbyMain.voice.cameraOn')} className="text-[14px] text-sky-300" /> : null}
+              {participant.hasScreenShare ? <VoiceStatusIcon icon="present_to_all" label={t('lobbyMain.voice.sharingScreen')} className="text-[14px] text-emerald-300" /> : null}
             </div>
           </div>
         ))}
@@ -660,11 +661,11 @@ function CameraTile({
       <div className="absolute inset-x-0 bottom-0 flex h-8 items-center justify-between bg-black/70 px-2 text-xs text-white/85">
         <span className="truncate font-medium">{participant.name}</span>
         {!participant.micEnabled ? (
-          <span className="material-symbols-outlined text-[14px] text-red-300" aria-label={t('lobby.voice.muted')}>mic_off</span>
+          <VoiceStatusIcon icon="mic_off" label={t('lobby.voice.muted')} className="text-[14px] text-red-300" />
         ) : participant.isSpeaking ? (
-          <span className="material-symbols-outlined text-[14px] text-emerald-300" aria-label={t('lobbyMain.voice.speaking')}>graphic_eq</span>
+          <VoiceStatusIcon icon="graphic_eq" label={t('lobbyMain.voice.speaking')} className="text-[14px] text-emerald-300" />
         ) : null}
-        {participant.hasScreenShare ? <span className="material-symbols-outlined text-[14px] text-emerald-300" aria-label={t('lobbyMain.voice.sharingScreen')}>present_to_all</span> : null}
+        {participant.hasScreenShare ? <VoiceStatusIcon icon="present_to_all" label={t('lobbyMain.voice.sharingScreen')} className="text-[14px] text-emerald-300" /> : null}
       </div>
     </button>
   );

@@ -5,6 +5,7 @@ import { getRealtimeClient } from '@/lib/realtime-client';
 import { MemberBlockButton } from './MemberBlockButton';
 import { BotAvatar, BotBadge, BotProfilePopover, type LobbyBot } from './BotIdentity';
 import { useProfileCard } from './ProfileCardProvider';
+import { VoiceStatusIcon } from './VoiceStatusIcon';
 import { useT } from '@/lib/i18n/client';
 import { initialOf } from '@/lib/initial';
 import {
@@ -398,7 +399,7 @@ function MemberRow({
           </div>
         </button>
         {member.muted ? (
-          <span className="material-symbols-outlined text-[16px] text-text-secondary">mic_off</span>
+          <VoiceStatusIcon icon="mic_off" label={t('lobby.voice.muted')} className="text-[16px] text-text-secondary" />
         ) : null}
         <MemberBlockButton userId={member.id} isSelf={member.id === currentUserId} />
       </div>

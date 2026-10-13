@@ -7,6 +7,7 @@ import type { Params } from '@/lib/i18n/core';
 import { initialOf } from '@/lib/initial';
 import { useLobbyVoice, type LobbyVoiceParticipant } from './LobbyVoiceProvider';
 import { ProfileTrigger } from './ProfileCardProvider';
+import { VoiceStatusIcon } from './VoiceStatusIcon';
 import Link from 'next/link';
 import { useEmailRestriction, useVerifyEmailAction } from '@/components/email-verification/EmailUnverifiedNotice';
 
@@ -445,18 +446,15 @@ export function LobbyVoiceChannels({
                           {u.name}
                         </span>
                       </ProfileTrigger>
+                      {/* Icon-only statuses, each a named image (VoiceStatusIcon):
+                          a screen reader used to read "mic_off". Deafen is a
+                          local setting, so only your own row knows it. */}
                       {u.serverMuted ? (
-                        <span
-                          className="material-symbols-outlined text-[14px] text-danger"
-                          title={t('lobbyMain.voice.serverMuted')}
-                          aria-label={t('lobbyMain.voice.serverMuted')}
-                        >
-                          block
-                        </span>
+                        <VoiceStatusIcon icon="block" label={t('lobbyMain.voice.serverMuted')} className="text-[14px] text-danger" />
+                      ) : u.isLocal && voice.deafenEnabled ? (
+                        <VoiceStatusIcon icon="headphones_off" label={t('lobbyMain.voice.deafened')} className="text-[14px] text-danger" />
                       ) : !u.micEnabled ? (
-                        <span className="material-symbols-outlined text-[14px] text-danger">
-                          mic_off
-                        </span>
+                        <VoiceStatusIcon icon="mic_off" label={t('lobby.voice.muted')} className="text-[14px] text-danger" />
                       ) : null}
                       {isConnected && canMuteMembers && !u.isLocal ? (
                         <button
@@ -484,10 +482,10 @@ export function LobbyVoiceChannels({
                         </button>
                       ) : null}
                       {u.cameraEnabled ? (
-                        <span className="material-symbols-outlined text-[14px] text-primary" title={t('lobbyMain.voice.cameraOn')} aria-label={t('lobbyMain.voice.cameraOn')}>videocam</span>
+                        <VoiceStatusIcon icon="videocam" label={t('lobbyMain.voice.cameraOn')} className="text-[14px] text-primary" />
                       ) : null}
                       {u.hasScreenShare ? (
-                        <span className="material-symbols-outlined text-[14px] text-success" title={t('lobbyMain.voice.sharingScreen')} aria-label={t('lobbyMain.voice.sharingScreen')}>present_to_all</span>
+                        <VoiceStatusIcon icon="present_to_all" label={t('lobbyMain.voice.sharingScreen')} className="text-[14px] text-success" />
                       ) : null}
                     </ParticipantRow>
                   ))}
