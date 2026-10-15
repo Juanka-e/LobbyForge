@@ -53,7 +53,10 @@ socket cannot connect polls the session GET every 5 s instead.
 |---|---|---|---|
 | `activity-state:{serverId}:{sessionId}` | `lf:{env}:activity-state:{serverId}:{sessionId}` | activity `actions` + `end` routes (and the GET when it fires timers) | ws-gateway |
 | `chat:{serverId}:{channelId}` | `lf:{env}:chat:{serverId}:{channelId}` | messages `POST` route | ws-gateway (chat UI is M20+) |
-| `user:{userId}` | `lf:{env}:user-events:{userId}` | Bot API v2 (ephemeral interaction answers) | ws-gateway — only the session whose uid matches |
+| `presence:{serverId}` | `lf:{env}:presence:{serverId}` | presence `POST` route | ws-gateway — a content-free "re-fetch" signal |
+| `members:{serverId}` | `lf:{env}:members:{serverId}` | `lib/member-bus.ts` (joins, kick/leave, ban, timeout, roles, role edits, nicknames, profiles) | ws-gateway — `members-changed` / `members-removed { userIds }`, `roles-changed`; nothing else passes ([PROFILES.md](./PROFILES.md#live-updates)) |
+| `dm:{channelId}` | `lf:{env}:dm:{channelId}` | DM messages `POST` route | ws-gateway — participants with DM access |
+| `user:{userId}` | `lf:{env}:user-events:{userId}` | Bot API v2 (ephemeral interaction answers); `dm_activity` (DM list); `mention` (channel badges) | ws-gateway — only the session whose uid matches |
 
 Bots do not use these topics: they connect on `/ws/bot` and get a feed
 the gateway builds for them — see [`docs/BOT_API_V2.md`](./BOT_API_V2.md) §4.

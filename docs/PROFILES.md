@@ -10,6 +10,9 @@ viewer, the API behind them and the privacy and permission rules they follow.
 - [The full profile](#the-full-profile)
 - [The image viewer](#the-image-viewer)
 - [The profile API](#the-profile-api)
+- [Profile fields](#profile-fields)
+- [Mentions](#mentions)
+- [Live updates](#live-updates)
 - [Privacy](#privacy)
 - [Permissions: `viewerCan`](#permissions-viewercan)
 - [Accessibility](#accessibility)
@@ -21,8 +24,8 @@ viewer, the API behind them and the privacy and permission rules they follow.
 | Place | How |
 |---|---|
 | Member list | Click a row. The card gets the row's live status. |
-| Chat | Click the author's avatar or name. Bots, webhooks and apps have their own badges and no card. |
-| Voice roster | Left-click a participant. Right-click and the "⋮" button still open the moderator menu. |
+| Chat | Click the author's avatar or name, or a mention chip (`@Ada`) in a message. Bots, webhooks and apps have their own badges and no card. |
+| Voice roster | Left-click a participant (shown with their photo). Right-click and the "⋮" button still open the moderator menu. |
 | Direct messages | Click the header (avatar and name), or an author's avatar or name. |
 | Your account block | Click your avatar to open your own card. Click your name to open the status menu, as before. |
 
@@ -30,16 +33,15 @@ Only one card is open at a time. Clicking another person switches the card,
 and clicking the same person again closes it. A click anywhere else closes it
 too.
 
-Mentions in messages are plain text. Messages don't store which user a
-mention points to: the composer's `@` autocomplete keeps no id, and the
-messages route refuses client metadata (security-review AUTHZ-008). A mention
-can't open a card until messages store mention ids.
+A mention in a message opens the card of the member it names; see
+[Mentions](#mentions).
 
 ## What the card shows
 
 From top to bottom:
 
-- **Banner.** The member's banner. Without one, a band in the main colour of
+- **Banner.** The member's banner. Without one, a band in their profile
+  colour ([Profile fields](#profile-fields)); without that, the main colour of
   their avatar. The colour is sampled from the image on a small canvas. If
   that fails, the band takes the colour of their highest coloured role, then
   the theme accent (`--lf-user-accent`). Only same-origin avatars are sampled:
@@ -50,8 +52,10 @@ From top to bottom:
   shown separately, as an "In voice" badge.
 - **Names**, Discord's way: the name this community sees (the nickname, if
   there is one) in large type, and the account's own name under it when a
-  nickname replaces it. Then a Guest badge, a crown for the community owner,
-  and the custom status as a speech bubble.
+  nickname replaces it. Under the names, `@handle · pronouns` when the member
+  set them. Then a Guest badge, a crown for the community owner, and the
+  custom status as a speech bubble. A profile colour also draws a thin ring at
+  the edge of the photo.
 - **About me**: the bio, or "No bio yet.".
 - **Member since**: when the LobbyForge account was created and when they
   joined this community. Both dates are in the viewer's language
@@ -171,8 +175,11 @@ requests a minute. The answer has `Cache-Control: no-store`.
     "avatarUrl": "/api/users/…/avatar?v=…", // versioned URL, or null
     "bannerUrl": "/api/users/…/banner?v=…", // versioned URL, or null
     "isGuest": false,
+    "username": "ace",                    // the handle, or null — shown like a name
     "statusText": "Building",             // custom status, or null
     "bio": "…",                           // or null
+    "pronouns": "she/her",                // or null (unset, or withheld when limited)
+    "accentColor": "#5865f2",             // profile colour, or null (unset, or withheld when limited)
     "presence": "idle",                   // online | idle | dnd | offline, or null
     "inVoice": false,                     // in a voice room of this community the viewer can see
     "roles": [{ "id": "…", "name": "Mods", "color": "#ff8800", "icon": "shield", "position": 10, "displaySeparately": true }],
@@ -225,6 +232,100 @@ can't be used to find out who belongs where.
 The database half lives in `packages/db/src/queries/memberProfiles.ts`:
 `getMemberProfileRecord` and `listMutualServers`.
 
+## Profile fields
+
+Migration 0050 adds three columns to `users`, edited in Settings → Profile
+and shown on the card. All three are nullable: every account from before
+0050, and every guest, simply has none.
+
+| Field | Rules | Shown |
+|---|---|---|
+| **Handle** (`username`) | 2–32 of `a-z 0-9 _ .`, stored lowercase, unique (a unique constraint plus a format CHECK). No leading, trailing or doubled dot. Reserved: `everyone`, `here`, `admin`, `administrator`, `moderator`, `mod`, `owner`, `system`, `lobbyforge`, `support`, `staff`, `bot`, `webhook`. Guests can't take one. | `@handle` under the names, always (a name, like the display name). Typed in chat it is a mention. |
+| **Pronouns** | Free text, at most 40 characters, no control characters, whitespace collapsed. | Next to the handle — withheld like the bio. |
+| **Profile colour** (`accent_color`) | `#rrggbb`, stored lowercase (a CHECK). Twelve swatches, any colour from the picker, or Automatic. | The card's band without a banner, and the ring around the photo — withheld like the bio. |
+
+The settings page checks a handle while you type: the format rules at once,
+then `GET /api/users/me/username?name=…` after a short pause (60 a minute;
+handles are visible to fellow members anyway). The page shows a preview of
+the band, the photo ring, the name and `@handle · pronouns`.
+
+`PATCH /api/users/me/profile` takes `username`, `pronouns` and `accentColor`
+next to the old fields (`null` or an empty string clears one). Refusals carry
+a code the page translates: `username_too_short`, `username_too_long`,
+`username_characters`, `username_dots`, `username_reserved`,
+`username_guest` (403), `username_taken` (409), `pronouns_too_long`,
+`pronouns_characters`, `accent_color_invalid`, `invalid_profile`.
+
+**Community nicknames.** Settings → Profile → "Server-specific" lists every
+community the account is in and edits the nickname of the one picked; the
+profile card's "Edit profile" opens it on the card's community
+(`/settings/profile?server=…`). `PATCH /api/users/me/server-profile` takes
+`serverId` and checks the membership (`409 no_community` otherwise). Before,
+the nickname always went to the account's newest community, whatever lobby it
+was set from.
+
+## Mentions
+
+A message's text stays plain (`hi @Ada Lovelace`), so bots, notifications and
+older clients read it as before. Who a mention names is kept beside it, in
+`metadata.mentions`: `[{ "userId": "…", "text": "Ada Lovelace" }]`, where
+`text` is what follows the `@`. Only the server writes it
+(security-review AUTHZ-008 still refuses client metadata):
+
+- the composer sends `mentions: [userId…]` — the members picked from the `@`
+  list whose name is still in the text;
+- the messages route (post and edit) keeps a pick only if it is a current
+  member whose nickname, account name or handle stands as `@…` in the text,
+  and adds every typed `@handle` of a current member
+  (`lib/message-mentions-server.ts`). An edit keeps the earlier mentions whose
+  names are still there. At most 20.
+
+The lobby turns each stored `@text` into a chip that opens that member's card,
+marks `@everyone` / `@here`, and highlights a message that names the viewer
+(or pings everyone) with an amber bar, as Discord does. The `@` list matches a
+handle too, and folds case the viewer's way (Turkish `İ`/`I`).
+
+**Notifications.** Each member a new message names hears it on their own feed
+(`user:{uid}`, `{ type: "mention", serverId, channelId, messageId,
+fromUserId }`, `lib/mention-notify.ts`) — only if they may read that channel,
+never the author, never someone who blocked the author, and with no text. The
+channel list gives that channel a red badge with the count until it is
+opened, and a hidden tab gets a desktop notification. Settings →
+Notifications now does what it says: "Unread badge" turns the badges on or
+off, "Suppress while in voice" keeps a voice room quiet, and the sound choice
+plays the page's own chime, a soft pop, or nothing (`lib/notification-prefs.ts`).
+
+## Live updates
+
+The lobby's member rows used to be the page render's: someone who joined, a
+new name or avatar, roles handed out by somebody else — all waited for a
+reload. They now arrive live.
+
+- **`members:{serverId}`** is a new gateway topic (any member may subscribe;
+  a kick, ban or role change re-checks it). Its events say WHO changed, never
+  what, and the gateway forwards nothing but these three shapes
+  (`apps/ws-gateway/src/member-events.ts`):
+  - `members-changed { userIds }` — joined, or their profile, nickname,
+    roles or timeout changed;
+  - `members-removed { userIds }` — left, kicked or banned;
+  - `roles-changed` — a role's name, colour, icon, grouping or order changed,
+    or a role was deleted.
+- `lib/member-bus.ts` publishes them from every route that changes those
+  things (join paths, kick and leave, ban, timeout, role assignment, role
+  edit and delete, nickname, and the account's own profile, avatar and banner
+  — which reach every community it belongs to).
+- `LiveMembersProvider` re-reads exactly the named rows from
+  `GET /api/servers/{id}/lobby-members?ids=…` (projected for the viewer like
+  the page render; owner or member only; up to 100 ids; `missing` lists those
+  no longer members), or everyone after `roles-changed` or a reconnect. The
+  member list, the profile card (an open card re-reads), chat author names,
+  the mention list and the voice roster all read these rows; status stays the
+  presence feed's.
+- **DMs.** A DM message also tells both participants' feeds
+  (`{ type: "dm_activity", channelId, fromUserId }`, no text). The sidebar's
+  DM list re-reads `GET /api/dm`, so a conversation someone else started
+  appears, and one that is not open gets an unread dot until it is opened.
+
 ## Privacy
 
 The route uses the lobby's own projection: `canViewProfile` and
@@ -233,9 +334,9 @@ build the member list. Nothing the lobby would hide comes through the API.
 
 | | Full profile | Hidden profile (`profileVisibility` shuts the viewer out) | They blocked you | You blocked them |
 |---|---|---|---|---|
-| Names, Guest tag, roles, owner crown | yes | yes | yes | yes |
+| Names, handle, Guest tag, roles, owner crown | yes | yes | yes | yes |
 | Avatar | yes | no | no | if the privacy setting allows (the block list's rule, `projectBlockedUser`) |
-| Banner, bio, custom status | yes | no | no | no |
+| Banner, bio, custom status, pronouns, profile colour | yes | no | no | no |
 | Member since, account created | yes | no | no | no |
 | Mutual communities | yes | no | no | no |
 | Presence, in voice | per presence privacy | per presence privacy | per presence privacy | no (like the presence feed) |
@@ -313,6 +414,11 @@ and never removed.
 | `apps/web/components/modals/profile/*` | shared pieces, the "⋯" menu, the confirmations, the actions |
 | `apps/web/components/ImageLightbox.tsx` | the image viewer |
 | `apps/web/lib/profile-accent.ts` | the banner band's colour |
+| `apps/web/lib/profile-fields.ts` | handle, pronouns and colour rules (page and route) |
+| `apps/web/lib/mentions.ts`, `lib/message-mentions-server.ts`, `lib/mention-notify.ts` | mention parsing, resolution, notifications |
+| `apps/web/lib/member-bus.ts`, `app/lobby/LiveMembersProvider.tsx` | live member rows |
+| `apps/web/app/api/servers/[id]/lobby-members/route.ts` | member rows for the live lobby |
+| `apps/ws-gateway/src/member-events.ts` | what a `members:` subscriber may receive |
 
 To make a new place open the card, wrap the person in
 `<ProfileTrigger userId={…} seed={{ displayName }}>`. Outside the live lobby
@@ -333,17 +439,15 @@ Tests:
 
 ## Not done yet
 
-- **Clickable mentions.** They need messages to store mention user ids first
-  (see above).
-- **Pronouns, a handle, a profile accent colour.** Each needs a new column,
-  so none is in this change.
+- **Unread marks for every message.** Channels show a badge for mentions of
+  the viewer; a mark for any new message needs a per-viewer "channel
+  activity" feed that respects channel visibility. The old dot (lit for a
+  channel merely opened in the last seconds) is gone.
+- **Mentions in DMs, from bots, of roles; `@everyone` notifications.** Member
+  mentions in community channels only; an edit that adds a mention does not
+  notify (Discord doesn't either).
 - **Image viewer for chat attachments.** The viewer is generic; chat has no
   image attachments to open yet.
-- **Role changes made elsewhere, live.** A role change made through your own
-  card regroups your member list at once (see "The member list follows"). One
-  made somewhere else (the admin Members page, another moderator's card)
-  reaches your member list on the next page load, or when you next open that
-  member's card.
 - **A DM with someone who is not in this community** opens a card with just
   the name and avatar from the DM. The profile API is per community.
 - **The two other places that give a block away**: the DM route's two

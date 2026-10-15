@@ -2,6 +2,51 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Handles, pronouns, profile colours, mentions and live members - 2026-10-15
+
+- **Profile fields** (migration 0050, docs/PROFILES.md "Profile fields"):
+  - A handle (`@ada_l`): unique, 2–32 of `a-z 0-9 _ .`, checked as you type, reserved names refused, none for guests.
+  - Pronouns, up to 40 characters.
+  - A profile colour: swatches, a free picker or Automatic. It colours the card's band when there's no banner, and draws a ring around the photo.
+  - The card shows `@handle · pronouns` under the names. Pronouns and the colour follow the profile's visibility like the bio; the handle shows like a name.
+  - Settings → Profile has a live preview. Every refusal is said in the account's language.
+- **Community nicknames:** the settings page lists every community and edits the one picked. "Edit profile" opens it on the card's community. The nickname used to go to the account's newest community, whatever lobby it was set from.
+- **Mentions that know who they name** (docs/PROFILES.md "Mentions"):
+  - The server keeps `metadata.mentions` (`{ userId, text }`): picks from the `@` list that are members and whose name is still in the text, plus typed `@handles`. Message text stays plain.
+  - Mentions render as chips that open the profile card. A message that names you, or `@everyone`, is highlighted.
+  - The `@` list matches handles and folds Turkish İ/I.
+  - A mention elsewhere in the community puts a red badge on that channel, and a hidden tab gets a desktop notification. Only members who can read the channel are told, never someone who blocked the author, and the text is never sent.
+- **Notification settings that work:** "Unread badge", "Suppress while in voice" and the sound choice (default chime, soft pop, none) were saved but never used.
+- **Live members** (new gateway topic `members:{serverId}`; docs/PROFILES.md "Live updates"):
+  - Joins, departures, kicks and bans show live, as do new names, avatars, handles, nicknames and roles, and edited roles' colours and order. This covers the member list, profile cards, chat author names, the mention list and the voice roster.
+  - Events say who changed, never what; each lobby re-reads those rows over REST, projected for that viewer.
+- **Live DM list:** a conversation someone else starts appears without a reload, with an unread dot until opened. Starting one from a profile card adds it too.
+- **Voice:** the voice list and the call view show profile photos instead of initials.
+- **Chat:**
+  - "Load older messages": a channel used to stop at its newest 50 messages.
+  - After a dropped connection, the channel and the open DM catch up: missed messages appear, deleted ones go.
+  - Delete asks first; the message actions show on keyboard focus and on touch screens.
+  - A refused edit, delete or pin says why (a Moderation Bot rule, a timeout, `@everyone` without permission), and a refused edit stays open.
+  - The composer says refusals in your language, never the server's English.
+  - "is typing…" sits under the newest message (it was above the oldest).
+  - Pinning no longer marks a message "(edited)".
+  - Unblocking someone shows their messages again without a reload.
+  - Times and day separators use your time zone from the first paint.
+- **Bans:**
+  - The admin Members page lists bans (reason, since, until) with "Lift ban". There was no way to undo a ban in the product.
+  - The profile card's Ban takes a duration (1 hour, 1 day, 1 week, 30 days or permanent).
+- **Smaller fixes:**
+  - The channel header shows the channel's real topic, or nothing (it was the same canned sentence everywhere), and long names truncate at 390 px.
+  - The fake unread dot on channels is gone.
+  - The call view says "Reconnecting…" while LiveKit reconnects.
+  - Switching DMs can no longer show the previous conversation or send its draft to the new person.
+  - The member-list block button is never an invisible tap target on touch screens.
+  - A failed block or unblock says so.
+  - Password-change, session-revoke and voice-mute errors are translated.
+  - Header icon buttons have names, and the dead footer button is gone.
+  - Changing the stream quality no longer leaves an unhandled error.
+- **Upgrade notes:** migration 0050 is expand-only and idempotent: three nullable `users` columns plus constraints. Restart the ws-gateway with the web image, because the new topic needs both.
+
 ## [0.2.0-rc.11] - 2026-10-13
 
 rc.10 plus the two entries below: "A Discord-like profile card" and "The A-to-Z e2e run: fixes and three new specs". Update with `lfctl update apply`.
