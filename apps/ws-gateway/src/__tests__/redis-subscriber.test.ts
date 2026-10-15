@@ -19,9 +19,14 @@ class FakeConnection implements SubscriberConnection {
   unsubscribe = vi.fn(async (_channel: string) => 0);
   quit = vi.fn(async () => 'OK');
   private messageListeners: Array<(channel: string, raw: string) => void> = [];
-  on(event: 'message' | 'error', listener: (...args: never[]) => void): this {
+  private readyListeners: Array<() => void> = [];
+  on(event: 'message' | 'error' | 'ready', listener: (...args: never[]) => void): this {
     if (event === 'message') this.messageListeners.push(listener as (channel: string, raw: string) => void);
+    if (event === 'ready') this.readyListeners.push(listener as () => void);
     return this;
+  }
+  emitReady(): void {
+    for (const l of this.readyListeners) l();
   }
   emitMessage(channel: string, raw: string): void {
     for (const l of this.messageListeners) l(channel, raw);
@@ -135,6 +140,38 @@ describe('shared redis subscriber', () => {
     b.release();
     expect(conn.unsubscribe).toHaveBeenCalledWith('lf:test:bot-events:b1');
     chat.release();
+  });
+
+  it('retries a refused SUBSCRIBE on the next ready, for topics still held', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const onMsg = vi.fn();
+    const held = acquireTopicSubscription('chat:srv-1:a', onMsg);
+    const conn = connections[0]!;
+    conn.subscribe.mockRejectedValueOnce(new Error('Reached the max retries per request limit'));
+    const dropped = acquireTopicSubscription('chat:srv-1:b', () => undefined);
+    // Let the rejection land.
+    await new Promise((r) => setTimeout(r, 0));
+    dropped.release(); // released before Redis came back: not retried
+    expect(conn.subscribe).toHaveBeenCalledTimes(2);
+
+    conn.subscribe.mockRejectedValueOnce(new Error('still down'));
+    const refusedAgain = acquireTopicSubscription('chat:srv-1:c', onMsg);
+    await new Promise((r) => setTimeout(r, 0));
+
+    conn.emitReady();
+    expect(conn.subscribe).toHaveBeenCalledTimes(4);
+    expect(conn.subscribe).toHaveBeenLastCalledWith('lf:test:chat:srv-1:c');
+    expect(conn.subscribe.mock.calls.filter(([channel]) => channel === 'lf:test:chat:srv-1:b')).toHaveLength(1);
+    // A ready with nothing refused re-issues nothing (ioredis re-subscribes the rest).
+    await new Promise((r) => setTimeout(r, 0));
+    conn.emitReady();
+    expect(conn.subscribe).toHaveBeenCalledTimes(4);
+
+    conn.emitMessage('lf:test:chat:srv-1:c', 'x');
+    expect(onMsg).toHaveBeenCalledWith('x');
+    held.release();
+    refusedAgain.release();
+    warn.mockRestore();
   });
 
   it('never opens a connection for an unparseable topic', () => {

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import {
   APP_NAME,
@@ -13,7 +15,20 @@ describe('@lobbyforge/desktop', () => {
     const cfg = defaultDesktopConfig();
     expect(cfg.appName).toBe(APP_NAME);
     expect(cfg.enableTray).toBe(true);
-    expect(cfg.globalPushToTalk).toBe(true);
+    // Global shortcuts take keys from every other app: opt-in only.
+    expect(cfg.globalPushToTalk).toBe(false);
+    expect(cfg.globalShortcuts).toBe(false);
+  });
+
+  it('the Rust shell agrees: no global shortcut unless opted in, none while disconnected', () => {
+    const lib = readFileSync(join(__dirname, '..', '..', 'src-tauri', 'src', 'lib.rs'), 'utf8');
+    expect(lib).toContain('shell_flag(app, GLOBAL_PTT_KEY, false)');
+    expect(lib).toContain('shell_flag(app, GLOBAL_SHORTCUTS_KEY, false)');
+    expect(lib).toContain('const GLOBAL_PTT_KEY: &str = "globalPushToTalk";');
+    // Registration lives in apply_global_shortcuts only (connect / restore /
+    // disconnect / tray toggle), never unconditionally at setup.
+    expect(lib.match(/\.on_shortcut\(/g)).toHaveLength(1);
+    expect(lib).toContain('unregister_all()');
   });
 
   it('DEFAULT_SHORTCUTS includes push-to-talk', () => {

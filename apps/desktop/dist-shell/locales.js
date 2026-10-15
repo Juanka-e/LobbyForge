@@ -14,8 +14,10 @@ window.__LF_SHELL_LOCALES = {
       "desktop.error.invalidUrl": "That isn't a valid address.",
       "desktop.error.noExtras": "Use the address only: no user name, password, query or # part.",
       "desktop.error.originOnly": "Use the address only, without a path (for example https://chat.example.com).",
+      "desktop.tray.globalPtt": "Push to talk anywhere (Ctrl+Space)",
       "desktop.tray.quit": "Quit",
-      "desktop.tray.show": "Show LobbyForge"
+      "desktop.tray.show": "Show LobbyForge",
+      "desktop.tray.switchInstance": "Switch instance…"
     }
   },
   "tr": {
@@ -31,8 +33,10 @@ window.__LF_SHELL_LOCALES = {
       "desktop.error.invalidUrl": "Bu geçerli bir adres değil.",
       "desktop.error.noExtras": "Yalnızca adresi yaz: kullanıcı adı, şifre, sorgu ya da # kısmı olmadan.",
       "desktop.error.originOnly": "Yalnızca adresi yaz, yol olmadan (örneğin https://sohbet.ornek.com).",
+      "desktop.tray.globalPtt": "Her yerde bas-konuş (Ctrl+Space)",
       "desktop.tray.quit": "Çık",
-      "desktop.tray.show": "LobbyForge'u göster"
+      "desktop.tray.show": "LobbyForge'u göster",
+      "desktop.tray.switchInstance": "Kurulumu değiştir…"
     }
   }
 };

@@ -113,13 +113,24 @@ export interface AccessRevokedMessage {
   at: string;
 }
 
+/**
+ * Sent next to every protocol ping (30 s). Browsers answer pings but never
+ * show them to the page, so the client re-arms its liveness timer on this
+ * frame instead; it carries nothing else.
+ */
+export interface HeartbeatMessage {
+  type: 'heartbeat';
+  at: string;
+}
+
 export type ServerMessage =
   | HelloMessage
   | SubscribedMessage
   | UnsubscribedMessage
   | EventMessage
   | ErrorMessage
-  | AccessRevokedMessage;
+  | AccessRevokedMessage
+  | HeartbeatMessage;
 
 /**
  * Parse a topic into its parts. Returns `null` if the topic isn't one

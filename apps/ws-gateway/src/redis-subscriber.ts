@@ -14,7 +14,10 @@
  *     UNSUBSCRIBE. The connection itself stays open for the process
  *     lifetime (ioredis reconnects + auto-resubscribes on its own).
  *   - Subscriptions are fire-and-forget: failures are logged, never
- *     thrown into the socket handler.
+ *     thrown into the socket handler. A SUBSCRIBE Redis refused (e.g. it
+ *     sat in the offline queue past its retries while Redis was down) is
+ *     not one ioredis re-subscribes, so it is retried on the next 'ready'
+ *     — otherwise the topic stayed dead until every holder released it.
  *
  * ioredis forbids regular commands on a subscriber connection — this
  * connection only ever runs subscribe/unsubscribe/quit.
@@ -28,6 +31,7 @@ export interface SubscriberConnection {
   unsubscribe(channel: string): Promise<unknown>;
   on(event: 'message', listener: (channel: string, raw: string) => void): unknown;
   on(event: 'error', listener: (err: Error) => void): unknown;
+  on(event: 'ready', listener: () => void): unknown;
   quit(): Promise<unknown>;
 }
 
@@ -60,6 +64,18 @@ interface HandlerEntry {
 /** wire topic → live handler entries (size === refcount). */
 const states = new Map<string, Set<HandlerEntry>>();
 
+/** Held topics whose SUBSCRIBE was refused — retried on the next 'ready'. */
+const failedSubscribes = new Set<string>();
+
+/** SUBSCRIBE on the shared connection; a refusal is remembered for a retry. */
+function subscribeChannel(sub: SubscriberConnection, wireTopic: string): void {
+  sub.subscribe(wireTopic).catch((err: Error) => {
+    console.warn(`[ws-gateway] subscribe failed for ${wireTopic}: ${err.message}`);
+    // Only while someone still holds it (and the connection is still ours).
+    if (states.has(wireTopic) && subscriber === sub) failedSubscribes.add(wireTopic);
+  });
+}
+
 function topicForWire(topic: string): string | null {
   const parsed = parseTopic(topic);
   if (!parsed) return null;
@@ -85,6 +101,15 @@ function getSubscriber(): SubscriberConnection {
   sub.on('error', (err: Error) => {
     // ioredis reconnects (and re-subscribes) on its own.
     console.warn(`[ws-gateway] redis subscriber error: ${err.message}`);
+  });
+  // (Re)connected: ioredis re-subscribes what Redis had accepted; retry
+  // what it refused, for the topics still held.
+  sub.on('ready', () => {
+    const retry = [...failedSubscribes];
+    failedSubscribes.clear();
+    for (const wireTopic of retry) {
+      if (states.has(wireTopic)) subscribeChannel(sub, wireTopic);
+    }
   });
   subscriber = sub;
   return sub;
@@ -122,9 +147,7 @@ export function acquireRedisChannel(
     entries = new Set();
     states.set(wireTopic, entries);
     // First listener for this topic → SUBSCRIBE on the shared connection.
-    sub.subscribe(wireTopic).catch((err: Error) => {
-      console.warn(`[ws-gateway] subscribe failed for ${wireTopic}: ${err.message}`);
-    });
+    subscribeChannel(sub, wireTopic);
   }
   const entry: HandlerEntry = { fn: handler };
   entries.add(entry);
@@ -139,6 +162,7 @@ export function acquireRedisChannel(
       cur.delete(entry);
       if (cur.size === 0) {
         states.delete(wireTopic);
+        failedSubscribes.delete(wireTopic);
         // Last listener gone → UNSUBSCRIBE; the connection stays open.
         // Commands are pipelined in order, so an immediate re-acquire's
         // SUBSCRIBE lands after this UNSUBSCRIBE.
@@ -153,6 +177,7 @@ export function shutdownSubscriber(): void {
   const sub = subscriber;
   subscriber = null;
   states.clear();
+  failedSubscribes.clear();
   if (sub) sub.quit().catch(() => undefined);
 }
 
