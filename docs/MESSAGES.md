@@ -182,7 +182,12 @@ AUTHZ-009).
 
 The typing indicator (`GET …/typing`) leaves out users the viewer blocked,
 users who blocked the viewer, and users whose *Online status* privacy hides
-them from the viewer — the presence rule (docs/PRESENCE.md).
+them from the viewer — the presence rule (docs/PRESENCE.md). Saying you are
+typing (`POST …/typing`) takes what posting takes — membership, seeing the
+channel and `SEND_MESSAGES` (the message route's send check), and not being
+timed out (`403 actor_timed_out`) — and the name shown is resolved on the
+server: the community nickname, else the account's display name (it used to
+be the session cookie's name, without the nickname and stale after a rename).
 
 ## Direct messages
 

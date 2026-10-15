@@ -8,12 +8,17 @@ const getTypingEntries = vi.fn();
 const getBlockedUserIds = vi.fn();
 const getBlockersAmong = vi.fn();
 const getUserSettings = vi.fn();
+const authorizeChannelMessageAccess = vi.fn();
+const getActiveMemberTimeout = vi.fn();
+const getServerMember = vi.fn();
+const getUserById = vi.fn();
 
 vi.mock('@/lib/api-auth', () => ({
   requireMaterializedSession,
   requireChannelInServer,
   requireVisibleChannelInServer: requireChannelInServer,
 }));
+vi.mock('@/lib/message-authorization', () => ({ authorizeChannelMessageAccess }));
 vi.mock('@/lib/redis', () => ({ setTyping, getTypingEntries }));
 vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
@@ -30,6 +35,9 @@ vi.mock('@lobbyforge/db', () => ({
   getBlockedUserIds,
   getBlockersAmong,
   getUserSettings,
+  getActiveMemberTimeout,
+  getServerMember,
+  getUserById,
 }));
 
 const SECRET = 'x'.repeat(32);
@@ -61,6 +69,14 @@ beforeEach(() => {
     session: { uid: UID, gid: 'g_1', name: 'Owner', exp: 123 },
   });
   requireChannelInServer.mockResolvedValue({ ok: true });
+  // POST: the message route's send check passes for a plain member.
+  authorizeChannelMessageAccess.mockReset().mockResolvedValue({
+    ok: true,
+    context: { server: { id: SERVER_ID, ownerUserId: 'someone-else' }, channel: { id: CHANNEL_ID } },
+  });
+  getActiveMemberTimeout.mockReset().mockResolvedValue(null);
+  getServerMember.mockReset().mockResolvedValue({ nickname: null });
+  getUserById.mockReset().mockResolvedValue({ displayName: 'Profile Name' });
   setTyping.mockResolvedValue(undefined);
   getTypingEntries.mockResolvedValue([{ userId: ALICE, displayName: 'Alice' }]);
 });
@@ -101,7 +117,7 @@ describe('POST /api/servers/[id]/channels/[channelId]/typing', () => {
   });
 
   it('returns the denied response when the channel does not belong to the server', async () => {
-    requireChannelInServer.mockResolvedValue({
+    authorizeChannelMessageAccess.mockResolvedValue({
       ok: false,
       response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }),
     });
@@ -113,6 +129,53 @@ describe('POST /api/servers/[id]/channels/[channelId]/typing', () => {
       ctx()
     );
     expect(res.status).toBe(403);
+    expect(setTyping).not.toHaveBeenCalled();
+  });
+});
+
+// Security review 2026-10 (A10): the typer's name came from the session
+// cookie (no nickname, stale after a rename), and anyone who could SEE the
+// channel could say they were typing — a timed-out member, or one without
+// Send Messages, included.
+describe('POST …/typing — who may type, under which name', () => {
+  async function post(): Promise<Response> {
+    const { POST } = await import('../route.js');
+    return POST(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}/typing`, { method: 'POST' }),
+      ctx()
+    );
+  }
+
+  it('asks the message route’s send check (membership, visibility, Send Messages)', async () => {
+    await post();
+    expect(authorizeChannelMessageAccess).toHaveBeenCalledWith({ userId: UID, serverId: SERVER_ID, channelId: CHANNEL_ID, operation: 'send' });
+  });
+
+  it('shows the community nickname first, then the account name — never the cookie’s name', async () => {
+    getServerMember.mockResolvedValue({ nickname: 'Nick' });
+    await post();
+    expect(setTyping).toHaveBeenLastCalledWith(SERVER_ID, CHANNEL_ID, UID, 'Nick');
+    getServerMember.mockResolvedValue({ nickname: null });
+    await post();
+    expect(setTyping).toHaveBeenLastCalledWith(SERVER_ID, CHANNEL_ID, UID, 'Profile Name');
+  });
+
+  it('a member without Send Messages records nothing (403)', async () => {
+    authorizeChannelMessageAccess.mockResolvedValue({
+      ok: false,
+      response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }),
+    });
+    expect((await post()).status).toBe(403);
+    expect(setTyping).not.toHaveBeenCalled();
+  });
+
+  it('a timed-out member records nothing (403 actor_timed_out)', async () => {
+    const until = new Date(Date.now() + 60_000);
+    getActiveMemberTimeout.mockResolvedValue(until);
+    const res = await post();
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'actor_timed_out', until: until.toISOString() });
+    expect(getActiveMemberTimeout).toHaveBeenCalledWith({ __mockDb: true }, SERVER_ID, UID);
     expect(setTyping).not.toHaveBeenCalled();
   });
 });
