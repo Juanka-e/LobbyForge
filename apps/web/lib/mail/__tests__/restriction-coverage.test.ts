@@ -254,6 +254,20 @@ describe('every protected action is gated (docs/EMAIL.md §4.2)', { timeout: 30_
     expect(h.requireVerifiedEmail).not.toHaveBeenCalled();
   });
 
+  // Security review 2026-10 (A7): the invite redeem carries the same note
+  // to the moderators under an approval policy, and skipped the gate.
+  it('join_request: a note sent with an invite redeem is gated; a plain redeem is not', async () => {
+    const load = () => import('@/app/api/invites/[code]/redeem/route');
+    const path = '/api/invites/ABCD2345EFGH/redeem';
+    const params = { code: 'ABCD2345EFGH' };
+    await expectRefused(await call(load, 'POST', path, { note: 'friend of Ada' }, params), 'join_request');
+    expect(db.redeemInvite).not.toHaveBeenCalled();
+    h.requireVerifiedEmail.mockClear();
+    await call(load, 'POST', path, undefined, params);
+    await call(load, 'POST', path, { note: '   ' }, params);
+    expect(h.requireVerifiedEmail).not.toHaveBeenCalled();
+  });
+
   it('directory_listing: listing a community in the hub directory (challenge and registration)', async () => {
     await expectRefused(await call(() => import('@/app/api/directory/register/challenge/route'), 'GET', '/api/directory/register/challenge', undefined), 'directory_listing');
     h.requireVerifiedEmail.mockClear();
@@ -286,6 +300,7 @@ describe('the gate stays in place (static)', () => {
     ['directory/register/route.ts', 'directory_listing'],
     ['directory/register/challenge/route.ts', 'directory_listing'],
     ['servers/[id]/join-requests/mine/route.ts', 'join_request'],
+    ['invites/[code]/redeem/route.ts', 'join_request'],
   ];
 
   it.each(GATED)('%s calls requireVerifiedEmail(…, %s)', (file, action) => {

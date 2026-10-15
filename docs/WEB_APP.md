@@ -360,9 +360,12 @@ The interaction contract is fixed:
   before lookup.
 - `/admin/settings/voice-media` is wired to `server_voice_settings` through
   `/api/servers/{id}/voice-settings`. Mutations require the caller to be a
-  server member with `MANAGE_SERVER`, use bounded zod validation, and are
-  rate-limited. Camera and screen-share toggles are enforced at LiveKit token
-  issuance by narrowing `canPublishSources`.
+  server member with `MANAGE_SERVER` who is not timed out, use bounded zod
+  validation, and are rate-limited. Camera and screen-share toggles are
+  enforced at LiveKit token issuance by narrowing `canPublishSources`, and a
+  change is re-applied at once to everyone already connected
+  (`queueServerVoiceSync`). Every change is audited as
+  `server.voice_settings.update` with the fields it set.
 - `/admin/settings/backups` no longer shows fabricated restore points or
   successful backup status. It verifies the configured backup manifest, checks
   freshness, digest shape, and artifact existence, and reports missing backup

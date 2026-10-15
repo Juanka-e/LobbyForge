@@ -5,6 +5,7 @@ import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { authorizeServerPermission } from '@/lib/permissions';
 import { withApiSecurity } from '@/lib/security-headers';
+import { refuseTimedOutActor } from '@/lib/actor-timeout';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -53,8 +54,15 @@ async function handleDelete(
         { status: 400 }
       );
     }
-    const auth = await authorizeServerPermission(session.uid, serverId, CorePermission.CREATE_INVITE);
-    if (!auth.ok) return auth.response;
+    // CREATE_INVITE covers your own invites, MANAGE_SERVER everyone's: either
+    // one gets you in (a manager whose roles do not carry CREATE_INVITE used
+    // to be refused before the own-invite rule below was even reached).
+    let auth = await authorizeServerPermission(session.uid, serverId, CorePermission.CREATE_INVITE);
+    if (!auth.ok) {
+      const manager = await authorizeServerPermission(session.uid, serverId, CorePermission.MANAGE_SERVER);
+      if (!manager.ok) return auth.response;
+      auth = manager;
+    }
 
     const server = await getServerById(getDb(), serverId);
     if (!server) {
@@ -72,6 +80,13 @@ async function handleDelete(
       !hasPermission(auth.permissions, CorePermission.MANAGE_SERVER)
     ) {
       return NextResponse.json({ error: 'You can only revoke invites you created' }, { status: 403 });
+    }
+    // Revoking SOMEONE ELSE'S invite is management, which a timed-out member
+    // may not do (lib/actor-timeout.ts). Taking back your own stays allowed,
+    // like deleting your own message.
+    if (invite.createdBy !== session.uid) {
+      const timedOut = await refuseTimedOutActor(serverId, session.uid, server.ownerUserId);
+      if (timedOut) return timedOut;
     }
     await revokeInvite(getDb(), inviteId);
     void logAction(getDb(), {

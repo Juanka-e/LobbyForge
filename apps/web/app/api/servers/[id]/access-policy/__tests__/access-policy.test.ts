@@ -7,6 +7,7 @@ const requireServerPermission = vi.fn();
 const getEffectiveServerAccessPolicy = vi.fn();
 const upsertServerAccessPolicy = vi.fn();
 const logAction = vi.fn();
+const getActiveMemberTimeout = vi.fn();
 
 vi.mock('@/lib/api-auth', () => ({
   CorePermission: { MANAGE_SERVER: 'manage_server' },
@@ -18,6 +19,7 @@ vi.mock('@lobbyforge/db', () => ({
   getEffectiveServerAccessPolicy,
   upsertServerAccessPolicy,
   logAction,
+  getActiveMemberTimeout,
 }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
 vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));
@@ -45,6 +47,7 @@ beforeEach(() => {
   upsertServerAccessPolicy.mockReset();
   logAction.mockReset();
   logAction.mockResolvedValue(undefined);
+  getActiveMemberTimeout.mockReset().mockResolvedValue(null);
   requireMaterializedSession.mockReturnValue({
     ok: true,
     session: { uid: UID, gid: 'g_1', name: 'Owner', exp: 123 },
@@ -145,5 +148,25 @@ describe('PATCH /api/servers/[id]/access-policy', () => {
       ctx()
     );
     expect(res.status).toBe(400);
+  });
+
+  // Security review 2026-10 (A1): a timed-out member changes no settings.
+  it('403 actor_timed_out for a timed-out manager — nothing is stored', async () => {
+    const until = new Date(Date.now() + 60_000);
+    requireServerMember.mockResolvedValue({ ok: true, server: { id: SERVER_ID, ownerUserId: 'someone-else' } });
+    getActiveMemberTimeout.mockResolvedValue(until);
+    const { PATCH } = await import('../route.js');
+    const res = await PATCH(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/access-policy`, {
+        method: 'PATCH',
+        body: JSON.stringify(validBody),
+      }),
+      ctx()
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'actor_timed_out', until: until.toISOString() });
+    expect(getActiveMemberTimeout).toHaveBeenCalledWith({ __mockDb: true }, SERVER_ID, UID);
+    expect(upsertServerAccessPolicy).not.toHaveBeenCalled();
+    expect(logAction).not.toHaveBeenCalled();
   });
 });

@@ -45,10 +45,16 @@ export interface ServerBanRow {
 
 export interface BanResult {
   ok: true;
+  /** The ban as stored now. */
   ban: ServerBanRow;
+  /**
+   * false when the user was ALREADY actively banned: that ban was updated in
+   * place instead (`previous` holds what it said before).
+   */
+  created: boolean;
+  previous?: Pick<ServerBanRow, 'bannedBy' | 'reason' | 'expiresAt'>;
 }
 export type BanError =
-  | { ok: false; error: 'already_banned' }
   | { ok: false; error: 'cannot_ban_owner' }
   | { ok: false; error: 'cannot_ban_self' };
 
@@ -61,11 +67,18 @@ export type BanError =
  * beta-review (S2): the old helper only inserted the `server_bans` row —
  * the membership survived, so a banned user kept posting messages and
  * minting LiveKit tokens. The membership delete (membership_roles
- * cascade) now commits atomically with the ban. Re-banning is
- * idempotent for an ACTIVE ban (the existing row is returned and any
- * lingering membership is still removed); an EXPIRED ban row (the
- * unique (server, user) constraint keeps it around) is refreshed with
- * the new ban's values instead of being returned as if it still applied.
+ * cascade) now commits atomically with the ban.
+ *
+ * Banning a user who is ALREADY actively banned updates that ban in place
+ * (`created: false`, with the `previous` values): the new moderator, the
+ * new expiry (none = permanent, as for a new ban) and the new reason (an
+ * omitted reason keeps the stored one). Security review 2026-10 (A6): it
+ * used to return the old row unchanged while the route answered 201 and
+ * audited a `ban.create` that had not happened — and escalating a
+ * temporary ban to a permanent one silently did nothing. The ban keeps its
+ * `createdAt` (when the user was first banned). Any lingering membership
+ * is still removed. An EXPIRED ban row (the unique (server, user)
+ * constraint keeps it around) is refreshed as a new ban (`created: true`).
  */
 export async function banUser(
   db: DbClient,
@@ -98,9 +111,25 @@ export async function banUser(
     );
     const [existing] = await tx.select().from(serverBans).where(whereBan).limit(1);
 
+    // The new terms of an ACTIVE ban (an omitted reason keeps the old one).
+    const updateActive = async (current: ServerBanRow) =>
+      (
+        await tx
+          .update(serverBans)
+          .set({
+            bannedBy: input.bannedBy,
+            reason: input.reason ?? current.reason,
+            expiresAt: input.expiresAt ?? null,
+          })
+          .where(eq(serverBans.id, current.id))
+          .returning()
+      )[0];
+
     let ban: ServerBanRow | undefined;
+    let previous: ServerBanRow | undefined;
     if (existing && isBanActive(existing)) {
-      ban = existing;
+      previous = existing;
+      ban = await updateActive(existing);
     } else if (existing) {
       [ban] = await tx
         .update(serverBans)
@@ -124,8 +153,12 @@ export async function banUser(
         })
         .onConflictDoNothing({ target: [serverBans.serverId, serverBans.userId] })
         .returning();
-      // A concurrent ban won the insert — adopt its row.
-      if (!ban) [ban] = await tx.select().from(serverBans).where(whereBan).limit(1);
+      // A concurrent ban won the insert — this one updates it, like a
+      // second ban of an actively banned user.
+      if (!ban) {
+        [previous] = await tx.select().from(serverBans).where(whereBan).limit(1);
+        if (previous) ban = await updateActive(previous);
+      }
     }
     if (!ban) {
       throw new Error('banUser: ban row could not be written');
@@ -158,7 +191,14 @@ export async function banUser(
       .delete(memberships)
       .where(and(eq(memberships.serverId, input.serverId), eq(memberships.userId, input.userId)));
 
-    return { ok: true as const, ban };
+    return {
+      ok: true as const,
+      ban,
+      created: !previous,
+      ...(previous
+        ? { previous: { bannedBy: previous.bannedBy, reason: previous.reason, expiresAt: previous.expiresAt } }
+        : {}),
+    };
   });
 }
 

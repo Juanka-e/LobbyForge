@@ -18,6 +18,7 @@ const db = vi.hoisted(() => ({
   /** Role-gated channels have overrides: not open. */
   isChannelOpenToBots: vi.fn(async (_db: unknown, id: string) => !access.gated.has(id)),
   endOpenGameSessionsForPlugin: vi.fn(async (..._args: unknown[]) => [] as Array<Record<string, unknown>>),
+  getActiveMemberTimeout: vi.fn(async (..._args: unknown[]) => null as Date | null),
 }));
 /** Who saves: their permissions, whether they own the community, which channels they cannot see. */
 const access = vi.hoisted(() => ({
@@ -87,6 +88,7 @@ beforeEach(() => {
   access.hidden = new Set();
   db.getPluginInstall.mockResolvedValue(null);
   db.endOpenGameSessionsForPlugin.mockResolvedValue([]);
+  db.getActiveMemberTimeout.mockResolvedValue(null);
   db.getChannelById.mockImplementation(async (_db: unknown, id: string) =>
     id === TEXT
       ? { id: TEXT, serverId: SERVER, type: 'text' }
@@ -201,6 +203,36 @@ describe('uninstalling or disabling an app ends its open sessions', () => {
     db.endOpenGameSessionsForPlugin.mockClear();
     expect((await save({}, { enabled: true })).status).toBe(200);
     expect(db.endOpenGameSessionsForPlugin).not.toHaveBeenCalled();
+  });
+});
+
+// Security review 2026-10 (A1): a timed-out member installs, changes and
+// removes no apps.
+describe('a timed-out manager changes no apps (actor_timed_out)', () => {
+  it('POST and DELETE are refused before anything is written; the owner is never asked', async () => {
+    const until = new Date(Date.now() + 60_000);
+    db.getActiveMemberTimeout.mockResolvedValue(until);
+    const saved = await save({ chatChannelId: TEXT });
+    expect(saved.status).toBe(403);
+    expect(await saved.json()).toMatchObject({ code: 'actor_timed_out', until: until.toISOString() });
+    const route = await import('../route.js');
+    const removed = await route.DELETE(
+      new Request(`https://chat.example.test/api/servers/${SERVER}/apps`, {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ pluginId: 'chatty' }),
+      }),
+      { params: Promise.resolve({ id: SERVER }) }
+    );
+    expect(removed.status).toBe(403);
+    expect(db.upsertPluginInstall).not.toHaveBeenCalled();
+    expect(db.deletePluginInstall).not.toHaveBeenCalled();
+    expect(db.endOpenGameSessionsForPlugin).not.toHaveBeenCalled();
+
+    access.owner = true;
+    db.getActiveMemberTimeout.mockClear();
+    expect((await save({ chatChannelId: TEXT })).status).toBe(200);
+    expect(db.getActiveMemberTimeout).not.toHaveBeenCalled();
   });
 });
 

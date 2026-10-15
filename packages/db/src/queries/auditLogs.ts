@@ -13,9 +13,10 @@
  * data. Routes call `logAction` from inside their handler — it's
  * fire-and-forget from the caller's perspective.
  */
-import { and, desc, eq, lt } from 'drizzle-orm';
+import { and, desc, eq, lt, notInArray, type SQL } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
 import { auditLogs } from '../schema.js';
+import { completeLastMillisecond, inMillisecondOf } from './pagination.js';
 
 export interface AuditLogRow {
   id: string;
@@ -55,8 +56,10 @@ export async function logAction(db: DbClient, input: LogActionInput): Promise<vo
 }
 
 /**
- * Read the audit log for a server, newest first. Bounded to 100 to keep
- * the read cheap; the UI paginates with a `before` cursor.
+ * Read the audit log for a server, newest first. Bounded to 100 (at most
+ * 200) to keep the read cheap; the UI paginates with a `before` cursor. A
+ * full page also carries the rows that share its last row's millisecond
+ * (./pagination.ts), so it can run past `limit` by those.
  */
 export async function listAuditLogsForServer(
   db: DbClient,
@@ -64,14 +67,22 @@ export async function listAuditLogsForServer(
   options: { before?: Date; limit?: number } = {}
 ): Promise<AuditLogRow[]> {
   const limit = Math.min(Math.max(options.limit ?? 100, 1), 200);
-  const where = options.before
-    ? and(eq(auditLogs.serverId, serverId), lt(auditLogs.createdAt, options.before))
-    : eq(auditLogs.serverId, serverId);
-  const rows = await db
-    .select()
-    .from(auditLogs)
-    .where(where)
-    .orderBy(desc(auditLogs.createdAt))
-    .limit(limit);
-  return rows as AuditLogRow[];
+  const filters: SQL[] = [eq(auditLogs.serverId, serverId)];
+  if (options.before) filters.push(lt(auditLogs.createdAt, options.before));
+  const select = (where: SQL[]) =>
+    db
+      .select()
+      .from(auditLogs)
+      .where(and(...where))
+      .orderBy(desc(auditLogs.createdAt), desc(auditLogs.id));
+  const page = (await select(filters).limit(limit)) as AuditLogRow[];
+  // Security review 2026-10 (A11): millisecond-complete pages
+  // (./pagination.ts), so the next `before` skips nothing.
+  return completeLastMillisecond(page, limit, async (boundary, seenIds) =>
+    (await select([
+      ...filters,
+      inMillisecondOf(auditLogs.createdAt, boundary),
+      ...(seenIds.length > 0 ? [notInArray(auditLogs.id, seenIds)] : []),
+    ])) as AuditLogRow[]
+  );
 }

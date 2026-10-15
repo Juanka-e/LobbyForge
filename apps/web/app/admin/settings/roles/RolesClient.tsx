@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
 import { ROLE_ICONS, type RoleIcon } from '@/lib/role-icons';
+import { adminRefusalText } from '@/lib/profile-action-errors';
 
 export interface RoleView {
   id: string;
@@ -138,7 +139,7 @@ export default function RolesClient({
       cache: 'no-store',
     });
     const data = (await response.json().catch(() => ({}))) as ApiRoleResponse;
-    if (!response.ok || !data.roles) throw new Error(data.error ?? t('adminSettings.roles.reloadFailed'));
+    if (!response.ok || !data.roles) throw new Error(adminRefusalText(t, data, t('adminSettings.roles.reloadFailed')));
     setRoles((current) => mergeMemberCounts(data.roles ?? [], current));
   }
 
@@ -169,7 +170,7 @@ export default function RolesClient({
         }),
       });
       const data = (await response.json().catch(() => ({}))) as ApiRoleResponse;
-      if (!response.ok || !data.role) throw new Error(data.error ?? t('adminSettings.roles.createFailed'));
+      if (!response.ok || !data.role) throw new Error(adminRefusalText(t, data, t('adminSettings.roles.createFailed')));
       setRoles((current) => [...current, { ...data.role!, memberCount: 0 }]);
       setForm(EMPTY_FORM);
       setMessage({ tone: 'success', text: t('adminSettings.roles.created') });
@@ -224,7 +225,7 @@ export default function RolesClient({
         }
       );
       const data = (await response.json().catch(() => ({}))) as ApiRoleResponse;
-      if (!response.ok || !data.role) throw new Error(data.error ?? t('adminSettings.roles.updateFailed'));
+      if (!response.ok || !data.role) throw new Error(adminRefusalText(t, data, t('adminSettings.roles.updateFailed')));
       setRoles((current) =>
         current.map((item) => (item.id === role.id ? { ...data.role!, memberCount: item.memberCount } : item))
       );
@@ -273,7 +274,7 @@ export default function RolesClient({
         }
         throw new Error(parts.length > 0 ? parts.join(' ') : (data.error ?? t('adminSettings.roles.deleteFailed')));
       }
-      if (!response.ok) throw new Error(data.error ?? t('adminSettings.roles.deleteFailed'));
+      if (!response.ok) throw new Error(adminRefusalText(t, data, t('adminSettings.roles.deleteFailed')));
       setRoles((current) => current.filter((item) => item.id !== role.id));
       setMessage({ tone: 'success', text: t('adminSettings.roles.deleted') });
       await refreshRoles();

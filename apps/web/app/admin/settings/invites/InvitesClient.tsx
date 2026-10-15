@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
+import { adminRefusalText } from '@/lib/profile-action-errors';
 import type { Translator } from '@/lib/i18n/core';
 import { rich } from '@/lib/i18n/rich';
 import EmailUnverifiedNotice, {
@@ -121,7 +122,7 @@ export default function InvitesClient({
           setEmailRefused(true);
           return;
         }
-        throw new Error(detail.error ?? `HTTP ${res.status}`);
+        throw new Error(adminRefusalText(t, detail, `HTTP ${res.status}`));
       }
       const data = (await res.json()) as { invite: Omit<InviteView, 'creatorName'> };
       setInvites((current) => [{ ...data.invite, creatorName: t('adminSettings.invites.you') }, ...current]);
@@ -144,7 +145,7 @@ export default function InvitesClient({
       });
       if (!res.ok) {
         const detail = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(detail.error ?? `HTTP ${res.status}`);
+        throw new Error(adminRefusalText(t, detail, `HTTP ${res.status}`));
       }
       setInvites((current) => current.filter((candidate) => candidate.id !== invite.id));
       setPendingRevoke(null);

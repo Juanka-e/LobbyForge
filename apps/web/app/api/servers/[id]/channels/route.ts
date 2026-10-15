@@ -17,6 +17,7 @@ import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
 import { CorePermission, authorizeServerPermission, hasPermission } from '@/lib/permissions';
 import { requireVerifiedEmail } from '@/lib/mail/verification';
+import { refuseTimedOutActor } from '@/lib/actor-timeout';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -28,7 +29,7 @@ const CreateChannelSchema = z.object({
   type: z.enum(CHANNEL_TYPES),
   topic: z.string().max(512).optional(),
   pluginId: z.string().max(64).optional(),
-  position: z.number().int().min(0).optional(),
+  position: z.number().int().min(0).max(1_000_000).optional(),
 });
 
 function getSessionSecret(): string {
@@ -160,6 +161,9 @@ async function handlePost(req: Request, ctx: { params: Promise<{ id: string }> }
     // "general" channel that every other member reads.
     const auth = await authorizeServerPermission(session.uid, serverId, CorePermission.MANAGE_CHANNELS);
     if (!auth.ok) return auth.response;
+    // A timed-out member creates no channels (lib/actor-timeout.ts).
+    const timedOut = await refuseTimedOutActor(serverId, session.uid, access.server.ownerUserId);
+    if (timedOut) return timedOut;
 
     const created = await createChannel(getDb(), {
       serverId,

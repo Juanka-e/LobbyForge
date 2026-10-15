@@ -510,6 +510,24 @@ describe('POST .../polls/{pollId}/close', () => {
     expect(closeMessagePoll).toHaveBeenCalledTimes(2);
   });
 
+  // Security review 2026-10 (A1): closing someone else's poll is moderation.
+  it("a timed-out moderator cannot close another member's poll (403 actor_timed_out); the creator still closes their own", async () => {
+    const until = new Date(Date.now() + HOUR);
+    getActiveMemberTimeout.mockResolvedValue(until);
+    const { POST } = await import('../[pollId]/close/route.js');
+    const refused = await POST(request(MOD, 'POST'), pollCtx());
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toMatchObject({ code: 'actor_timed_out', until: until.toISOString() });
+    expect(closeMessagePoll).not.toHaveBeenCalled();
+    expect(publishChatPollUpdate).not.toHaveBeenCalled();
+    expect(logAction).not.toHaveBeenCalled();
+
+    getMessagePollWithTally.mockResolvedValue(tally({ closedAt: new Date() }));
+    expect((await POST(request(POLLER, 'POST'), pollCtx())).status).toBe(200);
+    expect((await POST(request(OWNER, 'POST'), pollCtx())).status).toBe(200);
+    expect(getActiveMemberTimeout).toHaveBeenCalledTimes(1);
+  });
+
   it('a poll that has already closed answers 409', async () => {
     closeMessagePoll.mockResolvedValue({ ok: false, reason: 'closed' });
     const { POST } = await import('../[pollId]/close/route.js');

@@ -30,6 +30,7 @@ const db = {
   listBotReachableChannels: vi.fn(),
   listBotEventTargets: vi.fn(),
   listBotChannelAccessForServer: vi.fn(),
+  getActiveMemberTimeout: vi.fn(),
 };
 vi.mock('@lobbyforge/db', () => db);
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
@@ -95,6 +96,7 @@ beforeEach(() => {
   db.listBotReachableChannels.mockResolvedValue([]);
   db.listBotEventTargets.mockResolvedValue([]);
   db.listBotChannelAccessForServer.mockResolvedValue(new Map());
+  db.getActiveMemberTimeout.mockResolvedValue(null);
 });
 
 function botAccessEvents() {

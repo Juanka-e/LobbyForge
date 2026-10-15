@@ -17,6 +17,7 @@ import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
 import { authorizeChannelMessageAccess } from '@/lib/message-authorization';
 import { authorizeServerPermission } from '@/lib/permissions';
+import { refuseTimedOutActor } from '@/lib/actor-timeout';
 import { moderateMessage, moderationBlockedBody } from '@/lib/bots/moderation';
 import { messageBotJson } from '@/lib/bots/bot-i18n-server';
 import { emitMessageEvent } from '@/lib/bots/events';
@@ -368,6 +369,13 @@ async function handleDelete(req: Request, ctx: RouteContext): Promise<NextRespon
 
     if (!(await canMutateMessage(serverId, access.isAuthor, session.uid))) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+    // Deleting SOMEONE ELSE'S message is moderation, which a timed-out
+    // member may not do (lib/actor-timeout.ts). Taking back your own
+    // message stays allowed: it adds nothing to the channel.
+    if (!access.isAuthor) {
+      const timedOut = await refuseTimedOutActor(serverId, session.uid, access.isOwner ? session.uid : null);
+      if (timedOut) return timedOut;
     }
 
     // A deleted poll message takes its poll and every ballot with it, in the

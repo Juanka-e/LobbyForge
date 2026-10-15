@@ -18,9 +18,10 @@
  *   - `metadata` is a JSONB blob for plugin-attached data (reactions,
  *     embeds, etc.). It's read through but not validated at this layer.
  */
-import { and, asc, desc, eq, isNull, lt } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, lt, notInArray, type SQL } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
 import { messages, users, channels, servers } from '../schema.js';
+import { completeLastMillisecond, inMillisecondOf } from './pagination.js';
 
 export interface MessageRow {
   id: string;
@@ -67,6 +68,19 @@ async function assertChannelAlive(db: DbClient, channelId: string): Promise<void
 }
 
 /**
+ * The error `createMessage` throws for a reply target that does not exist
+ * or lives in another channel. It carries `code: 'invalid_reply'` so the
+ * route can answer 400 instead of a 500 (security review 2026-10, A12);
+ * recognise it by the code, not `instanceof` (a second copy of the package
+ * would defeat that).
+ */
+export const INVALID_REPLY_CODE = 'invalid_reply' as const;
+
+function invalidReplyError(message: string): Error & { code: typeof INVALID_REPLY_CODE } {
+  return Object.assign(new Error(message), { code: INVALID_REPLY_CODE });
+}
+
+/**
  * Create a message. The `userId` is the materialized UUID from the
  * `lf_guest` cookie's `uid` field; the route layer is responsible for
  * making sure that field is non-null before calling. A bot message
@@ -93,10 +107,10 @@ export async function createMessage(db: DbClient, input: CreateMessageInput): Pr
       .where(eq(messages.id, input.replyToId))
       .limit(1);
     if (target.length === 0) {
-      throw new Error(`Reply target ${input.replyToId} not found`);
+      throw invalidReplyError(`Reply target ${input.replyToId} not found`);
     }
     if (target[0]?.channelId !== input.channelId) {
-      throw new Error('Reply target is in a different channel');
+      throw invalidReplyError('Reply target is in a different channel');
     }
   }
 
@@ -151,7 +165,9 @@ export async function createAppMessage(
  * pagination; if absent, the most recent `limit` messages are returned.
  *
  * Soft-deleted messages are excluded. Cross-channel / cross-server
- * leakage is prevented by the `assertChannelAlive` check.
+ * leakage is prevented by the `assertChannelAlive` check. A full page also
+ * carries the rows that share its last row's millisecond (./pagination.ts),
+ * so it can run past `limit` by those and the next `before` skips nothing.
  */
 export async function listMessagesForChannel(
   db: DbClient,
@@ -161,27 +177,39 @@ export async function listMessagesForChannel(
   await assertChannelAlive(db, channelId);
 
   const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
-  const filters = [eq(messages.channelId, channelId), isNull(messages.deletedAt)];
+  const filters: SQL[] = [eq(messages.channelId, channelId), isNull(messages.deletedAt)];
+  // The cursor is a whole millisecond (a JS Date); this is the same set as
+  // `date_trunc('milliseconds', created_at) < before`, and keeps the index.
   if (options.before) filters.push(lt(messages.createdAt, options.before));
 
-  const rows = await db
-    .select({
-      id: messages.id,
-      channelId: messages.channelId,
-      userId: messages.userId,
-      botId: messages.botId,
-      content: messages.content,
-      metadata: messages.metadata,
-      replyToId: messages.replyToId,
-      createdAt: messages.createdAt,
-      editedAt: messages.editedAt,
-      deletedAt: messages.deletedAt,
-    })
-    .from(messages)
-    .where(and(...filters))
-    .orderBy(desc(messages.createdAt))
-    .limit(limit);
-  return rows as MessageRow[];
+  const select = (where: SQL[]) =>
+    db
+      .select({
+        id: messages.id,
+        channelId: messages.channelId,
+        userId: messages.userId,
+        botId: messages.botId,
+        content: messages.content,
+        metadata: messages.metadata,
+        replyToId: messages.replyToId,
+        createdAt: messages.createdAt,
+        editedAt: messages.editedAt,
+        deletedAt: messages.deletedAt,
+      })
+      .from(messages)
+      .where(and(...where))
+      // id breaks ties, so the order (and a page's cut) is stable.
+      .orderBy(desc(messages.createdAt), desc(messages.id));
+  const page = (await select(filters).limit(limit)) as MessageRow[];
+  // Security review 2026-10 (A11): the page never ends inside a millisecond
+  // (./pagination.ts), so the next `before` skips nothing.
+  return completeLastMillisecond(page, limit, async (boundary, seenIds) =>
+    (await select([
+      ...filters,
+      inMillisecondOf(messages.createdAt, boundary),
+      ...(seenIds.length > 0 ? [notInArray(messages.id, seenIds)] : []),
+    ])) as MessageRow[]
+  );
 }
 
 /**

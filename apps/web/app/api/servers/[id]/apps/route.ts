@@ -25,6 +25,7 @@ import {
   requireServerPermission,
 } from '@/lib/api-auth';
 import { withApiSecurity } from '@/lib/security-headers';
+import { refuseTimedOutActor } from '@/lib/actor-timeout';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -112,6 +113,9 @@ async function handlePost(
   if (!member.ok) return member.response;
   const permission = await requireServerPermission(session.session.uid, serverId, CorePermission.MANAGE_SERVER);
   if (!permission.ok) return permission.response;
+  // A timed-out member installs, changes and removes no apps (lib/actor-timeout.ts).
+  const timedOut = await refuseTimedOutActor(serverId, session.session.uid, member.server?.ownerUserId);
+  if (timedOut) return timedOut;
 
   let body: z.infer<typeof UpsertAppSchema>;
   try {
@@ -213,6 +217,9 @@ async function handleDelete(
   if (!member.ok) return member.response;
   const permission = await requireServerPermission(session.session.uid, serverId, CorePermission.MANAGE_SERVER);
   if (!permission.ok) return permission.response;
+  // A timed-out member installs, changes and removes no apps (lib/actor-timeout.ts).
+  const timedOut = await refuseTimedOutActor(serverId, session.session.uid, member.server?.ownerUserId);
+  if (timedOut) return timedOut;
 
   let body: z.infer<typeof DeleteAppSchema>;
   try {

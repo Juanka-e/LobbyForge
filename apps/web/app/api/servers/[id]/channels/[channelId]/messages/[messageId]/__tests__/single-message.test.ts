@@ -252,6 +252,39 @@ describe('PATCH single message — beta-review: timeouts apply to edits', () => 
   });
 });
 
+// Security review 2026-10 (A1): deleting someone else's message is
+// moderation, and a timed-out moderator kept doing it.
+describe('DELETE single message — a timed-out member moderates nothing', () => {
+  it("403 actor_timed_out: a timed-out moderator cannot delete another member's message", async () => {
+    const until = new Date(Date.now() + 60_000);
+    getUserPermissions.mockResolvedValue(['read_message_history', 'manage_messages']);
+    getActiveMemberTimeout.mockResolvedValue(until);
+    const res = await call('DELETE', USER_ID);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'actor_timed_out', until: until.toISOString() });
+    expect(getActiveMemberTimeout).toHaveBeenCalledWith(expect.anything(), SERVER_ID, USER_ID);
+    expect(softDeleteMessage).not.toHaveBeenCalled();
+    expect(publishChatMessageDelete).not.toHaveBeenCalled();
+    expect(logAction).not.toHaveBeenCalled();
+  });
+
+  it('a timed-out author may still take back their own message', async () => {
+    getActiveMemberTimeout.mockResolvedValue(new Date(Date.now() + 60_000));
+    const res = await call('DELETE', AUTHOR_ID);
+    expect(res.status).toBe(200);
+    expect(softDeleteMessage).toHaveBeenCalled();
+    expect(getActiveMemberTimeout).not.toHaveBeenCalled();
+  });
+
+  it('the owner is never asked about a timeout', async () => {
+    getUserPermissions.mockResolvedValue(['administrator']);
+    getActiveMemberTimeout.mockResolvedValue(new Date(Date.now() + 60_000));
+    const res = await call('DELETE', OWNER_ID);
+    expect(res.status).toBe(200);
+    expect(getActiveMemberTimeout).not.toHaveBeenCalled();
+  });
+});
+
 describe('PATCH/DELETE single message — Bot API v2 events', () => {
   it('an edit is published on the chat topic and to the endpoint fan-out', async () => {
     const res = await call('PATCH', AUTHOR_ID, { content: 'edited' });

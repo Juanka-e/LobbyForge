@@ -11,20 +11,22 @@ import { getDb } from '@/lib/db';
 import { canViewOnlineStatus } from '@/lib/presence-privacy';
 import { getTypingEntries, setTyping } from '@/lib/redis';
 import { withApiSecurity } from '@/lib/security-headers';
-import { readGuestSession } from '@/lib/guest-session';
+import { authorizeChannelMessageAccess } from '@/lib/message-authorization';
+import { refuseTimedOutActor } from '@/lib/actor-timeout';
+import { resolveMemberDisplayName } from '@/lib/member-display-name';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-function getSessionSecret(): string {
-  const secret = process.env.LOBBYFORGE_SESSION_SECRET;
-  if (!secret || secret.length < 32) throw new Error('LOBBYFORGE_SESSION_SECRET must be set');
-  return secret;
-}
-
 /**
  * POST /api/servers/{id}/channels/{channelId}/typing
- *   Records that the user is typing. TTL 5s in Redis.
+ *   Records that the user is typing. TTL 5s in Redis. Only someone who may
+ *   post here may say they are typing: the message route's send check
+ *   (membership, channel visibility, SEND_MESSAGES), and not while timed
+ *   out — 403 otherwise, and nothing is recorded. The name shown is the
+ *   member's community nickname, else their account name, resolved here
+ *   (security review 2026-10, A10: it was the session cookie's name, which
+ *   ignored nicknames and went stale on a rename).
  *
  * GET /api/servers/{id}/channels/{channelId}/typing
  *   Returns { typers: string[] } — display names of users currently typing,
@@ -38,14 +40,15 @@ async function handlePost(
   const { id: serverId, channelId } = await ctx.params;
   const session = requireMaterializedSession(req);
   if (!session.ok) return session.response;
+  const { uid } = session.session;
 
   try {
-    const channel = await requireVisibleChannelInServer(session.session.uid, channelId, serverId);
-    if (!channel.ok) return channel.response;
-    const secret = getSessionSecret();
-    const guest = readGuestSession(req.headers.get('cookie'), secret);
-    const displayName = guest?.name ?? 'User';
-    await setTyping(serverId, channelId, session.session.uid, displayName);
+    const access = await authorizeChannelMessageAccess({ userId: uid, serverId, channelId, operation: 'send' });
+    if (!access.ok) return access.response;
+    const timedOut = await refuseTimedOutActor(serverId, uid, access.context.server.ownerUserId);
+    if (timedOut) return timedOut;
+    const displayName = await resolveMemberDisplayName(serverId, uid, session.session.name || 'User');
+    await setTyping(serverId, channelId, uid, displayName);
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: 'Failed' }, { status: 500 });

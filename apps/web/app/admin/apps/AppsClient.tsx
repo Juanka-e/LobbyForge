@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
+import { adminRefusalText } from '@/lib/profile-action-errors';
 import DeveloperDocsLink from '@/app/(developers)/developers/_components/DeveloperDocsLink';
 
 export interface AppView {
@@ -61,7 +62,7 @@ export default function AppsClient({
             });
         if (!res.ok) {
           const detail = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(detail.error ?? t('admin.apps.requestFailed', { status: res.status }));
+          throw new Error(adminRefusalText(t, detail, t('admin.apps.requestFailed', { status: res.status })));
         }
         setApps((current) =>
           current.map((entry) => (entry.id === app.id ? { ...entry, ...next } : entry))

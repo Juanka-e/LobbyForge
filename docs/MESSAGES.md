@@ -114,7 +114,7 @@ interface MessageJson {
 |---:|---|
 | 200 | `GET` / `PATCH` success (PATCH also returns 200 for an empty patch) |
 | 201 | `POST` success |
-| 400 | Body fails zod validation (empty content, > 4000 chars, invalid `replyToId` uuid, an unknown field, client `metadata` → `metadata_not_allowed`) — or query string fails (`?before=not-a-date`, `?limit=abc`) |
+| 400 | Body fails zod validation (empty content, > 4000 chars, invalid `replyToId` uuid, an unknown field, client `metadata` → `metadata_not_allowed`) — or query string fails (`?before=not-a-date`, `?limit=abc`) — or `replyToId` names a message that does not exist or is in another channel (`invalid_reply`; it used to be a 500) |
 | 401 | Cookie missing or signature invalid |
 | 413 | `POST` / `PATCH` body over 16 KiB |
 | 403 | Caller is not a member (reads) or not the author/owner (mutations); `@everyone` / `@here` in the content without Mention Everyone |
@@ -182,7 +182,12 @@ AUTHZ-009).
 
 The typing indicator (`GET …/typing`) leaves out users the viewer blocked,
 users who blocked the viewer, and users whose *Online status* privacy hides
-them from the viewer — the presence rule (docs/PRESENCE.md).
+them from the viewer — the presence rule (docs/PRESENCE.md). Saying you are
+typing (`POST …/typing`) takes what posting takes — membership, seeing the
+channel and `SEND_MESSAGES` (the message route's send check), and not being
+timed out (`403 actor_timed_out`) — and the name shown is resolved on the
+server: the community nickname, else the account's display name (it used to
+be the session cookie's name, without the nickname and stale after a rename).
 
 ## Direct messages
 
@@ -192,8 +197,17 @@ caller — both current members of a live server, neither banned there — or
 one the caller **already has a conversation** with. Anything else (an
 unknown id, a stranger) is the same `404 { error: "User not found" }`: no
 existence oracle (an unknown id used to be an FK error and a 500). A block
-in either direction is still `403`. `POST /api/dm/{channelId}/messages`
+in either direction is still `403`. The ids are compared and the pair is
+ordered in lower case (the database's spelling of a uuid), so an upper-case
+id neither opens a second conversation with the same person nor a
+"conversation" with yourself; two first messages at once reuse one row
+(the insert does nothing on the pair's unique index and reads the winner
+back). `POST /api/dm/{channelId}/messages`
 takes `{ content, replyToId? }` (strict) with the 16 KiB body cap above.
+`GET /api/dm/{channelId}/messages?limit=&before=` pages back in time:
+`limit` is an integer clamped to 1..100 (default 50) and `before` a date;
+anything else is `400`, and a channel id that is not a UUID is `404` (both
+used to reach Postgres and come back as a 500).
 
 ## DB schema (no delta from M3)
 
@@ -216,8 +230,13 @@ createMessage(db, { channelId, userId, content, metadata?, replyToId? })
 
 listMessagesForChannel(db, channelId, { limit?, before? })
   // Joins channels + servers, filters soft-deleted messages, sorts newest
-  // first. The `before` cursor is an ISO-8601 timestamp; "give me messages
-  // older than this". Default limit 50, hard cap 100.
+  // first (then by id, so ties keep one order). The `before` cursor is an
+  // ISO-8601 timestamp; "give me messages older than this". Default limit
+  // 50, hard cap 100. `created_at` has microseconds but the cursor (the
+  // last row's createdAt) only milliseconds, so a full page also carries
+  // the rows that share its last row's millisecond (queries/pagination.ts)
+  // and can run past `limit` by those; the next page then misses nothing.
+  // listDmMessages and listAuditLogsForServer page the same way.
 
 getMessageById(db, messageId)
   // Joins channels + servers, filters soft-deleted messages AND

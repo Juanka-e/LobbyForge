@@ -32,6 +32,7 @@ const db = {
   listBotCommands: vi.fn(),
   getBotCommandById: vi.fn(),
   updateBotCommandAdmin: vi.fn(),
+  getActiveMemberTimeout: vi.fn(),
 };
 vi.mock('@lobbyforge/db', () => ({ ...db, ENDPOINT_DISABLED_TOKEN_CHANGED: 'token_changed' }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
@@ -127,6 +128,7 @@ beforeEach(() => {
   db.listBotEventTargets.mockResolvedValue([]);
   db.listBotChannelAccessForServer.mockResolvedValue(new Map());
   db.logAction.mockResolvedValue(undefined);
+  db.getActiveMemberTimeout.mockResolvedValue(null);
 });
 
 describe('channel access — GET', () => {
@@ -256,6 +258,32 @@ describe('channel access — PUT (bulk)', () => {
     const { PUT } = await access();
     expect((await PUT(req('PUT', '/channel-access', OWNER, { channelIds: null }), botCtx)).status).toBe(200);
     expect(db.setBotChannelAccess).not.toHaveBeenCalled();
+    expect(db.logAction).not.toHaveBeenCalled();
+  });
+});
+
+// Security review 2026-10 (A1): a timed-out manager changes no channel access.
+describe('channel access — a timed-out manager (actor_timed_out)', () => {
+  it('may look, but PUT (bulk and one channel) and DELETE are refused — nothing changes', async () => {
+    const until = new Date(Date.now() + 60_000);
+    db.getActiveMemberTimeout.mockResolvedValue(until);
+    mode = 'selected';
+    grants = [GENERAL];
+    const bulk = await access();
+    const one = await accessOne();
+    expect((await bulk.GET(req('GET', '/channel-access', MANAGER), botCtx)).status).toBe(200);
+    const refused = [
+      await bulk.PUT(req('PUT', '/channel-access', MANAGER, { channelIds: [GENERAL] }), botCtx),
+      await one.PUT(req('PUT', `/channel-access/${GENERAL}`, MANAGER), channelCtx(GENERAL)),
+      await one.DELETE(req('DELETE', `/channel-access/${GENERAL}`, MANAGER), channelCtx(GENERAL)),
+    ];
+    for (const res of refused) {
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ code: 'actor_timed_out', until: until.toISOString() });
+    }
+    expect(db.setBotChannelAccess).not.toHaveBeenCalled();
+    expect(db.grantBotChannelAccess).not.toHaveBeenCalled();
+    expect(db.revokeBotChannelAccess).not.toHaveBeenCalled();
     expect(db.logAction).not.toHaveBeenCalled();
   });
 });
