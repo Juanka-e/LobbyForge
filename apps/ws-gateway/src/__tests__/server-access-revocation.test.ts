@@ -430,6 +430,24 @@ describe('G9 — an unsubscribe cancels a subscribe that is still authorizing', 
   });
 });
 
+describe('G11 — browsers get an application heartbeat with every ping', () => {
+  it('sends { type: heartbeat } on each heartbeat tick', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      baseUrl = await start();
+      const ws = await connect(baseUrl);
+      await nextMessage(ws); // hello
+      vi.advanceTimersByTime(30_000);
+      const frame = await nextMessage(ws);
+      expect(frame.type).toBe('heartbeat');
+      expect(typeof frame.at).toBe('string');
+      ws.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('security follow-up — subscribe errors never reach the client verbatim', () => {
   it('sends a fixed code and message when authorization throws (no SQL in the frame)', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);

@@ -419,6 +419,9 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
       } catch {
         /* swallow */
       }
+      // A browser page never sees the ping: this frame is what keeps its
+      // client's liveness timer from tearing down a quiet socket.
+      send(client, { type: 'heartbeat', at: new Date().toISOString() });
       // SEC-003 + LF-SEC-009: re-check revocation on LIVE sockets each
       // heartbeat — logout must close an already-open WS, not just
       // block new ones. 'unavailable' gets a BOUNDED grace (Redis
