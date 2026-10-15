@@ -11,6 +11,7 @@
  *   activity-state:{serverId}:{sessionId}
  *   chat:{serverId}:{channelId}
  *   presence:{serverId}
+ *   members:{serverId}   (member/role changes — a "re-fetch these" signal)
  *   dm:{channelId}
  *   user:{userId}        (Bot API v2 §4.3 — only that user's own session)
  *
@@ -28,6 +29,7 @@ export type Topic =
   | `activity-state:${string}:${string}`
   | `chat:${string}:${string}`
   | `presence:${string}`
+  | `members:${string}`
   | `dm:${string}`
   | `user:${string}`;
 
@@ -127,7 +129,7 @@ export type ServerMessage =
  * are 3-part (`kind:{serverId}:{resourceId}`). The parser handles both.
  */
 export function parseTopic(topic: string): {
-  kind: 'activity-state' | 'chat' | 'presence' | 'dm' | 'user';
+  kind: 'activity-state' | 'chat' | 'presence' | 'members' | 'dm' | 'user';
   serverId: string;
   resourceId: string;
 } | null {
@@ -138,6 +140,12 @@ export function parseTopic(topic: string): {
   if (kind === 'presence') {
     if (parts.length !== 2 || !parts[1]) return null;
     return { kind: 'presence', serverId: parts[1], resourceId: parts[1] };
+  }
+
+  // members:{serverId} — 2 parts (docs/PROFILES.md "Live updates")
+  if (kind === 'members') {
+    if (parts.length !== 2 || !parts[1]) return null;
+    return { kind: 'members', serverId: parts[1], resourceId: parts[1] };
   }
 
   // user:{userId} — 2 parts (per-user events, not server-scoped)
@@ -163,11 +171,14 @@ export function parseTopic(topic: string): {
 /**
  * Build the Redis topic name for a parsed topic. Topic naming is the
  * gateway's internal contract — keep it identical to the publisher
- * (`apps/web/lib/{activity-bus,chat-bus,presence-bus}.ts`).
+ * (`apps/web/lib/{activity-bus,chat-bus,presence-bus,member-bus}.ts`).
  */
 export function redisTopicName(envPrefix: string, parsed: NonNullable<ReturnType<typeof parseTopic>>): string {
   if (parsed.kind === 'presence') {
     return `lf:${envPrefix}:presence:${parsed.serverId}`;
+  }
+  if (parsed.kind === 'members') {
+    return `lf:${envPrefix}:members:${parsed.serverId}`;
   }
   if (parsed.kind === 'dm') {
     return `lf:${envPrefix}:dm:${parsed.resourceId}`;

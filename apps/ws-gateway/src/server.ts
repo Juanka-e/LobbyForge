@@ -16,6 +16,7 @@ import { getRevocationStatus, validateGuestFromHeaders, type ResolvedGuest } fro
 import { authorizeTopicSubscribe } from './authorize.js';
 import { ConnectionSubscriptions, type SubscriptionCapacityError } from './subscriptions.js';
 import { ClientMessageSchema, type ServerMessage } from './protocol.js';
+import { sanitizeMemberEvent } from './member-events.js';
 import { getDb } from './db.js';
 import { initAccessInvalidationListener, topicMatchesInvalidation } from './access-invalidation.js';
 import { shutdownSubscriber } from './redis-subscriber.js';
@@ -602,6 +603,11 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
                   data: sanitizePresenceEvent(data),
                   at: new Date().toISOString(),
                 });
+                return;
+              }
+              if (authz.kind === 'members') {
+                const event = sanitizeMemberEvent(data);
+                if (event) send(socket, { type: 'event', topic: msg.topic, data: event, at: new Date().toISOString() });
                 return;
               }
               // SEC-001: the bus payload carries NO canonical state (the
