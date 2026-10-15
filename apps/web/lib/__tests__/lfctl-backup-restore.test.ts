@@ -201,3 +201,39 @@ describe('lfctl backup create — owner-only files (security follow-up)', () => 
     for (const f of readdirSync(shared)) expect(statSync(join(shared, f)).mode & 0o777, f).toBe(0o600);
   });
 });
+
+/** Run lfctl in the sandbox with the fake docker; `env` adds variables (and -u removals). */
+function runLfctl(sandbox: Sandbox, args: string, env = '') {
+  const res = spawnSync(
+    'bash',
+    [
+      '-c',
+      `cd "$1" && env -u LFCTL_PG_CONTAINER -u DATABASE_URL ${env} LFCTL_ROOT="$1" FAKE_DOCKER_LOG="$2" \
+        FAKE_PLUGINS_RESTORED="$1/plugins-restored.bin" LFCTL_DOCKER="bash $3" node "$4" ${args}`,
+      'run',
+      sandbox.dir,
+      sandbox.dockerLog,
+      sandbox.fakeDocker.replace(/\\/g, '/'),
+      LFCTL,
+    ],
+    { encoding: 'utf8', timeout: 60_000 }
+  );
+  return { rc: res.status ?? -1, out: (res.stdout ?? '') + (res.stderr ?? '') };
+}
+
+describe('lfctl backup create — database URL (G12)', () => {
+  it('reads DATABASE_URL from .env.prod like update apply, when neither the flag nor the env var is set', () => {
+    const sandbox = makeSandbox();
+    writeFileSync(join(sandbox.dir, '.env.prod'), 'DATABASE_URL=postgres://u:p@postgres:5432/fromenvprod\n');
+    const { rc, out } = runLfctl(sandbox, 'backup create --json');
+    expect(rc, out).toBe(0);
+    expect(dockerCalls(sandbox).some((c) => c.includes('pg_dump -Fc postgres://u:p@postgres:5432/fromenvprod'))).toBe(true);
+  });
+
+  it('still refuses with no URL anywhere', () => {
+    const sandbox = makeSandbox();
+    const { rc, out } = runLfctl(sandbox, 'backup create --json');
+    expect(rc).not.toBe(0);
+    expect(out).toContain('requires --database-url');
+  });
+});

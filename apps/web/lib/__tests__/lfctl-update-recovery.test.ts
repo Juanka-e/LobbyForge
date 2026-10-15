@@ -172,11 +172,14 @@ function runApply(
     noBackupManifest?: boolean;
     /** Run WITHOUT --public-key (the default key path / no key at all). */
     noPublicKey?: boolean;
+    /** Run WITHOUT --yes (plan only). */
+    noYes?: boolean;
   } = {}
 ) {
   const fakeViaBash = `bash ${sandbox.fakeDocker.replace(/\\/g, '/')}`;
   const backupArg = opts.noBackupManifest ? '' : '--backup-manifest backup.manifest.json ';
   const keyArg = opts.noPublicKey ? '' : '--public-key release-public.pem ';
+  const yesArg = opts.noYes ? '' : '--yes ';
   // LFCTL_ROOT: lfctl resolves its DEFAULT paths (.env.prod, deployment
   // state, backups, the release key) from its own checkout — point it at
   // the sandbox so a test never touches the real repo.
@@ -187,7 +190,7 @@ function runApply(
       `cd "$1" && env -u LOBBYFORGE_RELEASE_PUBLIC_KEY_PEM LFCTL_ROOT="$1" FAKE_DOCKER_LOG="$2" FAKE_UP_RCS="$3" LFCTL_DOCKER="$4" FAKE_WEB_CONTAINER="$5" \
          FAKE_IMAGE_ID="$6" FAKE_CONFIGURED_IMAGE_ID="$7" FAKE_WS_CONTAINER="$8" FAKE_WS_IMAGE_ID="$9" node "\${10}" update apply \
         --manifest release-manifest.json ${backupArg}\
-        ${keyArg}--yes --force-major`,
+        ${keyArg}${yesArg}--force-major`,
       'run',
       sandbox.dir,
       sandbox.dockerLog,
@@ -379,6 +382,22 @@ describe('lfctl update apply — rollout failure recovery (23rd-audit)', () => {
     ).toBe(true);
     // And no deployment state was written either.
     expect(existsSync(join(sandbox.dir, 'infra', 'update', 'deployment-state.json'))).toBe(false);
+  });
+
+  it('without --yes and --backup-manifest: shows the plan and writes NO database dump (G12)', () => {
+    const sandbox = makeSandbox();
+    writeFileSync(
+      join(sandbox.dir, '.env.prod'),
+      'LOBBYFORGE_VERSION=0.2.0\nLOBBYFORGE_IMAGE=lobbyforge-web:latest\nNODE_ENV=production\n' +
+        'DATABASE_URL=postgres://u:p@postgres:5432/lobbyforge\n'
+    );
+    const { rc, out } = runApply(sandbox, '', { noBackupManifest: true, noYes: true });
+    expect(rc, out).toBe(0);
+    expect(out).toContain('Re-run with --yes');
+    expect(readdirSync(sandbox.dir)).not.toContain('backups');
+    expect(dockerCalls(sandbox).some((c) => c.includes('pg_dump'))).toBe(false);
+    expect(upCount(sandbox)).toBe(0);
+    expect(envValue(sandbox, 'LOBBYFORGE_IMAGE')).toBe('lobbyforge-web:latest');
   });
 });
 

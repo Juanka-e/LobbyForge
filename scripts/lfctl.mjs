@@ -88,7 +88,7 @@ function usage() {
 Usage:
   node scripts/lfctl.mjs update check [--manifest <path-or-url>] [--current-version <version>] [--channel stable] [--public-key <pem-file>] [--json]
   node scripts/lfctl.mjs update plan  [--manifest <path-or-url>] [--current-version <version>] [--channel stable] [--public-key <pem-file>] [--json]
-  node scripts/lfctl.mjs update apply [--manifest <path-or-url>] [--backup-manifest <path>] [--current-version <version>] [--channel stable] [--public-key <pem-file>] [--yes] [--force-major]
+  node scripts/lfctl.mjs update apply [--manifest <path-or-url>] [--backup-manifest <path>] [--database-url <url>] [--current-version <version>] [--channel stable] [--public-key <pem-file>] [--yes] [--force-major]
   node scripts/lfctl.mjs update rollback
   node scripts/lfctl.mjs backup verify [--manifest <path>] [--require-files] [--json]
   node scripts/lfctl.mjs backup create [--out <dir>] [--database-url <url>] [--json]
@@ -124,9 +124,11 @@ Notes:
   (${DEFAULT_PUBLIC_KEY_PATH}, resolved from this checkout, not the cwd);
   override with --public-key. update apply refuses to run without a key.
   backup create writes owner-only files (0600) in an owner-only directory
-  (0700) on POSIX.
-  update apply creates + verifies a FRESH backup automatically unless
-  --backup-manifest points at an existing one. Deployed version state is
+  (0700) on POSIX. The database URL is --database-url, else DATABASE_URL,
+  else DATABASE_URL in .env.prod.
+  update apply --yes creates + verifies a FRESH backup automatically unless
+  --backup-manifest points at an existing one (without --yes it only shows
+  the plan and writes no dump). Deployed version state is
   read from .env.prod/deployment-state.json (no hardcoded current version).
   update rollback restores the previous recorded image+version (app-level;
   DB migrations are forward-only — restore the pre-update backup if a
@@ -1529,13 +1531,21 @@ async function main() {
   // the URL is compose-internal) and strictly verified.
   let backupManifestPath = options.backupManifest;
   if (!backupManifestPath) {
-    console.log('\nNo --backup-manifest given — creating a fresh backup...');
-    const dbUrl = await resolveDatabaseUrl();
+    const dbUrl = options['database-url'] ?? (await resolveDatabaseUrl());
     if (!dbUrl) {
       console.error('Cannot auto-backup: no DATABASE_URL in env or .env.prod. Pass --database-url or --backup-manifest.');
       process.exitCode = 2;
       return;
     }
+    // A full dump only when the update will really run: a plan-only run
+    // (no --yes) must not write a database copy to disk.
+    if (!options.yes) {
+      console.log('\nNo --backup-manifest given — a fresh backup is created when you re-run with --yes.');
+      console.error('\nUpdate plan ready. Re-run with --yes to execute.');
+      process.exitCode = 0;
+      return;
+    }
+    console.log('\nNo --backup-manifest given — creating a fresh backup...');
     const created = await backupCreate({ 'database-url': dbUrl });
     console.log(`Backup created: ${created.file} (sha256 ${created.sha256.slice(0, 16)}…)`);
     backupManifestPath = created.manifestPath;
@@ -1834,8 +1844,10 @@ async function restrictBackupFile(file) {
 
 async function backupCreate(options = {}) {
   const outDir = options.out ? path.resolve(process.cwd(), options.out) : fromRoot(DEFAULT_BACKUP_DIR);
-  const dbUrl = options['database-url'] ?? process.env.DATABASE_URL;
-  if (!dbUrl) throw new Error('backup create requires --database-url or DATABASE_URL');
+  // The same resolution `update apply` uses: --database-url, then the
+  // environment, then the installed .env.prod.
+  const dbUrl = options['database-url'] ?? (await resolveDatabaseUrl());
+  if (!dbUrl) throw new Error('backup create requires --database-url, DATABASE_URL, or DATABASE_URL in .env.prod');
   await ensurePgContainer(dbUrl);
 
   await ensureBackupDir(outDir);
