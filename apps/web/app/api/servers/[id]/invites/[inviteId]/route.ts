@@ -54,8 +54,15 @@ async function handleDelete(
         { status: 400 }
       );
     }
-    const auth = await authorizeServerPermission(session.uid, serverId, CorePermission.CREATE_INVITE);
-    if (!auth.ok) return auth.response;
+    // CREATE_INVITE covers your own invites, MANAGE_SERVER everyone's: either
+    // one gets you in (a manager whose roles do not carry CREATE_INVITE used
+    // to be refused before the own-invite rule below was even reached).
+    let auth = await authorizeServerPermission(session.uid, serverId, CorePermission.CREATE_INVITE);
+    if (!auth.ok) {
+      const manager = await authorizeServerPermission(session.uid, serverId, CorePermission.MANAGE_SERVER);
+      if (!manager.ok) return auth.response;
+      auth = manager;
+    }
 
     const server = await getServerById(getDb(), serverId);
     if (!server) {

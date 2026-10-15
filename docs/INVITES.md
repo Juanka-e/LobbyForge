@@ -61,9 +61,9 @@ The error map is a route-layer concern (the route layer maps it to status codes 
 
 | Method | Path | Auth | Body | Status | Rate limit |
 |---|---|---|---|---|---|
-| `GET`    | `/api/servers/{id}/invites`              | Member  | — | 200 / 403 / 404 | 60 / min |
+| `GET`    | `/api/servers/{id}/invites`              | `CREATE_INVITE` (own invites) or `MANAGE_SERVER` (all); the owner sees all | — | 200 / 403 / 404 | 60 / min |
 | `POST`   | `/api/servers/{id}/invites`              | `CREATE_INVITE` | `{ maxUses?: 1..1000, expiresAt?: ISO8601 }` | 201 / 400 / 403 / 404 | 10 / min |
-| `DELETE` | `/api/servers/{id}/invites/{inviteId}`   | `MANAGE_ROLES`  | — | 200 / 400 / 403 / 404 | 10 / min |
+| `DELETE` | `/api/servers/{id}/invites/{inviteId}`   | `CREATE_INVITE` (own invite) or `MANAGE_SERVER` (any); revoking another member's invite while timed out is 403 `actor_timed_out` | — | 200 / 400 / 403 / 404 | 10 / min |
 | `GET`    | `/api/invites/{code}`                    | Public  | — | 200 / 400 / 404 | 60 / min |
 | `POST`   | `/api/invites/{code}/redeem`             | Session + `uid` | `{ note?: string ≤ 500 }` (optional; only used under an approval policy) | 201 / 202 / 400 / 401 / 403 / 409 / 429 / 503 | 10 / min |
 
@@ -330,7 +330,7 @@ The page is intentionally a thin shell — the rest of the M15 UI is a separate 
 
 ## Relationship to M13's `CREATE_INVITE`
 
-The `@everyone` default permissions include `create_invite`. That means **any member** of a server can create an invite — the M13 design is "creating an invite is a low-trust action; revoking it is high-trust". Revoking (`DELETE /api/servers/{id}/invites/{inviteId}`) requires `MANAGE_ROLES`, which only `@admin` has.
+The `@everyone` default permissions include `create_invite`. That means **any member** of a server can create an invite — the M13 design is "creating an invite is a low-trust action; revoking it is high-trust". `CREATE_INVITE` lists and revokes only the caller's own invites; listing or revoking everyone's (`GET /api/servers/{id}/invites`, `DELETE /api/servers/{id}/invites/{inviteId}`) needs `MANAGE_SERVER` (beta-review F7). Either permission gets a caller into these routes, so a manager whose roles do not carry `CREATE_INVITE` still manages every invite.
 
 The M15 server-home UI gives a "create invite" button to every member and a "revoke" button only to admins. The M14 backend already does the right thing.
 
