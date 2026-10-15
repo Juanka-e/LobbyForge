@@ -120,7 +120,13 @@ async function handler(req: Request): Promise<NextResponse> {
     voiceSettings.maxScreenShareUsersPerRoom != null;
   if (hasLimitConfig) {
     try {
-      const participants = await getRoomServiceClient().listParticipants(room);
+      // The caller's own participant is left out: a reconnect (a refresh,
+      // a second tab, a network blip) replaces it, so counting it refused
+      // a member their own seat in a full room — or their camera / screen
+      // share at the cap they were already using.
+      const participants = (await getRoomServiceClient().listParticipants(room)).filter(
+        (p) => p.identity !== session.uid
+      );
       if (
         voiceSettings.defaultUserLimit != null &&
         participants.length >= voiceSettings.defaultUserLimit
