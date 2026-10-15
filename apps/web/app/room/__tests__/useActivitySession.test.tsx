@@ -394,6 +394,36 @@ describe('useActivitySession plugin timers', () => {
   });
 });
 
+describe('useActivitySession realtime frame order (G4)', () => {
+  const TOPIC = `activity-state:${SERVER}:${SESSION}`;
+  const frame = (data: Record<string, unknown>) =>
+    act(() => {
+      realtime.handlers.get(TOPIC)!(data);
+    });
+
+  it('ignores a frame older than the revision it already shows', async () => {
+    const { result } = await mountSession();
+    frame({ status: 'running', revision: 5, state: { round: 5 } });
+    expect(result.current.detail?.state).toEqual({ round: 5 });
+    // A late frame from before: left out.
+    frame({ status: 'running', revision: 4, state: { round: 4 } });
+    expect(result.current.detail?.state).toEqual({ round: 5 });
+    // The same revision again, or a newer one, applies.
+    frame({ status: 'running', revision: 5, state: { round: 5, again: true } });
+    expect(result.current.detail?.state).toEqual({ round: 5, again: true });
+    frame({ status: 'finished', revision: 6, state: { round: 6 } });
+    expect(result.current.detail?.state).toEqual({ round: 6 });
+    expect(result.current.detail?.status).toBe('finished');
+  });
+
+  it('applies a frame without a revision as before (older gateways)', async () => {
+    const { result } = await mountSession();
+    frame({ status: 'running', revision: 5, state: { round: 5 } });
+    frame({ status: 'running', state: { round: 7 } });
+    expect(result.current.detail?.state).toEqual({ round: 7 });
+  });
+});
+
 describe('useActivitySession catching up after the connection was away', () => {
   const detailReads = () =>
     (fetch as unknown as { mock: { calls: Array<[string]> } }).mock.calls.filter(([url]) => url === DETAIL).length;

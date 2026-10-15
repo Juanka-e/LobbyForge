@@ -161,8 +161,18 @@ export function useActivitySession({
     // Another session: its due times start with no re-reads behind them.
     checkHistoryRef.current = null;
 
+    // The highest session revision a realtime frame has shown. The gateway
+    // sends each frame with the revision of the row it projected; a frame
+    // that arrives late with an older one would put stale state back.
+    let shownRevision: number | null = null;
+
     const handleEvent = (raw: unknown) => {
       if (cancelled || !raw || typeof raw !== 'object') return;
+      const revision = (raw as { revision?: unknown }).revision;
+      if (typeof revision === 'number') {
+        if (shownRevision !== null && revision < shownRevision) return;
+        shownRevision = revision;
+      }
       const event = raw as Partial<ActivityDetail> & { type?: string; host?: unknown };
       if (event.type === 'snapshot' || event.id) {
         setDetail((prev) => ({
