@@ -43,6 +43,36 @@ export const KNOWN_REFUSAL_CODES: readonly string[] = Object.keys(REFUSAL_CODE_K
 /** The generic "That didn't work" answer — a surface may say its own instead. */
 export const GENERIC_REFUSAL_KEY = 'shell.profile.error.generic';
 
+/**
+ * A timed-out member manages nothing (lib/actor-timeout.ts): every
+ * management route — roles, channels, invites, join requests, community
+ * settings, apps, bots, webhooks — refuses them with `actor_timed_out`.
+ * The admin screens show their routes' English `error`; for this refusal
+ * they say this key instead, in the viewer's language. null for any other
+ * response body.
+ */
+export function timedOutRefusalKey(body: unknown): string | null {
+  return body !== null && typeof body === 'object' && (body as { code?: unknown }).code === 'actor_timed_out'
+    ? REFUSAL_CODE_KEYS.actor_timed_out!
+    : null;
+}
+
+/**
+ * What an admin screen says for a refused request: the timed-out refusal in
+ * the viewer's language, otherwise the route's own `error`, otherwise
+ * `fallback`. Drop-in for `body.error ?? fallback`.
+ */
+export function adminRefusalText(
+  t: (key: string, params?: Params) => string,
+  body: unknown,
+  fallback: string
+): string {
+  const timedOut = timedOutRefusalKey(body);
+  if (timedOut) return t(timedOut);
+  const error = body !== null && typeof body === 'object' ? (body as { error?: unknown }).error : undefined;
+  return typeof error === 'string' && error.length > 0 ? error : fallback;
+}
+
 export function profileActionErrorMessage(action: ProfileAction, refusal: ProfileActionRefusal): { key: string; params?: Params } {
   const { status, code } = refusal;
   if (action === 'message') {

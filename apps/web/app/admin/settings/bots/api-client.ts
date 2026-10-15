@@ -3,6 +3,7 @@ import type { BotJson } from '@/lib/bots/admin';
 import { MASS_MENTION_ISSUE } from '@/lib/bots/settings';
 import { RESTRICTED_ACTION_KEYS } from '@/components/email-verification/email-status';
 import { handleEmailUnverified } from '@/components/email-verification/email-status-store';
+import { timedOutRefusalKey } from '@/lib/profile-action-errors';
 
 /**
  * Calls to `/api/servers/{id}/bots/**` from the settings page, with every
@@ -80,6 +81,9 @@ export function permissionHint(t: Translator, permission: string): string | null
 }
 
 export function describeFailure(t: Translator, status: number, body: ErrorBody): string {
+  // A timed-out manager changes no bots (lib/actor-timeout.ts).
+  const timedOut = timedOutRefusalKey(body);
+  if (timedOut) return t(timedOut);
   switch (body.code) {
     case 'ungrantable_permissions':
       return t('bots.error.ungrantable', {

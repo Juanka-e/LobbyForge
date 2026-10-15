@@ -71,6 +71,17 @@ describe('PollRolesPicker', () => {
     );
   });
 
+  // Security review 2026-10 (A1): the role API refuses a timed-out member.
+  it('says a timed-out member is timed out, not that the role cannot be changed', async () => {
+    fetchMock.mockImplementationOnce(async () =>
+      Response.json({ error: 'You are timed out in this server', code: 'actor_timed_out', until: '2026-10-15T12:00:00.000Z' }, { status: 403 })
+    );
+    const { group, onChanged } = renderPicker();
+    fireEvent.click(within(group).getByRole('checkbox', { name: '@everyone' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent("You're timed out in this community.");
+    expect(onChanged).not.toHaveBeenCalled();
+  });
+
   it('says why when the role API refuses, and leaves the roles as they were', async () => {
     patchStatus = 403;
     const { group, onChanged } = renderPicker();

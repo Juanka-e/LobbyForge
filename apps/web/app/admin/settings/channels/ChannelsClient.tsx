@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
+import { adminRefusalText } from '@/lib/profile-action-errors';
 import { ChannelWebhooks } from './ChannelWebhooks';
 import EmailUnverifiedNotice, {
   handleEmailUnverified,
@@ -91,7 +92,7 @@ export default function ChannelsClient({
     });
     const data = (await response.json().catch(() => ({}))) as ApiChannelResponse;
     if (!response.ok || !data.channels) {
-      throw new Error(data.error ?? t('adminSettings.channels.reloadFailed'));
+      throw new Error(adminRefusalText(t, data, t('adminSettings.channels.reloadFailed')));
     }
     setChannels(data.channels);
   }
@@ -120,7 +121,7 @@ export default function ChannelsClient({
         setEmailRefused(true);
         return;
       }
-      if (!response.ok || !data.channel) throw new Error(data.error ?? t('adminSettings.channels.createFailed'));
+      if (!response.ok || !data.channel) throw new Error(adminRefusalText(t, data, t('adminSettings.channels.createFailed')));
       await refreshChannels();
       setForm(EMPTY_FORM);
       setMessage({ tone: 'success', text: t('adminSettings.channels.created') });
@@ -174,7 +175,7 @@ export default function ChannelsClient({
         }
       );
       const data = (await response.json().catch(() => ({}))) as ApiChannelResponse;
-      if (!response.ok || !data.channel) throw new Error(data.error ?? t('adminSettings.channels.updateFailed'));
+      if (!response.ok || !data.channel) throw new Error(adminRefusalText(t, data, t('adminSettings.channels.updateFailed')));
       await refreshChannels();
       setEditingId(null);
       setMessage({ tone: 'success', text: t('adminSettings.channels.updated') });
@@ -202,7 +203,7 @@ export default function ChannelsClient({
         }
       );
       const data = (await response.json().catch(() => ({}))) as ApiChannelResponse;
-      if (!response.ok || !data.channel) throw new Error(data.error ?? t('adminSettings.channels.reorderFailed'));
+      if (!response.ok || !data.channel) throw new Error(adminRefusalText(t, data, t('adminSettings.channels.reorderFailed')));
       await refreshChannels();
     } catch (err) {
       setMessage({ tone: 'danger', text: (err as Error).message });
@@ -222,7 +223,7 @@ export default function ChannelsClient({
         { method: 'DELETE' }
       );
       const data = (await response.json().catch(() => ({}))) as ApiChannelResponse;
-      if (!response.ok) throw new Error(data.error ?? t('adminSettings.channels.deleteFailed'));
+      if (!response.ok) throw new Error(adminRefusalText(t, data, t('adminSettings.channels.deleteFailed')));
       await refreshChannels();
       setMessage({ tone: 'success', text: t('adminSettings.channels.deleted') });
     } catch (err) {

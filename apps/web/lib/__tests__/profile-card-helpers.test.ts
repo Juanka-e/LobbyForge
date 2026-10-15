@@ -8,7 +8,13 @@ import {
   THEME_ACCENT_COLOR,
   toCssColor,
 } from '@/lib/profile-accent';
-import { KNOWN_REFUSAL_CODES, profileActionErrorMessage } from '@/lib/profile-action-errors';
+import {
+  adminRefusalText,
+  KNOWN_REFUSAL_CODES,
+  profileActionErrorMessage,
+  timedOutRefusalKey,
+} from '@/lib/profile-action-errors';
+import { translatorFor } from '@/lib/i18n/catalogue';
 import enShell from '@/messages/en/shell.json';
 import trShell from '@/messages/tr/shell.json';
 import { mergeProfileView, type MemberProfileResponse, type ProfileSeed } from '@/lib/member-profile';
@@ -103,6 +109,31 @@ describe('refusal messages', () => {
   it('a DM refusal never says why (blocked or not)', () => {
     expect(profileActionErrorMessage('message', { status: 403 }).key).toBe('shell.profile.error.cannotMessage');
     expect(profileActionErrorMessage('message', { status: 404 }).key).toBe('shell.profile.error.cannotMessage');
+  });
+});
+
+// Security review 2026-10 (A1): every management route refuses a
+// timed-out actor with `actor_timed_out`; the admin screens say it in the
+// viewer's language instead of the route's English `error`.
+describe('the timed-out refusal on the admin screens', () => {
+  const body = { error: 'You are timed out in this server', code: 'actor_timed_out', until: '2026-10-15T12:00:00.000Z' };
+
+  it('timedOutRefusalKey recognises only actor_timed_out', () => {
+    expect(timedOutRefusalKey(body)).toBe('shell.profile.error.timedOut');
+    expect(timedOutRefusalKey({ code: 'forbidden' })).toBeNull();
+    expect(timedOutRefusalKey({ error: 'Forbidden' })).toBeNull();
+    expect(timedOutRefusalKey(null)).toBeNull();
+    expect(timedOutRefusalKey('actor_timed_out')).toBeNull();
+  });
+
+  it('adminRefusalText says it in English and Turkish, and keeps the old behaviour otherwise', () => {
+    const en = translatorFor('en');
+    const tr = translatorFor('tr');
+    expect(adminRefusalText(en, body, 'fallback')).toBe("You're timed out in this community.");
+    expect(adminRefusalText(tr, body, 'fallback')).toBe('Bu toplulukta zaman aşımındasın.');
+    expect(adminRefusalText(en, { error: 'Role not found' }, 'fallback')).toBe('Role not found');
+    expect(adminRefusalText(en, {}, 'fallback')).toBe('fallback');
+    expect(adminRefusalText(en, { error: '' }, 'fallback')).toBe('fallback');
   });
 });
 

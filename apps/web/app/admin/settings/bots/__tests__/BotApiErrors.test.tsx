@@ -49,3 +49,12 @@ describe('describeFailure for invalid_request', () => {
     expect(describeInvalidRequest(en, 'not a list')).toBeNull();
   });
 });
+
+// Security review 2026-10 (A1): a timed-out manager changes no bots.
+describe('describeFailure for a timed-out manager', () => {
+  it('says actor_timed_out in English and Turkish, not as a generic refusal', () => {
+    const body = { error: 'You are timed out in this server', code: 'actor_timed_out', until: '2026-10-15T12:00:00.000Z' };
+    expect(describeFailure(en, 403, body)).toBe("You're timed out in this community.");
+    expect(describeFailure(tr, 403, body)).toBe('Bu toplulukta zaman aşımındasın.');
+  });
+});

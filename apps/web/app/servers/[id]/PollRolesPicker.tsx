@@ -2,6 +2,7 @@
 
 import { useId, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
+import { timedOutRefusalKey } from '@/lib/profile-action-errors';
 
 /**
  * Who may create polls in text channels (docs/CHAT_POLLS.md), chosen on the
@@ -54,10 +55,14 @@ export function PollRolesPicker({
         body: JSON.stringify({ permissions }),
       });
       if (!res.ok) {
+        // A timed-out member edits no roles (lib/actor-timeout.ts).
+        const timedOut = timedOutRefusalKey(await res.json().catch(() => null));
         setError(
-          t(res.status === 403 ? 'hub.servers.apps.pollRoles.forbidden' : 'hub.servers.apps.pollRoles.failed', {
-            role: role.name,
-          })
+          timedOut
+            ? t(timedOut)
+            : t(res.status === 403 ? 'hub.servers.apps.pollRoles.forbidden' : 'hub.servers.apps.pollRoles.failed', {
+                role: role.name,
+              })
         );
         return;
       }
