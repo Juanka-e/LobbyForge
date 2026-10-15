@@ -309,11 +309,12 @@ describe('user image route queries — security-review FILE-001', () => {
 describe('single-user reads and writes — security-review FILE-001', () => {
   const IMAGE_FREE_FIELDS = [
     'id', 'email', 'displayName', 'locale', 'isGuest', 'guestKey',
-    'statusText', 'bio', 'createdAt', 'updatedAt', 'deletedAt',
+    'statusText', 'bio', 'username', 'pronouns', 'accentColor', 'createdAt', 'updatedAt', 'deletedAt',
   ];
   const row = {
     id: 'u-1', email: null, displayName: 'Alice', locale: 'en', isGuest: false, guestKey: null,
-    statusText: null, bio: null, createdAt: new Date(), updatedAt: new Date(), deletedAt: null,
+    statusText: null, bio: null, username: null, pronouns: null, accentColor: null,
+    createdAt: new Date(), updatedAt: new Date(), deletedAt: null,
   };
 
   /** The projection names its columns and none of them is an image (or the password hash). */

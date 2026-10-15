@@ -231,9 +231,15 @@ export async function updateMessage(
   messageId: string,
   input: UpdateMessageInput
 ): Promise<MessageRow> {
-  const patch: Record<string, unknown> = { editedAt: new Date() };
-  if (input.content !== undefined) patch.content = input.content;
+  // Only a new text is an edit: pinning (a metadata write) used to stamp
+  // `edited_at` too, so every pinned message read "(edited)".
+  const patch: Record<string, unknown> = {};
+  if (input.content !== undefined) {
+    patch.content = input.content;
+    patch.editedAt = new Date();
+  }
   if (input.metadata !== undefined) patch.metadata = input.metadata;
+  if (Object.keys(patch).length === 0) throw new Error('updateMessage: nothing to update');
 
   const [row] = await db
     .update(messages)

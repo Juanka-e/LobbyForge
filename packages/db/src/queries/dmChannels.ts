@@ -310,3 +310,16 @@ export async function deleteDmMessage(
     .set({ deletedAt: new Date() })
     .where(eq(dmMessages.id, messageId));
 }
+
+/** The two participants of a DM channel, or null when it does not exist. */
+export async function getDmChannelParticipants(
+  db: DbClient,
+  channelId: string
+): Promise<{ userAId: string; userBId: string } | null> {
+  const [row] = await db
+    .select({ userAId: dmChannels.userAId, userBId: dmChannels.userBId })
+    .from(dmChannels)
+    .where(eq(dmChannels.id, channelId))
+    .limit(1);
+  return row ?? null;
+}

@@ -22,7 +22,7 @@
  */
 import { and, asc, eq, inArray, isNull, not } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
-import { membershipRoles, memberships, roles, users } from '../schema.js';
+import { membershipRoles, memberships, roles, servers, users } from '../schema.js';
 import { activeBanOnMembershipSql, isCurrentlyBanned } from './bans.js';
 import { EVERYONE_ROLE_NAME, pickDisplayRole } from './roles.js';
 import { getMemberSanction, membershipValuesFromSanction, recordMemberSanction } from './memberSanctions.js';
@@ -236,6 +236,52 @@ export async function updateMemberNickname(
 }
 
 /**
+ * Current members of a server whose handle (0050) is one of `usernames`
+ * (lowercase) — how a typed `@handle` becomes a mention. Soft-deleted
+ * accounts never match; a member is one membership row (a ban removes it).
+ */
+export async function findMembersByUsernames(
+  db: DbClient,
+  serverId: string,
+  usernames: readonly string[]
+): Promise<Array<{ userId: string; username: string }>> {
+  const wanted = [...new Set(usernames.map((name) => name.toLowerCase()))].slice(0, 50);
+  if (wanted.length === 0) return [];
+  const rows = await db
+    .select({ userId: users.id, username: users.username })
+    .from(memberships)
+    .innerJoin(users, eq(users.id, memberships.userId))
+    .where(and(eq(memberships.serverId, serverId), isNull(users.deletedAt), inArray(users.username, wanted)));
+  return rows.filter((row): row is { userId: string; username: string } => typeof row.username === 'string');
+}
+
+export interface ServerNicknameRow {
+  serverId: string;
+  serverName: string;
+  nickname: string | null;
+}
+
+/**
+ * The account's nickname in each live community it belongs to, by name —
+ * the settings page's "Community profiles" picker (docs/PROFILES.md).
+ */
+export async function listServerNicknamesForUser(
+  db: DbClient,
+  userId: string,
+  options: { limit?: number } = {}
+): Promise<ServerNicknameRow[]> {
+  const limit = Math.min(Math.max(options.limit ?? 200, 1), 500);
+  const rows = await db
+    .select({ serverId: servers.id, serverName: servers.name, nickname: memberships.nickname })
+    .from(memberships)
+    .innerJoin(servers, eq(servers.id, memberships.serverId))
+    .where(and(eq(memberships.userId, userId), isNull(servers.deletedAt)))
+    .orderBy(asc(servers.name), asc(servers.id))
+    .limit(limit);
+  return rows.map((row) => ({ ...row, nickname: row.nickname && row.nickname.trim() ? row.nickname : null }));
+}
+
+/**
  * Assign (or clear) a role on a member. `roleId: null` is a valid input
  * and means "remove the role assignment". Throws if the user is not a
  * member of the server.
@@ -417,6 +463,11 @@ export interface MemberSummary {
   roleIcon: string | null;
   statusText: string | null;
   bio: string | null;
+  /** The account's handle, lowercase; null = none (0050). An identity field like the name. */
+  username: string | null;
+  /** 0050 — profile details, withheld like `bio` by the viewer projection. */
+  pronouns: string | null;
+  accentColor: string | null;
   roles: Array<{ id: string; name: string; color: string | null; icon: string | null; position: number; displaySeparately: boolean }>;
   joinedAt: Date;
 }
@@ -432,8 +483,16 @@ export interface MemberSummary {
 export async function listMemberSummariesForServer(
   db: DbClient,
   serverId: string,
-  options: { limit?: number } = {}
+  options: {
+    limit?: number;
+    /**
+     * Only these members (the lobby re-reading the ones a live event named).
+     * An empty list reads nobody. Callers bound its length.
+     */
+    userIds?: readonly string[];
+  } = {}
 ): Promise<MemberSummary[]> {
+  if (options.userIds && options.userIds.length === 0) return [];
   // We leftJoin roles so members without a role still surface. `users`
   // is the source of truth for display name / username / avatar.
   const query = db
@@ -458,6 +517,9 @@ export async function listMemberSummariesForServer(
       legacyRoleDisplaySeparately: roles.displaySeparately,
       statusText: users.statusText,
       bio: users.bio,
+      username: users.username,
+      pronouns: users.pronouns,
+      accentColor: users.accentColor,
       joinedAt: memberships.createdAt,
     })
     .from(memberships)
@@ -466,7 +528,8 @@ export async function listMemberSummariesForServer(
     .where(
       and(
         eq(memberships.serverId, serverId),
-        isNull(users.deletedAt)
+        isNull(users.deletedAt),
+        options.userIds ? inArray(memberships.userId, [...options.userIds]) : undefined
       )
     )
     .orderBy(asc(memberships.createdAt), asc(memberships.id));
@@ -492,7 +555,12 @@ export async function listMemberSummariesForServer(
         .from(membershipRoles)
         .innerJoin(roles, eq(roles.id, membershipRoles.roleId))
         .innerJoin(memberships, eq(memberships.id, membershipRoles.membershipId))
-        .where(eq(memberships.serverId, serverId));
+        .where(
+          and(
+            eq(memberships.serverId, serverId),
+            options.userIds ? inArray(memberships.userId, [...options.userIds]) : undefined
+          )
+        );
   const rolesByMembership = new Map<string, MemberSummary['roles']>();
   for (const role of roleLinks) {
     const current = rolesByMembership.get(role.membershipId) ?? [];

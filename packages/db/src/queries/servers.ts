@@ -116,6 +116,26 @@ export async function listServersForUser(
 }
 
 /**
+ * Every live server the user belongs to or owns, ids only — who hears that
+ * the user's profile changed (docs/PROFILES.md "Live updates"). Unbounded
+ * on purpose (an id is small); an owner without a membership row counts.
+ */
+export async function listServerIdsForUser(db: DbClient, userId: string): Promise<string[]> {
+  const [member, owned] = await Promise.all([
+    db
+      .select({ id: servers.id })
+      .from(servers)
+      .innerJoin(memberships, eq(memberships.serverId, servers.id))
+      .where(and(eq(memberships.userId, userId), isNull(servers.deletedAt))),
+    db
+      .select({ id: servers.id })
+      .from(servers)
+      .where(and(eq(servers.ownerUserId, userId), isNull(servers.deletedAt))),
+  ]);
+  return [...new Set([...member, ...owned].map((row) => row.id))];
+}
+
+/**
  * Soft-delete a server. Only the owner should call this; the route layer
  * is responsible for the authorization check.
  */
