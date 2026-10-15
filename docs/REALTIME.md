@@ -70,6 +70,13 @@ can reach — so the gateway asks web per viewer through the signed internal
 `LOBBYFORGE_INTERNAL_WEB_URL`, default `http://web:3000`). If web cannot
 answer, the subscriber gets the event without state (ADR-007).
 
+The projections for one socket and topic go out in bus order (each read
+waits for the previous one), and each frame carries the `status` and
+`revision` of the row it actually projected, not those of the event that
+triggered the read. `useActivitySession` ignores a frame whose `revision`
+is lower than the one it already shows (a frame without `revision` is
+applied as before).
+
 ## Wire protocol (WebSocket)
 
 Client → server (JSON text frames):
@@ -87,6 +94,8 @@ Server → client:
 { "type": "unsubscribed","topic": "...", "at": "..." }
 { "type": "event",       "topic": "...", "data": {...}, "at": "..." }
 { "type": "error",       "topic": "...", "code": "forbidden", "message": "..." }
+{ "type": "access_revoked", "topic": "...", "reason": "...", "at": "..." }
+{ "type": "heartbeat",   "at": "..." }
 ```
 
 Errors carry one of:
@@ -94,9 +103,19 @@ Errors carry one of:
 - `bad_message` — payload didn't match the schema (invalid JSON, missing fields, etc.).
 - `forbidden` — the caller isn't a member of the topic's server.
 - `unknown_topic` — topic shape is unknown.
-- `rate_limited` — subscribe rate limit exceeded.
+- `rate_limited` — subscribe rate limit or subscription cap exceeded.
+- `internal_error` — the authorization check failed (a fixed message; the
+  detail is only logged).
 
-The gateway enforces 30 subscribe messages / 60s / connection.
+`access_revoked` means the gateway removed a live subscription because the
+caller's access changed (kick, ban, role loss, channel policy, block) or a
+periodic re-check denied it. `heartbeat` goes out with every protocol ping
+(30 s): a browser answers pings without showing them to the page, so this
+frame is the page's proof that the socket is alive.
+
+The gateway enforces 30 subscribe messages / 60s / connection. An
+`unsubscribe` that arrives while the same topic's `subscribe` is still
+being authorized cancels it.
 
 ## Authentication
 
@@ -106,6 +125,9 @@ HTTP upgrade request. The gateway validates it via
 `4401` (a non-standard "unauthenticated" code picked for the gateway) on
 failure. The cookie's HMAC must verify against `LOBBYFORGE_SESSION_SECRET`
 and the payload's `uid` must be non-null (post-`POST /api/auth/guest`).
+A revoked session closes with `1008`; in production, a revocation store
+that cannot answer closes with `1011`. All three happen right after the
+upgrade was accepted, so the browser sees `open` first.
 
 ## Authorization
 
@@ -129,19 +151,25 @@ or refresh their session.
 
 ## Redis subscriber pool
 
-The gateway's `apps/ws-gateway/src/redis-subscriber.ts` keeps one ioredis
-connection per topic with a refcounted handler set:
+The gateway's `apps/ws-gateway/src/redis-subscriber.ts` keeps ONE shared
+ioredis subscriber connection for the whole process, with a refcounted
+handler set per topic:
 
-1. First `acquire` for a topic opens a fresh connection and starts the
-   Redis `SUBSCRIBE`.
-2. Subsequent `acquire`s on the same topic share the existing connection
-   (handler is appended to the fan-out set).
+1. First `acquire` for a topic sends `SUBSCRIBE` on the shared connection.
+2. Subsequent `acquire`s on the same topic only add a handler to the
+   fan-out set.
 3. `release` decrements the refcount; when it hits zero, the connection
-   issues `UNSUBSCRIBE` and quits.
+   sends `UNSUBSCRIBE` (the connection itself stays open).
+
+ioredis reconnects and re-subscribes what Redis had accepted. A `SUBSCRIBE`
+that Redis refused (typically one that waited in the offline queue past its
+retries while Redis was down) is retried on the connection's next `ready`,
+for the topics someone still holds.
 
 This means a popular voice room with 100 spectators costs **one** Redis
-connection, not 100. The web app's `apps/web/lib/activity-bus.ts` and
-`chat-bus.ts` use the same pattern locally.
+subscription, not 100, and any number of topics costs one connection. The
+web app's `apps/web/lib/activity-bus.ts` and `chat-bus.ts` use the same
+pattern locally.
 
 ## Browser client (`apps/web/lib/realtime-client.ts`)
 
@@ -167,8 +195,22 @@ unsubscribe();
 `RealtimeClient` is a module-level singleton — one connection per page
 load. It auto-reconnects with exponential backoff (cap 30s), queues
 subscribes that arrive while disconnected, and replays them on the
-next `open`. A 60s heartbeat closes the socket if the server hasn't
-pinged in time, which triggers reconnect.
+next `open` and again on `hello`. The backoff starts over only on
+`hello`: the gateway accepts every upgrade and refuses after `open`.
+
+- `4401` (no or invalid cookie) and `1008` (revoked session) are final:
+  the client stops reconnecting and calls its `onTerminalClose(listener)`
+  listeners (`terminalClose` holds the code and reason). An explicit
+  `connect()` tries again; `wake()` and new subscribes do not.
+- `1011` (revocation store unavailable) and every other close back off.
+- A subscribe refused with `internal_error` or `rate_limited` is retried
+  while the topic still has handlers: 1 s, 2 s, 4 s … capped at 30 s, six
+  times at most (a `subscribed` starts the count over). After
+  `access_revoked` the client asks once more after 5 s; if access is really
+  gone the answer is `forbidden`, which ends it.
+- Liveness: any frame re-arms a 60 s timer, and the gateway sends a
+  `heartbeat` frame every 30 s, so only a socket that stayed silent for two
+  heartbeats is closed (which triggers a reconnect).
 
 The default URL is `ws://{window.location.hostname}:19521` (HTTPS pages use the same-origin `/ws` proxy instead). Override
 via `NEXT_PUBLIC_WS_URL` (the env var the build reads).
@@ -210,6 +252,7 @@ Required env vars on the gateway container:
   the activity-state namespace (e.g. leaderboard updates, world events)
   should declare the topic via `manifest.realtime?.topics` and let the
   host mediate publication. M20+ design work.
-- **Server-initiated pings.** The gateway already pings every 30s; the
-  client detects missed pings and reconnects. No change needed unless
-  we add a richer keep-alive protocol.
+- **Server-initiated pings.** The gateway pings every 30s and sends a
+  `heartbeat` frame with each ping; the client reconnects after two
+  missed heartbeats. No change needed unless we add a richer keep-alive
+  protocol.
