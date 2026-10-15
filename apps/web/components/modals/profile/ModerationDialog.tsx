@@ -25,8 +25,23 @@ export type TimeoutDurationId = (typeof TIMEOUT_DURATIONS)[number]['id'];
 /** The ban route accepts a reason of up to 512 characters (as the admin page's prompt sends). */
 export const BAN_REASON_MAX = 512;
 
+/**
+ * How long a ban lasts. Permanent is the default (lifted by hand from the
+ * admin Members page); the others end on their own (`expiresAt`).
+ */
+export const BAN_DURATIONS = [
+  { id: 'permanent', ms: null, unit: null, count: 0 },
+  { id: '1h', ms: 60 * 60_000, unit: 'hours', count: 1 },
+  { id: '1d', ms: 24 * 60 * 60_000, unit: 'days', count: 1 },
+  { id: '1w', ms: 7 * 24 * 60 * 60_000, unit: 'weeks', count: 1 },
+  { id: '30d', ms: 30 * 24 * 60 * 60_000, unit: 'days', count: 30 },
+] as const;
+
+export type BanDurationId = (typeof BAN_DURATIONS)[number]['id'];
+
 export interface ModerationRequest {
   kind: ModerationKind;
+  /** Timeout length; for a ban, its length (absent = permanent). */
   durationMs?: number;
   reason?: string;
 }
@@ -54,6 +69,7 @@ export function ModerationDialog({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const cancelRef = useRef<HTMLButtonElement | null>(null);
   const [duration, setDuration] = useState<TimeoutDurationId>('10m');
+  const [banDuration, setBanDuration] = useState<BanDurationId>('permanent');
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +87,11 @@ export function ModerationDialog({
       kind === 'timeout'
         ? { kind, durationMs: TIMEOUT_DURATIONS.find((option) => option.id === duration)!.ms }
         : kind === 'ban'
-          ? { kind, reason: reason.trim() || undefined }
+          ? {
+              kind,
+              reason: reason.trim() || undefined,
+              durationMs: BAN_DURATIONS.find((option) => option.id === banDuration)?.ms ?? undefined,
+            }
           : { kind };
     const failure = await onConfirm(request);
     // On success the parent closes the dialog; on failure it stays open with the reason.
@@ -126,6 +146,26 @@ export function ModerationDialog({
               ))}
             </div>
           </fieldset>
+        ) : null}
+
+        {kind === 'ban' ? (
+          <label className="mt-4 block">
+            <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-text-secondary">
+              {t('shell.profile.moderation.ban.duration')}
+            </span>
+            <select
+              value={banDuration}
+              onChange={(event) => setBanDuration(event.target.value as BanDurationId)}
+              className="w-full rounded-md border border-border-subtle bg-surface px-3 py-2 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+              data-testid="ban-duration"
+            >
+              {BAN_DURATIONS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.unit ? t(`shell.profile.duration.${option.unit}`, { count: option.count }) : t('shell.profile.moderation.ban.permanent')}
+                </option>
+              ))}
+            </select>
+          </label>
         ) : null}
 
         {kind === 'ban' ? (
