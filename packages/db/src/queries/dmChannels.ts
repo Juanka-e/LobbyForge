@@ -5,12 +5,13 @@
  * Messages cascade-delete with the channel. The `lastMessageAt` column drives
  * sidebar ordering without a join.
  */
-import { and, eq, isNull, or, desc, lt, sql } from 'drizzle-orm';
+import { and, eq, isNull, notInArray, or, desc, lt, sql, type SQL } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
 import { dmChannels, dmMessages, users } from '../schema.js';
 import { isUserBlocked } from './userBlocks.js';
 import { profileVisibilitySql, sharesServerSql, toProfileVisibility, userImageRefSql } from './userImages.js';
 import type { ActivityVisibilityScope } from './userSettings.js';
+import { completeLastMillisecond, inMillisecondOf } from './pagination.js';
 
 export interface DmChannelRow {
   id: string;
@@ -321,17 +322,26 @@ export async function listDmMessages(
   // 1..100 (default 50) whatever the caller passed: NaN or 0 must not reach
   // LIMIT (security review 2026-10, A9 — the route validates it as well).
   const limit = Number.isFinite(options.limit) ? Math.max(1, Math.min(Math.trunc(options.limit!), 100)) : 50;
-  const conditions = [eq(dmMessages.dmChannelId, channelId)];
+  const conditions: SQL[] = [eq(dmMessages.dmChannelId, channelId)];
   if (options.before && !Number.isNaN(options.before.getTime())) {
     conditions.push(lt(dmMessages.createdAt, options.before));
   }
-  const rows = await db
-    .select()
-    .from(dmMessages)
-    .where(and(...conditions))
-    .orderBy(desc(dmMessages.createdAt))
-    .limit(limit);
-  return rows as DmMessageRow[];
+  const select = (where: SQL[]) =>
+    db
+      .select()
+      .from(dmMessages)
+      .where(and(...where))
+      .orderBy(desc(dmMessages.createdAt), desc(dmMessages.id));
+  const page = (await select(conditions).limit(limit)) as DmMessageRow[];
+  // Security review 2026-10 (A11): millisecond-complete pages
+  // (./pagination.ts), so the next `before` skips nothing.
+  return completeLastMillisecond(page, limit, async (boundary, seenIds) =>
+    (await select([
+      ...conditions,
+      inMillisecondOf(dmMessages.createdAt, boundary),
+      ...(seenIds.length > 0 ? [notInArray(dmMessages.id, seenIds)] : []),
+    ])) as DmMessageRow[]
+  );
 }
 
 /** Soft-delete a DM message (author only; enforced by the route). */

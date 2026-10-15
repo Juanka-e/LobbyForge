@@ -230,8 +230,13 @@ createMessage(db, { channelId, userId, content, metadata?, replyToId? })
 
 listMessagesForChannel(db, channelId, { limit?, before? })
   // Joins channels + servers, filters soft-deleted messages, sorts newest
-  // first. The `before` cursor is an ISO-8601 timestamp; "give me messages
-  // older than this". Default limit 50, hard cap 100.
+  // first (then by id, so ties keep one order). The `before` cursor is an
+  // ISO-8601 timestamp; "give me messages older than this". Default limit
+  // 50, hard cap 100. `created_at` has microseconds but the cursor (the
+  // last row's createdAt) only milliseconds, so a full page also carries
+  // the rows that share its last row's millisecond (queries/pagination.ts)
+  // and can run past `limit` by those; the next page then misses nothing.
+  // listDmMessages and listAuditLogsForServer page the same way.
 
 getMessageById(db, messageId)
   // Joins channels + servers, filters soft-deleted messages AND
