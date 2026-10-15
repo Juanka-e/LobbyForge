@@ -43,7 +43,7 @@ exactly like one given by hand.
 
 **Then, in order:**
 
-1. A backup is created and verified (sha256 and size).
+1. A backup is created and verified (sha256 and size): the database dump and the installed plugin bundles (see [Backups and restore](#backups-and-restore)). Without `--yes`, `update apply` only shows the plan and writes no dump; with `--backup-manifest` it verifies that backup instead of making one.
 2. The signed image digest is pulled.
 3. The new image's migrator runs. Since rc.10 it also refuses a placeholder secret before touching the schema, so even an older `lfctl` stops there.
 4. The services are recreated.
@@ -176,14 +176,23 @@ Example:
   },
   "includes": {
     "database": true,
-    "uploads": false,
-    "env": false,
-    "pluginSettings": true,
-    "registryConfig": true
+    "plugins": true
+  },
+  "pluginsArchive": {
+    "path": "backups/local-dev-example/postgres.dump.plugins.tar.gz",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "sizeBytes": 512
   },
   "files": []
 }
 ```
+
+`includes` lists what `lfctl backup create` really put in the backup:
+`database` (always) and `plugins` (the plugin bundle archive, `pluginsArchive`).
+With `--require-files`, the archive is hashed like the dump. (Earlier
+examples listed `pluginSettings` and `registryConfig`; no tool ever produced
+them. Per-server plugin settings and the instance settings are database
+rows, so they are in the dump.)
 
 `POST /api/admin/updates` with `{ "action": "verify-backup" }` returns
 `{ backup }`. `POST /api/admin/updates` with `{ "action": "dry-run" }`
@@ -197,6 +206,37 @@ The worker defaults to non-executing:
 - apply/rollback steps are blocked until the execution gates pass
 - the `commandExecutor` gate is false unless worker execution is enabled
 - no OS command is spawned for previews or partially satisfied requests
+
+## Backups and restore
+
+`lfctl backup create` takes the database URL from `--database-url`, else
+`DATABASE_URL` in the environment, else `DATABASE_URL` in `.env.prod` — the
+same order `update apply` uses. It writes, owner-only, into `backups/`:
+
+- `<stamp>.dump` — `pg_dump -Fc` of the database, with its manifest
+  (`.dump.manifest.json`) and checksum sidecar (`.dump.json`);
+- `<stamp>.dump.plugins.tar.gz` — the marketplace plugin bundles from the
+  `plugins-data` volume (`/app/plugins/installed`). The running web
+  container makes the archive (`docker compose exec -T web … tar`), so the
+  stack has to be up. If it cannot be made, the backup still succeeds with a
+  warning and `includes.plugins: false`; re-install the marketplace plugins
+  from the admin panel after a restore.
+
+`lfctl backup restore --file <stamp>.dump --to <empty-database-url>` checks
+the dump and the archive (when the sidecar lists one) before touching
+anything, restores the database, then puts the bundles back through the
+running web container. If the database came back but the bundles did not, it
+exits non-zero and says what is missing; the manual step is
+`docker compose -f infra/docker/docker-compose.prod.yml --env-file .env.prod exec -T web sh -c 'tar -C /app/plugins -xzf -' < <stamp>.dump.plugins.tar.gz`.
+
+**Not in a backup:** `.env.prod` (secrets), the TLS certificates under
+`infra/certbot/`, and Redis. Keep a copy of `.env.prod` somewhere safe.
+Redis holds the session revocation list (signed-out and revoked cookies),
+so a restore onto a **new host** starts with an empty list: a cookie that was
+revoked before the backup is accepted again until it expires. After
+restoring onto a new host, rotate `LOBBYFORGE_SESSION_SECRET` in `.env.prod`
+and restart the stack — every session is signed out once, and no old cookie
+works.
 
 ## Command Executor Contract
 

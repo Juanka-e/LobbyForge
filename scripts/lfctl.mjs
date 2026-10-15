@@ -4,7 +4,7 @@ import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, ran
 import path from 'node:path';
 import process from 'node:process';
 import { execFile, spawn } from 'node:child_process';
-import { createWriteStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
@@ -281,6 +281,25 @@ async function verifyBackup(manifest, baseDir, options) {
         ok: false,
         message: `Could not read dump for hash verification: ${err.message}`,
       });
+    }
+    // The plugin bundle archive, when the backup has one, is hashed too.
+    const archive = manifest.includes.plugins === true ? manifest.pluginsArchive : null;
+    if (archive && typeof archive.path === 'string') {
+      const archivePath = path.isAbsolute(archive.path) ? archive.path : path.join(baseDir, archive.path);
+      try {
+        const actual = await sha256File(archivePath);
+        checks.push({
+          id: 'pluginsArchive.sha256Match',
+          ok: actual.sha256 === String(archive.sha256).toLowerCase(),
+          message: `Plugin bundle archive SHA-256 matches manifest (${actual.sha256.slice(0, 16)}…).`,
+        });
+      } catch (err) {
+        checks.push({
+          id: 'pluginsArchive.sha256Match',
+          ok: false,
+          message: `Could not read the plugin bundle archive: ${err.message}`,
+        });
+      }
     }
   }
   return { ok: checks.every((item) => item.ok), backupId: manifest.backupId, createdAt: manifest.createdAt, ageMs, checks };
@@ -1783,8 +1802,13 @@ async function pgExec(tool, args, options = {}) {
 // and any failure deletes the partial file so it can never masquerade
 // as a restorable backup.
 function streamPgDumpTo(dbUrl, outFile, timeoutMs) {
+  return streamDockerStdoutTo(['exec', PG_CONTAINER, 'pg_dump', '-Fc', dbUrl], outFile, timeoutMs, 'pg_dump');
+}
+
+/** Run a docker command and stream its stdout into `outFile` (deleted on failure). */
+function streamDockerStdoutTo(args, outFile, timeoutMs, label) {
   return new Promise((resolve, reject) => {
-    const child = spawn(DOCKER_PREFIX[0], dockerArgs(['exec', PG_CONTAINER, 'pg_dump', '-Fc', dbUrl]), {
+    const child = spawn(DOCKER_PREFIX[0], dockerArgs(args), {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const out = createWriteStream(outFile, { mode: BACKUP_FILE_MODE });
@@ -1806,16 +1830,105 @@ function streamPgDumpTo(dbUrl, outFile, timeoutMs) {
     };
     timer = setTimeout(() => {
       child.kill('SIGKILL');
-      finish(new Error(`pg_dump timed out after ${Math.round(timeoutMs / 1000)}s`));
+      finish(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s`));
     }, timeoutMs);
     child.stdout.pipe(out);
     child.stderr.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
     child.on('error', finish);
     child.on('close', (code) => {
       if (code === 0) finish();
-      else finish(new Error(`pg_dump exited with code ${code}: ${stderr.trim().slice(0, 400)}`));
+      else finish(new Error(`${label} exited with code ${code}: ${stderr.trim().slice(0, 400)}`));
     });
   });
+}
+
+/** Run a docker command with `inFile` on its stdin. */
+function pipeFileToDocker(args, inFile, timeoutMs, label) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(DOCKER_PREFIX[0], dockerArgs(args), { stdio: ['pipe', 'ignore', 'pipe'] });
+    let stderr = '';
+    let settled = false;
+    const finish = (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (err) reject(err);
+      else resolve();
+    };
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      finish(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s`));
+    }, timeoutMs);
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
+    child.on('error', finish);
+    child.on('close', (code) => {
+      if (code === 0) finish();
+      else finish(new Error(`${label} exited with code ${code}: ${stderr.trim().slice(0, 400)}`));
+    });
+    // An early exit closes the pipe; 'close' above reports the real reason.
+    child.stdin.on('error', () => {});
+    const input = createReadStream(inFile);
+    input.on('error', (err) => {
+      child.kill('SIGKILL');
+      finish(err);
+    });
+    input.pipe(child.stdin);
+  });
+}
+
+/** Streaming SHA-256 + size of a file (flat memory for any size). */
+async function sha256File(file) {
+  const hash = createHash('sha256');
+  let sizeBytes = 0;
+  await new Promise((resolveHash, rejectHash) => {
+    const stream = createReadStream(file);
+    stream.on('data', (chunk) => {
+      sizeBytes += chunk.length;
+      hash.update(chunk);
+    });
+    stream.on('end', resolveHash);
+    stream.on('error', rejectHash);
+  });
+  return { sha256: hash.digest('hex'), sizeBytes };
+}
+
+// Marketplace plugin bundles live in the compose `plugins-data` volume
+// (web extracts approved bundles into /app/plugins/installed, the worker
+// reads them). The database only records WHICH plugins are installed, so a
+// backup without the bundles restores an instance that lists plugins it
+// cannot run. The running web container archives them itself — it mounts
+// the volume and its image ships tar — and the bytes stream to a host file.
+const PLUGINS_ARCHIVE_SCRIPT =
+  'cd /app/plugins || exit 3; if [ -d installed ]; then tar -czf - installed; else tar -czf - -T /dev/null; fi';
+const PLUGINS_RESTORE_SCRIPT = 'mkdir -p /app/plugins && tar -C /app/plugins -xzf -';
+
+/**
+ * Archive the installed plugin bundles next to `dumpFile`. A failure (the
+ * stack is not running, no compose install) is a warning, not a failed
+ * backup: the database dump is the part an update cannot do without.
+ */
+async function archivePluginBundles(dumpFile) {
+  const archive = `${dumpFile}.plugins.tar.gz`;
+  try {
+    await (await fs.open(archive, 'wx', BACKUP_FILE_MODE)).close();
+    await restrictBackupFile(archive);
+    await streamDockerStdoutTo(
+      [...COMPOSE_BASE_ARGS, 'exec', '-T', 'web', 'sh', '-c', PLUGINS_ARCHIVE_SCRIPT],
+      archive,
+      300_000,
+      'plugin bundle archive'
+    );
+    const { sha256, sizeBytes } = await sha256File(archive);
+    if (sizeBytes === 0) throw new Error('the web container produced an empty archive');
+    return { path: path.basename(archive), sha256, sizeBytes };
+  } catch (err) {
+    await fs.unlink(archive).catch(() => {});
+    console.error(
+      `Warning: plugin bundles were NOT archived (${err.message}). The backup holds the database only — ` +
+        'after a restore, re-install marketplace plugins from the admin panel.'
+    );
+    return null;
+  }
 }
 
 /**
@@ -1885,6 +1998,10 @@ async function backupCreate(options = {}) {
   const sha256 = hash.digest('hex');
   const buf = { byteLength: stat.size }; // size-only shim (no full read)
 
+  // The installed marketplace plugin bundles (null when they could not be
+  // archived — the manifest then says includes.plugins: false).
+  const plugins = await archivePluginBundles(file);
+
   // 19th-audit: emit the CANONICAL formatVersion:1 manifest — the
   // same shape `lfctl update apply --backup-manifest` and `lfctl
   // backup verify` consume, so `backup create` output feeds directly
@@ -1900,7 +2017,8 @@ async function backupCreate(options = {}) {
       sha256,
       sizeBytes: buf.byteLength ?? buf.length,
     },
-    includes: { database: true },
+    includes: { database: true, plugins: plugins !== null },
+    ...(plugins ? { pluginsArchive: plugins } : {}),
   };
   await fs.writeFile(`${file}.manifest.json`, JSON.stringify(manifest, null, 2), { mode: BACKUP_FILE_MODE });
   await restrictBackupFile(`${file}.manifest.json`);
@@ -1911,11 +2029,20 @@ async function backupCreate(options = {}) {
     sizeBytes: buf.byteLength ?? buf.length,
     createdAt: new Date().toISOString(),
     databaseUrlPrefix: dbUrl.split('@').pop()?.split('/')[0] ?? 'unknown-host',
+    // `backup restore` puts these back after the database.
+    ...(plugins ? { plugins: { archive: plugins.path, sha256: plugins.sha256 } } : {}),
   };
   await fs.writeFile(`${file}.json`, JSON.stringify(meta, null, 2), { mode: BACKUP_FILE_MODE });
   await restrictBackupFile(`${file}.json`);
 
-  return { file, sha256, sizeBytes: buf.byteLength ?? buf.length, manifestPath: `${file}.manifest.json`, backupId };
+  return {
+    file,
+    sha256,
+    sizeBytes: buf.byteLength ?? buf.length,
+    manifestPath: `${file}.manifest.json`,
+    backupId,
+    pluginsArchive: plugins ? path.join(outDir, plugins.path) : null,
+  };
 }
 
 async function backupRestore(file, targetUrl, options = {}) {
@@ -1966,6 +2093,27 @@ async function backupRestore(file, targetUrl, options = {}) {
       }
     }
 
+    // The plugin bundle archive made with this dump (when there is one) is
+    // checked up front too: nothing is touched when it is corrupt.
+    let pluginsArchive = null;
+    let pluginsProblem = null;
+    let pluginsArchiveName = '<dump>.plugins.tar.gz';
+    const listed = sidecar?.plugins;
+    if (listed && typeof listed.archive === 'string') {
+      const candidate = path.join(path.dirname(path.resolve(file)), path.basename(listed.archive));
+      pluginsArchiveName = candidate;
+      if (!(await exists(candidate))) {
+        pluginsProblem = `the archive ${path.basename(candidate)} is not next to the dump`;
+      } else if ((await sha256File(candidate)).sha256 !== listed.sha256) {
+        if (!allowUnverified) {
+          return { ok: false, message: 'Plugin bundle archive SHA-256 mismatch — it may be corrupted. Nothing was restored.' };
+        }
+        pluginsProblem = 'the archive failed its SHA-256 check';
+      } else {
+        pluginsArchive = candidate;
+      }
+    }
+
     // Safety: refuse to restore into a database that already has tables.
     // Count EVERY non-system schema — checking only `public` let a
     // populated `drizzle` (migrations ledger) schema slip through and
@@ -1988,6 +2136,30 @@ async function backupRestore(file, targetUrl, options = {}) {
       }
     } else {
       await pgExec('pg_restore', ['--no-owner', '--no-privileges', '-d', targetUrl, file], { timeout: 600_000 });
+    }
+    if (pluginsArchive) {
+      try {
+        await pipeFileToDocker(
+          [...COMPOSE_BASE_ARGS, 'exec', '-T', 'web', 'sh', '-c', PLUGINS_RESTORE_SCRIPT],
+          pluginsArchive,
+          300_000,
+          'plugin bundle restore'
+        );
+        return { ok: true, message: 'Database restored successfully. Plugin bundles restored.' };
+      } catch (err) {
+        pluginsProblem = `putting them back failed (${err.message})`;
+      }
+    }
+    if (pluginsProblem) {
+      // The database IS restored (and cannot be restored twice — the target
+      // is no longer empty); say exactly what is missing.
+      return {
+        ok: false,
+        message:
+          `Database restored successfully, but the plugin bundles were not: ${pluginsProblem}. ` +
+          'Re-install the marketplace plugins from the admin panel, or with the stack running: ' +
+          `docker compose -f ${COMPOSE_FILE} --env-file ${ENV_FILE} exec -T web sh -c 'tar -C /app/plugins -xzf -' < ${pluginsArchiveName}`,
+      };
     }
     return { ok: true, message: 'Database restored successfully.' };
   } catch (err) {

@@ -11,10 +11,12 @@
   },
   "includes": {
     "database": true,
-    "uploads": false,
-    "env": false,
-    "pluginSettings": true,
-    "registryConfig": true
+    "plugins": true
+  },
+  "pluginsArchive": {
+    "path": "backups/local-dev-example/postgres.dump.plugins.tar.gz",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "sizeBytes": 512
   },
   "files": []
 }
