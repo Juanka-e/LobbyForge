@@ -460,6 +460,18 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
     // double-decrement when 'close', 'error' and the raw-socket 'close'
     // all fire for the same connection.
     const releaseIpSlot = ipSlotReleasers.get(req) ?? (() => undefined);
+    // Set once the socket is authenticated; the error listener below
+    // releases its subscriptions.
+    let liveState: ConnectionState | null = null;
+    // FIRST, before any check or await: ws reports a malformed frame (RSV
+    // bits, oversize, unmasked, bad UTF-8) as an 'error' event, and an
+    // 'error' with no listener throws and exits the process. The frame can
+    // arrive together with the handshake, so the unauthenticated / revoked
+    // early returns and the revocation check below must already be covered.
+    socket.on('error', () => {
+      liveState?.subs.closeAll();
+      releaseIpSlot();
+    });
 
     // Bot API v2 §4.1: token-authenticated bot feed — never a cookie.
     if (isBotGatewayPath(req.url)) {
@@ -490,6 +502,12 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
         socket.close(1011, 'revocation store unavailable');
         return;
       }
+      // The socket failed or hung up while the check was in flight: its
+      // 'close' has already fired, so nothing below would ever be undone.
+      if (socket.readyState !== socket.OPEN) {
+        releaseIpSlot();
+        return;
+      }
     }
     if (!auth.ok) {
       send(socket, {
@@ -512,6 +530,7 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
       revocationUnavailableSince: null,
     };
     connections.set(socket, state);
+    liveState = state;
 
     send(socket, {
       type: 'hello',
@@ -666,10 +685,6 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
     });
 
     socket.once('close', () => {
-      state.subs.closeAll();
-      releaseIpSlot();
-    });
-    socket.once('error', () => {
       state.subs.closeAll();
       releaseIpSlot();
     });
