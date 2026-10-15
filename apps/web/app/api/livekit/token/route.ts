@@ -11,8 +11,6 @@ import {
 import {
   getActiveMemberTimeout,
   getEffectiveServerVoiceSettings,
-  getServerMember,
-  getUserById,
   getUserPermissions,
   isMemberVoiceMuted,
 } from '@lobbyforge/db';
@@ -33,6 +31,7 @@ import { buildAllowedPublishSources, canPublishAnySource } from '@/lib/voice-mod
 import { publishBlockedReason } from '@/lib/voice-publish-state';
 import { getRuntimeLiveKitUrl } from '@/lib/public-endpoints';
 import { requireVerifiedEmail } from '@/lib/mail/verification';
+import { resolveMemberDisplayName } from '@/lib/member-display-name';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -120,7 +119,13 @@ async function handler(req: Request): Promise<NextResponse> {
     voiceSettings.maxScreenShareUsersPerRoom != null;
   if (hasLimitConfig) {
     try {
-      const participants = await getRoomServiceClient().listParticipants(room);
+      // The caller's own participant is left out: a reconnect (a refresh,
+      // a second tab, a network blip) replaces it, so counting it refused
+      // a member their own seat in a full room — or their camera / screen
+      // share at the cap they were already using.
+      const participants = (await getRoomServiceClient().listParticipants(room)).filter(
+        (p) => p.identity !== session.uid
+      );
       if (
         voiceSettings.defaultUserLimit != null &&
         participants.length >= voiceSettings.defaultUserLimit
@@ -193,7 +198,8 @@ async function handler(req: Request): Promise<NextResponse> {
       apiKey,
       apiSecret,
       identity,
-      name: await resolveVoiceDisplayName(body.serverId, session.uid, session.name),
+      // Nickname → profile name, resolved on the server (lib/member-display-name.ts).
+      name: await resolveMemberDisplayName(body.serverId, session.uid, session.name),
       grants,
       metadata,
     });
@@ -286,25 +292,3 @@ export const POST = withApiSecurity(handler, {
   // Token issuance is moderately expensive (HMAC + JWT serialization).
   rateLimit: { identifier: 'livekit-token', config: { windowMs: 60_000, maxRequests: 30 } },
 });
-
-/**
- * Per-MEMBER publish sources = server-wide toggles ∩ the member's ROLE
- * permissions ∩ their moderation state:
- *  - SPEAK gates the microphone (no SPEAK → listen-only participant).
- *  - STREAM gates camera AND screen-share (a moderator/role can restrict
- *    exactly who may turn on a camera or share a screen — role-level,
- *    not just the owner's server-wide switch).
- *  - An active MODERATE_MEMBERS timeout strips the microphone (the
- *    timed-out member can still listen).
- */
-async function resolveVoiceDisplayName(serverId: string, userId: string, fallback: string): Promise<string> {
-  try {
-    const member = await getServerMember(getDb(), serverId, userId);
-    if (member?.nickname) return member.nickname.slice(0, 64);
-    const user = await getUserById(getDb(), userId);
-    if (user?.displayName) return user.displayName.slice(0, 64);
-  } catch {
-    // Fall back to the signed session name.
-  }
-  return fallback;
-}

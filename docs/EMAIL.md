@@ -489,7 +489,7 @@ change email and delete the account. They cannot:
   | `webhook` | `POST /api/servers/{id}/channels/{channelId}/webhooks`, `POST …/webhooks/{webhookId}/token` |
   | `plugin_publish` | `POST /api/marketplace/submit` |
   | `directory_listing` | `GET /api/directory/register/challenge`, `POST /api/directory/register` |
-  | `join_request` | `POST /api/servers/{id}/join-requests/mine` when it carries a note (free text sent to the moderators); asking to join without one is not gated |
+  | `join_request` | `POST /api/servers/{id}/join-requests/mine` and `POST /api/invites/{code}/redeem` when they carry a note (free text sent to the moderators); asking or joining without one is not gated |
 
   Not gated: the Bot API and a bot's event endpoint (bot tokens, no
   account), the admin instance logo (owner only), activity (game) actions

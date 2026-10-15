@@ -33,6 +33,7 @@ import { pluginSummary } from '@/lib/plugin-catalog-text';
 import { PollRolesPicker } from './PollRolesPicker';
 import { RESTRICTED_ACTION_KEYS } from '@/components/email-verification/email-status';
 import { handleEmailUnverified } from '@/components/email-verification/email-status-store';
+import { timedOutRefusalKey } from '@/lib/profile-action-errors';
 
 type Channel = {
   id: string;
@@ -214,14 +215,24 @@ export function visibleTabs(can: ServerSettingsViewer['can']): Tab[] {
 /** EMAIL.md §4.2: the action needs a verified email — callers say so in words. */
 class EmailUnverifiedError extends Error {}
 
+/** A timed-out member manages nothing (lib/actor-timeout.ts) — said in words, not as raw JSON. */
+class ActorTimedOutError extends Error {}
+
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { credentials: 'same-origin', ...init });
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}));
     if (handleEmailUnverified(res.status, detail)) throw new EmailUnverifiedError('email_unverified');
+    const timedOut = timedOutRefusalKey(detail);
+    if (timedOut) throw new ActorTimedOutError(timedOut);
     throw new Error(`HTTP ${res.status} ${JSON.stringify(detail)}`);
   }
   return (await res.json()) as T;
+}
+
+/** What a failed request says: a timed-out refusal in the viewer's language, else the error itself. */
+function errorText(t: Translator, err: unknown): string {
+  return err instanceof ActorTimedOutError ? t(err.message) : (err as Error).message;
 }
 
 export default function ServerSettingsClient({
@@ -483,7 +494,7 @@ function Overview({
       await onChanged();
     } catch (err) {
       setCreateError(
-        err instanceof EmailUnverifiedError ? t(RESTRICTED_ACTION_KEYS.createChannel) : (err as Error).message
+        err instanceof EmailUnverifiedError ? t(RESTRICTED_ACTION_KEYS.createChannel) : errorText(t, err)
       );
       throw err;
     } finally {
@@ -586,7 +597,7 @@ function Overview({
                       });
                       await onChanged();
                     } catch (err) {
-                      alert(t('hub.servers.members.kickFailed', { error: (err as Error).message }));
+                      alert(t('hub.servers.members.kickFailed', { error: errorText(t, err) }));
                     }
                   }}
                   className="rounded-md px-2 py-1 text-xs text-danger hover:bg-danger/10"
@@ -636,7 +647,7 @@ function AppsPanel({
         });
         await onChanged();
       } catch (err) {
-        alert(t('hub.servers.apps.updateFailed', { error: (err as Error).message }));
+        alert(t('hub.servers.apps.updateFailed', { error: errorText(t, err) }));
       } finally {
         setBusyPluginId(null);
       }
@@ -656,7 +667,7 @@ function AppsPanel({
         });
         await onChanged();
       } catch (err) {
-        alert(t('hub.servers.apps.uninstallFailed', { error: (err as Error).message }));
+        alert(t('hub.servers.apps.uninstallFailed', { error: errorText(t, err) }));
       } finally {
         setBusyPluginId(null);
       }
@@ -836,7 +847,7 @@ function AccessPanel({
       });
       await onChanged();
     } catch (err) {
-      alert(t('hub.servers.access.saveFailed', { error: (err as Error).message }));
+      alert(t('hub.servers.access.saveFailed', { error: errorText(t, err) }));
     } finally {
       setBusy(false);
     }
@@ -1050,7 +1061,7 @@ function InvitesPanel({
         alert(
           err instanceof EmailUnverifiedError
             ? t(RESTRICTED_ACTION_KEYS.createInvite)
-            : t('hub.servers.invites.createFailed', { error: (err as Error).message })
+            : t('hub.servers.invites.createFailed', { error: errorText(t, err) })
         );
       } finally {
         setBusy(false);
@@ -1068,7 +1079,7 @@ function InvitesPanel({
         });
         await onChanged();
       } catch (err) {
-        alert(t('hub.servers.invites.revokeFailed', { error: (err as Error).message }));
+        alert(t('hub.servers.invites.revokeFailed', { error: errorText(t, err) }));
       }
     },
     [serverId, onChanged, t]

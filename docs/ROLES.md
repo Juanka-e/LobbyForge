@@ -135,6 +135,16 @@ counted in `hiddenChannelCount`, never named.
 
 All eight sit behind `withApiSecurity(...)` (now generic over `TContext` for the `[roleId]` and `[userId]` segments).
 
+**Banning someone who is already banned** (`POST /api/servers/{id}/bans`,
+`BAN_MEMBERS`) updates that ban instead of creating a second one: the new
+moderator, the new expiry (none means permanent, as for a new ban) and
+the new reason (an omitted reason keeps the stored one). It answers
+**200** with the stored ban and audits `ban.update` with the previous
+values; a new ban answers **201** and audits `ban.create`. So a temporary
+ban can be made permanent, or ended sooner or later, without lifting it
+first. It used to answer 201 and audit a `ban.create` while the old ban
+stayed as it was.
+
 ### Join requests
 
 When a server's access policy holds newcomers for approval (see
@@ -181,13 +191,31 @@ acts on the owner, and acting on yourself is refused (400
 `target_not_member`, `server_not_found`, `user_not_found`,
 `invalid_request`, `actor_timed_out`.
 
-**A timed-out member cannot moderate.** The same gate refuses an actor who
-is currently timed out — `403 { code: "actor_timed_out", until }` — for
-every operation it covers: kick, ban (and lifting one — the unban route
+**A timed-out member cannot moderate or manage.** The same gate refuses an
+actor who is currently timed out — `403 { code: "actor_timed_out", until }` —
+for every operation it covers: kick, ban (and lifting one — the unban route
 applies the same check), timeout (setting or clearing one), role
 assignment, voice mute and voice disconnect. A timeout already
 silences messages, invites and voice; moderation powers used to survive
 it. The owner cannot be timed out, so the owner is never refused.
+
+Every other management route gives the same refusal, through one helper
+(`refuseTimedOutActor` in `apps/web/lib/actor-timeout.ts`), after it has
+checked the caller and found the server and before it writes anything:
+
+- approving or rejecting a join request;
+- creating, editing and deleting roles and channels;
+- deleting another member's message, and closing another member's poll
+  (taking back your own message, or closing your own poll, stays allowed);
+- revoking another member's invite (your own stays allowed);
+- the community's access policy, voice settings, banner and apps;
+- every change to bots (create, edit, delete, tokens, channel access,
+  commands, the event endpoint) and to channel webhooks — reading their
+  settings stays allowed.
+
+The admin screens say this refusal in the viewer's language
+(`shell.profile.error.timedOut`, via `timedOutRefusalKey` in
+`apps/web/lib/profile-action-errors.ts`).
 
 ### Atomic Position Shifting (M15.6)
 

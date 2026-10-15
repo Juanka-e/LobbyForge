@@ -13,6 +13,7 @@ import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
 import { authorizeModerationTarget } from '@/lib/member-authorization';
 import { queueMemberVoiceSync } from '@/lib/voice-moderation';
+import { publishMembersChanged } from '@/lib/member-bus';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -116,6 +117,8 @@ async function handlePut(
     // who is ALREADY in a voice room — the token grant only applies on
     // the next join.
     queueMemberVoiceSync(serverId, targetUserId);
+    // An open profile card of theirs (a moderator's sees the timeout) re-reads.
+    publishMembersChanged(serverId, [targetUserId]);
     void logAction(getDb(), {
       serverId,
       actorUserId: session.uid,

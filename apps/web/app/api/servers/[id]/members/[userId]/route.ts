@@ -12,6 +12,7 @@ import { authorizeModerationTarget } from '@/lib/member-authorization';
 import { publishAccessInvalidation } from '@/lib/access-invalidation';
 import { queueMemberVoiceSync } from '@/lib/voice-moderation';
 import { emitMemberEvent } from '@/lib/bots/events';
+import { publishMembersRemoved } from '@/lib/member-bus';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -127,6 +128,8 @@ async function handleDelete(
     // live voice room of the server — LiveKit sessions outlive the
     // membership row.
     queueMemberVoiceSync(serverId, targetUserId);
+    // docs/PROFILES.md "Live updates": open lobbies drop them from the list.
+    publishMembersRemoved(serverId, [targetUserId]);
     void logAction(getDb(), {
       serverId,
       actorUserId: session.uid,

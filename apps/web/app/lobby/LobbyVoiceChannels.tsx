@@ -4,9 +4,10 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useCallba
 import { createPortal } from 'react-dom';
 import { useT } from '@/lib/i18n/client';
 import type { Params } from '@/lib/i18n/core';
-import { initialOf } from '@/lib/initial';
 import { useLobbyVoice, type LobbyVoiceParticipant } from './LobbyVoiceProvider';
 import { ProfileTrigger } from './ProfileCardProvider';
+import { VoiceAvatar } from './VoiceAvatar';
+import { GENERIC_REFUSAL_KEY, profileActionErrorMessage } from '@/lib/profile-action-errors';
 import { VoiceStatusIcon } from './VoiceStatusIcon';
 import Link from 'next/link';
 import { useEmailRestriction, useVerifyEmailAction } from '@/components/email-verification/EmailUnverifiedNotice';
@@ -148,9 +149,14 @@ export function LobbyVoiceChannels({
           }
         );
         if (!res.ok) {
-          const detail = (await res.json().catch(() => ({}))) as { error?: string };
+          // The gate's reason in the viewer's language (the profile card's
+          // words), never the route's English text.
+          const detail = (await res.json().catch(() => ({}))) as { code?: string };
+          const message = profileActionErrorMessage('mute', { status: res.status, code: detail.code });
           setModerationError(
-            detail.error ?? t('lobbyMain.voice.muteFailedStatus', { status: res.status })
+            message.key === GENERIC_REFUSAL_KEY
+              ? t('lobbyMain.voice.muteFailedStatus', { status: res.status })
+              : t(message.key, message.params)
           );
         }
       } catch {
@@ -432,8 +438,8 @@ export function LobbyVoiceChannels({
                               : 'w-6 h-6 flex-none rounded-full bg-secondary-container relative border-2 border-transparent'
                           }
                         >
-                          <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-text-primary">
-                            {initialOf(u.name, { locale: t.locale })}
+                          <span className="absolute inset-0 flex items-center justify-center overflow-hidden rounded-full text-[10px] font-bold text-text-primary">
+                            <VoiceAvatar userId={u.identity} name={u.name} />
                           </span>
                         </span>
                         <span

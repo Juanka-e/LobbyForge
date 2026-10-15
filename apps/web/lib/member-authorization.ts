@@ -21,7 +21,6 @@
 import { NextResponse } from 'next/server';
 import { hasPermission } from '@lobbyforge/core';
 import {
-  getActiveMemberTimeout,
   getHighestRolePosition,
   getServerById,
   getUserPermissions,
@@ -29,6 +28,7 @@ import {
   userExists,
 } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
+import { refuseTimedOutActor } from '@/lib/actor-timeout';
 // The permission map and the rank comparison are shared with the profile
 // card's `viewerCan` (lib/member-capabilities.ts), so what the card offers
 // and what this gate accepts cannot drift apart.
@@ -118,18 +118,9 @@ export async function authorizeModerationTarget(input: {
   // still kick, ban, time out, mute, disconnect and re-role others — a
   // timeout silences a member in every other way (messages, invites,
   // voice). The owner cannot be timed out by anyone, so is never refused.
-  if (!actorIsOwner) {
-    const timedOutUntil = await getActiveMemberTimeout(getDb(), serverId, actorUserId);
-    if (timedOutUntil) {
-      return {
-        ok: false,
-        response: NextResponse.json(
-          { error: 'You are timed out in this server', code: 'actor_timed_out', until: timedOutUntil.toISOString() },
-          { status: 403 }
-        ),
-      };
-    }
-  }
+  // The same refusal guards every other management route (lib/actor-timeout.ts).
+  const timedOut = await refuseTimedOutActor(serverId, actorUserId, server.ownerUserId);
+  if (timedOut) return { ok: false, response: timedOut };
 
   // Self-action: never moderate yourself through these routes (kick's
   // self-leave path never reaches here; leaving is handled there).

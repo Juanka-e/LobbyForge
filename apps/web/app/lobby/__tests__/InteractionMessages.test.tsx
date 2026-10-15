@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { I18nProvider } from '@/lib/i18n/client';
 import { providerPropsFor } from '@/lib/i18n/catalogue';
 import { interactionStore } from '@/lib/bots/interaction-store';
+import { __resetNotificationPrefsForTests } from '@/lib/notification-prefs';
 
 /**
  * What slash commands and webhooks add to the message list: the invoker's
@@ -20,6 +21,7 @@ vi.mock('@/lib/realtime-client', () => ({
       subscribers.set(topic, handler);
       return () => subscribers.delete(topic);
     },
+    onReconnect: () => () => {},
   }),
 }));
 
@@ -30,6 +32,8 @@ const DICE = { id: 'b-dice', name: 'Dice', type: 'custom' };
 let historyResponse: unknown = { messages: [] };
 
 beforeEach(() => {
+  // Settings are read once per page; every case is a fresh page.
+  __resetNotificationPrefsForTests();
   subscribers.clear();
   interactionStore.reset();
   historyResponse = { messages: [] };

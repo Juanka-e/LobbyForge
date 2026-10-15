@@ -3,6 +3,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { I18nProvider } from '@/lib/i18n/client';
 import { providerPropsFor } from '@/lib/i18n/catalogue';
+import { __resetNotificationPrefsForTests } from '@/lib/notification-prefs';
 
 /**
  * App messages in the lobby chat: what a game plugin posts during an
@@ -20,6 +21,7 @@ vi.mock('@/lib/realtime-client', () => ({
       subscribers.set(topic, handler);
       return () => subscribers.delete(topic);
     },
+    onReconnect: () => () => {},
   }),
 }));
 
@@ -30,6 +32,8 @@ const APP = { pluginId: 'sandbox-buzzer', name: 'Sandbox Buzzer' };
 let historyResponse: unknown = { messages: [] };
 
 beforeEach(() => {
+  // Settings are read once per page; every case is a fresh page.
+  __resetNotificationPrefsForTests();
   subscribers.clear();
   historyResponse = { messages: [] };
   vi.stubGlobal(

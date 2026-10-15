@@ -2,6 +2,92 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Handles, pronouns, profile colours, mentions and live members - 2026-10-15
+
+- **Profile fields** (migration 0050, docs/PROFILES.md "Profile fields"):
+  - A handle (`@ada_l`): unique, 2–32 of `a-z 0-9 _ .`, checked as you type, reserved names refused, none for guests.
+  - Pronouns, up to 40 characters.
+  - A profile colour: swatches, a free picker or Automatic. It colours the card's band when there's no banner, and draws a ring around the photo.
+  - The card shows `@handle · pronouns` under the names. Pronouns and the colour follow the profile's visibility like the bio; the handle shows like a name.
+  - Settings → Profile has a live preview. Every refusal is said in the account's language.
+- **Community nicknames:** the settings page lists every community and edits the one picked. "Edit profile" opens it on the card's community. The nickname used to go to the account's newest community, whatever lobby it was set from.
+- **Mentions that know who they name** (docs/PROFILES.md "Mentions"):
+  - The server keeps `metadata.mentions` (`{ userId, text }`): picks from the `@` list that are members and whose name is still in the text, plus typed `@handles`. Message text stays plain.
+  - Mentions render as chips that open the profile card. A message that names you, or `@everyone`, is highlighted.
+  - The `@` list matches handles and folds Turkish İ/I.
+  - A mention elsewhere in the community puts a red badge on that channel, and a hidden tab gets a desktop notification. Only members who can read the channel are told, never someone who blocked the author, and the text is never sent.
+- **Notification settings that work:** "Unread badge", "Suppress while in voice" and the sound choice (default chime, soft pop, none) were saved but never used.
+- **Live members** (new gateway topic `members:{serverId}`; docs/PROFILES.md "Live updates"):
+  - Joins, departures, kicks and bans show live, as do new names, avatars, handles, nicknames and roles, and edited roles' colours and order. This covers the member list, profile cards, chat author names, the mention list and the voice roster.
+  - Events say who changed, never what; each lobby re-reads those rows over REST, projected for that viewer.
+- **Live DM list:** a conversation someone else starts appears without a reload, with an unread dot until opened. Starting one from a profile card adds it too.
+- **Voice:** the voice list and the call view show profile photos instead of initials.
+- **Chat:**
+  - "Load older messages": a channel used to stop at its newest 50 messages.
+  - After a dropped connection, the channel and the open DM catch up: missed messages appear, deleted ones go.
+  - Delete asks first; the message actions show on keyboard focus and on touch screens.
+  - A refused edit, delete or pin says why (a Moderation Bot rule, a timeout, `@everyone` without permission), and a refused edit stays open.
+  - The composer says refusals in your language, never the server's English.
+  - "is typing…" sits under the newest message (it was above the oldest).
+  - Pinning no longer marks a message "(edited)".
+  - Unblocking someone shows their messages again without a reload.
+  - Times and day separators use your time zone from the first paint.
+- **Bans:**
+  - The admin Members page lists bans (reason, since, until) with "Lift ban". There was no way to undo a ban in the product.
+  - The profile card's Ban takes a duration (1 hour, 1 day, 1 week, 30 days or permanent).
+- **Smaller fixes:**
+  - The channel header shows the channel's real topic, or nothing (it was the same canned sentence everywhere), and long names truncate at 390 px.
+  - The fake unread dot on channels is gone.
+  - The call view says "Reconnecting…" while LiveKit reconnects.
+  - Switching DMs can no longer show the previous conversation or send its draft to the new person.
+  - The member-list block button is never an invisible tap target on touch screens.
+  - A failed block or unblock says so.
+  - Password-change, session-revoke and voice-mute errors are translated.
+  - Header icon buttons have names, and the dead footer button is gone.
+  - Changing the stream quality no longer leaves an unhandled error.
+- **Bug hunt (three read-only reviews: API, lobby UI, realtime/desktop/ops; every finding was checked and fixed with a test):**
+  - **Realtime gateway:**
+    - **Crash (high):** a single malformed WebSocket frame (bad RSV bits, too large, unmasked, bad UTF-8) could crash the gateway when it arrived with the handshake or during the session check. The socket's error listener is now attached before anything else.
+    - **Activity order:** updates for one session reach each viewer in the order they happened, each with the revision of the state it shows. The panel ignores an older one.
+    - **Stale subscriptions:** leaving a topic while its subscription was still being checked no longer leaves it live.
+    - **Redis outages:** a SUBSCRIBE refused while Redis was down is retried when Redis is back.
+    - **Heartbeat:** browsers get a `heartbeat` frame with every ping, so quiet connections are no longer dropped and reopened every minute.
+  - **Realtime client:**
+    - A signed-out, invalid or revoked session no longer reconnects every 500 ms forever. The client stops after a 4401/1008 close and tells the page through `onTerminalClose`.
+    - Backoff resets only once the socket is signed in.
+    - Subscriptions refused for a passing reason are retried a few times; a revoked one is asked for once more.
+  - **Moderation:** a timed-out moderator kept every management power outside the moderation gate. The following now answer `403 actor_timed_out` (with `until`) through one shared check (`lib/actor-timeout.ts`); the owner is never refused, and the admin screens and chat say it in English and Turkish:
+    - approving or rejecting join requests;
+    - creating, editing and deleting roles and channels;
+    - deleting another member's message;
+    - closing another member's poll;
+    - revoking another member's invite;
+    - changing the access policy, voice settings, banner, apps, bots and webhooks.
+  - **Voice:**
+    - A voice-settings change reaches everyone already in voice at once, and is audited as `server.voice_settings.update`.
+    - Reconnecting to a full room (or at the camera or screen-share cap) no longer counts your own earlier connection.
+  - **Invites:** Manage Community lists and revokes every invite without Create Invite.
+  - **Channels:** a refused edit no longer saves the name, topic or position first; positions are capped at 1,000,000.
+  - **Bans:** banning someone already banned updates the ban (moderator, expiry, reason) and answers 200, audited as `ban.update` with the previous values. It used to answer 201 while nothing changed, so a temporary ban could not be made permanent.
+  - **Email verification:** a note sent with an invite redeem needs a verified email in `required` mode, like "Ask to join".
+  - **Direct messages:**
+    - An upper-case user id no longer opens a second conversation, or one with yourself.
+    - Two first messages sent at once no longer fail.
+    - A junk `limit` or `before` answers 400, and a non-UUID channel id 404 (both were 500).
+  - **Typing indicator:** shows only members who may post there and are not timed out, under their community nickname.
+  - **Pagination:** paging back through messages, DMs and the audit log no longer skips rows in the cursor's millisecond.
+  - **Messages:** a reply to an unknown or foreign message answers `400 invalid_reply` (was 500).
+  - **lfctl:**
+    - `backup create` finds the database URL like `update apply` (`--database-url`, `DATABASE_URL`, `.env.prod`).
+    - `update apply` without `--yes` no longer writes a full dump first.
+    - Backups now include the installed marketplace bundles (`<dump>.plugins.tar.gz`), and `backup restore` puts them back.
+    - docs/UPDATES.md lists what a backup does not hold, and recommends rotating `LOBBYFORGE_SESSION_SECRET` after restoring onto a new host.
+  - **Desktop:**
+    - The tray has "Switch instance…", even for an instance that no longer loads.
+    - Global shortcuts are opt-in ("Push to talk anywhere" in the tray), so Ctrl+Space no longer takes the input-language switch from other apps.
+    - Not done: "Continue with Google" in the desktop app, which needs a browser-to-app handoff for OAuth sign-ins.
+- **Upgrade notes:** migration 0050 is expand-only and idempotent: three nullable `users` columns plus constraints. Restart the ws-gateway with the web image, because the new topic and frames need both. Desktop users who relied on the global shortcuts turn "Push to talk anywhere" on in the tray.
+
 ## [0.2.0-rc.11] - 2026-10-13
 
 rc.10 plus the two entries below: "A Discord-like profile card" and "The A-to-Z e2e run: fixes and three new specs". Update with `lfctl update apply`.

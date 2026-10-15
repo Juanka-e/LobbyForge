@@ -144,6 +144,57 @@ describe('PATCH /api/servers/{id}/channels/[channelId] — visibleToRoleIds', ()
     expect(dbFns.setChannelRoleOverrides).not.toHaveBeenCalled();
   });
 
+  // Security review 2026-10 (A5): the role check ran AFTER the name,
+  // topic and position were saved, so a refused edit was half applied.
+  it('a role of another server refuses the WHOLE edit: nothing is saved', async () => {
+    const FOREIGN_ROLE = '99999999-8888-4777-8666-555555555555';
+    dbFns.getChannelById.mockResolvedValue(channelRow());
+    dbFns.getUserPermissions.mockResolvedValue(['manage_channels']);
+    dbFns.updateChannel.mockResolvedValue(channelRow());
+    dbFns.listRolesBriefForServer.mockResolvedValue([{ id: ROLE_ID, name: 'VIP', position: 5 }]);
+    const { PATCH } = await import('../[channelId]/route.js');
+    const res = await PATCH(
+      new Request(`https://e.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', cookie: cookie(OWNER) },
+        body: JSON.stringify({ name: 'renamed', topic: 'new topic', position: 3, visibleToRoleIds: [ROLE_ID, FOREIGN_ROLE] }),
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID }) }
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ unknown: [FOREIGN_ROLE] });
+    expect(dbFns.updateChannel).not.toHaveBeenCalled();
+    expect(dbFns.setChannelRoleOverrides).not.toHaveBeenCalled();
+    expect(dbFns.logAction).not.toHaveBeenCalled();
+  });
+
+  it('a position past 1,000,000 is refused on create and on edit', async () => {
+    dbFns.getChannelById.mockResolvedValue(channelRow());
+    dbFns.getUserPermissions.mockResolvedValue(['manage_channels']);
+    const { PATCH } = await import('../[channelId]/route.js');
+    const patched = await PATCH(
+      new Request(`https://e.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', cookie: cookie(OWNER) },
+        body: JSON.stringify({ position: 1_000_001 }),
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID }) }
+    );
+    expect(patched.status).toBe(400);
+    expect(dbFns.updateChannel).not.toHaveBeenCalled();
+    const { POST } = await import('../route.js');
+    const created = await POST(
+      new Request(`https://e.test/api/servers/${SERVER_ID}/channels`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: cookie(OWNER) },
+        body: JSON.stringify({ name: 'deep', type: 'text', position: 1_000_001 }),
+      }),
+      { params: Promise.resolve({ id: SERVER_ID }) }
+    );
+    expect(created.status).toBe(400);
+    expect(dbFns.createChannel).not.toHaveBeenCalled();
+  });
+
   it('[] clears the overrides (channel returns to everyone)', async () => {
     dbFns.getChannelById.mockResolvedValue(channelRow());
     dbFns.getUserPermissions.mockResolvedValue(['manage_channels']);

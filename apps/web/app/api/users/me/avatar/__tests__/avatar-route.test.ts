@@ -13,6 +13,7 @@ vi.mock('@lobbyforge/db', () => ({
   USER_IMAGE_QUOTA_BYTES: 24 * 1024 * 1024,
 }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __testDb: true }) }));
+vi.mock('@/lib/member-bus', () => ({ publishProfileChanged: vi.fn() }));
 vi.mock('@/lib/api-auth', () => ({ requireMaterializedSession }));
 vi.mock('@/lib/mail/verification', () => ({ requireVerifiedEmail: async () => null }));
 // The daily upload budget keys on the client address (security-review FILE-001).

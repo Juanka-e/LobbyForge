@@ -19,8 +19,10 @@ import {
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
+import { refuseTimedOutActor } from '@/lib/actor-timeout';
 import { isValidRoleIcon } from '@/lib/role-icons';
 import { findUngrantablePermissions, UNGRANTABLE_PERMISSIONS_ERROR } from '@/lib/role-grant-policy';
+import { publishRolesChanged } from '@/lib/member-bus';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -120,6 +122,9 @@ async function loadRoleForWrite(serverId: string, roleId: string, userId: string
   if (!hasPermission(permissions, CorePermission.MANAGE_ROLES)) {
     return { ok: false, response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
   }
+  // A timed-out member edits and deletes no roles (lib/actor-timeout.ts).
+  const timedOut = await refuseTimedOutActor(serverId, userId, server.ownerUserId);
+  if (timedOut) return { ok: false, response: timedOut };
   // Discord-style hierarchy (applies to ADMINISTRATOR too; only the
   // owner bypasses): you may only edit/delete roles STRICTLY BELOW your
   // own highest role. The @everyone role is never deletable, and its
@@ -286,6 +291,9 @@ async function handlePatch(req: Request, ctx: { params: Promise<{ id: string; ro
       const { queueServerVoiceSync } = await import('@/lib/voice-moderation');
       queueServerVoiceSync(serverId);
     }
+    // docs/PROFILES.md "Live updates": a name, colour, icon, grouping or
+    // order change shows in every open member list.
+    publishRolesChanged(serverId);
     void logAction(getDb(), {
       serverId,
       actorUserId: session.uid,
@@ -355,6 +363,7 @@ async function handleDelete(req: Request, ctx: { params: Promise<{ id: string; r
     });
     const { queueServerVoiceSync } = await import('@/lib/voice-moderation');
     queueServerVoiceSync(serverId);
+    publishRolesChanged(serverId);
     void logAction(getDb(), {
       serverId,
       actorUserId: session.uid,

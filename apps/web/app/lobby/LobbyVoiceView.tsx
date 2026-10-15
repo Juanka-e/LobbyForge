@@ -5,9 +5,10 @@ import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '@/lib/i18n/client';
-import { initialOf } from '@/lib/initial';
 import { useLobbyVoice, type LobbyVoiceParticipant } from './LobbyVoiceProvider';
 import { VoiceStatusIcon } from './VoiceStatusIcon';
+import { VoiceAvatar } from './VoiceAvatar';
+import { isVoiceReconnecting } from '@/lib/voice-connection';
 
 export function LobbyVoiceView({ channelId, channelName }: { channelId: string; channelName: string }) {
   const t = useT();
@@ -101,8 +102,10 @@ export function LobbyVoiceView({ channelId, channelName }: { channelId: string; 
             </div>
           </div>
           <span className="hidden h-5 items-center gap-1.5 rounded bg-white/7 px-2 text-[11px] text-white/60 sm:flex">
-            <span className="size-1.5 rounded-full bg-emerald-400" aria-hidden />
-            {t('lobbyMain.voice.connectedCount', { count: voice.participants.length })}
+            <span className={cn('size-1.5 rounded-full', isVoiceReconnecting(voice.connectionState) ? 'bg-amber-300' : 'bg-emerald-400')} aria-hidden />
+            {isVoiceReconnecting(voice.connectionState)
+              ? t('lobby.voice.reconnecting')
+              : t('lobbyMain.voice.connectedCount', { count: voice.participants.length })}
           </span>
         </div>
 
@@ -314,12 +317,12 @@ function VoiceOnlyStage({ participants }: { participants: LobbyVoiceParticipant[
           >
             <div
               className={cn(
-                'grid size-12 place-items-center rounded-full bg-[#343943] text-base font-semibold text-white/90 ring-2 ring-white/8 sm:size-14 sm:text-lg',
+                'grid size-12 place-items-center overflow-hidden rounded-full bg-[#343943] text-base font-semibold text-white/90 ring-2 ring-white/8 sm:size-14 sm:text-lg',
                 participant.isSpeaking && 'ring-emerald-400'
               )}
               aria-hidden
             >
-              {initialOf(participant.name, { locale: t.locale })}
+              <VoiceAvatar userId={participant.identity} name={participant.name} />
             </div>
             <div className="flex max-w-full items-center gap-1.5 text-xs text-white/80">
               <span className="truncate font-medium">{participant.name}</span>
@@ -371,6 +374,9 @@ function VoiceControls({ channelName }: { channelName: string }) {
   const micBlocked = voice.publishBlocked === true && !voice.micEnabled;
   const cameraBlocked = voice.publishBlocked === true && !voice.cameraEnabled;
   const screenShareBlocked = voice.publishBlocked === true && !voice.screenShareEnabled;
+  // The view stays open while LiveKit reconnects: say so here too (this
+  // full-screen view covers the footer that does).
+  const reconnecting = isVoiceReconnecting(voice.connectionState);
 
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-2 pb-[max(10px,env(safe-area-inset-bottom))]">
@@ -379,12 +385,16 @@ function VoiceControls({ channelName }: { channelName: string }) {
         className="pointer-events-auto flex h-16 max-w-full items-center gap-1.5 rounded-lg border border-white/10 bg-[#17191f] px-2 shadow-2xl sm:gap-2 sm:px-3"
       >
         <div className="hidden min-w-0 items-center gap-2 border-r border-white/10 pr-3 md:flex">
-          <span className="grid size-8 flex-none place-items-center rounded-full bg-emerald-400/15 text-emerald-300">
-            <span className="material-symbols-outlined text-[17px]" aria-hidden>graphic_eq</span>
+          <span className={cn('grid size-8 flex-none place-items-center rounded-full', reconnecting ? 'bg-amber-300/15 text-amber-200' : 'bg-emerald-400/15 text-emerald-300')}>
+            <span className={cn('material-symbols-outlined text-[17px]', reconnecting && 'motion-safe:animate-spin')} aria-hidden>
+              {reconnecting ? 'progress_activity' : 'graphic_eq'}
+            </span>
           </span>
           <div className="min-w-0 leading-tight">
             <p className="max-w-28 truncate text-xs font-semibold text-white/90">{channelName}</p>
-            <p className="text-[10px] text-emerald-300/80">{t('lobby.voice.connected')}</p>
+            <p className={cn('text-[10px]', reconnecting ? 'text-amber-200/90' : 'text-emerald-300/80')} role="status" data-testid="voice-dock-state">
+              {reconnecting ? t('lobby.voice.reconnecting') : t('lobby.voice.connected')}
+            </p>
           </div>
         </div>
 
@@ -680,15 +690,14 @@ function ParticipantPlaceholder({
   large?: boolean;
   compact?: boolean;
 }) {
-  const t = useT();
   return (
     <div className="absolute inset-0 grid place-items-center bg-[#1a1d23]">
       <div className={cn(
-        'grid place-items-center rounded-full bg-[#343943] font-semibold text-white/90 ring-2 ring-white/8',
+        'grid place-items-center overflow-hidden rounded-full bg-[#343943] font-semibold text-white/90 ring-2 ring-white/8',
         large ? 'size-20 text-2xl sm:size-24 sm:text-3xl' : compact ? 'size-11 text-sm' : 'size-14 text-lg sm:size-16 sm:text-xl',
         participant.isSpeaking && 'ring-emerald-400'
       )}>
-        {initialOf(participant.name, { locale: t.locale })}
+        <VoiceAvatar userId={participant.identity} name={participant.name} />
       </div>
     </div>
   );

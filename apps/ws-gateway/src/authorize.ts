@@ -34,7 +34,7 @@ export function isUuid(value: string): boolean {
 export type AuthorizeResult =
   | {
       ok: true;
-      kind: 'activity-state' | 'chat' | 'presence' | 'dm' | 'user';
+      kind: 'activity-state' | 'chat' | 'presence' | 'members' | 'dm' | 'user';
       serverId: string;
       resourceId: string;
       /** beta-review: the channel the topic lives in (chat / activity-state). */

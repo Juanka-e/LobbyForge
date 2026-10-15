@@ -26,7 +26,7 @@ vi.mock('next/link', () => ({
   ),
 }));
 vi.mock('@/lib/realtime-client', () => ({
-  getRealtimeClient: () => ({ subscribe: () => () => {}, connect: () => {} }),
+  getRealtimeClient: () => ({ subscribe: () => () => {}, connect: () => {}, onReconnect: () => () => {} }),
 }));
 
 const SERVER = 'srv-1';
@@ -58,8 +58,11 @@ function profileFor(userId: string, overrides: Partial<MemberProfileResponse['vi
       avatarUrl: null,
       bannerUrl: null,
       isGuest: false,
+      username: null,
       statusText: null,
       bio: `${name} bio`,
+      pronouns: null,
+      accentColor: null,
       presence: 'online',
       inVoice: false,
       roles: rolesFor[userId] ?? [],
@@ -369,7 +372,9 @@ describe('every place that shows a person', () => {
       />,
       voice
     );
-    const row = screen.getByRole('button', { name: 'A Alice' });
+    // Alice's photo (alt="") instead of her initial: the row is named by her name alone.
+    const row = screen.getByRole('button', { name: 'Alice' });
+    expect(row.querySelector('[data-voice-avatar="photo"]')).not.toBeNull();
     fireEvent.click(row);
     const card = screen.getByRole('dialog', { name: 'Alice profile' });
     expect(within(card).getByText('In voice')).toBeInTheDocument();
@@ -395,7 +400,7 @@ describe('every place that shows a person', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Your profile' }));
     const card = screen.getByRole('dialog', { name: 'Me profile' });
-    expect(within(card).getByRole('link', { name: /Edit profile/ })).toHaveAttribute('href', '/settings/profile');
+    expect(within(card).getByRole('link', { name: /Edit profile/ })).toHaveAttribute('href', `/settings/profile?server=${SERVER}`);
     expect(within(card).queryByRole('textbox')).toBeNull();
     fireEvent.click(within(card).getByRole('radio', { name: 'Do Not Disturb' }));
     expect(setPresenceStatus).toHaveBeenCalledWith('dnd');

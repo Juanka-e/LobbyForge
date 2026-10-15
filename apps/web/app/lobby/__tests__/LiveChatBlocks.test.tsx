@@ -4,6 +4,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import { I18nProvider } from '@/lib/i18n/client';
 import { providerPropsFor } from '@/lib/i18n/catalogue';
 import { interactionStore } from '@/lib/bots/interaction-store';
+import { __resetNotificationPrefsForTests } from '@/lib/notification-prefs';
 
 /**
  * security-review AUTHZ-009: the server render and the REST list mask a
@@ -22,6 +23,7 @@ vi.mock('@/lib/realtime-client', () => ({
       subscribers.set(topic, handler);
       return () => subscribers.delete(topic);
     },
+    onReconnect: () => () => {},
   }),
 }));
 
@@ -43,6 +45,8 @@ class FakeNotification {
 }
 
 beforeEach(() => {
+  // Settings are read once per page; every case is a fresh page.
+  __resetNotificationPrefsForTests();
   subscribers.clear();
   interactionStore.reset();
   shownNotifications.length = 0;

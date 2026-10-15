@@ -5,7 +5,18 @@ export interface DesktopConfig {
   appName: string;
   version: string;
   enableTray: boolean;
+  /**
+   * Hold push-to-talk (Ctrl+Space) system-wide while an instance is shown.
+   * Off by default — a global shortcut takes the key from every other app;
+   * the tray's "Push to talk anywhere" item turns it on (store key
+   * `globalPushToTalk`).
+   */
   globalPushToTalk: boolean;
+  /**
+   * Also hold the mute / deafen / settings shortcuts system-wide (store key
+   * `globalShortcuts`). Off by default, no UI.
+   */
+  globalShortcuts: boolean;
   startMinimized: boolean;
   /**
    * DP-04: the autoUpdate flag was a visible no-op — no updater plugin
@@ -20,7 +31,8 @@ export function defaultDesktopConfig(): DesktopConfig {
     appName: APP_NAME,
     version: APP_VERSION,
     enableTray: true,
-    globalPushToTalk: true,
+    globalPushToTalk: false,
+    globalShortcuts: false,
     startMinimized: false,
   };
 }

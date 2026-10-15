@@ -11,9 +11,10 @@ import { providerPropsFor } from '@/lib/i18n/catalogue';
  */
 
 vi.mock('@/lib/realtime-client', () => ({
-  getRealtimeClient: () => ({ subscribe: () => () => {} }),
+  getRealtimeClient: () => ({ subscribe: () => () => {}, onReconnect: () => () => {} }),
 }));
 vi.mock('../LobbyVoiceProvider', () => ({
+  useOptionalLobbyVoice: () => null,
   useLobbyVoice: () => ({ getRemoteVolume: () => 1, setRemoteVolume: () => {} }),
 }));
 

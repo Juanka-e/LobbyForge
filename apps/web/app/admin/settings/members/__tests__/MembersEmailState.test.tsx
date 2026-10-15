@@ -5,6 +5,10 @@ import { I18nProvider } from '@/lib/i18n/client';
 import { providerPropsFor } from '@/lib/i18n/catalogue';
 import MembersClient, { type MemberView } from '../MembersClient';
 
+// The ban list (its own section, tested in BansSection.test.tsx) would take
+// this file's queued fetch answers.
+vi.mock('../BansSection', () => ({ default: () => null }));
+
 const fetchMock = vi.fn();
 
 function member(overrides: Partial<MemberView>): MemberView {

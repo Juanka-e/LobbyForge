@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const REPO_ROOT = join(__dirname, '..', '..', '..', '..');
@@ -27,6 +27,15 @@ const FAKE_DOCKER = `#!/bin/sh
 # container (docker exec <pgc> psql|pg_restore); docker cp stages the dump.
 printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
 case " $* " in
+  *" exec -T web sh -c "*)
+    # The web container archives / restores the plugin bundles.
+    if [ -n "$FAKE_PLUGINS_FAIL" ]; then echo "service \\"web\\" is not running" >&2; exit 1; fi
+    case " $* " in
+      *" -xzf "*) cat > "$FAKE_PLUGINS_RESTORED" ;;
+      *) printf 'PLUGINS-TAR-fake' ;;
+    esac
+    exit 0
+    ;;
   *" ps -q postgres "*)
     echo "fake-pg-container"
     exit 0
@@ -181,7 +190,9 @@ describe('lfctl backup create — owner-only files (security follow-up)', () => 
     const files = readdirSync(dir);
     const dump = files.find((f) => f.endsWith('.dump'))!;
     expect(dump).toBeTruthy();
-    expect(files.sort()).toEqual([dump, `${dump}.json`, `${dump}.manifest.json`].sort());
+    expect(files.sort()).toEqual(
+      [dump, `${dump}.json`, `${dump}.manifest.json`, `${dump}.plugins.tar.gz`].sort()
+    );
     expect(readFileSync(join(dir, dump), 'utf8')).toBe('PGDMP-fake-custom-format');
     if (POSIX) {
       expect(statSync(dir).mode & 0o777).toBe(0o700);
@@ -199,5 +210,134 @@ describe('lfctl backup create — owner-only files (security follow-up)', () => 
     expect(out).toContain('accessible to other users');
     expect(statSync(shared).mode & 0o777).toBe(0o755);
     for (const f of readdirSync(shared)) expect(statSync(join(shared, f)).mode & 0o777, f).toBe(0o600);
+  });
+});
+
+/**
+ * Run lfctl in the sandbox with the fake docker. Arguments go to node as an
+ * array and variables through the child's environment — no shell string is
+ * built from them.
+ */
+function runLfctl(sandbox: Sandbox, args: readonly string[], extraEnv: Record<string, string> = {}) {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  delete env.LFCTL_PG_CONTAINER;
+  delete env.DATABASE_URL;
+  Object.assign(env, {
+    LFCTL_ROOT: sandbox.dir,
+    FAKE_DOCKER_LOG: sandbox.dockerLog,
+    FAKE_PLUGINS_RESTORED: `${sandbox.dir}/plugins-restored.bin`,
+    LFCTL_DOCKER: `bash ${sandbox.fakeDocker.replace(/\\/g, '/')}`,
+    ...extraEnv,
+  });
+  const res = spawnSync(process.execPath, [LFCTL, ...args], { cwd: sandbox.dir, env, encoding: 'utf8', timeout: 60_000 });
+  return { rc: res.status ?? -1, out: (res.stdout ?? '') + (res.stderr ?? '') };
+}
+
+function onlyDump(sandbox: Sandbox): string {
+  const dir = join(sandbox.dir, 'backups');
+  return join(dir, readdirSync(dir).find((f) => f.endsWith('.dump'))!);
+}
+
+describe('lfctl backup create — database URL (G12)', () => {
+  it('reads DATABASE_URL from .env.prod like update apply, when neither the flag nor the env var is set', () => {
+    const sandbox = makeSandbox();
+    writeFileSync(join(sandbox.dir, '.env.prod'), 'DATABASE_URL=postgres://u:p@postgres:5432/fromenvprod\n');
+    const { rc, out } = runLfctl(sandbox, ['backup', 'create', '--json']);
+    expect(rc, out).toBe(0);
+    expect(dockerCalls(sandbox).some((c) => c.includes('pg_dump -Fc postgres://u:p@postgres:5432/fromenvprod'))).toBe(true);
+  });
+
+  it('still refuses with no URL anywhere', () => {
+    const sandbox = makeSandbox();
+    const { rc, out } = runLfctl(sandbox, ['backup', 'create', '--json']);
+    expect(rc).not.toBe(0);
+    expect(out).toContain('requires --database-url');
+  });
+});
+
+describe('lfctl backup — plugin bundles (G13)', () => {
+  const DB = ['--database-url', 'postgres://u:p@postgres:5432/lobbyforge'];
+
+  it('archives the installed plugin bundles next to the dump and lists them in both manifests', () => {
+    const sandbox = makeSandbox();
+    const { rc, out } = runLfctl(sandbox, ['backup', 'create', ...DB, '--json']);
+    expect(rc, out).toBe(0);
+    const dump = onlyDump(sandbox);
+    const archive = `${dump}.plugins.tar.gz`;
+    expect(readFileSync(archive, 'utf8')).toBe('PLUGINS-TAR-fake');
+    if (POSIX) expect(statSync(archive).mode & 0o777).toBe(0o600);
+    const sha = createHash('sha256').update('PLUGINS-TAR-fake').digest('hex');
+    const manifest = JSON.parse(readFileSync(`${dump}.manifest.json`, 'utf8'));
+    expect(manifest.includes).toEqual({ database: true, plugins: true });
+    expect(manifest.pluginsArchive).toEqual({ path: `${basename(dump)}.plugins.tar.gz`, sha256: sha, sizeBytes: 16 });
+    const sidecar = JSON.parse(readFileSync(`${dump}.json`, 'utf8'));
+    expect(sidecar.plugins).toEqual({ archive: manifest.pluginsArchive.path, sha256: sha });
+    // Made by the running web container, over compose.
+    expect(dockerCalls(sandbox).some((c) => c.includes('exec -T web sh -c') && c.includes('tar -czf - installed'))).toBe(true);
+
+    // Strict verification hashes the archive too.
+    const verified = runLfctl(sandbox, ['backup', 'verify', '--manifest', `${dump.replace(/\\/g, '/')}.manifest.json`, '--require-files', '--json']);
+    expect(verified.rc, verified.out).toBe(0);
+    writeFileSync(archive, 'tampered');
+    const tampered = runLfctl(sandbox, ['backup', 'verify', '--manifest', `${dump.replace(/\\/g, '/')}.manifest.json`, '--require-files', '--json']);
+    expect(tampered.rc).toBe(2);
+    expect(tampered.out).toContain('pluginsArchive.sha256Match');
+  });
+
+  it('a backup whose bundles cannot be archived still succeeds, says so, and records includes.plugins: false', () => {
+    const sandbox = makeSandbox();
+    const { rc, out } = runLfctl(sandbox, ['backup', 'create', ...DB, '--json'], { FAKE_PLUGINS_FAIL: '1' });
+    expect(rc, out).toBe(0);
+    expect(out).toContain('plugin bundles were NOT archived');
+    const dump = onlyDump(sandbox);
+    expect(existsSync(`${dump}.plugins.tar.gz`)).toBe(false);
+    const manifest = JSON.parse(readFileSync(`${dump}.manifest.json`, 'utf8'));
+    expect(manifest.includes).toEqual({ database: true, plugins: false });
+    expect(manifest.pluginsArchive).toBeUndefined();
+  });
+
+  function withPluginArchive(sandbox: Sandbox, archiveBytes: Buffer, listedSha?: string): void {
+    writeFileSync(join(sandbox.dir, 'backup.dump.plugins.tar.gz'), archiveBytes);
+    const sidecar = JSON.parse(readFileSync(join(sandbox.dir, 'backup.dump.json'), 'utf8'));
+    sidecar.plugins = {
+      archive: 'backup.dump.plugins.tar.gz',
+      sha256: listedSha ?? createHash('sha256').update(archiveBytes).digest('hex'),
+    };
+    writeFileSync(join(sandbox.dir, 'backup.dump.json'), JSON.stringify(sidecar));
+  }
+
+  const RESTORE = ['backup', 'restore', '--file', 'backup.dump', '--to', 'postgres://u:p@postgres:5432/restored', '--json'];
+
+  it('restore puts the bundles back through the web container, after the database', () => {
+    const sandbox = makeSandbox();
+    const bytes = Buffer.from('gzip-tar-of-installed-bundles');
+    withPluginArchive(sandbox, bytes);
+    const { rc, out } = runLfctl(sandbox, RESTORE);
+    expect(rc, out).toBe(0);
+    expect(out).toContain('Plugin bundles restored');
+    expect(readFileSync(join(sandbox.dir, 'plugins-restored.bin'))).toEqual(bytes);
+    const calls = dockerCalls(sandbox);
+    const restoreAt = calls.findIndex((c) => c.includes('pg_restore'));
+    const pluginsAt = calls.findIndex((c) => c.includes('exec -T web sh -c') && c.includes('-xzf'));
+    expect(restoreAt).toBeGreaterThanOrEqual(0);
+    expect(pluginsAt).toBeGreaterThan(restoreAt);
+  });
+
+  it('a corrupt plugin archive refuses the restore before any pg tool runs', () => {
+    const sandbox = makeSandbox();
+    withPluginArchive(sandbox, Buffer.from('bundles'), 'f'.repeat(64));
+    const { rc, out } = runLfctl(sandbox, RESTORE);
+    expect(rc, out).toBe(2);
+    expect(out).toContain('Plugin bundle archive SHA-256 mismatch');
+    expect(dockerCalls(sandbox).some((c) => /psql|pg_restore|\bcp\b|-xzf/.test(c))).toBe(false);
+  });
+
+  it('says exactly what is missing when the database came back but the bundles did not', () => {
+    const sandbox = makeSandbox();
+    withPluginArchive(sandbox, Buffer.from('bundles'));
+    const { rc, out } = runLfctl(sandbox, RESTORE, { FAKE_PLUGINS_FAIL: '1' });
+    expect(rc, out).toBe(2);
+    expect(out).toContain('Database restored successfully, but the plugin bundles were not');
+    expect(out).toContain('Re-install the marketplace plugins');
   });
 });

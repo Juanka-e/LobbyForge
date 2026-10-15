@@ -87,8 +87,14 @@ async function handleGet(req: Request, ctx: { params: Promise<{ id: string }> })
       if (!(await isServerMember(getDb(), session.uid, serverId))) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }
-      const auth = await authorizeServerPermission(session.uid, serverId, CorePermission.CREATE_INVITE);
-      if (!auth.ok) return auth.response;
+      // CREATE_INVITE lists your own invites, MANAGE_SERVER everyone's:
+      // either one gets you in.
+      let auth = await authorizeServerPermission(session.uid, serverId, CorePermission.CREATE_INVITE);
+      if (!auth.ok) {
+        const manager = await authorizeServerPermission(session.uid, serverId, CorePermission.MANAGE_SERVER);
+        if (!manager.ok) return auth.response;
+        auth = manager;
+      }
       seeAll = hasPermission(auth.permissions, CorePermission.MANAGE_SERVER);
     }
     const rows = await listInvitesForServer(

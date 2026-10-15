@@ -337,4 +337,71 @@ describe('beta-review F7: invites are scoped to their creator unless MANAGE_SERV
     expect(res.status).toBe(200);
     expect(revokeInvite).toHaveBeenCalledWith({ __mockDb: true }, INVITE_ID);
   });
+
+  // Security review 2026-10 (A3): CREATE_INVITE was checked first, so a
+  // MANAGE_SERVER member whose roles lack CREATE_INVITE (it can be taken
+  // from @everyone) could neither list nor revoke anyone's invites.
+  function grants(...held: string[]) {
+    authorizeServerPermission.mockImplementation(async (_uid: string, _server: string, required: string) =>
+      held.includes(required)
+        ? { ok: true, permissions: held }
+        : { ok: false, response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+    );
+  }
+
+  it('MANAGE_SERVER without CREATE_INVITE still lists every invite and revokes anyone’s', async () => {
+    getServerById.mockResolvedValue({ ownerUserId: OTHER_OWNER });
+    isServerMember.mockResolvedValue(true);
+    grants('manage_server');
+    expect((await list()).status).toBe(200);
+    expect(listInvitesForServer).toHaveBeenCalledWith({ __mockDb: true }, SERVER_ID, {});
+    getInviteById.mockResolvedValue({ serverId: SERVER_ID, createdBy: OTHER_CREATOR });
+    expect((await revoke()).status).toBe(200);
+    expect(revokeInvite).toHaveBeenCalledWith({ __mockDb: true }, INVITE_ID);
+  });
+
+  it('a member with neither permission is refused (403) — nothing listed or revoked', async () => {
+    getServerById.mockResolvedValue({ ownerUserId: OTHER_OWNER });
+    isServerMember.mockResolvedValue(true);
+    grants('send_messages');
+    expect((await list()).status).toBe(403);
+    expect(listInvitesForServer).not.toHaveBeenCalled();
+    getInviteById.mockResolvedValue({ serverId: SERVER_ID, createdBy: UID });
+    expect((await revoke()).status).toBe(403);
+    expect(revokeInvite).not.toHaveBeenCalled();
+  });
+
+  it('CREATE_INVITE alone still only covers your own invites', async () => {
+    getServerById.mockResolvedValue({ ownerUserId: OTHER_OWNER });
+    isServerMember.mockResolvedValue(true);
+    grants('create_invite');
+    getInviteById.mockResolvedValue({ serverId: SERVER_ID, createdBy: OTHER_CREATOR });
+    expect((await revoke()).status).toBe(403);
+    getInviteById.mockResolvedValue({ serverId: SERVER_ID, createdBy: UID });
+    expect((await revoke()).status).toBe(200);
+  });
+
+  // Security review 2026-10 (A1): revoking someone else's invite is
+  // management, which a timed-out member may not do; their own they may.
+  it("a timed-out MANAGE_SERVER member cannot revoke someone else's invite (403 actor_timed_out)", async () => {
+    const until = new Date(Date.now() + 60_000);
+    getServerById.mockResolvedValue({ ownerUserId: OTHER_OWNER });
+    authorizeServerPermission.mockResolvedValue({ ok: true, permissions: ['manage_server'] });
+    getActiveMemberTimeout.mockResolvedValue(until);
+    getInviteById.mockResolvedValue({ serverId: SERVER_ID, createdBy: OTHER_CREATOR });
+    const res = await revoke();
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'actor_timed_out', until: until.toISOString() });
+    expect(revokeInvite).not.toHaveBeenCalled();
+    expect(logAction).not.toHaveBeenCalled();
+  });
+
+  it('a timed-out member may still take back their own invite', async () => {
+    getServerById.mockResolvedValue({ ownerUserId: OTHER_OWNER });
+    getActiveMemberTimeout.mockResolvedValue(new Date(Date.now() + 60_000));
+    getInviteById.mockResolvedValue({ serverId: SERVER_ID, createdBy: UID });
+    const res = await revoke();
+    expect(res.status).toBe(200);
+    expect(revokeInvite).toHaveBeenCalledWith({ __mockDb: true }, INVITE_ID);
+  });
 });

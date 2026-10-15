@@ -370,6 +370,54 @@ describe('POST /api/livekit/token room limits', () => {
     );
   });
 
+  // Security review 2026-10 (A4): a reconnect replaces the caller's own
+  // participant, so it must not count against the caps.
+  it("leaves the caller's own participant out of the room cap (a reconnect into a full room)", async () => {
+    const SELF = '00000000-0000-0000-0000-000000000099';
+    getEffectiveServerVoiceSettings.mockResolvedValue({
+      allowCamera: true,
+      allowScreenShare: true,
+      requirePushToTalk: false,
+      startMuted: false,
+      defaultUserLimit: 3,
+      maxCameraUsersPerRoom: null,
+      maxScreenShareUsersPerRoom: null,
+    });
+    listParticipants.mockResolvedValue([{ identity: 'a' }, { identity: 'b' }, { identity: SELF }]);
+    const { POST } = await loadRoute();
+    expect((await POST(makeRequest({ serverId: SERVER_ID, channelId: CHANNEL_ID }), {})).status).toBe(200);
+    // Three OTHER people fill it.
+    listParticipants.mockResolvedValue([{ identity: 'a' }, { identity: 'b' }, { identity: 'c' }, { identity: SELF }]);
+    expect((await POST(makeRequest({ serverId: SERVER_ID, channelId: CHANNEL_ID }), {})).status).toBe(409);
+  });
+
+  it("leaves the caller's own camera and screen share out of the media caps", async () => {
+    const SELF = '00000000-0000-0000-0000-000000000099';
+    getEffectiveServerVoiceSettings.mockResolvedValue({
+      allowCamera: true,
+      allowScreenShare: true,
+      requirePushToTalk: false,
+      startMuted: false,
+      defaultUserLimit: null,
+      maxCameraUsersPerRoom: 2,
+      maxScreenShareUsersPerRoom: 1,
+    });
+    listParticipants.mockResolvedValue([
+      { identity: 'a', tracks: [{ source: 1 }] }, // CAMERA
+      { identity: SELF, tracks: [{ source: 1 }, { source: 3 }] }, // CAMERA + SCREEN_SHARE
+    ]);
+    const { POST } = await loadRoute();
+    const res = await POST(makeRequest({ serverId: SERVER_ID, channelId: CHANNEL_ID }), {});
+    expect(res.status).toBe(200);
+    expect(issueLiveKitToken).toHaveBeenCalledWith(
+      expect.objectContaining({
+        grants: expect.objectContaining({
+          canPublishSources: ['microphone', 'camera', 'screen-share', 'screen-share-audio'],
+        }),
+      })
+    );
+  });
+
   it('VOICE-003: fails CLOSED (503) when a hard room cap cannot be verified', async () => {
     getEffectiveServerVoiceSettings.mockResolvedValue({
       allowCamera: true,

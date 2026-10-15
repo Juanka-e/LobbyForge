@@ -21,6 +21,7 @@ const db = {
   updateChannelWebhook: vi.fn(),
   deleteChannelWebhook: vi.fn(),
   logAction: vi.fn(),
+  getActiveMemberTimeout: vi.fn(),
 };
 vi.mock('@lobbyforge/db', () => db);
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
@@ -95,6 +96,7 @@ beforeEach(() => {
   db.updateChannelWebhook.mockImplementation(async (_db: unknown, _id: string, patch: Record<string, unknown>) => webhookRow(patch));
   db.deleteChannelWebhook.mockResolvedValue(true);
   db.logAction.mockResolvedValue(undefined);
+  db.getActiveMemberTimeout.mockResolvedValue(null);
 });
 
 describe('who manages webhooks', () => {
@@ -110,6 +112,34 @@ describe('who manages webhooks', () => {
     const route = await import('../route.js');
     expect((await route.POST(req('POST', '', OWNER, { name: 'CI' }), listCtx(VOICE))).status).toBe(400);
     expect((await route.POST(req('POST', '', OWNER, { name: 'CI' }), listCtx('12345678-1234-4234-8234-123456789012'))).status).toBe(404);
+  });
+});
+
+// Security review 2026-10 (A1): a timed-out channel manager kept creating,
+// changing, rotating and deleting webhooks. Listing them stays allowed.
+describe('a timed-out manager changes no webhooks (actor_timed_out)', () => {
+  it('create, update, rotate and delete are refused; the list still loads', async () => {
+    const until = new Date(Date.now() + 60_000);
+    db.getActiveMemberTimeout.mockResolvedValue(until);
+    const list = await import('../route.js');
+    const one = await import('../[webhookId]/route.js');
+    const rotate = await import('../[webhookId]/token/route.js');
+    expect((await list.GET(req('GET', '', CHANNEL_MANAGER), listCtx())).status).toBe(200);
+    const refused = [
+      await list.POST(req('POST', '', CHANNEL_MANAGER, { name: 'CI' }), listCtx()),
+      await one.PATCH(req('PATCH', `/${WEBHOOK}`, CHANNEL_MANAGER, { enabled: false }), oneCtx()),
+      await one.DELETE(req('DELETE', `/${WEBHOOK}`, CHANNEL_MANAGER), oneCtx()),
+      await rotate.POST(req('POST', `/${WEBHOOK}/token`, CHANNEL_MANAGER), oneCtx()),
+    ];
+    for (const res of refused) {
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ code: 'actor_timed_out', until: until.toISOString() });
+    }
+    expect(db.getActiveMemberTimeout).toHaveBeenCalledWith({ __mockDb: true }, SERVER, CHANNEL_MANAGER);
+    expect(db.createChannelWebhook).not.toHaveBeenCalled();
+    expect(db.updateChannelWebhook).not.toHaveBeenCalled();
+    expect(db.deleteChannelWebhook).not.toHaveBeenCalled();
+    expect(db.logAction).not.toHaveBeenCalled();
   });
 });
 

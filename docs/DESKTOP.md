@@ -56,7 +56,11 @@ the signing setup.
    is permitted only in debug builds for local development.
 3. Click **Connect**. The instance loads in the window and the URL is saved
    for next launch.
-4. To switch instances later, click **"Switch instance"** in the top-right.
+4. To switch instances later, open the tray menu and choose **Switch
+   instance…**. It forgets the saved address and brings back the connect
+   screen from any page, including an instance that no longer loads (the
+   app cannot tell a failed load from a slow one, so it does not fall back
+   on its own).
 
 The connect screen, its error messages and the tray menu follow the
 system's language when the instance ships it (`apps/web/messages/<code>/desktop.json`),
@@ -68,10 +72,11 @@ as Tauri's installer translations go. Adding a language needs no code; see
 
 | Capability | Behavior |
 |------------|----------|
-| **Global push-to-talk** | Hold `Ctrl+Space` anywhere (even when the client isn't focused) to talk. The client forwards the key state to the instance via a `lobbyforge:ptt` event. |
-| **Tray icon** | Hide the window to the system tray; "Show" / "Quit" menu. |
+| **Global push-to-talk** (opt-in) | Off by default. Tick **Push to talk anywhere (Ctrl+Space)** in the tray menu, then hold `Ctrl+Space` anywhere (even when the client isn't focused) to talk; the client forwards the key state to the instance via a `lobbyforge:ptt` event. The choice is saved (`globalPushToTalk` in the app's `settings.json`). A global shortcut takes the key away from every other app — `Ctrl+Space` switches the input language on many systems — so it is registered only while an instance is shown and released on disconnect. Push-to-talk inside the focused window works without it (the instance's own key binds). |
+| **Other global shortcuts** (off) | `Ctrl+Shift+M` (mute), `Ctrl+Shift+D` (deafen) and `Ctrl+,` (settings) are registered system-wide only when `globalShortcuts` is `true` in `settings.json`; there is no menu item for them. |
+| **Tray icon** | Hide the window to the system tray; menu: Show / Switch instance… / Push to talk anywhere / Quit. |
 | **Single instance** | A second launch focuses the existing window instead of opening a duplicate. |
-| **Persisted instance** | The last-connected URL is restored automatically on launch. |
+| **Persisted instance** | The last-connected URL is restored automatically on launch; **Switch instance…** in the tray forgets it. |
 | **Deep-link auth** (infrastructure) | `lobbyforge://session/complete?code=&state=&instance=` handler for the OAuth session handoff flow. |
 
 ## Build from source

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { I18nProvider } from '@/lib/i18n/client';
 import { providerPropsFor } from '@/lib/i18n/catalogue';
+import { __resetNotificationPrefsForTests } from '@/lib/notification-prefs';
 
 /**
  * Bots in the lobby: the members panel lists them in their own group with
@@ -18,9 +19,11 @@ vi.mock('@/lib/realtime-client', () => ({
       subscribers.set(topic, handler);
       return () => subscribers.delete(topic);
     },
+    onReconnect: () => () => {},
   }),
 }));
 vi.mock('../LobbyVoiceProvider', () => ({
+  useOptionalLobbyVoice: () => null,
   useLobbyVoice: () => ({ getRemoteVolume: () => 1, setRemoteVolume: () => {} }),
 }));
 
@@ -31,6 +34,8 @@ const BOT_META = { id: 'bot-1', name: 'Greeter', type: 'welcome' };
 let historyResponse: unknown = { messages: [] };
 
 beforeEach(() => {
+  // Settings are read once per page; every case is a fresh page.
+  __resetNotificationPrefsForTests();
   subscribers.clear();
   historyResponse = { messages: [] };
   vi.stubGlobal(

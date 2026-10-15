@@ -17,6 +17,7 @@ import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
 import { authorizeChannelMessageAccess } from '@/lib/message-authorization';
 import { authorizeServerPermission } from '@/lib/permissions';
+import { refuseTimedOutActor } from '@/lib/actor-timeout';
 import { moderateMessage, moderationBlockedBody } from '@/lib/bots/moderation';
 import { messageBotJson } from '@/lib/bots/bot-i18n-server';
 import { emitMessageEvent } from '@/lib/bots/events';
@@ -26,6 +27,8 @@ import { readMessagePollId } from '@/lib/chat-polls';
 import { loadPollViewsForMessages } from '@/lib/chat-polls-server';
 import { MESSAGE_BODY_MAX_BYTES } from '@/lib/message-limits';
 import { mentionsEveryoneOrHere } from '@/lib/everyone-mention';
+import { MAX_MENTIONS, readMessageMentions } from '@/lib/mentions';
+import { mentionEveryoneRefusal, resolveMessageMentions } from '@/lib/message-mentions-server';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -33,6 +36,9 @@ export const runtime = 'nodejs';
 const PatchMessageSchema = z.object({
   content: MessageContentSchema.optional(),
   pinned: z.boolean().optional(),
+  // docs/PROFILES.md "Mentions": members picked while editing. The edit
+  // keeps the message's earlier mentions whose names are still in the text.
+  mentions: z.array(z.string().uuid()).max(MAX_MENTIONS).optional(),
 }).strict();
 
 function getSessionSecret(): string {
@@ -217,7 +223,7 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
     const activeTimeout = await getActiveMemberTimeout(getDb(), serverId, session.uid);
     if (activeTimeout) {
       return NextResponse.json(
-        { error: 'You are timed out in this server', until: activeTimeout.toISOString() },
+        { error: 'You are timed out in this server', code: 'timed_out', until: activeTimeout.toISOString() },
         { status: 403 }
       );
     }
@@ -261,7 +267,7 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
       // POST checks.
       if (mentionsEveryoneOrHere(body.content)) {
         const mentionAuth = await authorizeServerPermission(session.uid, serverId, CorePermission.MENTION_EVERYONE);
-        if (!mentionAuth.ok) return mentionAuth.response;
+        if (!mentionAuth.ok) return mentionEveryoneRefusal(mentionAuth.response);
       }
     }
     // Bots milestone: an edit cannot slip past the Moderation Bot — its
@@ -299,9 +305,18 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
       delete metadata.$pinnedBy;
     }
 
+    if (body.content !== undefined) {
+      // The mentions follow the new text: earlier ones whose names are
+      // still there, new picks, typed @handles.
+      const requested = [...readMessageMentions(access.message.metadata).map((m) => m.userId), ...(body.mentions ?? [])];
+      const mentions = await resolveMessageMentions(getDb(), serverId, body.content, requested);
+      if (mentions.length > 0) metadata.mentions = mentions;
+      else delete metadata.mentions;
+    }
+
     const updated = await updateMessage(getDb(), messageId, {
       ...(body.content !== undefined ? { content: body.content } : {}),
-      ...(body.pinned !== undefined ? { metadata } : {}),
+      ...(body.pinned !== undefined || body.content !== undefined ? { metadata } : {}),
     });
     if (body.content !== undefined) {
       // Bot API v2: bots hear about edits — the event stream through the
@@ -354,6 +369,13 @@ async function handleDelete(req: Request, ctx: RouteContext): Promise<NextRespon
 
     if (!(await canMutateMessage(serverId, access.isAuthor, session.uid))) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+    // Deleting SOMEONE ELSE'S message is moderation, which a timed-out
+    // member may not do (lib/actor-timeout.ts). Taking back your own
+    // message stays allowed: it adds nothing to the channel.
+    if (!access.isAuthor) {
+      const timedOut = await refuseTimedOutActor(serverId, session.uid, access.isOwner ? session.uid : null);
+      if (timedOut) return timedOut;
     }
 
     // A deleted poll message takes its poll and every ballot with it, in the

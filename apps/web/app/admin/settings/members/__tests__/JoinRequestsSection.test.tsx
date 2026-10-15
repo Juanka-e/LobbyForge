@@ -131,6 +131,18 @@ describe('JoinRequestsSection', () => {
     await waitFor(() => expect(screen.getByText('No one is waiting for approval.')).toBeTruthy());
   });
 
+  // Security review 2026-10 (A1): a timed-out moderator decides nothing.
+  it('says a timed-out moderator is timed out — in their language — and keeps the request', async () => {
+    respond = (call) =>
+      call.method !== 'POST'
+        ? listing([request()])
+        : Response.json({ error: 'You are timed out in this server', code: 'actor_timed_out', until: '2026-10-15T12:00:00.000Z' }, { status: 403 });
+    renderSection('tr');
+    fireEvent.click(await screen.findByRole('button', { name: 'Ada kişisini onayla' }));
+    expect(await screen.findByText('Bu toplulukta zaman aşımındasın.')).toBeTruthy();
+    expect(screen.getByText('Ada')).toBeTruthy();
+  });
+
   it('explains the permission when the API refuses the list', async () => {
     respond = () => Response.json({ error: 'Forbidden' }, { status: 403 });
     renderSection();

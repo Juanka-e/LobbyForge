@@ -10,12 +10,22 @@ import { initialOf } from '@/lib/initial';
  * When the user types @ followed by at least one character, this
  * component fetches the server's member list and shows a filtered
  * dropdown. Selecting a member inserts @displayName into the input
- * and stores the userId for mention metadata.
+ * and reports the userId and that name (`onMention`): the composer sends
+ * the picks with the post, and the server stores them as the message's
+ * mentions (docs/PROFILES.md "Mentions"). A member matches on their name
+ * or their handle.
  */
+
+/** Case folding for matching: the viewer's locale (Turkish İ/I), accents kept. */
+function fold(text: string, locale: string): string {
+  return text.normalize('NFC').toLocaleLowerCase(locale).replace(/\u0307/g, '');
+}
 
 export interface MentionUser {
   userId: string;
   displayName: string;
+  /** The handle (0050), matched and shown as `@name`. */
+  username?: string | null;
   roleName?: string | null;
   roleColor?: string | null;
   avatarUrl?: string | null;
@@ -28,7 +38,8 @@ export interface MentionInputProps {
   placeholder?: string;
   disabled?: boolean;
   className?: string;
-  onMention?: (userId: string) => void;
+  /** A member was picked: their id and the name inserted after `@`. */
+  onMention?: (userId: string, label: string) => void;
   /**
    * Runs before the mention keys; return true when the key was handled
    * (the composer's slash command picker owns the arrows while it is open).
@@ -78,7 +89,7 @@ export function MentionInput({
       setMentionQuery(null);
       return;
     }
-    setMentionQuery(query.toLowerCase());
+    setMentionQuery(fold(query, t.locale));
     setMentionIndex(0);
   }
 
@@ -90,7 +101,11 @@ export function MentionInput({
 
   const filtered = mentionQuery !== null
     ? members
-        .filter((m) => m.displayName.toLowerCase().includes(mentionQuery))
+        .filter(
+          (m) =>
+            fold(m.displayName, t.locale).includes(mentionQuery) ||
+            Boolean(m.username && m.username.startsWith(mentionQuery))
+        )
         .slice(0, 8)
     : [];
 
@@ -106,7 +121,7 @@ export function MentionInput({
     const newValue = text.substring(0, atIdx) + insertion + afterCursor;
     onChange(newValue);
     setMentionQuery(null);
-    onMention?.(user.userId);
+    onMention?.(user.userId, user.displayName);
     // Focus back and place cursor after the mention
     requestAnimationFrame(() => {
       inputRef.current?.focus();
@@ -178,6 +193,7 @@ export function MentionInput({
                 >
                   <div className="w-7 h-7 rounded-full bg-secondary-container flex items-center justify-center font-bold text-text-primary text-xs flex-shrink-0 overflow-hidden">
                     {user.avatarUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- same-origin avatar route
                       <img src={user.avatarUrl} alt="" className="w-full h-full object-cover" />
                     ) : (
                       initialOf(user.displayName, { locale: t.locale })
@@ -190,8 +206,10 @@ export function MentionInput({
                     >
                       {user.displayName}
                     </span>
-                    {user.roleName ? (
-                      <span className="text-[10px] text-text-muted truncate block">{user.roleName}</span>
+                    {user.username || user.roleName ? (
+                      <span className="text-[10px] text-text-muted truncate block">
+                        {[user.username ? `@${user.username}` : null, user.roleName].filter(Boolean).join(' · ')}
+                      </span>
                     ) : null}
                   </div>
                 </button>

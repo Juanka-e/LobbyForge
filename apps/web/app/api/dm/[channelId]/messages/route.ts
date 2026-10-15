@@ -7,16 +7,49 @@ import {
   listDmMessages,
   sendDmMessage,
   deleteDmMessage,
+  getDmChannelParticipants,
 } from '@lobbyforge/db';
 import { requireMaterializedSession } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
 import { withApiSecurity } from '@/lib/security-headers';
 import { publishDmMessage } from '@/lib/dm-bus';
+import { publishDmActivity } from '@/lib/dm-notify';
 import { requireVerifiedEmail } from '@/lib/mail/verification';
 import { MESSAGE_BODY_MAX_BYTES } from '@/lib/message-limits';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+
+/** A channel id Postgres can compare: anything else is simply not found (it used to throw a 500). */
+function isChannelId(channelId: string): boolean {
+  return z.string().uuid().safeParse(channelId).success;
+}
+
+/**
+ * The page query, or a 400 for junk (security review 2026-10, A9 — `limit`
+ * and `before` reached the query unchecked: NaN and Invalid Date threw a
+ * 500). `limit` is an integer, clamped to 1..100 (default 50); `before` is
+ * a date (the list is newest first, so it pages back in time).
+ */
+function readPage(url: URL): { ok: true; limit: number; before?: Date } | { ok: false; response: NextResponse } {
+  const limitParam = url.searchParams.get('limit');
+  const beforeParam = url.searchParams.get('before');
+  let limit = 50;
+  if (limitParam !== null) {
+    if (!/^-?\d{1,9}$/.test(limitParam.trim())) {
+      return { ok: false, response: NextResponse.json({ error: 'Invalid `limit`' }, { status: 400 }) };
+    }
+    limit = Math.max(1, Math.min(100, Number.parseInt(limitParam, 10)));
+  }
+  let before: Date | undefined;
+  if (beforeParam !== null) {
+    before = new Date(beforeParam);
+    if (!beforeParam.trim() || Number.isNaN(before.getTime())) {
+      return { ok: false, response: NextResponse.json({ error: 'Invalid `before` cursor' }, { status: 400 }) };
+    }
+  }
+  return { ok: true, limit, ...(before ? { before } : {}) };
+}
 
 /**
  * GET /api/dm/{channelId}/messages — list messages in a DM channel (paginated).
@@ -30,21 +63,22 @@ async function handleGet(
   if (!sessionResult.ok) return sessionResult.response;
   const { uid } = sessionResult.session;
   const { channelId } = await ctx.params;
-
-  const db = getDb();
-  const isParticipant = await isDmChannelParticipant(db, channelId, uid);
-  if (!isParticipant) {
+  if (!isChannelId(channelId)) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
-
-  const url = new URL(req.url);
-  const limitParam = url.searchParams.get('limit');
-  const beforeParam = url.searchParams.get('before');
-  const limit = limitParam ? Number(limitParam) : 50;
-  const before = beforeParam ? new Date(beforeParam) : undefined;
+  const page = readPage(new URL(req.url));
+  if (!page.ok) return page.response;
 
   try {
-    const messages = await listDmMessages(db, channelId, { limit, before });
+    const db = getDb();
+    const isParticipant = await isDmChannelParticipant(db, channelId, uid);
+    if (!isParticipant) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    const messages = await listDmMessages(db, channelId, {
+      limit: page.limit,
+      ...(page.before ? { before: page.before } : {}),
+    });
     // Mask soft-deleted messages.
     const masked = messages.map((m) => ({
       id: m.id,
@@ -86,6 +120,9 @@ async function handlePost(
   // docs/EMAIL.md §4.2: an unverified account in `required` mode may read, not do this.
   const unverified = await requireVerifiedEmail(uid, 'dm');
   if (unverified) return unverified;
+  if (!isChannelId(channelId)) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
 
   let body: z.infer<typeof SendMessageSchema>;
   try {
@@ -133,6 +170,14 @@ async function handlePost(
         createdAt: message.createdAt.toISOString(),
       },
     });
+    // Both participants' DM lists hear it — a first message from someone
+    // new shows up in the recipient's list without a reload.
+    void Promise.resolve()
+      .then(() => getDmChannelParticipants(db, channelId))
+      .then((pair) => {
+        if (pair) publishDmActivity({ channelId, authorId: uid, participantIds: [pair.userAId, pair.userBId] });
+      })
+      .catch(() => {});
     return NextResponse.json(
       {
         message: {

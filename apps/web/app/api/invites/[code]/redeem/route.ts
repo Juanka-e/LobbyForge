@@ -6,6 +6,7 @@ import { readGuestSession } from '@/lib/guest-session';
 import { normalizeInviteCode } from '@/lib/invite-code';
 import { withApiSecurity } from '@/lib/security-headers';
 import { notifyMemberJoined } from '@/lib/bots/welcome';
+import { requireVerifiedEmail } from '@/lib/mail/verification';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -72,6 +73,13 @@ async function handlePost(req: Request, ctx: { params: Promise<{ code: string }>
     const body = await readNote(req);
     if (!body.ok) {
       return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
+    // docs/EMAIL.md §4.2: the note is free text sent to the moderators — the
+    // same gate as the lobby's "Ask to join" (join-requests/mine). A redeem
+    // without a note is not gated (an unverified account may still join).
+    if (body.note?.trim()) {
+      const unverified = await requireVerifiedEmail(session.uid, 'join_request');
+      if (unverified) return unverified;
     }
     const result = await redeemInvite(getDb(), code, session.uid, { note: body.note });
     if (result.ok) {

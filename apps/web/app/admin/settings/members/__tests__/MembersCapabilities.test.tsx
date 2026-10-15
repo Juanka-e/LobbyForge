@@ -12,6 +12,10 @@ import { I18nProvider } from '@/lib/i18n/client';
 import { providerPropsFor } from '@/lib/i18n/catalogue';
 import MembersClient, { type MemberCapabilities, type MemberView } from '../MembersClient';
 
+// The ban list (its own section, tested in BansSection.test.tsx) would take
+// this file's queued fetch answers.
+vi.mock('../BansSection', () => ({ default: () => null }));
+
 const OWNER = '00000000-0000-4000-8000-000000000001';
 const ME = '00000000-0000-4000-8000-000000000002';
 const ADA = '00000000-0000-4000-8000-000000000003';

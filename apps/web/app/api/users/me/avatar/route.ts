@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { updateUserAvatar } from '@lobbyforge/db';
+import { publishProfileChanged } from '@/lib/member-bus';
 import { getDb } from '@/lib/db';
 import { requireMaterializedSession } from '@/lib/api-auth';
 import { withApiSecurity } from '@/lib/security-headers';
@@ -64,6 +65,8 @@ async function handlePost(req: Request): Promise<NextResponse> {
   if (overBudget) return overBudget;
 
   const updated = await updateUserAvatar(getDb(), session.session.uid, body.dataUrl);
+  // docs/PROFILES.md "Live updates": every community the account is in re-reads it.
+  publishProfileChanged(session.session.uid);
   return NextResponse.json(
     { avatarUrl: updated.avatarUrl },
     { headers: { 'Cache-Control': 'no-store' } }

@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react';
 import { getRealtimeClient } from '@/lib/realtime-client';
 import { useT } from '@/lib/i18n/client';
 import { initialOf } from '@/lib/initial';
@@ -24,6 +24,19 @@ import { EphemeralAnswerRow, InteractionHeader, PendingInteractionRow } from './
 import { ChatPollCard } from './ChatPollCard';
 import { useBlockList } from './BlockListProvider';
 import { ProfileTrigger, useProfileCard } from './ProfileCardProvider';
+import { composerRefusalMessage } from '@/lib/chat-refusals';
+import { mentionsEveryoneOrHere } from '@/lib/everyone-mention';
+import { readMessageMentions, splitMentions, type StoredMention } from '@/lib/mentions';
+import { useHydrated } from '@/lib/use-hydrated';
+import {
+  DEFAULT_NOTIFICATION_PREFS,
+  loadNotificationPrefs,
+  playNotificationSound,
+  shouldNotify,
+  type NotificationPrefs,
+} from '@/lib/notification-prefs';
+import { isInVoiceRoom } from '@/lib/voice-connection';
+import { useOptionalLobbyVoice } from './LobbyVoiceProvider';
 import {
   applyChatPollUpdate,
   asChatPollUpdate,
@@ -76,6 +89,8 @@ interface ChatMessage {
   app?: MessageAppInfo | null;
   /** A poll message (docs/CHAT_POLLS.md): the poll as this viewer sees it. */
   poll?: ChatPollView | null;
+  /** Members the message names (docs/PROFILES.md "Mentions"). */
+  mentions?: StoredMention[];
 }
 
 interface MessageBot {
@@ -229,6 +244,9 @@ interface TimelineItem {
   node: ReactNode;
 }
 
+/** Messages per page: the first read, a reconnect's re-read and each "Load older messages". */
+const PAGE_SIZE = 50;
+
 /** Merge two newest-first lists into one, newest first (stable for equal times). */
 function mergeNewestFirst(a: TimelineItem[], b: TimelineItem[]): TimelineItem[] {
   if (b.length === 0) return a;
@@ -252,11 +270,14 @@ function mergeNewestFirst(a: TimelineItem[], b: TimelineItem[]): TimelineItem[] 
 /** The rule between two days of conversation. */
 function DaySeparator({ at }: { at: string }) {
   const t = useT();
+  // The day is the reader's (their time zone), not the server's: worked
+  // out in the browser, after hydration.
+  const hydrated = useHydrated();
   return (
     <div className="flex items-center gap-3 py-1" aria-hidden>
       <div className="h-px flex-1 bg-border-subtle/60" />
       <span className="font-label-xs text-[11px] uppercase tracking-wider text-text-muted">
-        {formatDaySeparator(at, t)}
+        {hydrated ? formatDaySeparator(at, t) : '\u00a0'}
       </span>
       <div className="h-px flex-1 bg-border-subtle/60" />
     </div>
@@ -268,7 +289,11 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
   const [messages, setMessages] = useState<ChatMessage[]>(data.initialMessages);
   const nameCacheRef = useRef<Map<string, string>>(new Map(Object.entries(data.knownNames)));
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const notificationPrefsRef = useRef({ level: 'mentions', desktopEnabled: true, showPreview: true, sound: 'default' });
+  const notificationPrefsRef = useRef<NotificationPrefs>(DEFAULT_NOTIFICATION_PREFS);
+  // "Suppress while in voice" (Settings → Notifications) needs to know.
+  const voice = useOptionalLobbyVoice();
+  const inVoiceRef = useRef(false);
+  inVoiceRef.current = Boolean(voice?.activeChannelId) && isInVoiceRoom(voice?.connectionState ?? null);
   const localRows = useInteractionState();
   /** Ids that came in through the realtime feed or the local echo. */
   const liveIdsRef = useRef<Set<string>>(new Set());
@@ -292,8 +317,14 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
    */
   const { blockedIds } = useBlockList();
   const blockedIdsRef = useRef(blockedIds);
+  /** Bumped to read the channel again (an unblock: the masked messages come back). */
+  const [reloadTick, setReloadTick] = useState(0);
   useEffect(() => {
+    const before = blockedIdsRef.current;
     blockedIdsRef.current = blockedIds;
+    // Someone unblocked: their placeholders turn back into messages, which
+    // only the server can give back.
+    if ([...before].some((id) => !blockedIds.has(id))) setReloadTick((tick) => tick + 1);
     // Someone blocked while the view is open (or a list that loaded after
     // the first live message): their messages on screen are masked too.
     if (blockedIds.size === 0) return;
@@ -322,28 +353,54 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
 
   useEffect(() => {
     let cancelled = false;
-    void fetch('/api/settings/me', { credentials: 'same-origin', cache: 'no-store' })
-      .then(async (response) => response.ok ? response.json() : null)
-      .then((body: { settings?: { notifications?: Record<string, unknown> } } | null) => {
-        if (cancelled || !body?.settings?.notifications) return;
-        const input = body.settings.notifications;
-        notificationPrefsRef.current = {
-          level: input.level === 'all' || input.level === 'nothing' ? input.level : 'mentions',
-          desktopEnabled: typeof input.desktopEnabled === 'boolean' ? input.desktopEnabled : true,
-          showPreview: typeof input.showPreview === 'boolean' ? input.showPreview : true,
-          sound: typeof input.sound === 'string' ? input.sound : 'default',
-        };
-      })
-      .catch(() => undefined);
+    void loadNotificationPrefs().then((prefs) => {
+      if (!cancelled) notificationPrefsRef.current = prefs;
+    });
     return () => { cancelled = true; };
   }, []);
 
-  // Auto-scroll to bottom when messages change.
+  // Auto-scroll to the bottom when a NEWER message arrives - not when an
+  // older page is added at the top, which would yank the reader away.
+  const newestId = messages[0]?.id ?? null;
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [messages]);
+  }, [newestId]);
+
+  /** A REST message as a chat row, in this viewer's language. */
+  const toChatMessage = useCallback(
+    (message: ApiMessage): ChatMessage => {
+      const who = describeAuthor(message, nameCacheRef.current, t, t('lobbyMain.chat.unknownUser'));
+      // A pending row whose public answer is already in the history is done.
+      if (who.interaction) interactionStore.markAnswered(who.interaction.id);
+      return {
+        id: message.id,
+        authorId: message.userId,
+        ...who,
+        author: message.blocked ? t('lobbyMain.chat.blockedUser') : who.author,
+        authorColor: message.userId === data.currentUserId ? 'primary' : 'default',
+        timestamp: formatMessageTimestamp(message.createdAt, t),
+        createdAt: message.createdAt,
+        // A built-in bot's default text in this viewer's language; a
+        // blocked author's placeholder in it too, like the server render.
+        body: message.blocked ? t('lobbyMain.chat.blockedBody') : localizeBotMessage(message, t),
+        blocked: message.blocked,
+        pinned: typeof message.metadata?.$pinnedAt === 'string',
+        poll: message.blocked ? null : catchUp(asChatPollView(message.poll)),
+        mentions: message.blocked ? [] : readMessageMentions(message.metadata),
+      };
+    },
+    [catchUp, data.currentUserId, t]
+  );
+
+  /**
+   * Whether the channel has messages older than the ones loaded - null
+   * until the first page answers. "Load older messages" reads them a page
+   * at a time (the `before` cursor of the messages route).
+   */
+  const [hasOlder, setHasOlder] = useState<boolean | null>(null);
+  const [olderState, setOlderState] = useState<'idle' | 'loading' | 'error'>('idle');
 
   // Fetch the selected channel instead of relying only on the initial SSR
   // snapshot. This keeps channel switching useful even before a new WS event.
@@ -351,33 +408,16 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
     let cancelled = false;
     async function loadMessages() {
       try {
-        const res = await fetch(`/api/servers/${encodeURIComponent(data.serverId)}/channels/${encodeURIComponent(data.channelId)}/messages?limit=50`, {
+        const res = await fetch(`/api/servers/${encodeURIComponent(data.serverId)}/channels/${encodeURIComponent(data.channelId)}/messages?limit=${PAGE_SIZE}`, {
           credentials: 'same-origin',
           cache: 'no-store',
         });
         if (!res.ok) return;
         const body = (await res.json()) as { messages?: ApiMessage[] };
         if (cancelled || !body.messages) return;
-        const history: ChatMessage[] = body.messages.map((message) => {
-          const who = describeAuthor(message, nameCacheRef.current, t, t('lobbyMain.chat.unknownUser'));
-          // A pending row whose public answer is already in the history is done.
-          if (who.interaction) interactionStore.markAnswered(who.interaction.id);
-          return {
-            id: message.id,
-            authorId: message.userId,
-            ...who,
-            author: message.blocked ? t('lobbyMain.chat.blockedUser') : who.author,
-            authorColor: message.userId === data.currentUserId ? 'primary' : 'default',
-            timestamp: formatMessageTimestamp(message.createdAt, t),
-            createdAt: message.createdAt,
-            // A built-in bot's default text in this viewer's language; a
-            // blocked author's placeholder in it too, like the server render.
-            body: message.blocked ? t('lobbyMain.chat.blockedBody') : localizeBotMessage(message, t),
-            blocked: message.blocked,
-            pinned: typeof message.metadata?.$pinnedAt === 'string',
-            poll: message.blocked ? null : catchUp(asChatPollView(message.poll)),
-          };
-        });
+        const history: ChatMessage[] = body.messages.map(toChatMessage);
+        const fullPage = body.messages.length >= PAGE_SIZE;
+        setHasOlder((current) => current ?? fullPage);
         // A message that arrived live while the history was loading (a
         // bot's answer can come back within milliseconds) must survive it,
         // and so must what happened live meanwhile: a delete stays deleted,
@@ -385,22 +425,65 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
         setMessages((current) => {
           const known = new Set(history.map((m) => m.id));
           const byId = new Map(current.map((m) => [m.id, m]));
-          const live = current.filter((m) => liveIdsRef.current.has(m.id) && !known.has(m.id));
+          // A live message older than the newest one in the answer, yet
+          // missing from it, was deleted meanwhile (a reconnect re-read).
+          const newest = history[0] ? Date.parse(history[0].createdAt) : null;
+          const live = current.filter(
+            (m) => liveIdsRef.current.has(m.id) && !known.has(m.id) && (newest === null || Date.parse(m.createdAt) > newest)
+          );
           const merged = history
             .filter((m) => !deletedIdsRef.current.has(m.id))
             .map((m) => {
               const shown = byId.get(m.id)?.poll;
               return shown && m.poll && shown.id === m.poll.id && shown.version > m.poll.version ? { ...m, poll: shown } : m;
             });
-          return [...live, ...merged];
+          // Older pages the viewer loaded stay below the newest page (a
+          // reconnect re-reads only the newest one).
+          const oldestRead = history.length > 0 ? Date.parse(history[history.length - 1]!.createdAt) : null;
+          const older =
+            oldestRead === null || history.length < PAGE_SIZE
+              ? []
+              : current.filter((m) => !known.has(m.id) && !liveIdsRef.current.has(m.id) && Date.parse(m.createdAt) < oldestRead);
+          return [...live, ...merged, ...older];
         });
       } catch {
         // Realtime/local echo can continue from the current snapshot.
       }
     }
     void loadMessages();
-    return () => { cancelled = true; };
-  }, [catchUp, data.channelId, data.currentUserId, data.serverId, t]);
+    // The gateway keeps no backlog: whatever was posted, edited or deleted
+    // while the socket was down (sleep, a network change, a gateway
+    // restart) is read again once it is back. The merge keeps live rows
+    // and deletions.
+    const offReconnect = getRealtimeClient().onReconnect(() => void loadMessages());
+    return () => {
+      cancelled = true;
+      offReconnect();
+    };
+  }, [data.channelId, data.serverId, reloadTick, toChatMessage]);
+
+  const loadOlder = useCallback(async () => {
+    const oldest = messages[messages.length - 1];
+    if (!oldest || olderState === 'loading') return;
+    setOlderState('loading');
+    try {
+      const res = await fetch(
+        `/api/servers/${encodeURIComponent(data.serverId)}/channels/${encodeURIComponent(data.channelId)}/messages?limit=${PAGE_SIZE}&before=${encodeURIComponent(oldest.createdAt)}`,
+        { credentials: 'same-origin', cache: 'no-store' }
+      );
+      if (!res.ok) throw new Error(String(res.status));
+      const body = (await res.json()) as { messages?: ApiMessage[] };
+      const page = (body.messages ?? []).map(toChatMessage).filter((m) => !deletedIdsRef.current.has(m.id));
+      setMessages((current) => {
+        const known = new Set(current.map((m) => m.id));
+        return [...current, ...page.filter((m) => !known.has(m.id))];
+      });
+      setHasOlder((body.messages ?? []).length >= PAGE_SIZE);
+      setOlderState('idle');
+    } catch {
+      setOlderState('error');
+    }
+  }, [data.channelId, data.serverId, messages, olderState, toChatMessage]);
 
   // An edit (or anything else that changed a message) arrived as an id:
   // reload that one message through the REST route — it re-checks access
@@ -426,6 +509,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
                 ...x,
                 body: x.blocked ? x.body : localizeBotMessage(message, t),
                 pinned: typeof message.metadata?.$pinnedAt === 'string',
+                mentions: x.blocked ? [] : readMessageMentions(message.metadata),
                 ...(message.poll !== undefined && !x.blocked ? { poll: catchUp(asChatPollView(message.poll)) } : {}),
               }
             : x
@@ -493,24 +577,32 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
           createdAt: m.createdAt,
           body,
           poll: asChatPollView(m.poll),
+          mentions: readMessageMentions(m.metadata),
         };
         // Newest first; UI uses flex-col-reverse so newest appears at bottom.
         return [next, ...prev];
       });
       const prefs = notificationPrefsRef.current;
+      // docs/PROFILES.md "Mentions": the message names this member, or
+      // pings everyone; a message from before mention ids still counts by
+      // its text.
       const myName = data.currentUserId ? nameCacheRef.current.get(data.currentUserId) : null;
-      const mentioned = Boolean(myName && m.content.toLocaleLowerCase().includes(`@${myName.toLocaleLowerCase()}`));
+      const mentioned =
+        readMessageMentions(m.metadata).some((mention) => mention.userId === data.currentUserId) ||
+        (Boolean(m.userId) && mentionsEveryoneOrHere(m.content)) ||
+        Boolean(myName && m.content.toLocaleLowerCase().includes(`@${myName.toLocaleLowerCase()}`));
       let channelMuted = false;
       try { channelMuted = window.localStorage.getItem(`lf-channel-muted:${data.channelId}`) === 'true'; } catch { /* local preference */ }
       if (
         m.userId !== data.currentUserId &&
-        !channelMuted &&
-        prefs.desktopEnabled &&
-        prefs.level !== 'nothing' &&
-        (prefs.level === 'all' || mentioned) &&
         typeof Notification !== 'undefined' &&
         Notification.permission === 'granted' &&
-        document.visibilityState !== 'visible'
+        shouldNotify(prefs, {
+          mentioned,
+          inVoice: inVoiceRef.current,
+          channelMuted,
+          hidden: document.visibilityState !== 'visible',
+        })
       ) {
         // A bot, a webhook or an app is never mistaken for a member — not
         // even in a desktop notification, which cannot show the badge.
@@ -523,9 +615,12 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
               : 'lobbyMain.chat.notificationTitle';
         new Notification(t(titleKey, { author, channel: data.channelName }), {
           body: prefs.showPreview ? body : t('lobbyMain.chat.notificationBody'),
-          silent: prefs.sound === 'none',
+          // The page plays the chosen sound itself (default chime, soft
+          // pop, or none) instead of the system's.
+          silent: true,
           tag: `lf-message:${data.channelId}`,
         });
+        playNotificationSound(prefs.sound);
       }
     });
     return () => {
@@ -540,7 +635,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
     function onMessageSent(e: Event) {
       const detail = (e as CustomEvent).detail as {
         channelId: string;
-        message: { id: string; content: string; userId: string | null; createdAt: string };
+        message: { id: string; content: string; userId: string | null; createdAt: string; metadata?: Record<string, unknown> };
         /** Set when the composer posted a poll. */
         poll?: unknown;
       };
@@ -566,6 +661,7 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
           createdAt: m.createdAt,
           body: m.content,
           poll: asChatPollView(detail.poll),
+          mentions: readMessageMentions(m.metadata),
         };
         return [next, ...prev];
       });
@@ -680,6 +776,25 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
 
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-6 space-y-6 flex flex-col-reverse sm:px-6">
+      {/* The column is reversed: the first child sits at the BOTTOM, under
+          the newest message - where "is typing..." belongs (it used to sit
+          above the oldest one, out of sight in a long channel). */}
+      {typers.length > 0 ? (
+        <div className="px-2 py-1 flex items-center gap-2 text-xs text-text-muted animate-fade-in-up">
+          <div className="flex gap-0.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-text-muted animate-pulse" />
+            <span className="w-1.5 h-1.5 rounded-full bg-text-muted animate-pulse" style={{ animationDelay: '0.15s' }} />
+            <span className="w-1.5 h-1.5 rounded-full bg-text-muted animate-pulse" style={{ animationDelay: '0.3s' }} />
+          </div>
+          <span>
+            {typers.length === 1
+              ? t('lobbyMain.chat.typingOne', { first: typers[0] ?? '' })
+              : typers.length === 2
+                ? t('lobbyMain.chat.typingTwo', { first: typers[0] ?? '', second: typers[1] ?? '' })
+                : t('lobbyMain.chat.typingMany', { first: typers[0] ?? '', count: typers.length - 1 })}
+          </span>
+        </div>
+      ) : null}
       {timeline.length === 0 ? (
         <p className="font-body-md text-text-muted italic">
           {showPinned
@@ -703,36 +818,67 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
           </Fragment>
         );
       })}
-      {typers.length > 0 ? (
-        <div className="px-2 py-1 flex items-center gap-2 text-xs text-text-muted animate-fade-in-up">
-          <div className="flex gap-0.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-text-muted animate-pulse" />
-            <span className="w-1.5 h-1.5 rounded-full bg-text-muted animate-pulse" style={{ animationDelay: '0.15s' }} />
-            <span className="w-1.5 h-1.5 rounded-full bg-text-muted animate-pulse" style={{ animationDelay: '0.3s' }} />
-          </div>
-          <span>
-            {typers.length === 1
-              ? t('lobbyMain.chat.typingOne', { first: typers[0] ?? '' })
-              : typers.length === 2
-                ? t('lobbyMain.chat.typingTwo', { first: typers[0] ?? '', second: typers[1] ?? '' })
-                : t('lobbyMain.chat.typingMany', { first: typers[0] ?? '', count: typers.length - 1 })}
-          </span>
+      {hasOlder && !filtering ? (
+        <div className="flex flex-col items-center gap-1 py-2">
+          <button
+            type="button"
+            onClick={() => void loadOlder()}
+            disabled={olderState === 'loading'}
+            className="rounded-md border border-border-subtle px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-surface-container hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
+            data-testid="chat-load-older"
+          >
+            {olderState === 'loading' ? t('lobbyMain.chat.loadingOlder') : t('lobbyMain.chat.loadOlder')}
+          </button>
+          {olderState === 'error' ? (
+            <p role="alert" className="text-xs text-danger">
+              {t('lobbyMain.chat.loadOlderFailed')}
+            </p>
+          ) : null}
         </div>
-      ) : null}
-      <ChannelWelcome channelName={data.channelName} />
+      ) : (
+        <ChannelWelcome channelName={data.channelName} />
+      )}
     </div>
   );
 }
 
 function LiveMessage({ message, invokedByName, currentUserId, serverId, channelId, canManageMessages, onPinnedChange, onEdited, onDeleted, onPollChange }: { message: ChatMessage; invokedByName: string | null; currentUserId: string | null; serverId: string; channelId: string; canManageMessages: boolean; onPinnedChange: (pinned: boolean) => void; onEdited: (body: string) => void; onDeleted: () => void; onPollChange: (poll: ChatPollView) => void }) {
   const t = useT();
+  const profile = useProfileCard();
+  const hydrated = useHydrated();
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(message.body);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [busy, setBusy] = useState(false);
+  /** Why the last edit, delete or pin was refused — shown under the message. */
+  const [actionError, setActionError] = useState<string | null>(null);
   const isOwn = message.authorId === currentUserId;
+  const isMember = Boolean(message.authorId) && !message.bot && !message.webhook && !message.app;
+  // docs/PROFILES.md "Live updates": a member's name as the lobby knows it
+  // now (a rename shows on their old messages too).
+  const author = (isMember && message.authorId ? profile?.seedFor(message.authorId)?.displayName : null) ?? message.author;
+  // Discord's highlight: the message names this member, or pings everyone.
+  const mentionsMe =
+    Boolean(currentUserId) &&
+    !isOwn &&
+    (Boolean(message.mentions?.some((mention) => mention.userId === currentUserId)) ||
+      (isMember && mentionsEveryoneOrHere(message.body)));
+
+  /** The route's refusal, in this viewer's language. */
+  async function refusal(res: Response): Promise<string> {
+    const detail = (await res.json().catch(() => ({}))) as { code?: string; rule?: string; until?: string };
+    return composerRefusalMessage(t, res.status, detail);
+  }
 
   async function saveEdit() {
     const trimmed = editValue.trim();
-    if (!trimmed || !message.id) return;
+    if (!trimmed || !message.id || busy) return;
+    if (trimmed === message.body) {
+      setEditing(false);
+      return;
+    }
+    setBusy(true);
+    setActionError(null);
     try {
       const res = await fetch(`/api/servers/${serverId}/channels/${channelId}/messages/${message.id}`, {
         method: 'PATCH',
@@ -746,27 +892,48 @@ function LiveMessage({ message, invokedByName, currentUserId, serverId, channelI
         requestVerificationFocus();
         return;
       }
-      if (!res.ok) throw new Error(`edit failed: ${res.status}`);
+      // A refused edit keeps the editor open with the reason; the text is not lost.
+      if (!res.ok) {
+        setActionError(await refusal(res));
+        return;
+      }
       // Shown at once; the realtime `message_update` brings it to everyone else.
       onEdited(trimmed);
-    } catch { /* non-fatal */ }
-    setEditing(false);
+      setEditing(false);
+    } catch {
+      setActionError(t('lobbyMain.chat.actionNetwork'));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function deleteMessage() {
-    if (!message.id) return;
+    if (!message.id || busy) return;
+    setBusy(true);
+    setActionError(null);
     try {
       const res = await fetch(`/api/servers/${serverId}/channels/${channelId}/messages/${message.id}`, {
         method: 'DELETE',
         credentials: 'same-origin',
       });
-      if (!res.ok) throw new Error(`delete failed: ${res.status}`);
+      if (!res.ok) {
+        setActionError(await refusal(res));
+        return;
+      }
       onDeleted();
-    } catch { /* non-fatal */ }
+    } catch {
+      setActionError(t('lobbyMain.chat.actionNetwork'));
+    } finally {
+      setBusy(false);
+      setConfirmingDelete(false);
+    }
   }
 
   async function togglePinned() {
+    if (busy) return;
     const pinned = !message.pinned;
+    setBusy(true);
+    setActionError(null);
     try {
       const res = await fetch(`/api/servers/${serverId}/channels/${channelId}/messages/${message.id}`, {
         method: 'PATCH',
@@ -774,9 +941,16 @@ function LiveMessage({ message, invokedByName, currentUserId, serverId, channelI
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pinned }),
       });
-      if (!res.ok) throw new Error(`pin failed: ${res.status}`);
+      if (!res.ok) {
+        setActionError(await refusal(res));
+        return;
+      }
       onPinnedChange(pinned);
-    } catch { /* non-fatal */ }
+    } catch {
+      setActionError(t('lobbyMain.chat.actionNetwork'));
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (message.blocked) {
@@ -793,8 +967,19 @@ function LiveMessage({ message, invokedByName, currentUserId, serverId, channelI
     );
   }
   const authorColorClass = message.authorColor === 'primary' ? 'text-primary' : 'text-text-primary';
+  const actionButton =
+    'grid size-7 place-items-center rounded text-text-secondary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-40';
   return (
-    <div data-chat-message data-bot-message={message.bot ? 'true' : undefined} data-webhook-message={message.webhook ? 'true' : undefined} data-app-message={message.app ? 'true' : undefined} className="flex gap-4 group hover:bg-surface-container/30 p-2 -mx-2 rounded-lg transition-colors animate-fade-in-up relative">
+    <div
+      data-chat-message
+      data-bot-message={message.bot ? 'true' : undefined}
+      data-webhook-message={message.webhook ? 'true' : undefined}
+      data-app-message={message.app ? 'true' : undefined}
+      data-mentions-me={mentionsMe ? 'true' : undefined}
+      className={`flex gap-4 group p-2 -mx-2 rounded-lg transition-colors animate-fade-in-up relative ${
+        mentionsMe ? 'bg-ember/10 shadow-[inset_2px_0_0_var(--lf-ember,#E7B86A)] hover:bg-ember/15' : 'hover:bg-surface-container/30'
+      }`}
+    >
       {message.bot ? (
         <BotAvatar size="md" className="mt-1" />
       ) : message.webhook ? (
@@ -802,7 +987,7 @@ function LiveMessage({ message, invokedByName, currentUserId, serverId, channelI
       ) : message.app ? (
         <AppAvatar className="mt-1" />
       ) : (
-        <ChatAuthorAvatar authorId={message.authorId} name={message.author} />
+        <ChatAuthorAvatar authorId={message.authorId} name={author} />
       )}
       <div className="flex flex-col w-full min-w-0">
         {message.bot && message.interaction ? (
@@ -812,30 +997,32 @@ function LiveMessage({ message, invokedByName, currentUserId, serverId, channelI
           />
         ) : null}
         <div className="flex items-baseline gap-2">
-          {message.authorId && !message.bot && !message.webhook && !message.app ? (
+          {isMember ? (
             <ProfileTrigger
               userId={message.authorId}
-              seed={{ displayName: message.author }}
+              seed={{ displayName: author }}
               className={`font-label-sm font-medium ${authorColorClass} rounded-sm hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary`}
               testId="chat-author"
             >
-              {message.author}
+              {author}
             </ProfileTrigger>
           ) : (
-            <span className={`font-label-sm font-medium ${authorColorClass}`}>{message.author}</span>
+            <span className={`font-label-sm font-medium ${authorColorClass}`}>{author}</span>
           )}
           {message.bot ? (
             <BotBadge className="self-center" />
           ) : message.webhook ? (
             <WebhookBadge className="self-center" />
           ) : message.app ? (
-            <AppBadge name={message.author} className="self-center" />
+            <AppBadge name={author} className="self-center" />
           ) : null}
           <span
             className="font-label-xs text-[11px] text-text-secondary"
-            title={formatFullTimestamp(message.createdAt, t)}
+            // The exact time in the reader's time zone — after hydration, so
+            // the server's (UTC) value never sticks to the attribute.
+            title={hydrated ? formatFullTimestamp(message.createdAt, t) : undefined}
           >
-            {message.timestamp}
+            {hydrated ? formatMessageTimestamp(message.createdAt, t) : message.timestamp}
           </span>
           {message.pinned ? <span className="material-symbols-outlined text-[13px] text-primary" title={t('lobbyMain.chat.pinned')}>push_pin</span> : null}
         </div>
@@ -844,12 +1031,19 @@ function LiveMessage({ message, invokedByName, currentUserId, serverId, channelI
             <input
               value={editValue}
               onChange={(e) => setEditValue(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditing(false); }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void saveEdit();
+                if (e.key === 'Escape') {
+                  setEditing(false);
+                  setActionError(null);
+                }
+              }}
+              aria-label={t('lobbyMain.chat.editLabel')}
               autoFocus
               className="flex-1 bg-surface-container border border-border-subtle rounded px-2 py-1 text-body-md text-text-primary outline-none focus:border-primary"
             />
-            <button onClick={saveEdit} className="text-xs px-2 py-1 bg-primary-container text-on-primary-container rounded font-medium">{t('lobbyMain.chat.save')}</button>
-            <button onClick={() => setEditing(false)} className="text-xs px-2 py-1 text-text-secondary hover:text-text-primary">{t('lobbyMain.chat.cancel')}</button>
+            <button type="button" disabled={busy} onClick={() => void saveEdit()} className="text-xs px-2 py-1 bg-primary-container text-on-primary-container rounded font-medium disabled:opacity-50">{t('lobbyMain.chat.save')}</button>
+            <button type="button" onClick={() => { setEditing(false); setActionError(null); }} className="text-xs px-2 py-1 text-text-secondary hover:text-text-primary">{t('lobbyMain.chat.cancel')}</button>
           </div>
         ) : message.poll ? (
           <ChatPollCard
@@ -860,39 +1054,104 @@ function LiveMessage({ message, invokedByName, currentUserId, serverId, channelI
             onChange={onPollChange}
           />
         ) : (
-          <p className="font-body-md text-text-secondary mt-1 whitespace-pre-wrap break-words">{message.body}</p>
+          <MessageText text={message.body} mentions={isMember ? message.mentions : undefined} />
         )}
+        {confirmingDelete ? (
+          <div role="group" aria-label={t('lobbyMain.chat.deleteConfirm')} className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm">
+            <span className="text-text-primary">{t('lobbyMain.chat.deleteConfirm')}</span>
+            <button
+              type="button"
+              disabled={busy}
+              autoFocus
+              onClick={() => void deleteMessage()}
+              className="rounded bg-danger px-2 py-1 text-xs font-semibold text-background disabled:opacity-50"
+              data-testid="chat-delete-confirm"
+            >
+              {t('lobbyMain.chat.delete')}
+            </button>
+            <button type="button" onClick={() => setConfirmingDelete(false)} className="rounded px-2 py-1 text-xs text-text-secondary hover:text-text-primary">
+              {t('lobbyMain.chat.cancel')}
+            </button>
+          </div>
+        ) : null}
+        {actionError ? (
+          <p role="alert" className="mt-1 text-xs text-danger">
+            {actionError}
+          </p>
+        ) : null}
       </div>
-      {/* Hover action menu — only for own messages */}
-      {(isOwn || canManageMessages) && !editing ? (
-        <div className="absolute top-1 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 bg-surface-raised rounded-md border border-border-subtle shadow-sm">
+      {/* Hover action menu. Shown on hover, on keyboard focus inside it,
+          and always on touch screens (an invisible button is never tapped
+          by accident). */}
+      {(isOwn || canManageMessages) && !editing && !confirmingDelete ? (
+        <div className="absolute top-1 right-2 flex items-center gap-0.5 rounded-md border border-border-subtle bg-surface-raised opacity-0 shadow-sm transition-opacity focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
           {canManageMessages ? <button
             type="button"
+            disabled={busy}
             onClick={() => void togglePinned()}
             title={message.pinned ? t('lobbyMain.chat.unpin') : t('lobbyMain.chat.pin')}
-            className={message.pinned ? 'p-1 text-primary' : 'p-1 text-text-secondary hover:text-primary'}
+            aria-label={message.pinned ? t('lobbyMain.chat.unpin') : t('lobbyMain.chat.pin')}
+            className={`${actionButton} ${message.pinned ? 'text-primary' : 'hover:text-primary'}`}
           >
-            <span className="material-symbols-outlined text-[16px]">push_pin</span>
+            <span className="material-symbols-outlined text-[16px]" aria-hidden>push_pin</span>
           </button> : null}
-          {isOwn && !message.poll ? <button
+          {isOwn && !message.poll && isMember ? <button
             type="button"
-            onClick={() => { setEditing(true); setEditValue(message.body); }}
+            onClick={() => { setEditing(true); setEditValue(message.body); setActionError(null); }}
             title={t('lobbyMain.chat.edit')}
-            className="p-1 text-text-secondary hover:text-text-primary"
+            aria-label={t('lobbyMain.chat.edit')}
+            className={`${actionButton} hover:text-text-primary`}
           >
-            <span className="material-symbols-outlined text-[16px]">edit</span>
+            <span className="material-symbols-outlined text-[16px]" aria-hidden>edit</span>
           </button> : null}
           <button
             type="button"
-            onClick={deleteMessage}
+            disabled={busy}
+            onClick={() => { setConfirmingDelete(true); setActionError(null); }}
             title={t('lobbyMain.chat.delete')}
-            className="p-1 text-text-secondary hover:text-danger"
+            aria-label={t('lobbyMain.chat.delete')}
+            className={`${actionButton} hover:text-danger`}
+            data-testid="chat-delete"
           >
-            <span className="material-symbols-outlined text-[16px]">delete</span>
+            <span className="material-symbols-outlined text-[16px]" aria-hidden>delete</span>
           </button>
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * A message's text with its mentions (docs/PROFILES.md "Mentions"): each
+ * member it names is a chip that opens their profile card; `@everyone` and
+ * `@here` are marked but name nobody.
+ */
+function MessageText({ text, mentions }: { text: string; mentions?: StoredMention[] }) {
+  const t = useT();
+  const segments = useMemo(() => splitMentions(text, mentions ?? []), [text, mentions]);
+  return (
+    <p className="font-body-md text-text-secondary mt-1 whitespace-pre-wrap break-words">
+      {segments.map((segment, index) =>
+        segment.kind === 'text' ? (
+          <Fragment key={index}>{segment.text}</Fragment>
+        ) : segment.kind === 'mass' ? (
+          <span key={index} className="rounded bg-ember/15 px-0.5 font-medium text-text-primary" data-mass-mention>
+            {segment.text}
+          </span>
+        ) : (
+          <ProfileTrigger
+            key={index}
+            userId={segment.userId}
+            seed={{ displayName: segment.text.slice(1) }}
+            label={t('lobbyMain.chat.mentionLabel', { name: segment.text.slice(1) })}
+            className="rounded bg-primary/15 px-0.5 font-medium text-primary transition-colors hover:bg-primary/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+            testId="chat-mention"
+          >
+            {segment.text}
+          </ProfileTrigger>
+        )
+      )}
+    </p>
   );
 }
 

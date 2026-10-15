@@ -305,6 +305,28 @@ describe('POST /api/servers/{id}/channels/{channelId}/messages', () => {
       expect.objectContaining({ channelId: CHANNEL_ID, userId: USER_ID, content: 'hi there' })
     );
   });
+
+  // Security review 2026-10 (A12): an unknown reply target, or one in
+  // another channel, made createMessage throw — a 500.
+  it('400 invalid_reply for a reply target that is unknown or in another channel; other failures stay 500', async () => {
+    mockServerAlive();
+    const { POST } = await loadListRoute();
+    const send = () =>
+      POST(
+        new Request(`https://example.test/api/servers/${SERVER_ID}/channels/${CHANNEL_ID}/messages`, {
+          method: 'POST',
+          headers: { cookie: makeSessionCookie() },
+          body: JSON.stringify({ content: 'replying', replyToId: '99999999-9999-4999-8999-999999999999' }),
+        }),
+        { params: Promise.resolve({ id: SERVER_ID, channelId: CHANNEL_ID }) }
+      );
+    createMessage.mockRejectedValue(Object.assign(new Error('Reply target is in a different channel'), { code: 'invalid_reply' }));
+    const refused = await send();
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toMatchObject({ code: 'invalid_reply' });
+    createMessage.mockRejectedValue(new Error('connection lost'));
+    expect((await send()).status).toBe(500);
+  });
 });
 
 describe('GET /api/servers/{id}/channels/{channelId}/messages/{messageId}', () => {
@@ -684,7 +706,7 @@ describe('security-review AUTHZ-003: message text is author-only', () => {
       params()
     );
     expect(res.status).toBe(200);
-    expect(updateMessage).toHaveBeenCalledWith(expect.anything(), MESSAGE_ID, { content: 'edited' });
+    expect(updateMessage).toHaveBeenCalledWith(expect.anything(), MESSAGE_ID, expect.objectContaining({ content: 'edited' }));
   });
 });
 

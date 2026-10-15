@@ -5,12 +5,13 @@
  * Messages cascade-delete with the channel. The `lastMessageAt` column drives
  * sidebar ordering without a join.
  */
-import { and, eq, isNull, or, desc, lt, sql } from 'drizzle-orm';
+import { and, eq, isNull, notInArray, or, desc, lt, sql, type SQL } from 'drizzle-orm';
 import type { DbClient } from '../client.js';
 import { dmChannels, dmMessages, users } from '../schema.js';
 import { isUserBlocked } from './userBlocks.js';
 import { profileVisibilitySql, sharesServerSql, toProfileVisibility, userImageRefSql } from './userImages.js';
 import type { ActivityVisibilityScope } from './userSettings.js';
+import { completeLastMillisecond, inMillisecondOf } from './pagination.js';
 
 export interface DmChannelRow {
   id: string;
@@ -48,38 +49,62 @@ export interface DmMessageRow {
   createdAt: Date;
 }
 
-/** Canonicalize the pair so (A,B) and (B,A) map to the same row. */
+/**
+ * Canonicalize the pair so (A,B) and (B,A) map to the same row. The ids are
+ * lower-cased FIRST (security review 2026-10, A8): Postgres stores a uuid
+ * in lower case whatever case it was sent in, but JavaScript orders "A" <
+ * "a", so a recipient id sent in upper case could order the pair the other
+ * way round — a second conversation for the same two people, or (with the
+ * caller's own id in upper case) a "DM" with oneself.
+ */
 function orderedPair(a: string, b: string): [string, string] {
-  return a < b ? [a, b] : [b, a];
+  const x = a.toLowerCase();
+  const y = b.toLowerCase();
+  return x < y ? [x, y] : [y, x];
 }
 
-/** Find or create a DM channel between two users. Returns the existing row
- *  if one already exists (idempotent on the user pair). */
+async function selectPairRow(db: DbClient, userAId: string, userBId: string): Promise<DmChannelRow | null> {
+  const [row] = await db
+    .select()
+    .from(dmChannels)
+    .where(and(eq(dmChannels.userAId, userAId), eq(dmChannels.userBId, userBId)))
+    .limit(1);
+  return (row as DmChannelRow | undefined) ?? null;
+}
+
+/**
+ * Find or create a DM channel between two users. Returns the existing row
+ * if one already exists (idempotent on the user pair).
+ *
+ * Race-safe: two first messages at once both used to miss the lookup and
+ * insert, and the loser hit the pair's unique index (a 500). The insert now
+ * does nothing on that conflict and the winner's row is read back. A row
+ * the case bug above stored the other way round is still found (no
+ * migration rewrites it).
+ */
 export async function findOrCreateDmChannel(
   db: DbClient,
   currentUserId: string,
   otherUserId: string
 ): Promise<DmChannelRow> {
   const [userAId, userBId] = orderedPair(currentUserId, otherUserId);
-  // Try to find an existing channel first.
-  const [existing] = await db
-    .select()
-    .from(dmChannels)
-    .where(
-      and(eq(dmChannels.userAId, userAId), eq(dmChannels.userBId, userBId))
-    )
-    .limit(1);
-  if (existing) return existing as DmChannelRow;
+  const existing = (await selectPairRow(db, userAId, userBId)) ?? (await selectPairRow(db, userBId, userAId));
+  if (existing) return existing;
 
   const [created] = await db
     .insert(dmChannels)
     .values({
       userAId,
       userBId,
-      createdBy: currentUserId,
+      createdBy: currentUserId.toLowerCase(),
     })
+    .onConflictDoNothing({ target: [dmChannels.userAId, dmChannels.userBId] })
     .returning();
-  return created as DmChannelRow;
+  if (created) return created as DmChannelRow;
+  // A concurrent request created it first — adopt its row.
+  const winner = await selectPairRow(db, userAId, userBId);
+  if (!winner) throw new Error('findOrCreateDmChannel: the DM channel could not be written');
+  return winner;
 }
 
 /** List all DM channels for a user, with the other participant's profile. */
@@ -165,10 +190,18 @@ export async function findDmChannelByPair(
   userBId: string
 ): Promise<string | null> {
   const [a, b] = orderedPair(userAId, userBId);
+  // Either order: a row stored the other way round (see orderedPair) is the
+  // same conversation.
   const [row] = await db
     .select({ id: dmChannels.id })
     .from(dmChannels)
-    .where(and(eq(dmChannels.userAId, a), eq(dmChannels.userBId, b)))
+    .where(
+      or(
+        and(eq(dmChannels.userAId, a), eq(dmChannels.userBId, b)),
+        and(eq(dmChannels.userAId, b), eq(dmChannels.userBId, a))
+      )
+    )
+    .orderBy(desc(sql`${dmChannels.userAId} = ${a}`))
     .limit(1);
   return row?.id ?? null;
 }
@@ -286,18 +319,29 @@ export async function listDmMessages(
   channelId: string,
   options: { limit?: number; before?: Date } = {}
 ): Promise<DmMessageRow[]> {
-  const limit = Math.min(options.limit ?? 50, 100);
-  const conditions = [eq(dmMessages.dmChannelId, channelId)];
-  if (options.before) {
+  // 1..100 (default 50) whatever the caller passed: NaN or 0 must not reach
+  // LIMIT (security review 2026-10, A9 — the route validates it as well).
+  const limit = Number.isFinite(options.limit) ? Math.max(1, Math.min(Math.trunc(options.limit!), 100)) : 50;
+  const conditions: SQL[] = [eq(dmMessages.dmChannelId, channelId)];
+  if (options.before && !Number.isNaN(options.before.getTime())) {
     conditions.push(lt(dmMessages.createdAt, options.before));
   }
-  const rows = await db
-    .select()
-    .from(dmMessages)
-    .where(and(...conditions))
-    .orderBy(desc(dmMessages.createdAt))
-    .limit(limit);
-  return rows as DmMessageRow[];
+  const select = (where: SQL[]) =>
+    db
+      .select()
+      .from(dmMessages)
+      .where(and(...where))
+      .orderBy(desc(dmMessages.createdAt), desc(dmMessages.id));
+  const page = (await select(conditions).limit(limit)) as DmMessageRow[];
+  // Security review 2026-10 (A11): millisecond-complete pages
+  // (./pagination.ts), so the next `before` skips nothing.
+  return completeLastMillisecond(page, limit, async (boundary, seenIds) =>
+    (await select([
+      ...conditions,
+      inMillisecondOf(dmMessages.createdAt, boundary),
+      ...(seenIds.length > 0 ? [notInArray(dmMessages.id, seenIds)] : []),
+    ])) as DmMessageRow[]
+  );
 }
 
 /** Soft-delete a DM message (author only; enforced by the route). */
@@ -309,4 +353,17 @@ export async function deleteDmMessage(
     .update(dmMessages)
     .set({ deletedAt: new Date() })
     .where(eq(dmMessages.id, messageId));
+}
+
+/** The two participants of a DM channel, or null when it does not exist. */
+export async function getDmChannelParticipants(
+  db: DbClient,
+  channelId: string
+): Promise<{ userAId: string; userBId: string } | null> {
+  const [row] = await db
+    .select({ userAId: dmChannels.userAId, userBId: dmChannels.userBId })
+    .from(dmChannels)
+    .where(eq(dmChannels.id, channelId))
+    .limit(1);
+  return row ?? null;
 }

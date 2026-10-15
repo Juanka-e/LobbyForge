@@ -16,6 +16,7 @@ import { getRevocationStatus, validateGuestFromHeaders, type ResolvedGuest } fro
 import { authorizeTopicSubscribe } from './authorize.js';
 import { ConnectionSubscriptions, type SubscriptionCapacityError } from './subscriptions.js';
 import { ClientMessageSchema, type ServerMessage } from './protocol.js';
+import { sanitizeMemberEvent } from './member-events.js';
 import { getDb } from './db.js';
 import { initAccessInvalidationListener, topicMatchesInvalidation } from './access-invalidation.js';
 import { shutdownSubscriber } from './redis-subscriber.js';
@@ -38,6 +39,9 @@ interface ConnectionState {
    * this socket (null = healthy). Past the grace window the socket
    * closes — realtime never fails open indefinitely. */
   revocationUnavailableSince: number | null;
+  /** Subscribes still authorizing, per topic. An `unsubscribe` cancels
+   * them, so a slow authorization cannot add a topic the client left. */
+  pendingSubscribes: Map<string, Set<{ cancelled: boolean }>>;
 }
 
 function getEnvPort(): number {
@@ -115,15 +119,27 @@ async function forwardProjectedActivity(
     // marketplace plugin projects itself in the plugin worker, which only
     // web can reach) is projected by the web app. A failure throws → the
     // lean event below, never unprojected state.
-    const projected = isCoreProjectedPlugin(pluginId)
-      ? projectActivityState(row.state, pluginId, viewerUserId)
-      : (await fetchHostProjection({ serverId: authz.serverId, sessionId: row.id, viewerUserId })).state;
+    const rowRevision = (row as { revision?: number }).revision;
+    let projected: unknown;
+    let status: string | undefined = row.status;
+    let revision = rowRevision ?? data.revision;
+    if (isCoreProjectedPlugin(pluginId)) {
+      projected = projectActivityState(row.state, pluginId, viewerUserId);
+    } else {
+      const host = await fetchHostProjection({ serverId: authz.serverId, sessionId: row.id, viewerUserId });
+      projected = host.state;
+      status = host.status ?? status;
+      revision = host.revision ?? revision;
+    }
     send(socket, {
       type: 'event',
       topic,
       data: {
-        status: data.status ?? row.status,
-        revision: data.revision,
+        // The status and revision of the row whose state is projected —
+        // not the bus event's: the row may already be newer than the event
+        // that triggered this read, and the client orders frames by revision.
+        status,
+        revision,
         publicSummary: data.publicSummary,
         state: projected,
       },
@@ -162,6 +178,37 @@ function send(socket: WebSocket, msg: ServerMessage): void {
   } catch (err) {
     console.warn(`[ws-gateway] send failed: ${(err as Error).message}`);
   }
+}
+
+/**
+ * Register a subscribe that is about to authorize. `cancelled` turns true
+ * when an `unsubscribe` for the topic arrives first; `done()` forgets it.
+ */
+function beginPendingSubscribe(state: ConnectionState, topic: string): { cancelled: boolean; done: () => void } {
+  let forTopic = state.pendingSubscribes.get(topic);
+  if (!forTopic) {
+    forTopic = new Set();
+    state.pendingSubscribes.set(topic, forTopic);
+  }
+  const pending = {
+    cancelled: false,
+    done: () => {
+      const current = state.pendingSubscribes.get(topic);
+      if (!current) return;
+      current.delete(pending);
+      if (current.size === 0) state.pendingSubscribes.delete(topic);
+    },
+  };
+  forTopic.add(pending);
+  return pending;
+}
+
+/** An `unsubscribe` cancels every subscribe of that topic still authorizing. */
+function cancelPendingSubscribes(state: ConnectionState, topic: string): void {
+  const forTopic = state.pendingSubscribes.get(topic);
+  if (!forTopic) return;
+  for (const pending of forTopic) pending.cancelled = true;
+  state.pendingSubscribes.delete(topic);
 }
 
 function recordSubscribe(state: ConnectionState): boolean {
@@ -373,6 +420,9 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
       } catch {
         /* swallow */
       }
+      // A browser page never sees the ping: this frame is what keeps its
+      // client's liveness timer from tearing down a quiet socket.
+      send(client, { type: 'heartbeat', at: new Date().toISOString() });
       // SEC-003 + LF-SEC-009: re-check revocation on LIVE sockets each
       // heartbeat — logout must close an already-open WS, not just
       // block new ones. 'unavailable' gets a BOUNDED grace (Redis
@@ -460,6 +510,18 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
     // double-decrement when 'close', 'error' and the raw-socket 'close'
     // all fire for the same connection.
     const releaseIpSlot = ipSlotReleasers.get(req) ?? (() => undefined);
+    // Set once the socket is authenticated; the error listener below
+    // releases its subscriptions.
+    let liveState: ConnectionState | null = null;
+    // FIRST, before any check or await: ws reports a malformed frame (RSV
+    // bits, oversize, unmasked, bad UTF-8) as an 'error' event, and an
+    // 'error' with no listener throws and exits the process. The frame can
+    // arrive together with the handshake, so the unauthenticated / revoked
+    // early returns and the revocation check below must already be covered.
+    socket.on('error', () => {
+      liveState?.subs.closeAll();
+      releaseIpSlot();
+    });
 
     // Bot API v2 §4.1: token-authenticated bot feed — never a cookie.
     if (isBotGatewayPath(req.url)) {
@@ -490,6 +552,12 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
         socket.close(1011, 'revocation store unavailable');
         return;
       }
+      // The socket failed or hung up while the check was in flight: its
+      // 'close' has already fired, so nothing below would ever be undone.
+      if (socket.readyState !== socket.OPEN) {
+        releaseIpSlot();
+        return;
+      }
     }
     if (!auth.ok) {
       send(socket, {
@@ -510,8 +578,10 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
       subscribeTimestamps: [],
       alive: true,
       revocationUnavailableSince: null,
+      pendingSubscribes: new Map(),
     };
     connections.set(socket, state);
+    liveState = state;
 
     send(socket, {
       type: 'hello',
@@ -579,8 +649,13 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
           });
           return;
         }
+        const pending = beginPendingSubscribe(state, msg.topic);
         try {
           const authz = await authorizeTopicSubscribe(getDb(), state.guest.uid, msg.topic);
+          // The client unsubscribed while this was authorizing: it already
+          // has its `unsubscribed`, so adding the topic now would leave a
+          // live subscription nobody wants.
+          if (pending.cancelled) return;
           if (!authz.ok) {
             send(socket, {
               type: 'error',
@@ -590,6 +665,9 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
             });
             return;
           }
+          // Projections for this topic go out in bus order: each one waits
+          // for the previous one, so a slow read cannot overtake a newer one.
+          let projectionChain: Promise<void> = Promise.resolve();
           const added = state.subs.add(msg.topic, (raw) => {
             try {
               const data = JSON.parse(raw);
@@ -604,6 +682,11 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
                 });
                 return;
               }
+              if (authz.kind === 'members') {
+                const event = sanitizeMemberEvent(data);
+                if (event) send(socket, { type: 'event', topic: msg.topic, data: event, at: new Date().toISOString() });
+                return;
+              }
               // SEC-001: the bus payload carries NO canonical state (the
               // publisher only sends status/revision/publicSummary). For
               // activity-state topics we load the session and project it
@@ -611,7 +694,9 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
               // use — so no subscriber ever sees another player's
               // secrets (Hushle deck/cards, Quiz correctIndex).
               if (authz.kind === 'activity-state') {
-                void forwardProjectedActivity(socket, msg.topic, authz, data, state.guest.uid);
+                projectionChain = projectionChain
+                  .then(() => forwardProjectedActivity(socket, msg.topic, authz, data, state.guest.uid))
+                  .catch(() => undefined);
                 return;
               }
               send(socket, {
@@ -652,8 +737,11 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
             code: 'internal_error',
             message: 'Subscription failed',
           });
+        } finally {
+          pending.done();
         }
       } else {
+        cancelPendingSubscribes(state, msg.topic);
         if (state.subs.has(msg.topic)) {
           state.subs.remove(msg.topic);
         }
@@ -666,10 +754,6 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
     });
 
     socket.once('close', () => {
-      state.subs.closeAll();
-      releaseIpSlot();
-    });
-    socket.once('error', () => {
       state.subs.closeAll();
       releaseIpSlot();
     });

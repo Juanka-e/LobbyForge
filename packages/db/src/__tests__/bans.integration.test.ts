@@ -90,11 +90,21 @@ describe.skipIf(!DB_URL)('bans revoke access (integration)', () => {
     expect(await isCurrentlyBanned(db, serverId, target)).toBe(true);
   });
 
-  it('re-banning an actively banned user is idempotent', async () => {
-    const again = await banUser(db, { serverId, userId: target, bannedBy: mod });
-    expect(again.ok).toBe(true);
-    const bans = await sql`SELECT id FROM server_bans WHERE server_id = ${serverId} AND user_id = ${target}`;
+  // Security review 2026-10 (A6): a second ban of an actively banned user
+  // updates that ban (escalation) instead of returning it unchanged.
+  it('re-banning an actively banned user updates the one ban row in place', async () => {
+    const until = new Date(Date.now() + 60 * 60_000);
+    const temporary = await banUser(db, { serverId, userId: target, bannedBy: mod, expiresAt: until });
+    expect(temporary).toMatchObject({ ok: true, created: false, previous: { reason: 'spam', expiresAt: null } });
+    if (temporary.ok) {
+      expect(temporary.ban.reason).toBe('spam');
+      expect(temporary.ban.expiresAt?.getTime()).toBe(until.getTime());
+    }
+    const permanent = await banUser(db, { serverId, userId: target, bannedBy: owner, reason: 'raid' });
+    expect(permanent).toMatchObject({ ok: true, created: false, ban: { bannedBy: owner, reason: 'raid', expiresAt: null } });
+    const bans = await sql`SELECT id, banned_by, reason, expires_at FROM server_bans WHERE server_id = ${serverId} AND user_id = ${target}`;
     expect(bans).toHaveLength(1);
+    expect(bans[0]).toMatchObject({ banned_by: owner, reason: 'raid', expires_at: null });
   });
 
   it('refuses to ban the server owner', async () => {

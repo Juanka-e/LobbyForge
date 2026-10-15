@@ -1,14 +1,21 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { listServersForUser, updateMemberNickname } from '@lobbyforge/db';
+import { getServerById, getServerMember, listServersForUser, updateMemberNickname } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { requireMaterializedSession } from '@/lib/api-auth';
 import { withApiSecurity } from '@/lib/security-headers';
+import { publishMembersChanged } from '@/lib/member-bus';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 const ServerProfileSchema = z.object({
+  /**
+   * The community whose nickname this is. Optional only for older clients:
+   * without it the nickname lands in the account's newest community, which
+   * is what every request did before — whichever lobby it came from.
+   */
+  serverId: z.string().uuid().optional(),
   nickname: z
     .string()
     .trim()
@@ -26,19 +33,31 @@ async function handlePatch(req: Request): Promise<NextResponse> {
   try {
     body = ServerProfileSchema.parse(await req.json());
   } catch {
-    return NextResponse.json({ error: 'Invalid server profile payload' }, { status: 400 });
+    return NextResponse.json({ error: 'Invalid server profile payload', code: 'invalid_nickname' }, { status: 400 });
   }
 
   const db = getDb();
-  const servers = await listServersForUser(db, session.session.uid, { limit: 1 });
-  const server = servers[0];
-  if (!server) {
-    return NextResponse.json({ error: 'No accessible community.' }, { status: 409 });
+  let serverId: string | null = null;
+  if (body.serverId) {
+    // A membership in a live server; one answer for "no such community" and
+    // "not yours", like every other server route.
+    const [server, membership] = await Promise.all([
+      getServerById(db, body.serverId),
+      getServerMember(db, body.serverId, session.session.uid),
+    ]);
+    if (server && membership) serverId = server.id;
+  } else {
+    serverId = (await listServersForUser(db, session.session.uid, { limit: 1 }))[0]?.id ?? null;
+  }
+  if (!serverId) {
+    return NextResponse.json({ error: 'No accessible community.', code: 'no_community' }, { status: 409 });
   }
 
-  const updated = await updateMemberNickname(db, server.id, session.session.uid, body.nickname);
+  const updated = await updateMemberNickname(db, serverId, session.session.uid, body.nickname);
+  // docs/PROFILES.md "Live updates": that community's open lobbies show the new name.
+  publishMembersChanged(serverId, [session.session.uid]);
   return NextResponse.json(
-    { serverProfile: { serverId: server.id, nickname: updated.nickname } },
+    { serverProfile: { serverId, nickname: updated.nickname } },
     { headers: { 'Cache-Control': 'no-store' } }
   );
 }

@@ -17,7 +17,7 @@ export interface ProfileNotice {
  *   roles      PUT  /api/servers/{id}/members/{userId}/role          (the whole set)
  *   timeout    PUT  /api/servers/{id}/members/{userId}/timeout       ({ until })
  *   kick       DELETE /api/servers/{id}/members/{userId}
- *   ban        POST /api/servers/{id}/bans                           ({ userId, reason? })
+ *   ban        POST /api/servers/{id}/bans                           ({ userId, reason?, expiresAt? })
  *   server mute POST /api/servers/{id}/channels/{ch}/members/{userId}/voice/mute
  *
  * The profile only offers what `viewerCan` allows; the routes decide.
@@ -135,7 +135,12 @@ export function useProfileActions({
             method: 'POST',
             credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId, ...(request.reason ? { reason: request.reason } : {}) }),
+            body: JSON.stringify({
+              userId,
+              ...(request.reason ? { reason: request.reason } : {}),
+              // A ban with a length ends on its own; without one it is permanent.
+              ...(request.durationMs ? { expiresAt: new Date(Date.now() + request.durationMs).toISOString() } : {}),
+            }),
           });
         }
         if (!res.ok) return await refusal(request.kind === 'untimeout' ? 'timeout' : request.kind, res);

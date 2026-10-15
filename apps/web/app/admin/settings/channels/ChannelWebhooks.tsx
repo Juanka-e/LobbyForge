@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
 import type { Translator } from '@/lib/i18n/core';
+import { timedOutRefusalKey } from '@/lib/profile-action-errors';
 import { MAX_WEBHOOKS_PER_CHANNEL, WEBHOOK_NAME_MAX_LENGTH } from '@/lib/bots/catalog';
 import {
   createChannelWebhook,
@@ -39,6 +40,9 @@ type Notice = { tone: 'success' | 'danger'; text: string } | null;
 type Confirm = { kind: 'rotate' | 'delete'; webhook: ChannelWebhook } | null;
 
 function failureText(t: Translator, failure: RequestFailure): string {
+  // A timed-out channel manager changes no webhooks (lib/actor-timeout.ts).
+  const timedOut = timedOutRefusalKey(failure);
+  if (timedOut) return t(timedOut);
   switch (failure.code) {
     case 'network':
       return t('webhooks.error.network');

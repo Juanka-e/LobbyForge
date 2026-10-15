@@ -10,6 +10,8 @@ const checkDmChannelAccess = vi.fn();
 const listDmMessages = vi.fn();
 const sendDmMessage = vi.fn();
 const getDmRecipientEligibility = vi.fn();
+const getDmChannelParticipants = vi.fn();
+const publishDmActivity = vi.fn();
 
 vi.mock('@/lib/api-auth', () => ({ requireMaterializedSession }));
 vi.mock('@lobbyforge/db', () => ({
@@ -21,12 +23,15 @@ vi.mock('@lobbyforge/db', () => ({
   checkDmChannelAccess,
   listDmMessages,
   sendDmMessage,
+  getDmChannelParticipants,
 }));
+vi.mock('@/lib/dm-notify', () => ({ publishDmActivity }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
 vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));
 
 const UID = '00000000-0000-0000-0000-000000000099';
-const OTHER_UID = '00000000-0000-0000-0000-0000000000BB';
+// Lower case, as the database spells every uuid it returns.
+const OTHER_UID = '00000000-0000-0000-0000-0000000000bb';
 const CHANNEL_ID = '00000000-0000-0000-0000-0000000000CC';
 
 beforeEach(() => {
@@ -148,6 +153,36 @@ describe('POST /api/dm', () => {
     );
     expect(res.status).toBe(400);
   });
+
+  // Security review 2026-10 (A8): ids are compared and ordered in lower
+  // case — the database's spelling.
+  it('an upper-case copy of your own id is still yourself (400), not a DM with yourself', async () => {
+    const { POST } = await import('../route.js');
+    const OWN_UPPER = '00000000-0000-0000-0000-0000000000AA';
+    requireMaterializedSession.mockReturnValue({ ok: true, session: { uid: OWN_UPPER.toLowerCase(), gid: 'g_1', name: 'Caller', exp: 123 } });
+    const res = await POST(
+      new Request('https://example.test/api/dm', { method: 'POST', body: JSON.stringify({ recipientUserId: OWN_UPPER }) }),
+      {}
+    );
+    expect(res.status).toBe(400);
+    expect(findOrCreateDmChannel).not.toHaveBeenCalled();
+  });
+
+  it('an upper-case recipient id reaches the eligibility, block and channel lookups in lower case', async () => {
+    findOrCreateDmChannel.mockResolvedValue({ id: CHANNEL_ID, userAId: OTHER_UID, userBId: UID, createdBy: UID });
+    getBlockedUserIds.mockImplementation(async (_db, uid) => (uid === UID ? new Set([OTHER_UID]) : new Set()));
+    const { POST } = await import('../route.js');
+    const res = await POST(
+      new Request('https://example.test/api/dm', { method: 'POST', body: JSON.stringify({ recipientUserId: OTHER_UID.toUpperCase() }) }),
+      {}
+    );
+    // The caller blocked them: the lower-case block entry matches.
+    expect(res.status).toBe(403);
+    expect(getDmRecipientEligibility).toHaveBeenCalledWith({ __mockDb: true }, UID, OTHER_UID);
+    getBlockedUserIds.mockResolvedValue(new Set());
+    expect((await POST(new Request('https://example.test/api/dm', { method: 'POST', body: JSON.stringify({ recipientUserId: OTHER_UID.toUpperCase() }) }), {})).status).toBe(200);
+    expect(findOrCreateDmChannel).toHaveBeenCalledWith({ __mockDb: true }, UID, OTHER_UID);
+  });
 });
 
 // Security review (needs verification #4): any user id used to open a DM,
@@ -232,6 +267,62 @@ describe('GET /api/dm/{channelId}/messages', () => {
   });
 });
 
+// Security review 2026-10 (A9): `limit`, `before` and the channel id
+// reached Postgres unchecked — junk was a 500 (a non-UUID id threw before
+// the route's try block).
+describe('GET /api/dm/{channelId}/messages — input', () => {
+  function ctx(channelId = CHANNEL_ID) {
+    return { params: Promise.resolve({ channelId }) };
+  }
+  async function get(query = '', channelId = CHANNEL_ID) {
+    const { GET } = await import('../[channelId]/messages/route.js');
+    return GET(new Request(`https://example.test/api/dm/${channelId}/messages${query}`), ctx(channelId));
+  }
+
+  beforeEach(() => {
+    isDmChannelParticipant.mockResolvedValue(true);
+    listDmMessages.mockResolvedValue([]);
+  });
+
+  it('a channel id that is not a UUID is not found — before any query', async () => {
+    expect((await get('', 'not-a-uuid')).status).toBe(404);
+    expect(isDmChannelParticipant).not.toHaveBeenCalled();
+    const { POST } = await import('../[channelId]/messages/route.js');
+    const res = await POST(
+      new Request('https://example.test/api/dm/not-a-uuid/messages', { method: 'POST', body: JSON.stringify({ content: 'hi' }) }),
+      ctx('not-a-uuid')
+    );
+    expect(res.status).toBe(404);
+    expect(checkDmChannelAccess).not.toHaveBeenCalled();
+  });
+
+  it('400 for a limit that is not an integer, or a before that is not a date', async () => {
+    for (const query of ['?limit=abc', '?limit=12.5', '?limit=', '?before=yesterday', '?before=']) {
+      expect((await get(query)).status, query).toBe(400);
+    }
+    expect(listDmMessages).not.toHaveBeenCalled();
+  });
+
+  it('clamps the limit to 1..100 and passes a valid cursor on', async () => {
+    await get('?limit=1000');
+    expect(listDmMessages).toHaveBeenLastCalledWith({ __mockDb: true }, CHANNEL_ID, { limit: 100 });
+    await get('?limit=0');
+    expect(listDmMessages).toHaveBeenLastCalledWith({ __mockDb: true }, CHANNEL_ID, { limit: 1 });
+    await get('?limit=20&before=2026-10-01T12:00:00.123Z');
+    expect(listDmMessages).toHaveBeenLastCalledWith({ __mockDb: true }, CHANNEL_ID, {
+      limit: 20,
+      before: new Date('2026-10-01T12:00:00.123Z'),
+    });
+  });
+
+  it('a database failure is a 500 with a body, not a thrown error', async () => {
+    isDmChannelParticipant.mockRejectedValue(new Error('db down'));
+    const res = await get();
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: 'Failed to load messages' });
+  });
+});
+
 describe('POST /api/dm/{channelId}/messages', () => {
   function ctx(channelId = CHANNEL_ID) {
     return { params: Promise.resolve({ channelId }) };
@@ -250,6 +341,23 @@ describe('POST /api/dm/{channelId}/messages', () => {
     );
     expect(res.status).toBe(201);
     expect(sendDmMessage).toHaveBeenCalledWith({ __mockDb: true }, CHANNEL_ID, UID, 'hello', null);
+  });
+
+  it('tells the DM lists of both participants, without the message text (docs/PROFILES.md "Live updates")', async () => {
+    isDmChannelParticipant.mockResolvedValue(true);
+    checkDmChannelAccess.mockResolvedValue('ok');
+    sendDmMessage.mockResolvedValue({ id: 'm4', authorId: UID, content: 'secret', replyToId: null, createdAt: new Date('2026-01-03') });
+    getDmChannelParticipants.mockResolvedValue({ userAId: UID, userBId: OTHER_UID });
+    publishDmActivity.mockClear();
+    const { POST } = await import('../[channelId]/messages/route.js');
+    const res = await POST(
+      new Request(`https://example.test/api/dm/${CHANNEL_ID}/messages`, { method: 'POST', body: JSON.stringify({ content: 'secret' }) }),
+      ctx()
+    );
+    expect(res.status).toBe(201);
+    await vi.waitFor(() => expect(publishDmActivity).toHaveBeenCalledTimes(1));
+    expect(publishDmActivity).toHaveBeenCalledWith({ channelId: CHANNEL_ID, authorId: UID, participantIds: [UID, OTHER_UID] });
+    expect(JSON.stringify(publishDmActivity.mock.calls)).not.toContain('secret');
   });
 
   it('returns 404 when not a participant', async () => {

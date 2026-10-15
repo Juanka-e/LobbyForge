@@ -33,6 +33,7 @@ import { getDb } from '@/lib/db';
 import { publishChatMessage } from '@/lib/chat-bus';
 import { requireMaterializedSession, type ApiResult } from '@/lib/api-auth';
 import { authorizeChannelVisibility, authorizeServerPermission } from '@/lib/permissions';
+import { isWriteRequest, refuseTimedOutActor } from '@/lib/actor-timeout';
 import { MAX_BOT_MESSAGE_LENGTH, WEBHOOK_NAME_MAX_LENGTH } from './catalog';
 import { emitMessageEvent } from './events';
 import { moderateWebhookMessage, moderationBlockedBody } from './moderation';
@@ -129,7 +130,9 @@ export interface WebhookManager {
 /**
  * Managing a channel's webhooks (§1.3): a signed-in member holding
  * MANAGE_CHANNELS (owner / administrators implied) who can see the channel;
- * the channel must be a text or announcement channel of this server.
+ * the channel must be a text or announcement channel of this server. A
+ * write (anything but GET/HEAD) is also refused to a timed-out manager —
+ * 403 `actor_timed_out` (lib/actor-timeout.ts).
  */
 export async function requireWebhookManager(
   req: Request,
@@ -143,6 +146,10 @@ export async function requireWebhookManager(
   if (!server) return { ok: false, response: NextResponse.json({ error: 'Server not found', code: 'not_found' }, { status: 404 }) };
   const auth = await authorizeServerPermission(uid, serverId, CorePermission.MANAGE_CHANNELS);
   if (!auth.ok) return { ok: false, response: auth.response };
+  if (isWriteRequest(req)) {
+    const timedOut = await refuseTimedOutActor(serverId, uid, server.ownerUserId);
+    if (timedOut) return { ok: false, response: timedOut };
+  }
   const channel = z.string().uuid().safeParse(channelId).success ? await getChannelById(getDb(), channelId) : null;
   if (!channel || channel.serverId !== serverId) {
     return { ok: false, response: NextResponse.json({ error: 'Channel not found', code: 'not_found' }, { status: 404 }) };

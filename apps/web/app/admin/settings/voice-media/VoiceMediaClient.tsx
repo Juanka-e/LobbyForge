@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useT } from '@/lib/i18n/client';
+import { adminRefusalText } from '@/lib/profile-action-errors';
 
 export interface VoiceSettingsView {
   serverId: string;
@@ -60,7 +61,7 @@ export default function VoiceMediaClient({
         }),
       });
       const data = (await response.json().catch(() => ({}))) as ApiResponse;
-      if (!response.ok || !data.settings) throw new Error(data.error ?? t('adminSettings.voiceMedia.saveFailed'));
+      if (!response.ok || !data.settings) throw new Error(adminRefusalText(t, data, t('adminSettings.voiceMedia.saveFailed')));
       setSettings(data.settings);
       setDraft(data.settings);
       setMessage({ tone: 'success', text: t('adminSettings.voiceMedia.saved') });

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import {
   getEffectiveServerVoiceSettings,
+  logAction,
   updateServerVoiceSettings,
   type ServerVoiceSettingsRow,
 } from '@lobbyforge/db';
@@ -13,6 +14,8 @@ import {
   requireServerPermission,
 } from '@/lib/api-auth';
 import { withApiSecurity } from '@/lib/security-headers';
+import { refuseTimedOutActor } from '@/lib/actor-timeout';
+import { queueServerVoiceSync } from '@/lib/voice-moderation';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -59,7 +62,7 @@ async function requireReadable(req: Request, serverId: string) {
   if (!sessionResult.ok) return sessionResult;
   const member = await requireServerMember(sessionResult.session.uid, serverId);
   if (!member.ok) return member;
-  return { ok: true as const, uid: sessionResult.session.uid };
+  return { ok: true as const, uid: sessionResult.session.uid, ownerUserId: member.server?.ownerUserId ?? null };
 }
 
 async function handleGet(req: Request, ctx: RouteContext): Promise<NextResponse> {
@@ -82,6 +85,9 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
 
   const permission = await requireServerPermission(access.uid, serverId, CorePermission.MANAGE_SERVER);
   if (!permission.ok) return permission.response;
+  // A timed-out member changes no settings (lib/actor-timeout.ts).
+  const timedOut = await refuseTimedOutActor(serverId, access.uid, access.ownerUserId);
+  if (timedOut) return timedOut;
 
   let body: z.infer<typeof PatchSchema>;
   try {
@@ -92,6 +98,19 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
 
   try {
     const settings = await updateServerVoiceSettings(getDb(), serverId, body);
+    // The camera / screen-share switches reach everyone already connected:
+    // re-apply each participant's publish grant live (a disabled camera is
+    // muted now, not at the next token), like a role or channel change does.
+    queueServerVoiceSync(serverId);
+    void logAction(getDb(), {
+      serverId,
+      actorUserId: access.uid,
+      action: 'server.voice_settings.update',
+      targetType: 'server',
+      targetId: serverId,
+      // The fields this request set, with their new values.
+      metadata: { ...body },
+    }).catch((err) => console.error('[audit] server.voice_settings.update failed:', (err as Error).message));
     return NextResponse.json({ settings: toJson(settings) }, { headers: { 'Cache-Control': 'no-store' } });
   } catch {
     return NextResponse.json({ error: 'Failed to update voice settings' }, { status: 500 });

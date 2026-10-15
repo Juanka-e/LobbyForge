@@ -12,6 +12,15 @@ import AccountEmailSection from './AccountEmailSection';
 /** What the page says after the dialog closed on a successful change. */
 type PasswordNotice = 'changed' | 'sessionsNotRevoked';
 
+
+/** Why a password change was refused, by the route's `code`. */
+const PASSWORD_REFUSAL_KEYS: Readonly<Record<string, string>> = {
+  wrong_current_password: 'settings.account.security.wrongCurrent',
+  same_password: 'settings.account.security.samePassword',
+  password_too_short: 'settings.account.security.tooShort',
+  password_changed_elsewhere: 'settings.account.security.changedElsewhere',
+};
+
 export default function MyAccountBody({
   user,
   signedIn,
@@ -33,12 +42,16 @@ export default function MyAccountBody({
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(input),
     });
-    const body = (await response.json().catch(() => ({}))) as { error?: string; warning?: string; retryAfter?: number };
+    const body = (await response.json().catch(() => ({}))) as { error?: string; code?: string; warning?: string; retryAfter?: number };
     // Too many wrong current passwords (per-user limit): say how long.
     if (response.status === 429) {
       throw new Error(t('auth.login.error.rateLimited', { minutes: retryAfterMinutes(body.retryAfter) }));
     }
-    if (!response.ok) throw new Error(body.error ?? t('settings.account.security.changeFailed'));
+    if (!response.ok) {
+      // Said in the account's language, never the route's English text.
+      const key = PASSWORD_REFUSAL_KEYS[body.code ?? ''] ?? 'settings.account.security.changeFailed';
+      throw new Error(t(key));
+    }
     // security-review AUTH-001 follow-up: the password is changed even when
     // the other sessions could not be signed out. That is a success with a
     // warning — shown in the viewer's language — never a failure that
@@ -54,8 +67,7 @@ export default function MyAccountBody({
       credentials: 'same-origin',
     });
     if (!response.ok) {
-      const body = (await response.json().catch(() => ({}))) as { error?: string };
-      setAccountError(body.error ?? t('settings.account.session.signOutFailed'));
+      setAccountError(t('settings.account.session.signOutFailed'));
       setSigningOut(false);
       return;
     }

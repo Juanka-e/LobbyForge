@@ -5,6 +5,7 @@ import { getRealtimeClient } from '@/lib/realtime-client';
 import { MemberBlockButton } from './MemberBlockButton';
 import { BotAvatar, BotBadge, BotProfilePopover, type LobbyBot } from './BotIdentity';
 import { useProfileCard } from './ProfileCardProvider';
+import { useLiveMembers } from './LiveMembersProvider';
 import { VoiceStatusIcon } from './VoiceStatusIcon';
 import { useT } from '@/lib/i18n/client';
 import { initialOf } from '@/lib/initial';
@@ -37,12 +38,15 @@ interface Member {
   roleName?: string | null;
   roleColor?: string | null;
   isGuest?: boolean;
+  username?: string | null;
   /** Short image URL from the server (security-review FILE-001) — never a data URL. */
   avatarUrl?: string | null;
   /** Banner reference; turned into a URL only when the popover opens. */
   bannerRef?: string | null;
   statusText?: string | null;
   bio?: string | null;
+  pronouns?: string | null;
+  accentColor?: string | null;
   roles?: Array<{ id: string; name: string; color: string | null; icon: string | null; position: number; displaySeparately: boolean }>;
 }
 
@@ -126,7 +130,11 @@ export function LobbyMembersClient({
   botSettingsHref?: string | null;
 }) {
   const t = useT();
-  const [allMembers, setMembers] = useState<Member[]>(initialMembers);
+  // docs/PROFILES.md "Live updates": joins, departures, names, avatars and
+  // roles arrive through the live rows; status stays this list's own.
+  const liveMembers = useLiveMembers()?.members;
+  const sourceMembers = liveMembers ?? initialMembers;
+  const [allMembers, setMembers] = useState<Member[]>(sourceMembers);
   const profileCard = useProfileCard();
   // Someone kicked or banned through a profile card leaves the list at once;
   // a role change made in a card regroups them at once (Discord does too).
@@ -134,9 +142,9 @@ export function LobbyMembersClient({
   const roleUpdates = profileCard?.memberRoles;
   const separately = useMemo(() => {
     const known = new Map<string, boolean>();
-    for (const member of initialMembers) for (const role of member.roles ?? []) known.set(role.id, role.displaySeparately);
+    for (const member of sourceMembers) for (const role of member.roles ?? []) known.set(role.id, role.displaySeparately);
     return known;
-  }, [initialMembers]);
+  }, [sourceMembers]);
   const members = useMemo(() => {
     const present = removed && removed.size > 0 ? allMembers.filter((m) => !removed.has(m.id)) : allMembers;
     if (!roleUpdates || roleUpdates.size === 0) return present;
@@ -189,6 +197,33 @@ export function LobbyMembersClient({
     const id = window.setInterval(refresh, POLL_FALLBACK_MS);
     return () => window.clearInterval(id);
   }, [refresh]);
+
+  // New live rows: take everything but the status, which this list keeps
+  // from the presence feed. Someone new starts offline until the next
+  // presence read, asked for at once.
+  const firstSource = useRef(sourceMembers);
+  const shownRef = useRef(allMembers);
+  shownRef.current = allMembers;
+  useEffect(() => {
+    if (firstSource.current === sourceMembers) return;
+    firstSource.current = sourceMembers;
+    const shownIds = new Set(shownRef.current.map((member) => member.id));
+    const arrived = sourceMembers.some((member) => !shownIds.has(member.id));
+    setMembers((previous) => {
+      const known = new Map(previous.map((member) => [member.id, member]));
+      return sourceMembers
+        .map((member) => {
+          const before = known.get(member.id);
+          if (!before) return member;
+          return { ...member, status: before.status, presence: before.presence, grayscale: before.grayscale, muted: before.muted };
+        })
+        .sort((a, b) => {
+          const order: Record<Member['status'], number> = { 'in-voice': 0, online: 1, offline: 2 };
+          return order[a.status] - order[b.status] || a.name.localeCompare(b.name);
+        });
+    });
+    if (arrived) void refresh();
+  }, [sourceMembers, refresh]);
 
   // WS presence subscribe. beta-review (S5): the event is a content-free
   // "presence changed" signal — re-fetch the per-viewer REST snapshot

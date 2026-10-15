@@ -44,7 +44,7 @@ export function makeVoice(overrides: Partial<LobbyVoiceContextValue> = {}): Lobb
     toggleMic: vi.fn(async () => {}),
     toggleCamera: vi.fn(async () => {}),
     toggleScreenShare: vi.fn(async () => {}),
-    setScreenSharePreference: vi.fn(async () => {}),
+    setScreenSharePreference: vi.fn(async () => true),
     toggleDeafen: vi.fn(),
     setMainViewMode: vi.fn(),
     setActiveTextChannel: vi.fn(),

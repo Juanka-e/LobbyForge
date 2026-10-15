@@ -44,6 +44,10 @@ export interface MemberProfileRecord {
   isGuest: boolean;
   statusText: string | null;
   bio: string | null;
+  /** 0050: the handle (an identity field, always shown), pronouns and profile colour. */
+  username: string | null;
+  pronouns: string | null;
+  accentColor: string | null;
   accountCreatedAt: Date;
   /** When the membership row was created — "member since" in this community. */
   joinedAt: Date;
@@ -114,6 +118,9 @@ export async function getMemberProfileRecord(
       isGuest: users.isGuest,
       statusText: users.statusText,
       bio: users.bio,
+      username: users.username,
+      pronouns: users.pronouns,
+      accentColor: users.accentColor,
       accountCreatedAt: users.createdAt,
       joinedAt: memberships.createdAt,
       timedOutUntil: memberships.timedOutUntil,
@@ -160,6 +167,9 @@ export async function getMemberProfileRecord(
     isGuest: row.isGuest,
     statusText: row.statusText,
     bio: row.bio,
+    username: row.username ?? null,
+    pronouns: row.pronouns ?? null,
+    accentColor: row.accentColor ?? null,
     accountCreatedAt: row.accountCreatedAt,
     joinedAt: row.joinedAt,
     timedOutUntil: row.timedOutUntil,

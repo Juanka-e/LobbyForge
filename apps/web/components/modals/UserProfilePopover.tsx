@@ -24,7 +24,7 @@ import { MessageBox, SelfStatusPicker, VolumeControl } from './profile/ProfileCo
 import { ProfileMenu } from './profile/ProfileMenu';
 import { ModerationDialog } from './profile/ModerationDialog';
 import { useProfileActions } from './profile/useProfileActions';
-import { buildProfileMenuItems, EDIT_PROFILE_HREF } from './profile/profileMenuItems';
+import { buildProfileMenuItems, editProfileHref } from './profile/profileMenuItems';
 
 export type ProfileTab = 'about' | 'mutual';
 
@@ -133,7 +133,7 @@ export function UserProfilePopover({
   const view = user ? mergeProfileView(user, profile, self?.status ?? null) : null;
   const can = profile?.viewerCan ?? null;
   const isSelf = can?.isSelf ?? Boolean(self);
-  const bandColor = useBannerColor(view?.avatarUrl, view?.roles);
+  const bandColor = useBannerColor(view?.avatarUrl, view?.roles, view?.limited ? null : view?.accentColor);
   const actions = useProfileActions({
     serverId,
     userId,
@@ -212,6 +212,7 @@ export function UserProfilePopover({
     userId,
     name: view.displayName,
     isSelf,
+    serverId,
     data: profile,
     isBlocked,
     onCopyId: () => void actions.copyUserId(),
@@ -252,6 +253,7 @@ export function UserProfilePopover({
               avatarUrl={view.avatarUrl}
               presence={view.presence}
               isSelf={isSelf}
+              accentColor={view.limited ? null : view.accentColor}
               onOpen={openViewer('avatar')}
             />
             {view.statusText ? (
@@ -267,6 +269,8 @@ export function UserProfilePopover({
               displayName={view.displayName}
               globalDisplayName={view.globalDisplayName}
               nickname={view.nickname}
+              username={view.username}
+              pronouns={view.limited ? null : view.pronouns}
               isGuest={view.isGuest}
               isOwner={view.isOwner}
               presence={view.presence}
@@ -339,7 +343,7 @@ export function UserProfilePopover({
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
             {isSelf ? (
               <Link
-                href={EDIT_PROFILE_HREF}
+                href={editProfileHref(serverId)}
                 onClick={onClose}
                 className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-on-primary hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
               >

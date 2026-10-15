@@ -165,6 +165,52 @@ describe('gateway activity projection routing (ADR-007)', () => {
   });
 });
 
+describe('G4 — projected frames keep bus order and carry the revision they show', () => {
+  it('a slow read cannot be overtaken by the next event on the same topic', async () => {
+    let finishFirstRead: ((value: unknown) => void) | null = null;
+    dbMocks.getGameSessionById
+      .mockImplementationOnce(() => new Promise((resolve) => { finishFirstRead = resolve; }))
+      .mockResolvedValueOnce({ ...row('hushle', { phase: 'playing', deck: [], usedCardIds: [] }), revision: 8 });
+    const { ws, next } = await connectAndSubscribe(await start());
+    bus.get(TOPIC)!(JSON.stringify({ status: 'running', revision: 7 }));
+    bus.get(TOPIC)!(JSON.stringify({ status: 'running', revision: 8 }));
+    await vi.waitFor(() => expect(dbMocks.getGameSessionById).toHaveBeenCalledTimes(1));
+    // The second event waits for the first one's read.
+    await new Promise((r) => setTimeout(r, 30));
+    expect(dbMocks.getGameSessionById).toHaveBeenCalledTimes(1);
+
+    finishFirstRead!({ ...row('hushle', { phase: 'playing', deck: [], usedCardIds: [] }), revision: 7 });
+    const first = await next();
+    const second = await next();
+    expect((first.data as { revision: number }).revision).toBe(7);
+    expect((second.data as { revision: number }).revision).toBe(8);
+    ws.close();
+  });
+
+  it("sends the revision and status of the row it read, not the bus event's", async () => {
+    dbMocks.getGameSessionById.mockResolvedValue({
+      ...row('hushle', { phase: 'playing', deck: [], usedCardIds: [] }),
+      status: 'finished',
+      revision: 9,
+    });
+    const { ws, next } = await connectAndSubscribe(await start());
+    bus.get(TOPIC)!(JSON.stringify({ status: 'running', revision: 4 }));
+    const event = await next();
+    expect(event.data).toMatchObject({ status: 'finished', revision: 9 });
+    ws.close();
+  });
+
+  it('a web-projected plugin carries the revision the web app projected', async () => {
+    dbMocks.getGameSessionById.mockResolvedValue({ ...row('sandbox-buzzer', { phase: 'open' }), revision: 5 });
+    hostProjection.fetchHostProjection.mockResolvedValue({ state: { phase: 'open' }, status: 'running', revision: 6 });
+    const { ws, next } = await connectAndSubscribe(await start());
+    bus.get(TOPIC)!(JSON.stringify({ status: 'running', revision: 5 }));
+    const event = await next();
+    expect(event.data).toMatchObject({ status: 'running', revision: 6, state: { phase: 'open' } });
+    ws.close();
+  });
+});
+
 describe('fetchHostProjection', () => {
   const SECRET = 'k'.repeat(40);
 

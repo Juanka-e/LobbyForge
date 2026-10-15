@@ -44,6 +44,17 @@ export const users = pgTable('users', {
   guestKey: text('guest_key').unique(),
   statusText: varchar('status_text', { length: 128 }),
   bio: varchar('bio', { length: 190 }),
+  // 0050 (docs/PROFILES.md "Profile fields"): the account's handle — the
+  // unique `@name` under the display name, and a mention anyone can type
+  // without the picker. Stored lowercase (2–32 of a-z 0-9 _ .); NULL = none
+  // chosen, which every guest and every account from before 0050 has. The
+  // format CHECK lives in the SQL migration only.
+  username: text('username').unique(),
+  // 0050: free text shown next to the name ("she/her", "o/onlar"). NULL = none.
+  pronouns: varchar('pronouns', { length: 40 }),
+  // 0050: the profile colour, `#rrggbb` lowercase — the card's band when there
+  // is no banner, and its accent ring. NULL = derived from the avatar.
+  accentColor: varchar('accent_color', { length: 7 }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),

@@ -10,6 +10,7 @@
   "lobby.apps.title": "Etkinlikler",
   "lobby.dm.empty": "Henüz sohbet yok",
   "lobby.dm.title": "Direkt Mesajlar",
+  "lobby.dm.unread": "Okunmamış mesajlar",
   "lobby.meta.description": "Kendi barındırdığın topluluk, tek bir 1280px pencerede.",
   "lobby.meta.title": "Bağımsız Lobi - LobbyForge",
   "lobby.nav.close": "Gezinme menüsünü kapat",

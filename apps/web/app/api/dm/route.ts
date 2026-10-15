@@ -45,7 +45,10 @@ async function handleGet(req: Request): Promise<NextResponse> {
 }
 
 const CreateDmSchema = z.object({
-  recipientUserId: z.string().uuid(),
+  // Lower-cased (security review 2026-10, A8): an upper-case copy of the
+  // caller's own id slipped past the self check below, and the block lists
+  // and the pair's ordering compare the database's lower-case spelling.
+  recipientUserId: z.string().uuid().transform((id) => id.toLowerCase()),
 }).strict();
 
 /**
@@ -73,7 +76,7 @@ async function handlePost(req: Request): Promise<NextResponse> {
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
-  if (body.recipientUserId === uid) {
+  if (body.recipientUserId === uid.toLowerCase()) {
     return NextResponse.json({ error: 'Cannot DM yourself' }, { status: 400 });
   }
 

@@ -326,3 +326,169 @@ describe('RealtimeClient catching up after a lost connection', () => {
     expect(MockWebSocket.instances).toHaveLength(1);
   });
 });
+
+describe('RealtimeClient when the gateway refuses the socket (G2)', () => {
+  const hello = { type: 'hello', ok: true, uid: 'u1', at: 'now' };
+
+  it('resets the backoff only after hello — an accepted-then-closed socket keeps backing off (1011)', async () => {
+    vi.useFakeTimers();
+    const client = new RealtimeClient({ url: 'ws://test' });
+    client.connect();
+    MockWebSocket.instances[0].open();
+    MockWebSocket.instances[0].close(1011, 'revocation store unavailable');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(MockWebSocket.instances).toHaveLength(2);
+
+    // Open again, refused again: the next try waits 1 s, not 500 ms.
+    MockWebSocket.instances[1].open();
+    MockWebSocket.instances[1].close(1011, 'revocation store unavailable');
+    await vi.advanceTimersByTimeAsync(600);
+    expect(MockWebSocket.instances).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(400);
+    expect(MockWebSocket.instances).toHaveLength(3);
+
+    // Authenticated: the next loss starts over at 500 ms.
+    MockWebSocket.instances[2].open();
+    MockWebSocket.instances[2].receive(hello);
+    MockWebSocket.instances[2].close(1006);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(MockWebSocket.instances).toHaveLength(4);
+  });
+
+  it.each([
+    [4401, 'unauthenticated'],
+    [1008, 'session revoked'],
+  ])('stops for good on %i and tells terminal listeners', async (code, reason) => {
+    vi.useFakeTimers();
+    const terminal = vi.fn();
+    const client = new RealtimeClient({ url: 'ws://test' });
+    client.onTerminalClose(terminal);
+    client.subscribe('chat:srv:abc', () => undefined);
+    client.connect();
+    MockWebSocket.instances[0].open();
+    MockWebSocket.instances[0].close(code, reason);
+
+    expect(terminal).toHaveBeenCalledWith({ code, reason });
+    expect(client.terminalClose).toEqual({ code, reason });
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(MockWebSocket.instances).toHaveLength(1);
+
+    // Neither the network coming back nor a new subscriber hammers it.
+    client.wake('online');
+    client.wake('visible');
+    client.subscribe('user:u1', () => undefined);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(MockWebSocket.instances).toHaveLength(1);
+
+    // An explicit connect (signed in again) tries once more.
+    client.connect();
+    expect(MockWebSocket.instances).toHaveLength(2);
+    expect(client.terminalClose).toBeNull();
+    MockWebSocket.instances[1].open();
+    expect(MockWebSocket.instances[1].sent).toContain(JSON.stringify({ type: 'subscribe', topic: 'user:u1' }));
+  });
+});
+
+describe('RealtimeClient re-subscribing after a refusal (G8)', () => {
+  const hello = { type: 'hello', ok: true, uid: 'u1', at: 'now' };
+  const TOPIC = 'chat:srv:abc';
+  const subscribes = (sock: MockWebSocket) =>
+    sock.sent.filter((m) => m === JSON.stringify({ type: 'subscribe', topic: TOPIC })).length;
+
+  function ready(client: RealtimeClient): MockWebSocket {
+    client.subscribe(TOPIC, () => undefined);
+    client.connect();
+    const sock = MockWebSocket.instances[0];
+    sock.open();
+    sock.receive(hello);
+    return sock;
+  }
+
+  it('retries internal_error / rate_limited with a capped backoff, and stops after a few tries', async () => {
+    vi.useFakeTimers();
+    const errors: Error[] = [];
+    const client = new RealtimeClient({ url: 'ws://test', onError: (e) => errors.push(e) });
+    const sock = ready(client);
+    const before = subscribes(sock);
+
+    sock.receive({ type: 'error', topic: TOPIC, code: 'internal_error', message: 'Subscription failed' });
+    await vi.advanceTimersByTimeAsync(999);
+    expect(subscribes(sock)).toBe(before);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(subscribes(sock)).toBe(before + 1);
+
+    sock.receive({ type: 'error', topic: TOPIC, code: 'rate_limited', message: 'Too many subscribe requests' });
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(subscribes(sock)).toBe(before + 1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(subscribes(sock)).toBe(before + 2);
+
+    // Keeps failing: it gives up after the capped number of tries.
+    for (let i = 0; i < 10; i++) {
+      sock.receive({ type: 'error', topic: TOPIC, code: 'internal_error', message: 'Subscription failed' });
+      await vi.advanceTimersByTimeAsync(30_000);
+    }
+    expect(subscribes(sock)).toBe(before + 6);
+    expect(errors.some((e) => e.message.includes('gave up re-subscribing'))).toBe(true);
+  });
+
+  it('a successful subscribe starts the count over, and a topic nobody wants is not retried', async () => {
+    vi.useFakeTimers();
+    const client = new RealtimeClient({ url: 'ws://test' });
+    const sock = ready(client);
+    const before = subscribes(sock);
+    sock.receive({ type: 'error', topic: TOPIC, code: 'internal_error', message: 'x' });
+    await vi.advanceTimersByTimeAsync(1_000);
+    sock.receive({ type: 'subscribed', topic: TOPIC, at: 'now' });
+    sock.receive({ type: 'error', topic: TOPIC, code: 'internal_error', message: 'x' });
+    await vi.advanceTimersByTimeAsync(1_000); // back to the first, shortest delay
+    expect(subscribes(sock)).toBe(before + 2);
+
+    sock.receive({ type: 'error', topic: 'chat:srv:gone', code: 'rate_limited', message: 'x' });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(sock.sent.some((m) => m.includes('chat:srv:gone'))).toBe(false);
+  });
+
+  it('asks once more after access_revoked, and a forbidden answer ends it', async () => {
+    vi.useFakeTimers();
+    const errors: Error[] = [];
+    const client = new RealtimeClient({ url: 'ws://test', onError: (e) => errors.push(e) });
+    const sock = ready(client);
+    const before = subscribes(sock);
+
+    sock.receive({ type: 'access_revoked', topic: TOPIC, reason: 'roles_changed', at: 'now' });
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(subscribes(sock)).toBe(before);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(subscribes(sock)).toBe(before + 1);
+    // A second revoke before any answer does not start another round.
+    sock.receive({ type: 'access_revoked', topic: TOPIC, reason: 'roles_changed', at: 'now' });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(subscribes(sock)).toBe(before + 1);
+
+    sock.receive({ type: 'error', topic: TOPIC, code: 'forbidden', message: 'forbidden' });
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(subscribes(sock)).toBe(before + 1);
+    expect(errors.some((e) => e.message.startsWith('forbidden'))).toBe(true);
+  });
+});
+
+describe('RealtimeClient liveness (G11)', () => {
+  it('a heartbeat frame keeps a quiet socket alive; silence still closes it', async () => {
+    vi.useFakeTimers();
+    const client = new RealtimeClient({ url: 'ws://test' });
+    client.connect();
+    const sock = MockWebSocket.instances[0];
+    sock.open();
+    sock.receive({ type: 'hello', ok: true, uid: 'u1', at: 'now' });
+    for (let i = 0; i < 4; i++) {
+      await vi.advanceTimersByTimeAsync(30_000);
+      sock.receive({ type: 'heartbeat', at: 'now' });
+    }
+    expect(sock.readyState).toBe(MockWebSocket.OPEN);
+    expect(MockWebSocket.instances).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(sock.readyState).toBe(MockWebSocket.CLOSED);
+  });
+});

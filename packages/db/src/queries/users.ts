@@ -24,6 +24,12 @@ export interface UserRow {
   guestKey: string | null;
   statusText: string | null;
   bio: string | null;
+  /** The handle, lowercase; null = none chosen (0050). */
+  username: string | null;
+  /** Free-text pronouns; null = none (0050). */
+  pronouns: string | null;
+  /** The profile colour, `#rrggbb`; null = derived from the avatar (0050). */
+  accentColor: string | null;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -58,6 +64,9 @@ const userColumnsWithoutImages = {
   guestKey: users.guestKey,
   statusText: users.statusText,
   bio: users.bio,
+  username: users.username,
+  pronouns: users.pronouns,
+  accentColor: users.accentColor,
   createdAt: users.createdAt,
   updatedAt: users.updatedAt,
   deletedAt: users.deletedAt,
@@ -446,19 +455,59 @@ export async function updateUserBanner(
  * a status can be edited many times a minute, and each edit used to pull
  * both multi-MB data URLs back out of Postgres.
  */
+/** The handle is someone else's (0050): the unique constraint refused the write. */
+export class UsernameTakenError extends Error {
+  readonly code = 'username_taken';
+  constructor() {
+    super('That username is taken.');
+    this.name = 'UsernameTakenError';
+  }
+}
+
 export async function updateUserProfile(
   db: DbClient,
   id: string,
-  input: { displayName?: string; statusText?: string | null; bio?: string | null },
+  input: {
+    displayName?: string;
+    statusText?: string | null;
+    bio?: string | null;
+    username?: string | null;
+    pronouns?: string | null;
+    accentColor?: string | null;
+  },
   now: Date = new Date()
 ): Promise<UserRowWithoutImages> {
   const values: Partial<typeof users.$inferInsert> = { updatedAt: now };
   if (input.displayName !== undefined) values.displayName = input.displayName.trim();
   if (input.statusText !== undefined) values.statusText = input.statusText?.trim() || null;
   if (input.bio !== undefined) values.bio = input.bio?.trim() || null;
-  const updated = await db.update(users).set(values).where(eq(users.id, id)).returning(userColumnsWithoutImages);
+  // The route normalises and validates these; lowercasing here as well keeps
+  // the unique constraint case-insensitive for every caller.
+  if (input.username !== undefined) values.username = input.username?.trim().toLowerCase() || null;
+  if (input.pronouns !== undefined) values.pronouns = input.pronouns?.trim() || null;
+  if (input.accentColor !== undefined) values.accentColor = input.accentColor?.trim().toLowerCase() || null;
+  let updated: UserRowWithoutImages[];
+  try {
+    updated = await db.update(users).set(values).where(eq(users.id, id)).returning(userColumnsWithoutImages);
+  } catch (err) {
+    if (values.username && isUniqueViolation(err)) throw new UsernameTakenError();
+    throw err;
+  }
   if (!updated[0]) throw new Error(`User ${id} not found`);
   return updated[0];
+}
+
+/**
+ * Is this handle free for `userId`? True when nobody has it or `userId`
+ * already does. Advisory — the unique constraint is what decides.
+ */
+export async function isUsernameAvailable(db: DbClient, username: string, userId: string): Promise<boolean> {
+  const rows = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.username, username.trim().toLowerCase()))
+    .limit(1);
+  return !rows[0] || rows[0].id === userId;
 }
 
 // Postgres unique_violation (23505), also when Drizzle wraps the driver error.

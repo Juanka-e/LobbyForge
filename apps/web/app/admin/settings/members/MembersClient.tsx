@@ -6,6 +6,7 @@ import { initialOf } from '@/lib/initial';
 import { displayRoleOf } from '@/lib/display-role';
 import { GENERIC_REFUSAL_KEY, profileActionErrorMessage } from '@/lib/profile-action-errors';
 import JoinRequestsSection from './JoinRequestsSection';
+import BansSection from './BansSection';
 
 export interface MemberView {
   userId: string;
@@ -87,6 +88,7 @@ export default function MembersClient({
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
   const [draftRoles, setDraftRoles] = useState<string[]>([]);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  const [banRevision, setBanRevision] = useState(0);
   const [message, setMessage] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
 
   // A member with no role shows as "Guest" or "Member" — interface words,
@@ -253,6 +255,8 @@ export default function MembersClient({
       setMemberList((current) => current.filter((item) => item.userId !== member.userId));
       setExpandedUserId(null);
       setMessage({ tone: 'success', text: t('adminSettings.members.banned') });
+      // The ban list below reads again.
+      setBanRevision((revision) => revision + 1);
     } catch {
       setMessage({ tone: 'danger', text: t('shell.profile.error.network') });
     } finally {
@@ -299,6 +303,7 @@ export default function MembersClient({
       </header>
 
       {serverId && capabilities.reviewJoinRequests ? <JoinRequestsSection serverId={serverId} /> : null}
+      {serverId && capabilities.ban ? <BansSection key={banRevision} serverId={serverId} /> : null}
 
       <div className="flex flex-col md:flex-row gap-4 mb-6">
         <div className="relative flex-1">

@@ -42,8 +42,14 @@ export interface MemberProfileView {
   avatarUrl: string | null;
   bannerUrl: string | null;
   isGuest: boolean;
+  /** The handle (0050), lowercase — shown whenever names are; null = none. */
+  username: string | null;
   statusText: string | null;
   bio: string | null;
+  /** 0050: null when unset or withheld (`limited`). */
+  pronouns: string | null;
+  /** 0050: `#rrggbb`, the band colour without a banner; null when unset or withheld. */
+  accentColor: string | null;
   /**
    * The status the member chose, as this viewer may see it: `offline` for
    * a hidden online status (or nobody there); null when not shown at all
@@ -112,8 +118,11 @@ export interface ProfileSeed {
   avatarUrl?: string | null;
   bannerUrl?: string | null;
   isGuest?: boolean;
+  username?: string | null;
   statusText?: string | null;
   bio?: string | null;
+  pronouns?: string | null;
+  accentColor?: string | null;
   roles?: ProfileRoleView[];
   /**
    * The member's status — only from an opener that knows it LIVE (the
@@ -134,8 +143,11 @@ export interface MergedProfile {
   avatarUrl: string | null;
   bannerUrl: string | null;
   isGuest: boolean;
+  username: string | null;
   statusText: string | null;
   bio: string | null;
+  pronouns: string | null;
+  accentColor: string | null;
   presence: PresenceStatus | null;
   inVoice: boolean;
   roles: ProfileRoleView[];
@@ -175,8 +187,12 @@ export function mergeProfileView(
     avatarUrl: p ? p.avatarUrl : (seed.avatarUrl ?? null),
     bannerUrl: p ? p.bannerUrl : (seed.bannerUrl ?? null),
     isGuest: p?.isGuest ?? seed.isGuest ?? false,
+    // `?? null`: an answer from an older server has no 0050 fields.
+    username: p ? (p.username ?? null) : (seed.username ?? null),
     statusText: p ? p.statusText : (seed.statusText ?? null),
     bio: p ? p.bio : (seed.bio ?? null),
+    pronouns: p ? (p.pronouns ?? null) : (seed.pronouns ?? null),
+    accentColor: p ? (p.accentColor ?? null) : (seed.accentColor ?? null),
     presence,
     inVoice: p && p.presence === null ? false : (seed.inVoice ?? p?.inVoice ?? false),
     roles: p ? p.roles : (seed.roles ?? []).filter((role) => role.name !== EVERYONE),

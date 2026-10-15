@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useT } from '@/lib/i18n/client';
 import { initialOf } from '@/lib/initial';
+import { timedOutRefusalKey } from '@/lib/profile-action-errors';
 import type { JoinRequestJson } from '@/lib/join-requests';
 
 const PAGE_SIZE = 25;
@@ -95,6 +96,12 @@ export default function JoinRequestsSection({ serverId }: { serverId: string }) 
       if (response.status === 409 || response.status === 404) {
         removeRequest(request.id);
         setNotice({ tone: 'danger', text: t('adminSettings.joinRequests.alreadyDecided') });
+        return;
+      }
+      // A timed-out moderator decides nothing (lib/actor-timeout.ts).
+      const timedOut = timedOutRefusalKey(data);
+      if (timedOut) {
+        setNotice({ tone: 'danger', text: t(timedOut) });
         return;
       }
       if (!response.ok) {

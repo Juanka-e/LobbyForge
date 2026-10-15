@@ -16,6 +16,7 @@ import { distributedRateLimit, type RateLimitConfig } from '@/lib/security-heade
 import { getBuiltInBot } from './cache';
 import { listBotChannels } from './access';
 import { emitMemberEvent } from './events';
+import { publishMembersChanged } from '@/lib/member-bus';
 import { postBotMessage } from './messages';
 import { parseWelcomeSettings } from './settings';
 import { defaultBotText, renderBotTemplate } from './templates';
@@ -28,6 +29,8 @@ export async function notifyMemberJoined(input: { serverId: string; userId: stri
   // where bots with `read_members` hear about the newcomer (fire-and-forget,
   // whether or not a Welcome Bot exists).
   emitMemberEvent({ serverId: input.serverId, userId: input.userId, event: 'member_join' });
+  // docs/PROFILES.md "Live updates": open lobbies add the newcomer to their member list.
+  publishMembersChanged(input.serverId, [input.userId]);
   try {
     const bot = await getBuiltInBot(input.serverId, 'welcome');
     if (!bot || !bot.enabled) return;

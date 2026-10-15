@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import { I18nProvider } from '@/lib/i18n/client';
 import { providerPropsFor } from '@/lib/i18n/catalogue';
+import { __resetNotificationPrefsForTests } from '@/lib/notification-prefs';
 
 /**
  * A built-in bot's default greeting / notice and default name reach every
@@ -19,9 +20,11 @@ vi.mock('@/lib/realtime-client', () => ({
       subscribers.set(topic, handler);
       return () => subscribers.delete(topic);
     },
+    onReconnect: () => () => {},
   }),
 }));
 vi.mock('../LobbyVoiceProvider', () => ({
+  useOptionalLobbyVoice: () => null,
   useLobbyVoice: () => ({ getRemoteVolume: () => 1, setRemoteVolume: () => {} }),
 }));
 
@@ -33,6 +36,8 @@ const MODERATION = { id: 'bot-m', name: 'Moderation Bot', type: 'moderation', de
 let historyResponse: unknown = { messages: [] };
 
 beforeEach(() => {
+  // Settings are read once per page; every case is a fresh page.
+  __resetNotificationPrefsForTests();
   subscribers.clear();
   historyResponse = { messages: [] };
   vi.stubGlobal(

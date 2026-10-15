@@ -5,8 +5,8 @@
 // iframe/CSP/X-Frame-Options conflict — the webview is a top-level navigation,
 // not a framed embed. The Rust side persists the URL and drives global PTT.
 //
-// When the user clicks "Switch instance", we navigate back to the local
-// connect screen (a tauri:// URL or file:// URL).
+// The tray's "Switch instance…" (Rust `leave_instance`) forgets the instance
+// and navigates the window back to this local connect screen.
 
 const { invoke } = window.__TAURI__?.core ?? {};
 
@@ -47,7 +47,12 @@ for (const el of document.querySelectorAll('[data-i18n]')) {
 
 // The tray is built in Rust; hand it the labels in this language (it keeps
 // them for the next launch). Runs before any navigation to an instance.
-invoke?.('set_tray_labels', { show: t('desktop.tray.show'), quit: t('desktop.tray.quit') }).catch(() => {});
+invoke?.('set_tray_labels', {
+  show: t('desktop.tray.show'),
+  quit: t('desktop.tray.quit'),
+  switchInstance: t('desktop.tray.switchInstance'),
+  globalPtt: t('desktop.tray.globalPtt'),
+}).catch(() => {});
 
 // connect_instance answers a stable code when it refuses an address.
 const CONNECT_ERRORS = {

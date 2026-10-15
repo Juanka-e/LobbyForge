@@ -106,13 +106,10 @@ export default function ActiveSessionsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'revoke', gid }),
       });
-      if (!res.ok) {
-        const detail = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(detail.error ?? `HTTP ${res.status}`);
-      }
+      if (!res.ok) throw new Error(t('settings.sessions.revokeFailed', { status: res.status }));
       await load();
     } catch (err) {
-      setError((err as Error).message);
+      setError(err instanceof TypeError ? t('settings.sessions.revokeNetwork') : (err as Error).message);
     } finally {
       setBusy(null);
     }

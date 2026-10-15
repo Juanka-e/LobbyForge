@@ -12,6 +12,7 @@ const deleteRole = vi.fn();
 const getUserPermissions = vi.fn();
 const listVisibleChannelsForMember = vi.fn();
 const logAction = vi.fn().mockResolvedValue(undefined);
+const getActiveMemberTimeout = vi.fn().mockResolvedValue(null);
 
 const { getHighestRolePosition } = vi.hoisted(() => ({
   getHighestRolePosition: vi.fn().mockResolvedValue(Number.POSITIVE_INFINITY),
@@ -29,6 +30,7 @@ vi.mock('@lobbyforge/db', () => ({
   getUserPermissions,
   listVisibleChannelsForMember,
   logAction,
+  getActiveMemberTimeout,
   EVERYONE_ROLE_NAME: '@everyone',
 }));
 
@@ -57,6 +59,7 @@ beforeEach(() => {
   listVisibleChannelsForMember.mockReset();
   logAction.mockReset();
   logAction.mockResolvedValue(undefined);
+  getActiveMemberTimeout.mockReset().mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -839,5 +842,101 @@ describe('DELETE 409 names only the channels the actor may see', () => {
     expect(json.channels.map((c) => c.name)).toEqual(['lobby-staff', 'hr-complaints', 'board-room']);
     expect(json.hiddenChannelCount).toBe(0);
     expect(listVisibleChannelsForMember).not.toHaveBeenCalled();
+  });
+});
+
+// Security review 2026-10 (A1): docs/ROLES.md promised `actor_timed_out`
+// for the roles API, but only the moderation gate checked it — a timed-out
+// MANAGE_ROLES member could still create, edit and delete roles.
+describe('a timed-out member manages no roles (actor_timed_out)', () => {
+  const MOD_ROLE = {
+    id: ROLE_ID,
+    serverId: SERVER_ID,
+    name: 'Helper',
+    color: null,
+    icon: null,
+    displaySeparately: false,
+    position: 1,
+    permissions: ['kick_members'],
+    createdAt: new Date('2026-06-10T00:00:00Z'),
+  };
+  const until = new Date(Date.now() + 10 * 60_000);
+
+  function asTimedOutManager() {
+    getServerById.mockResolvedValue(mockServer(OWNER_ID));
+    isServerMember.mockResolvedValue(true);
+    getUserPermissions.mockResolvedValue(['manage_roles', 'kick_members']);
+    getHighestRolePosition.mockResolvedValue(50);
+    getRoleById.mockResolvedValue(MOD_ROLE);
+    getActiveMemberTimeout.mockResolvedValue(until);
+  }
+
+  async function expectTimedOut(res: Response) {
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'actor_timed_out', until: until.toISOString() });
+    expect(getActiveMemberTimeout).toHaveBeenCalledWith(expect.anything(), SERVER_ID, USER_ID);
+  }
+
+  it('POST: refused before anything is created', async () => {
+    asTimedOutManager();
+    const { POST } = await loadListRoute();
+    const res = await POST(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/roles`, {
+        method: 'POST',
+        headers: { cookie: makeSessionCookie() },
+        body: JSON.stringify({ name: 'New', position: 1, permissions: [] }),
+      }),
+      { params: Promise.resolve({ id: SERVER_ID }) }
+    );
+    await expectTimedOut(res);
+    expect(createRole).not.toHaveBeenCalled();
+    expect(logAction).not.toHaveBeenCalled();
+  });
+
+  it('PATCH: refused before anything changes', async () => {
+    asTimedOutManager();
+    const { PATCH } = await loadItemRoute();
+    const res = await PATCH(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/roles/${ROLE_ID}`, {
+        method: 'PATCH',
+        headers: { cookie: makeSessionCookie() },
+        body: JSON.stringify({ name: 'Renamed' }),
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, roleId: ROLE_ID }) }
+    );
+    await expectTimedOut(res);
+    expect(updateRole).not.toHaveBeenCalled();
+  });
+
+  it('DELETE: refused before anything is deleted', async () => {
+    asTimedOutManager();
+    const { DELETE } = await loadItemRoute();
+    const res = await DELETE(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/roles/${ROLE_ID}`, {
+        method: 'DELETE',
+        headers: { cookie: makeSessionCookie() },
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, roleId: ROLE_ID }) }
+    );
+    await expectTimedOut(res);
+    expect(deleteRole).not.toHaveBeenCalled();
+  });
+
+  it('the owner is never asked about a timeout (the owner cannot be timed out)', async () => {
+    getServerById.mockResolvedValue(mockServer(USER_ID));
+    getUserPermissions.mockResolvedValue(['administrator']);
+    getRoleById.mockResolvedValue(MOD_ROLE);
+    getActiveMemberTimeout.mockResolvedValue(until);
+    deleteRole.mockResolvedValue(undefined);
+    const { DELETE } = await loadItemRoute();
+    const res = await DELETE(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/roles/${ROLE_ID}`, {
+        method: 'DELETE',
+        headers: { cookie: makeSessionCookie() },
+      }),
+      { params: Promise.resolve({ id: SERVER_ID, roleId: ROLE_ID }) }
+    );
+    expect(res.status).toBe(200);
+    expect(getActiveMemberTimeout).not.toHaveBeenCalled();
   });
 });

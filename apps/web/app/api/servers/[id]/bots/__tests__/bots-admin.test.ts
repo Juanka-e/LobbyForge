@@ -30,6 +30,7 @@ const listChannelsForServer = vi.fn();
 const listBotAccessibleChannels = vi.fn();
 const getBotChannelAccessState = vi.fn();
 const listVisibleChannelsForMember = vi.fn();
+const getActiveMemberTimeout = vi.fn();
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -73,6 +74,7 @@ vi.mock('@lobbyforge/db', () => ({
   listBotAccessibleChannels,
   getBotChannelAccessState,
   listVisibleChannelsForMember,
+  getActiveMemberTimeout,
   canMemberAccessChannel: vi.fn(),
 }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
@@ -146,9 +148,10 @@ beforeEach(() => {
   vi.resetModules();
   process.env.LOBBYFORGE_SESSION_SECRET = SECRET;
   delete process.env.LOBBYFORGE_DEFAULT_LOCALE;
-  for (const fn of [getServerById, isServerMember, getUserPermissions, listBotsForServer, countBotsForServer, createBot, getBotById, updateBot, deleteBot, setBotTokenHash, changeBotToken, ensureBuiltInBot, logAction, getChannelById, isChannelOpenToBots, getBuiltInBotForServer, listChannelsForServer, listBotAccessibleChannels, getBotChannelAccessState, listVisibleChannelsForMember]) {
+  for (const fn of [getServerById, isServerMember, getUserPermissions, listBotsForServer, countBotsForServer, createBot, getBotById, updateBot, deleteBot, setBotTokenHash, changeBotToken, ensureBuiltInBot, logAction, getChannelById, isChannelOpenToBots, getBuiltInBotForServer, listChannelsForServer, listBotAccessibleChannels, getBotChannelAccessState, listVisibleChannelsForMember, getActiveMemberTimeout]) {
     fn.mockReset();
   }
+  getActiveMemberTimeout.mockResolvedValue(null);
   // Default: the bot uses every open channel — nothing hidden from anyone.
   const general = { id: GENERAL, serverId: SERVER, type: 'text', name: 'general', position: 0 };
   const vault = { id: VAULT, serverId: SERVER, type: 'text', name: 'vault', position: 1 };
@@ -366,6 +369,48 @@ describe('PATCH /api/servers/{id}/bots/{botId}', () => {
     const res = await PATCH(req('PATCH', '/x', OWNER, { permissions: ['send_messages', 'read_audit_log'] }), botCtx());
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ code: 'builtin_permissions_fixed' });
+  });
+});
+
+// Security review 2026-10 (A1): a timed-out manager kept creating,
+// changing and deleting bots and their tokens. Reading stays allowed.
+describe('a timed-out manager changes no bots (actor_timed_out)', () => {
+  const until = new Date(Date.now() + 60_000);
+
+  it('create, update, delete and token changes are refused; nothing is written', async () => {
+    getActiveMemberTimeout.mockResolvedValue(until);
+    const list = await import('../route.js');
+    const item = await import('../[botId]/route.js');
+    const token = await import('../[botId]/token/route.js');
+    const responses = [
+      await list.POST(req('POST', `/api/servers/${SERVER}/bots`, MANAGER, { name: 'Helper' }), serverCtx),
+      await item.PATCH(req('PATCH', `/api/servers/${SERVER}/bots/${BOT_ID}`, MANAGER, { enabled: false }), botCtx()),
+      await item.DELETE(req('DELETE', `/api/servers/${SERVER}/bots/${BOT_ID}`, MANAGER), botCtx()),
+      await token.POST(req('POST', `/api/servers/${SERVER}/bots/${BOT_ID}/token`, MANAGER, {}), botCtx()),
+      await token.DELETE(req('DELETE', `/api/servers/${SERVER}/bots/${BOT_ID}/token`, MANAGER), botCtx()),
+    ];
+    for (const res of responses) {
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ code: 'actor_timed_out', until: until.toISOString() });
+    }
+    expect(getActiveMemberTimeout).toHaveBeenCalledWith({ __mockDb: true }, SERVER, MANAGER);
+    for (const write of [createBot, updateBot, deleteBot, changeBotToken, setBotTokenHash, logAction]) {
+      expect(write).not.toHaveBeenCalled();
+    }
+  });
+
+  it('the bot list still loads for a timed-out manager (reading is not acting)', async () => {
+    getActiveMemberTimeout.mockResolvedValue(until);
+    listBotsForServer.mockResolvedValue([botRow()]);
+    const { GET } = await import('../route.js');
+    expect((await GET(req('GET', `/api/servers/${SERVER}/bots`, MANAGER), serverCtx)).status).toBe(200);
+  });
+
+  it('the owner is never asked about a timeout', async () => {
+    getActiveMemberTimeout.mockResolvedValue(until);
+    const { PATCH } = await import('../[botId]/route.js');
+    expect((await PATCH(req('PATCH', `/api/servers/${SERVER}/bots/${BOT_ID}`, OWNER, { enabled: false }), botCtx())).status).toBe(200);
+    expect(getActiveMemberTimeout).not.toHaveBeenCalled();
   });
 });
 
