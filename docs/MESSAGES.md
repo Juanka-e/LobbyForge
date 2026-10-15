@@ -199,6 +199,10 @@ id neither opens a second conversation with the same person nor a
 (the insert does nothing on the pair's unique index and reads the winner
 back). `POST /api/dm/{channelId}/messages`
 takes `{ content, replyToId? }` (strict) with the 16 KiB body cap above.
+`GET /api/dm/{channelId}/messages?limit=&before=` pages back in time:
+`limit` is an integer clamped to 1..100 (default 50) and `before` a date;
+anything else is `400`, and a channel id that is not a UUID is `404` (both
+used to reach Postgres and come back as a 500).
 
 ## DB schema (no delta from M3)
 

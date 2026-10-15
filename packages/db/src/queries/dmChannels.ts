@@ -318,9 +318,11 @@ export async function listDmMessages(
   channelId: string,
   options: { limit?: number; before?: Date } = {}
 ): Promise<DmMessageRow[]> {
-  const limit = Math.min(options.limit ?? 50, 100);
+  // 1..100 (default 50) whatever the caller passed: NaN or 0 must not reach
+  // LIMIT (security review 2026-10, A9 — the route validates it as well).
+  const limit = Number.isFinite(options.limit) ? Math.max(1, Math.min(Math.trunc(options.limit!), 100)) : 50;
   const conditions = [eq(dmMessages.dmChannelId, channelId)];
-  if (options.before) {
+  if (options.before && !Number.isNaN(options.before.getTime())) {
     conditions.push(lt(dmMessages.createdAt, options.before));
   }
   const rows = await db

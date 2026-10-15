@@ -263,6 +263,62 @@ describe('GET /api/dm/{channelId}/messages', () => {
   });
 });
 
+// Security review 2026-10 (A9): `limit`, `before` and the channel id
+// reached Postgres unchecked — junk was a 500 (a non-UUID id threw before
+// the route's try block).
+describe('GET /api/dm/{channelId}/messages — input', () => {
+  function ctx(channelId = CHANNEL_ID) {
+    return { params: Promise.resolve({ channelId }) };
+  }
+  async function get(query = '', channelId = CHANNEL_ID) {
+    const { GET } = await import('../[channelId]/messages/route.js');
+    return GET(new Request(`https://example.test/api/dm/${channelId}/messages${query}`), ctx(channelId));
+  }
+
+  beforeEach(() => {
+    isDmChannelParticipant.mockResolvedValue(true);
+    listDmMessages.mockResolvedValue([]);
+  });
+
+  it('a channel id that is not a UUID is not found — before any query', async () => {
+    expect((await get('', 'not-a-uuid')).status).toBe(404);
+    expect(isDmChannelParticipant).not.toHaveBeenCalled();
+    const { POST } = await import('../[channelId]/messages/route.js');
+    const res = await POST(
+      new Request('https://example.test/api/dm/not-a-uuid/messages', { method: 'POST', body: JSON.stringify({ content: 'hi' }) }),
+      ctx('not-a-uuid')
+    );
+    expect(res.status).toBe(404);
+    expect(checkDmChannelAccess).not.toHaveBeenCalled();
+  });
+
+  it('400 for a limit that is not an integer, or a before that is not a date', async () => {
+    for (const query of ['?limit=abc', '?limit=12.5', '?limit=', '?before=yesterday', '?before=']) {
+      expect((await get(query)).status, query).toBe(400);
+    }
+    expect(listDmMessages).not.toHaveBeenCalled();
+  });
+
+  it('clamps the limit to 1..100 and passes a valid cursor on', async () => {
+    await get('?limit=1000');
+    expect(listDmMessages).toHaveBeenLastCalledWith({ __mockDb: true }, CHANNEL_ID, { limit: 100 });
+    await get('?limit=0');
+    expect(listDmMessages).toHaveBeenLastCalledWith({ __mockDb: true }, CHANNEL_ID, { limit: 1 });
+    await get('?limit=20&before=2026-10-01T12:00:00.123Z');
+    expect(listDmMessages).toHaveBeenLastCalledWith({ __mockDb: true }, CHANNEL_ID, {
+      limit: 20,
+      before: new Date('2026-10-01T12:00:00.123Z'),
+    });
+  });
+
+  it('a database failure is a 500 with a body, not a thrown error', async () => {
+    isDmChannelParticipant.mockRejectedValue(new Error('db down'));
+    const res = await get();
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: 'Failed to load messages' });
+  });
+});
+
 describe('POST /api/dm/{channelId}/messages', () => {
   function ctx(channelId = CHANNEL_ID) {
     return { params: Promise.resolve({ channelId }) };
