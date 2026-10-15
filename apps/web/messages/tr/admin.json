@@ -66,6 +66,7 @@
   "admin.audit.action.server.access_policy.update": "erişim ayarlarını değiştirdi",
   "admin.audit.action.server.banner.clear": "topluluk afişini kaldırdı",
   "admin.audit.action.server.banner.update": "topluluk afişini değiştirdi",
+  "admin.audit.action.server.voice_settings.update": "ses ve medya ayarlarını değiştirdi",
   "admin.audit.action.user.email_verified_by_admin": "bir üyenin e-posta adresini doğrulanmış olarak işaretledi",
   "admin.audit.action.user.password_reset_by_operator": "bir hesabın şifresini sunucu konsolundan (lfctl) sıfırladı",
   "admin.audit.action.voice.block_enforced": "ses engeli sürerken yeniden katılan bir üyeyi çıkardı",

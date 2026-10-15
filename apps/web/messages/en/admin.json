@@ -66,6 +66,7 @@
   "admin.audit.action.server.access_policy.update": "changed the access settings",
   "admin.audit.action.server.banner.clear": "removed the community banner",
   "admin.audit.action.server.banner.update": "changed the community banner",
+  "admin.audit.action.server.voice_settings.update": "changed the voice and media settings",
   "admin.audit.action.user.email_verified_by_admin": "marked a member's email address as verified",
   "admin.audit.action.user.password_reset_by_operator": "reset an account's password from the server console (lfctl)",
   "admin.audit.action.voice.block_enforced": "removed a member who rejoined voice while blocked",
