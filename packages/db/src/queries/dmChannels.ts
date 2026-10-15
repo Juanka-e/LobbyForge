@@ -48,38 +48,62 @@ export interface DmMessageRow {
   createdAt: Date;
 }
 
-/** Canonicalize the pair so (A,B) and (B,A) map to the same row. */
+/**
+ * Canonicalize the pair so (A,B) and (B,A) map to the same row. The ids are
+ * lower-cased FIRST (security review 2026-10, A8): Postgres stores a uuid
+ * in lower case whatever case it was sent in, but JavaScript orders "A" <
+ * "a", so a recipient id sent in upper case could order the pair the other
+ * way round — a second conversation for the same two people, or (with the
+ * caller's own id in upper case) a "DM" with oneself.
+ */
 function orderedPair(a: string, b: string): [string, string] {
-  return a < b ? [a, b] : [b, a];
+  const x = a.toLowerCase();
+  const y = b.toLowerCase();
+  return x < y ? [x, y] : [y, x];
 }
 
-/** Find or create a DM channel between two users. Returns the existing row
- *  if one already exists (idempotent on the user pair). */
+async function selectPairRow(db: DbClient, userAId: string, userBId: string): Promise<DmChannelRow | null> {
+  const [row] = await db
+    .select()
+    .from(dmChannels)
+    .where(and(eq(dmChannels.userAId, userAId), eq(dmChannels.userBId, userBId)))
+    .limit(1);
+  return (row as DmChannelRow | undefined) ?? null;
+}
+
+/**
+ * Find or create a DM channel between two users. Returns the existing row
+ * if one already exists (idempotent on the user pair).
+ *
+ * Race-safe: two first messages at once both used to miss the lookup and
+ * insert, and the loser hit the pair's unique index (a 500). The insert now
+ * does nothing on that conflict and the winner's row is read back. A row
+ * the case bug above stored the other way round is still found (no
+ * migration rewrites it).
+ */
 export async function findOrCreateDmChannel(
   db: DbClient,
   currentUserId: string,
   otherUserId: string
 ): Promise<DmChannelRow> {
   const [userAId, userBId] = orderedPair(currentUserId, otherUserId);
-  // Try to find an existing channel first.
-  const [existing] = await db
-    .select()
-    .from(dmChannels)
-    .where(
-      and(eq(dmChannels.userAId, userAId), eq(dmChannels.userBId, userBId))
-    )
-    .limit(1);
-  if (existing) return existing as DmChannelRow;
+  const existing = (await selectPairRow(db, userAId, userBId)) ?? (await selectPairRow(db, userBId, userAId));
+  if (existing) return existing;
 
   const [created] = await db
     .insert(dmChannels)
     .values({
       userAId,
       userBId,
-      createdBy: currentUserId,
+      createdBy: currentUserId.toLowerCase(),
     })
+    .onConflictDoNothing({ target: [dmChannels.userAId, dmChannels.userBId] })
     .returning();
-  return created as DmChannelRow;
+  if (created) return created as DmChannelRow;
+  // A concurrent request created it first — adopt its row.
+  const winner = await selectPairRow(db, userAId, userBId);
+  if (!winner) throw new Error('findOrCreateDmChannel: the DM channel could not be written');
+  return winner;
 }
 
 /** List all DM channels for a user, with the other participant's profile. */
@@ -165,10 +189,18 @@ export async function findDmChannelByPair(
   userBId: string
 ): Promise<string | null> {
   const [a, b] = orderedPair(userAId, userBId);
+  // Either order: a row stored the other way round (see orderedPair) is the
+  // same conversation.
   const [row] = await db
     .select({ id: dmChannels.id })
     .from(dmChannels)
-    .where(and(eq(dmChannels.userAId, a), eq(dmChannels.userBId, b)))
+    .where(
+      or(
+        and(eq(dmChannels.userAId, a), eq(dmChannels.userBId, b)),
+        and(eq(dmChannels.userAId, b), eq(dmChannels.userBId, a))
+      )
+    )
+    .orderBy(desc(sql`${dmChannels.userAId} = ${a}`))
     .limit(1);
   return row?.id ?? null;
 }

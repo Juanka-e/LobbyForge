@@ -192,7 +192,12 @@ caller — both current members of a live server, neither banned there — or
 one the caller **already has a conversation** with. Anything else (an
 unknown id, a stranger) is the same `404 { error: "User not found" }`: no
 existence oracle (an unknown id used to be an FK error and a 500). A block
-in either direction is still `403`. `POST /api/dm/{channelId}/messages`
+in either direction is still `403`. The ids are compared and the pair is
+ordered in lower case (the database's spelling of a uuid), so an upper-case
+id neither opens a second conversation with the same person nor a
+"conversation" with yourself; two first messages at once reuse one row
+(the insert does nothing on the pair's unique index and reads the winner
+back). `POST /api/dm/{channelId}/messages`
 takes `{ content, replyToId? }` (strict) with the 16 KiB body cap above.
 
 ## DB schema (no delta from M3)

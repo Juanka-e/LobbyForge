@@ -26,7 +26,8 @@ vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
 vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));
 
 const UID = '00000000-0000-0000-0000-000000000099';
-const OTHER_UID = '00000000-0000-0000-0000-0000000000BB';
+// Lower case, as the database spells every uuid it returns.
+const OTHER_UID = '00000000-0000-0000-0000-0000000000bb';
 const CHANNEL_ID = '00000000-0000-0000-0000-0000000000CC';
 
 beforeEach(() => {
@@ -147,6 +148,36 @@ describe('POST /api/dm', () => {
       {}
     );
     expect(res.status).toBe(400);
+  });
+
+  // Security review 2026-10 (A8): ids are compared and ordered in lower
+  // case — the database's spelling.
+  it('an upper-case copy of your own id is still yourself (400), not a DM with yourself', async () => {
+    const { POST } = await import('../route.js');
+    const OWN_UPPER = '00000000-0000-0000-0000-0000000000AA';
+    requireMaterializedSession.mockReturnValue({ ok: true, session: { uid: OWN_UPPER.toLowerCase(), gid: 'g_1', name: 'Caller', exp: 123 } });
+    const res = await POST(
+      new Request('https://example.test/api/dm', { method: 'POST', body: JSON.stringify({ recipientUserId: OWN_UPPER }) }),
+      {}
+    );
+    expect(res.status).toBe(400);
+    expect(findOrCreateDmChannel).not.toHaveBeenCalled();
+  });
+
+  it('an upper-case recipient id reaches the eligibility, block and channel lookups in lower case', async () => {
+    findOrCreateDmChannel.mockResolvedValue({ id: CHANNEL_ID, userAId: OTHER_UID, userBId: UID, createdBy: UID });
+    getBlockedUserIds.mockImplementation(async (_db, uid) => (uid === UID ? new Set([OTHER_UID]) : new Set()));
+    const { POST } = await import('../route.js');
+    const res = await POST(
+      new Request('https://example.test/api/dm', { method: 'POST', body: JSON.stringify({ recipientUserId: OTHER_UID.toUpperCase() }) }),
+      {}
+    );
+    // The caller blocked them: the lower-case block entry matches.
+    expect(res.status).toBe(403);
+    expect(getDmRecipientEligibility).toHaveBeenCalledWith({ __mockDb: true }, UID, OTHER_UID);
+    getBlockedUserIds.mockResolvedValue(new Set());
+    expect((await POST(new Request('https://example.test/api/dm', { method: 'POST', body: JSON.stringify({ recipientUserId: OTHER_UID.toUpperCase() }) }), {})).status).toBe(200);
+    expect(findOrCreateDmChannel).toHaveBeenCalledWith({ __mockDb: true }, UID, OTHER_UID);
   });
 });
 
