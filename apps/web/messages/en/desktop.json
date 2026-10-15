@@ -9,6 +9,8 @@
   "desktop.error.invalidUrl": "That isn't a valid address.",
   "desktop.error.noExtras": "Use the address only: no user name, password, query or # part.",
   "desktop.error.originOnly": "Use the address only, without a path (for example https://chat.example.com).",
+  "desktop.tray.globalPtt": "Push to talk anywhere (Ctrl+Space)",
   "desktop.tray.quit": "Quit",
-  "desktop.tray.show": "Show LobbyForge"
+  "desktop.tray.show": "Show LobbyForge",
+  "desktop.tray.switchInstance": "Switch instance…"
 }

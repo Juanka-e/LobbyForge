@@ -8,7 +8,7 @@
 
 use std::sync::Mutex;
 use tauri::{
-    menu::{Menu, MenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
     Emitter, Manager, WebviewWindow,
 };
@@ -393,39 +393,114 @@ fn connect_instance(
     }
     // Reflect the instance in the window title + tray.
     let _ = window.set_title(&format!("LobbyForge — {}", origin));
+    // Opted-in global shortcuts are held only while an instance is shown.
+    apply_global_shortcuts(&app);
     Ok(origin)
 }
 
 /// Disconnect: return to the local connect screen.
 #[tauri::command]
-fn disconnect_instance(
-    state: tauri::State<ShellState>,
-    app: tauri::AppHandle,
-    window: tauri::WebviewWindow,
-) -> Result<(), String> {
+fn disconnect_instance(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
+    leave_instance(&app, &window);
+    Ok(())
+}
+
+/// The bundled connect screen's URL before its first page load recorded the
+/// real one: `http://tauri.localhost` on Windows, `tauri://localhost` elsewhere.
+fn default_shell_url() -> Option<url::Url> {
+    let raw = if cfg!(target_os = "windows") {
+        "http://tauri.localhost/index.html"
+    } else {
+        "tauri://localhost/index.html"
+    };
+    url::Url::parse(raw).ok()
+}
+
+/// Forget the instance and show the bundled connect screen. Shared by the
+/// connect screen's `disconnect_instance` and the tray's "Switch instance…",
+/// which works from any page — the instance's, or one that failed to load.
+fn leave_instance(app: &tauri::AppHandle, window: &WebviewWindow) {
     if let Ok(store) = app.store(STORE_FILE) {
         let _ = store.delete(INSTANCE_URL_KEY);
         let _ = store.save();
     }
+    let state: tauri::State<ShellState> = app.state();
     // DESK-V-02: no instance, no pending browser login.
     state.set_instance(None);
+    // No instance, no global shortcut.
+    apply_global_shortcuts(app);
     // DP-16: actually navigate BACK to the bundled connect screen (always
-    // allowed by the navigation guard). Its recorded URL when known; the
-    // relative path otherwise (this command runs on the connect screen).
-    let shell_url = state.shell_url.lock().unwrap().clone();
-    match shell_url {
-        Some(home) => {
-            let _ = window.navigate(home);
-        }
-        None => {
-            let _ = window.eval("window.location.href = 'index.html'");
-        }
+    // allowed by the navigation guard): its recorded URL when known.
+    let home = state.shell_url.lock().unwrap().clone().or_else(default_shell_url);
+    if let Some(home) = home {
+        let _ = window.navigate(home);
     }
     let _ = window.set_title("LobbyForge");
-    Ok(())
 }
 
-/// DP-05: read a boolean shell setting from the store (defaults true).
+/// Store key: hold push-to-talk (`Ctrl+Space`) system-wide. Off unless the
+/// user turns it on from the tray — a global shortcut takes the key from
+/// every other app (Ctrl+Space switches the input language on many systems).
+const GLOBAL_PTT_KEY: &str = "globalPushToTalk";
+/// Store key: also hold the mute / deafen / settings shortcuts system-wide.
+/// Off by default; there is no UI for it (edit settings.json).
+const GLOBAL_SHORTCUTS_KEY: &str = "globalShortcuts";
+const PTT_ACCELERATOR: &str = "Control+Space";
+/// The action a global shortcut forwards; `PTT_ACTION` is push-to-talk.
+const PTT_ACTION: &str = "ptt";
+
+/// Which global shortcuts to hold, as (accelerator, action): none while no
+/// instance is shown, and each group only when the user opted in.
+fn global_shortcut_plan(connected: bool, push_to_talk: bool, extra: bool) -> Vec<(&'static str, &'static str)> {
+    let mut plan = Vec::new();
+    if !connected {
+        return plan;
+    }
+    if push_to_talk {
+        plan.push((PTT_ACCELERATOR, PTT_ACTION));
+    }
+    if extra {
+        // DP-06: the web app maps these actions to its own toggles.
+        plan.extend([
+            ("Control+Shift+M", "toggleMute"),
+            ("Control+Shift+D", "toggleDeafen"),
+            ("Control+Comma", "openSettings"),
+        ]);
+    }
+    plan
+}
+
+/// Re-register the global shortcuts from scratch for the current instance
+/// and settings. Called on connect, launch restore, disconnect and when the
+/// tray toggle changes — so nothing stays registered after leaving.
+fn apply_global_shortcuts(app: &tauri::AppHandle) {
+    let shortcuts = app.global_shortcut();
+    let _ = shortcuts.unregister_all();
+    let connected = app.state::<ShellState>().instance().is_some();
+    let plan = global_shortcut_plan(
+        connected,
+        shell_flag(app, GLOBAL_PTT_KEY, false),
+        shell_flag(app, GLOBAL_SHORTCUTS_KEY, false),
+    );
+    for (accelerator, action) in plan {
+        let app_handle = app.clone();
+        let _ = shortcuts.on_shortcut(accelerator, move |_app, _shortcut, event| {
+            let pressed = event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed;
+            let Some(window) = app_handle.get_webview_window("main") else {
+                return;
+            };
+            if action == PTT_ACTION {
+                // Hold to talk: releases emit pressed=false. The instance web
+                // app is the consumer; the shell only forwards the key state.
+                emit_ptt(&window, pressed);
+            } else if pressed {
+                emit_shortcut(&window, action);
+            }
+        });
+    }
+}
+
+/// DP-05: read a boolean shell setting from the store.
 fn shell_flag(app: &tauri::AppHandle, key: &str, default: bool) -> bool {
     app.store(STORE_FILE)
         .ok()
@@ -476,12 +551,18 @@ fn emit_shortcut(window: &WebviewWindow, action: &str) {
 
 const TRAY_SHOW_KEY: &str = "trayShowLabel";
 const TRAY_QUIT_KEY: &str = "trayQuitLabel";
+const TRAY_SWITCH_KEY: &str = "traySwitchLabel";
+const TRAY_PTT_KEY: &str = "trayGlobalPttLabel";
 const TRAY_SHOW_DEFAULT: &str = "Show LobbyForge";
 const TRAY_QUIT_DEFAULT: &str = "Quit";
+const TRAY_SWITCH_DEFAULT: &str = "Switch instance…";
+const TRAY_PTT_DEFAULT: &str = "Push to talk anywhere (Ctrl+Space)";
 
 /// The tray's menu items, kept so the labels can follow the user's language.
 struct TrayItems {
     show: MenuItem<tauri::Wry>,
+    switch_instance: MenuItem<tauri::Wry>,
+    global_ptt: CheckMenuItem<tauri::Wry>,
     quit: MenuItem<tauri::Wry>,
 }
 
@@ -507,30 +588,86 @@ fn stored_tray_label(app: &tauri::AppHandle, key: &str, fallback: &str) -> Strin
 /// The connect screen sends the tray labels in the user's language (from
 /// the generated desktop strings, dist-shell/locales.js). They apply now
 /// and are saved, so the next launch builds the tray in that language.
+/// `switch_instance` / `global_ptt` are optional so an older connect screen
+/// still works (those items then keep their English default).
 #[tauri::command]
-fn set_tray_labels(app: tauri::AppHandle, show: String, quit: String) -> Result<(), String> {
+fn set_tray_labels(
+    app: tauri::AppHandle,
+    show: String,
+    quit: String,
+    switch_instance: Option<String>,
+    global_ptt: Option<String>,
+) -> Result<(), String> {
     let show = tray_label(&show, TRAY_SHOW_DEFAULT);
     let quit = tray_label(&quit, TRAY_QUIT_DEFAULT);
+    let switch_instance = switch_instance.map(|label| tray_label(&label, TRAY_SWITCH_DEFAULT));
+    let global_ptt = global_ptt.map(|label| tray_label(&label, TRAY_PTT_DEFAULT));
     if let Some(items) = app.try_state::<TrayItems>() {
         let _ = items.show.set_text(&show);
         let _ = items.quit.set_text(&quit);
+        if let Some(label) = &switch_instance {
+            let _ = items.switch_instance.set_text(label);
+        }
+        if let Some(label) = &global_ptt {
+            let _ = items.global_ptt.set_text(label);
+        }
     }
     if let Ok(store) = app.store(STORE_FILE) {
         let _ = store.set(TRAY_SHOW_KEY, serde_json::json!(show));
         let _ = store.set(TRAY_QUIT_KEY, serde_json::json!(quit));
+        if let Some(label) = switch_instance {
+            let _ = store.set(TRAY_SWITCH_KEY, serde_json::json!(label));
+        }
+        if let Some(label) = global_ptt {
+            let _ = store.set(TRAY_PTT_KEY, serde_json::json!(label));
+        }
         let _ = store.save();
     }
     Ok(())
 }
 
+/// The tray's push-to-talk toggle: flip the saved choice, show it, and
+/// (un)register the shortcut at once.
+fn toggle_global_ptt(app: &tauri::AppHandle) {
+    let enabled = !shell_flag(app, GLOBAL_PTT_KEY, false);
+    if let Ok(store) = app.store(STORE_FILE) {
+        let _ = store.set(GLOBAL_PTT_KEY, serde_json::json!(enabled));
+        let _ = store.save();
+    }
+    // Set explicitly: whether the platform already flipped the check mark
+    // on click or not, it now shows the saved choice.
+    if let Some(items) = app.try_state::<TrayItems>() {
+        let _ = items.global_ptt.set_checked(enabled);
+    }
+    apply_global_shortcuts(app);
+}
+
 fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let show_label = stored_tray_label(app, TRAY_SHOW_KEY, TRAY_SHOW_DEFAULT);
+    let switch_label = stored_tray_label(app, TRAY_SWITCH_KEY, TRAY_SWITCH_DEFAULT);
+    let ptt_label = stored_tray_label(app, TRAY_PTT_KEY, TRAY_PTT_DEFAULT);
     let quit_label = stored_tray_label(app, TRAY_QUIT_KEY, TRAY_QUIT_DEFAULT);
     let show_item = MenuItem::with_id(app, "show", show_label, true, None::<&str>)?;
+    let switch_item = MenuItem::with_id(app, "switch", switch_label, true, None::<&str>)?;
+    let ptt_item = CheckMenuItem::with_id(
+        app,
+        "global_ptt",
+        ptt_label,
+        true,
+        shell_flag(app, GLOBAL_PTT_KEY, false),
+        None::<&str>,
+    )?;
     let quit_item = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+    let separator = PredefinedMenuItem::separator(app)?;
+    let separator_2 = PredefinedMenuItem::separator(app)?;
+    let menu = Menu::with_items(
+        app,
+        &[&show_item, &switch_item, &separator, &ptt_item, &separator_2, &quit_item],
+    )?;
     app.manage(TrayItems {
         show: show_item.clone(),
+        switch_instance: switch_item.clone(),
+        global_ptt: ptt_item.clone(),
         quit: quit_item.clone(),
     });
     TrayIconBuilder::with_id("main")
@@ -545,6 +682,16 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                     let _ = window.set_focus();
                 }
             }
+            "switch" => {
+                // Back to the connect screen from wherever the window is —
+                // also the way out of an instance that no longer loads.
+                if let Some(window) = app.get_webview_window("main") {
+                    leave_instance(app, &window);
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+            "global_ptt" => toggle_global_ptt(app),
             "quit" => {
                 app.exit(0);
             }
@@ -669,46 +816,15 @@ pub fn run() {
                 }
             });
 
-            // DP-05: tray and shortcuts honour the persisted shell config
-            // (the DesktopConfig the TS side exposes; store keys mirror it).
-            let enable_tray = shell_flag(app.handle(), "enableTray", true);
-            let global_ptt = shell_flag(app.handle(), "globalPushToTalk", true);
-
-            if enable_tray {
+            // DP-05: the tray honours the persisted shell config (the
+            // DesktopConfig the TS side exposes; store keys mirror it).
+            if shell_flag(app.handle(), "enableTray", true) {
                 let _ = build_tray(app.handle());
             }
 
-            // Global push-to-talk shortcut: hold Ctrl+Space to talk.
-            // Releases emit pressed=false. The instance web app is the
-            // consumer; the shell only forwards the key state.
-            if global_ptt {
-                let app_handle = app.handle().clone();
-                let _ = app.global_shortcut().on_shortcut("Control+Space", move |_app, _shortcut, event| {
-                    if let Some(window) = app_handle.get_webview_window("main") {
-                        emit_ptt(&window, event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed);
-                    }
-                });
-            }
-
-            // DP-06: the remaining DEFAULT_SHORTCUTS were never
-            // registered — dead config. Wire them through the same eval
-            // bridge; the web app maps actions to its own toggles.
-            for (accel, action) in [
-                ("Control+Shift+M", "toggleMute"),
-                ("Control+Shift+D", "toggleDeafen"),
-                ("Control+Comma", "openSettings"),
-            ] {
-                let app_handle = app.handle().clone();
-                let action_owned = action.to_string();
-                let _ = app.global_shortcut().on_shortcut(accel, move |_app, _shortcut, event| {
-                    if event.state != tauri_plugin_global_shortcut::ShortcutState::Pressed {
-                        return;
-                    }
-                    if let Some(window) = app_handle.get_webview_window("main") {
-                        emit_shortcut(&window, &action_owned);
-                    }
-                });
-            }
+            // Global shortcuts are NOT registered here: they are held only
+            // while an instance is shown, and only those the user opted in
+            // to (apply_global_shortcuts, below and on connect/disconnect).
 
             // Restore the saved instance URL and navigate on launch. The
             // stored value is re-validated (it is a file on disk), and the
@@ -725,9 +841,13 @@ pub fn run() {
                         let full = format!("{}/", url);
                         let _ = window.eval(&format!("window.__lobbyforgeNavigate({:?})", full));
                         let _ = window.set_title(&format!("LobbyForge — {}", url));
+                        // Tauri reports no load failure for the page, so an
+                        // instance that is down is not detected here; the
+                        // tray's "Switch instance…" is the way back.
                     }
                 }
             }
+            apply_global_shortcuts(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -954,6 +1074,40 @@ mod navigation_tests {
         assert!(external_open_allowed(None, start));
         assert!(!external_open_allowed(Some(start), start + std::time::Duration::from_millis(400)));
         assert!(external_open_allowed(Some(start), start + std::time::Duration::from_millis(1000)));
+    }
+}
+
+#[cfg(test)]
+mod shortcut_tests {
+    use super::{default_shell_url, global_shortcut_plan, is_local_shell, PTT_ACCELERATOR, PTT_ACTION};
+
+    #[test]
+    fn nothing_is_global_while_no_instance_is_shown() {
+        assert!(global_shortcut_plan(false, true, true).is_empty());
+    }
+
+    #[test]
+    fn nothing_is_global_by_default_even_when_connected() {
+        assert!(global_shortcut_plan(true, false, false).is_empty());
+    }
+
+    #[test]
+    fn push_to_talk_alone_when_opted_in() {
+        assert_eq!(global_shortcut_plan(true, true, false), vec![(PTT_ACCELERATOR, PTT_ACTION)]);
+    }
+
+    #[test]
+    fn the_other_shortcuts_only_with_their_own_flag() {
+        let plan = global_shortcut_plan(true, false, true);
+        let accelerators: Vec<&str> = plan.iter().map(|(accel, _)| *accel).collect();
+        assert_eq!(accelerators, ["Control+Shift+M", "Control+Shift+D", "Control+Comma"]);
+        assert!(!accelerators.contains(&PTT_ACCELERATOR));
+    }
+
+    #[test]
+    fn the_fallback_connect_screen_is_the_bundled_shell() {
+        let url = default_shell_url().expect("parses");
+        assert!(is_local_shell(&url), "{url}");
     }
 }
 

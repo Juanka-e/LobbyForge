@@ -100,7 +100,28 @@ describe('the connect screen', () => {
     expect(page.documentElement.lang).toBe('tr');
     const label = page.translatable.find((el) => el.dataset.i18n === 'desktop.connect.label')!;
     expect(label.textContent).toBe('Kurulum adresi');
-    expect(invoke).toHaveBeenCalledWith('set_tray_labels', { show: "LobbyForge'u göster", quit: 'Çık' });
+    expect(invoke).toHaveBeenCalledWith('set_tray_labels', {
+      show: "LobbyForge'u göster",
+      quit: 'Çık',
+      switchInstance: 'Kurulumu değiştir…',
+      globalPtt: 'Her yerde bas-konuş (Ctrl+Space)',
+    });
+  });
+
+  it('gives the tray English labels for every item, the Rust defaults included', () => {
+    const invoke = vi.fn(async () => undefined);
+    runShell(['en-US'], invoke);
+    expect(invoke).toHaveBeenCalledWith('set_tray_labels', {
+      show: 'Show LobbyForge',
+      quit: 'Quit',
+      switchInstance: 'Switch instance…',
+      globalPtt: 'Push to talk anywhere (Ctrl+Space)',
+    });
+    // The tray is built before the connect screen runs: its English
+    // defaults in lib.rs must say the same thing.
+    const lib = readFileSync(join(root, 'src-tauri', 'src', 'lib.rs'), 'utf8');
+    expect(lib).toContain('const TRAY_SWITCH_DEFAULT: &str = "Switch instance…";');
+    expect(lib).toContain('const TRAY_PTT_DEFAULT: &str = "Push to talk anywhere (Ctrl+Space)";');
   });
 
   it('falls back to English for a language it does not ship', () => {

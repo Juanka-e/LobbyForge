@@ -15,11 +15,14 @@ Redis and runs on the instance server).
    navigates and forwards native events.
 3. **Native capabilities** owned by the shell:
    - **Single-instance** — a second launch focuses the existing window.
-   - **Tray** — Show / Quit menu; window can be hidden to tray.
-   - **Global push-to-talk** — hold `Ctrl+Space` while another app has focus;
-     the shell forwards `pressed`/`released` to the instance webview via a
-     `lobbyforge:ptt` postMessage.
-   - **Persisted instance** — the last URL is restored on next launch.
+   - **Tray** — Show / Switch instance… / Push to talk anywhere / Quit;
+     window can be hidden to tray.
+   - **Global push-to-talk** (opt-in from the tray, off by default) — hold
+     `Ctrl+Space` while another app has focus; the shell forwards
+     `pressed`/`released` to the instance webview via a `lobbyforge:ptt`
+     postMessage. Registered only while an instance is shown.
+   - **Persisted instance** — the last URL is restored on next launch;
+     the tray's **Switch instance…** forgets it and shows the connect screen.
    - **Deep-link auth** (infrastructure) — `lobbyforge://session/complete`
      handler wires into the existing `parseDesktopSessionHandoff` contract.
 

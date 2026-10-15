@@ -9,6 +9,8 @@
   "desktop.error.invalidUrl": "Bu geçerli bir adres değil.",
   "desktop.error.noExtras": "Yalnızca adresi yaz: kullanıcı adı, şifre, sorgu ya da # kısmı olmadan.",
   "desktop.error.originOnly": "Yalnızca adresi yaz, yol olmadan (örneğin https://sohbet.ornek.com).",
+  "desktop.tray.globalPtt": "Her yerde bas-konuş (Ctrl+Space)",
   "desktop.tray.quit": "Çık",
-  "desktop.tray.show": "LobbyForge'u göster"
+  "desktop.tray.show": "LobbyForge'u göster",
+  "desktop.tray.switchInstance": "Kurulumu değiştir…"
 }
