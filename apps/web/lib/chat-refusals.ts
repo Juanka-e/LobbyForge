@@ -13,7 +13,9 @@ export function composerRefusalMessage(
 ): string {
   // The Moderation Bot's refusal is explained in the reader's language.
   if (detail.code === 'blocked_by_moderation') return t(moderationBlockedMessageKey(detail.rule));
-  if (detail.code === 'timed_out') {
+  // `actor_timed_out`: a timed-out moderator deleting or pinning someone
+  // else's message (lib/actor-timeout.ts) — the same words.
+  if (detail.code === 'timed_out' || detail.code === 'actor_timed_out') {
     const until = detail.until ? new Date(detail.until) : null;
     return until && !Number.isNaN(until.getTime())
       ? t('lobbyMain.composer.timedOutUntil', {

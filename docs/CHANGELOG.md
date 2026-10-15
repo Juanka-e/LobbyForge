@@ -45,7 +45,48 @@ All notable changes to the LobbyForge monorepo skeleton.
   - Password-change, session-revoke and voice-mute errors are translated.
   - Header icon buttons have names, and the dead footer button is gone.
   - Changing the stream quality no longer leaves an unhandled error.
-- **Upgrade notes:** migration 0050 is expand-only and idempotent: three nullable `users` columns plus constraints. Restart the ws-gateway with the web image, because the new topic needs both.
+- **Bug hunt (three read-only reviews: API, lobby UI, realtime/desktop/ops; every finding was checked and fixed with a test):**
+  - **Realtime gateway:**
+    - **Crash (high):** a single malformed WebSocket frame (bad RSV bits, too large, unmasked, bad UTF-8) could crash the gateway when it arrived with the handshake or during the session check. The socket's error listener is now attached before anything else.
+    - **Activity order:** updates for one session reach each viewer in the order they happened, each with the revision of the state it shows. The panel ignores an older one.
+    - **Stale subscriptions:** leaving a topic while its subscription was still being checked no longer leaves it live.
+    - **Redis outages:** a SUBSCRIBE refused while Redis was down is retried when Redis is back.
+    - **Heartbeat:** browsers get a `heartbeat` frame with every ping, so quiet connections are no longer dropped and reopened every minute.
+  - **Realtime client:**
+    - A signed-out, invalid or revoked session no longer reconnects every 500 ms forever. The client stops after a 4401/1008 close and tells the page through `onTerminalClose`.
+    - Backoff resets only once the socket is signed in.
+    - Subscriptions refused for a passing reason are retried a few times; a revoked one is asked for once more.
+  - **Moderation:** a timed-out moderator kept every management power outside the moderation gate. The following now answer `403 actor_timed_out` (with `until`) through one shared check (`lib/actor-timeout.ts`); the owner is never refused, and the admin screens and chat say it in English and Turkish:
+    - approving or rejecting join requests;
+    - creating, editing and deleting roles and channels;
+    - deleting another member's message;
+    - closing another member's poll;
+    - revoking another member's invite;
+    - changing the access policy, voice settings, banner, apps, bots and webhooks.
+  - **Voice:**
+    - A voice-settings change reaches everyone already in voice at once, and is audited as `server.voice_settings.update`.
+    - Reconnecting to a full room (or at the camera or screen-share cap) no longer counts your own earlier connection.
+  - **Invites:** Manage Community lists and revokes every invite without Create Invite.
+  - **Channels:** a refused edit no longer saves the name, topic or position first; positions are capped at 1,000,000.
+  - **Bans:** banning someone already banned updates the ban (moderator, expiry, reason) and answers 200, audited as `ban.update` with the previous values. It used to answer 201 while nothing changed, so a temporary ban could not be made permanent.
+  - **Email verification:** a note sent with an invite redeem needs a verified email in `required` mode, like "Ask to join".
+  - **Direct messages:**
+    - An upper-case user id no longer opens a second conversation, or one with yourself.
+    - Two first messages sent at once no longer fail.
+    - A junk `limit` or `before` answers 400, and a non-UUID channel id 404 (both were 500).
+  - **Typing indicator:** shows only members who may post there and are not timed out, under their community nickname.
+  - **Pagination:** paging back through messages, DMs and the audit log no longer skips rows in the cursor's millisecond.
+  - **Messages:** a reply to an unknown or foreign message answers `400 invalid_reply` (was 500).
+  - **lfctl:**
+    - `backup create` finds the database URL like `update apply` (`--database-url`, `DATABASE_URL`, `.env.prod`).
+    - `update apply` without `--yes` no longer writes a full dump first.
+    - Backups now include the installed marketplace bundles (`<dump>.plugins.tar.gz`), and `backup restore` puts them back.
+    - docs/UPDATES.md lists what a backup does not hold, and recommends rotating `LOBBYFORGE_SESSION_SECRET` after restoring onto a new host.
+  - **Desktop:**
+    - The tray has "Switch instance…", even for an instance that no longer loads.
+    - Global shortcuts are opt-in ("Push to talk anywhere" in the tray), so Ctrl+Space no longer takes the input-language switch from other apps.
+    - Not done: "Continue with Google" in the desktop app, which needs a browser-to-app handoff for OAuth sign-ins.
+- **Upgrade notes:** migration 0050 is expand-only and idempotent: three nullable `users` columns plus constraints. Restart the ws-gateway with the web image, because the new topic and frames need both. Desktop users who relied on the global shortcuts turn "Push to talk anywhere" on in the tray.
 
 ## [0.2.0-rc.11] - 2026-10-13
 

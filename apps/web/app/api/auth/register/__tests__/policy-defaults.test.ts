@@ -62,6 +62,7 @@ vi.mock('@lobbyforge/db', async () => {
     getEffectiveInstanceAccessSettings: async () => ({ registrationMode: 'open' }),
     getInstanceBootstrapStatus: async () => ({ bootstrapComplete: true, firstServerId: SERVER }),
     getInviteMetadata: async () => null,
+    getActiveMemberTimeout: async () => null,
   };
 });
 vi.mock('@/lib/db', () => ({ getDb: () => fakeDb }));
