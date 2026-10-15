@@ -228,7 +228,7 @@ Settings → Members (the "Join requests" section):
 | Method | Path | Who | Body | Status | Rate limit |
 |---|---|---|---|---|---|
 | `GET` | `/api/servers/{id}/join-requests?status=pending\|all&limit=&offset=` | KICK_MEMBERS or MANAGE_SERVER | — | 200 / 400 / 401 / 403 / 404 | 60 / min |
-| `POST` | `/api/servers/{id}/join-requests/{requestId}` | KICK_MEMBERS or MANAGE_SERVER | `{ action: 'approve' \| 'reject' }` | 200 / 400 / 403 / 404 / 409 | 30 / min |
+| `POST` | `/api/servers/{id}/join-requests/{requestId}` | KICK_MEMBERS or MANAGE_SERVER, not timed out (403 `actor_timed_out`) | `{ action: 'approve' \| 'reject' }` | 200 / 400 / 403 / 404 / 409 | 30 / min |
 | `GET` | `/api/servers/{id}/join-requests/mine` | the requester | — | 200 / 401 / 404 | 60 / min |
 | `POST` | `/api/servers/{id}/join-requests/mine` | a signed-in non-member the lobby auto-join serves | `{ note?: string ≤ 500 }` (optional) | 202 / 400 / 401 / 403 / 404 / 409 / 429 | 10 / min |
 | `DELETE` | `/api/servers/{id}/join-requests/mine` | the requester | — | 200 / 401 / 404 | 10 / min |

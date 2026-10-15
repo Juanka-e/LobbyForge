@@ -89,6 +89,7 @@ Refusals:
 | 400 | `invalid_vote`, `vote_single_choice`, `vote_duplicate`, `vote_out_of_range` | a bad `choices` list |
 | 403 | — / `email_unverified` | no permission, timed out, not verified |
 | 403 | `poll_close_forbidden` | closing someone else's poll without Manage Messages |
+| 403 | `actor_timed_out` | closing someone else's poll while timed out (the creator may still close their own) |
 | 404 | `poll_not_found` | unknown poll, deleted message, or a poll in another channel |
 | 409 | `poll_closed` | voting, removing a vote or closing after the poll closed |
 | 422 | `blocked_by_moderation` | the Moderation Bot refused it (same body as a message) |

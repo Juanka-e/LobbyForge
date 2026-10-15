@@ -23,6 +23,7 @@ const requireServerMember = vi.fn();
 const notifyMemberJoined = vi.fn();
 const requestToJoinServer = vi.fn();
 const resolveAutoJoinServerId = vi.fn();
+const getActiveMemberTimeout = vi.fn();
 
 vi.mock('@lobbyforge/db', async () => {
   const actual = await vi.importActual<typeof import('@lobbyforge/db')>('@lobbyforge/db');
@@ -36,6 +37,7 @@ vi.mock('@lobbyforge/db', async () => {
     cancelJoinRequest,
     getServerById,
     requestToJoinServer,
+    getActiveMemberTimeout,
     joinRequestRetryAfter: actual.joinRequestRetryAfter,
     JOIN_REQUEST_NOTE_MAX_LENGTH: actual.JOIN_REQUEST_NOTE_MAX_LENGTH,
   };
@@ -113,9 +115,11 @@ beforeEach(() => {
     notifyMemberJoined,
     requestToJoinServer,
     resolveAutoJoinServerId,
+    getActiveMemberTimeout,
   ]) {
     fn.mockReset();
   }
+  getActiveMemberTimeout.mockResolvedValue(null);
   resolveAutoJoinServerId.mockResolvedValue(SERVER);
   logAction.mockResolvedValue(undefined);
   notifyMemberJoined.mockResolvedValue(undefined);
@@ -310,6 +314,30 @@ describe('POST /api/servers/{id}/join-requests/{requestId}', () => {
     expect((await decide({ action: 'reject' })).status).toBe(403);
     expect(approveJoinRequest).not.toHaveBeenCalled();
     expect(rejectJoinRequest).not.toHaveBeenCalled();
+  });
+
+  // Security review 2026-10 (A1): a timed-out moderator kept approving
+  // and rejecting join requests — the timeout only reached the moderation gate.
+  it('403 actor_timed_out for a timed-out moderator — nothing is decided', async () => {
+    const until = new Date(Date.now() + 5 * 60_000);
+    requireServerMember.mockResolvedValue({ ok: true, server: { id: SERVER, ownerUserId: USER } });
+    getActiveMemberTimeout.mockResolvedValue(until);
+    for (const action of ['approve', 'reject']) {
+      const res = await decide({ action });
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ code: 'actor_timed_out', until: until.toISOString() });
+    }
+    expect(getActiveMemberTimeout).toHaveBeenCalledWith({ __mockDb: true }, SERVER, MOD);
+    expect(approveJoinRequest).not.toHaveBeenCalled();
+    expect(rejectJoinRequest).not.toHaveBeenCalled();
+    expect(logAction).not.toHaveBeenCalled();
+  });
+
+  it('the owner decides without a timeout lookup (the owner cannot be timed out)', async () => {
+    requireServerMember.mockResolvedValue({ ok: true, server: { id: SERVER, ownerUserId: MOD } });
+    rejectJoinRequest.mockResolvedValue({ ok: true, request: decided('rejected') });
+    expect((await decide({ action: 'reject' })).status).toBe(200);
+    expect(getActiveMemberTimeout).not.toHaveBeenCalled();
   });
 
   it("another server's request id is not found here: 404, nothing decided, nothing audited", async () => {

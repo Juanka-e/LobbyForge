@@ -13,6 +13,7 @@ import {
   requireServerPermission,
 } from '@/lib/api-auth';
 import { withApiSecurity } from '@/lib/security-headers';
+import { refuseTimedOutActor } from '@/lib/actor-timeout';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -59,7 +60,7 @@ async function requireReadable(req: Request, serverId: string) {
   if (!sessionResult.ok) return sessionResult;
   const member = await requireServerMember(sessionResult.session.uid, serverId);
   if (!member.ok) return member;
-  return { ok: true as const, uid: sessionResult.session.uid };
+  return { ok: true as const, uid: sessionResult.session.uid, ownerUserId: member.server?.ownerUserId ?? null };
 }
 
 async function handleGet(req: Request, ctx: RouteContext): Promise<NextResponse> {
@@ -82,6 +83,9 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
 
   const permission = await requireServerPermission(access.uid, serverId, CorePermission.MANAGE_SERVER);
   if (!permission.ok) return permission.response;
+  // A timed-out member changes no settings (lib/actor-timeout.ts).
+  const timedOut = await refuseTimedOutActor(serverId, access.uid, access.ownerUserId);
+  if (timedOut) return timedOut;
 
   let body: z.infer<typeof PatchSchema>;
   try {

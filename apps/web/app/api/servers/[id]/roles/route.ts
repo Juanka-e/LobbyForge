@@ -14,6 +14,7 @@ import {
 import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
+import { refuseTimedOutActor } from '@/lib/actor-timeout';
 import { isValidRoleIcon } from '@/lib/role-icons';
 import { findUngrantablePermissions, UNGRANTABLE_PERMISSIONS_ERROR } from '@/lib/role-grant-policy';
 
@@ -135,6 +136,10 @@ async function handlePost(
     if (!hasPermission(permissions, CorePermission.MANAGE_ROLES)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
+    const server = await getServerById(getDb(), serverId);
+    // A timed-out member manages no roles (lib/actor-timeout.ts).
+    const timedOut = await refuseTimedOutActor(serverId, session.uid, server?.ownerUserId);
+    if (timedOut) return timedOut;
 
     let body: z.infer<typeof CreateRoleSchema>;
     try {
@@ -160,7 +165,6 @@ async function handlePost(
     // Discord-style hierarchy on CREATE: a non-owner cannot birth a role
     // at/past their own rank (that would be gifting themselves a
     // promotion). ADMINISTRATOR does not bypass; only the owner does.
-    const server = await getServerById(getDb(), serverId);
     if (server && session.uid !== server.ownerUserId) {
       const actorHighest = await getHighestRolePosition(getDb(), serverId, session.uid);
       const requested = body.position ?? 0;

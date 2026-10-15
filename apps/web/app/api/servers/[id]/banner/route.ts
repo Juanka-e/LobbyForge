@@ -14,6 +14,7 @@ import { BANNER_LIMITS, checkImageDataUrl } from '@/lib/image-validation';
 import { checkUserImageQuota, quotaExceededResponse } from '@/lib/upload-quota';
 import { consumeUploadBudget } from '@/lib/upload-budget';
 import { withApiSecurity } from '@/lib/security-headers';
+import { refuseTimedOutActor } from '@/lib/actor-timeout';
 import { requireVerifiedEmail } from '@/lib/mail/verification';
 
 export const dynamic = 'force-dynamic';
@@ -58,7 +59,7 @@ async function resolveSession(req: Request): Promise<
   return { ok: true, uid: session.uid };
 }
 
-/** Membership + MANAGE_SERVER gate (banner is a server-level setting).
+/** Membership + MANAGE_SERVER + not-timed-out gate (banner is a server-level setting).
  * Returns a NextResponse when denied, else the server row. */
 async function requireBannerManager(
   serverId: string,
@@ -77,6 +78,9 @@ async function requireBannerManager(
   if (!hasPermission(permissions, CorePermission.MANAGE_SERVER)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
+  // A timed-out member changes no settings (lib/actor-timeout.ts).
+  const timedOut = await refuseTimedOutActor(serverId, actorUserId, server.ownerUserId);
+  if (timedOut) return timedOut;
   return { server };
 }
 

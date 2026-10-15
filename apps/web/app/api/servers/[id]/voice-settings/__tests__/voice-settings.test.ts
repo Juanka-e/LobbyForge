@@ -6,6 +6,7 @@ const requireServerMember = vi.fn();
 const requireServerPermission = vi.fn();
 const getEffectiveServerVoiceSettings = vi.fn();
 const updateServerVoiceSettings = vi.fn();
+const getActiveMemberTimeout = vi.fn();
 
 vi.mock('@/lib/api-auth', () => ({
   CorePermission: { MANAGE_SERVER: 'manage_server' },
@@ -16,6 +17,7 @@ vi.mock('@/lib/api-auth', () => ({
 vi.mock('@lobbyforge/db', () => ({
   getEffectiveServerVoiceSettings,
   updateServerVoiceSettings,
+  getActiveMemberTimeout,
 }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
 vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));
@@ -48,6 +50,7 @@ beforeEach(() => {
   requireServerPermission.mockReset();
   getEffectiveServerVoiceSettings.mockReset();
   updateServerVoiceSettings.mockReset();
+  getActiveMemberTimeout.mockReset().mockResolvedValue(null);
   // Defaults: member access allowed.
   requireMaterializedSession.mockReturnValue({
     ok: true,
@@ -130,5 +133,38 @@ describe('PATCH /api/servers/[id]/voice-settings', () => {
       ctx()
     );
     expect(res.status).toBe(400);
+  });
+
+  // Security review 2026-10 (A1): a timed-out member changes no settings.
+  it('403 actor_timed_out for a timed-out manager — nothing is stored', async () => {
+    const until = new Date(Date.now() + 60_000);
+    requireServerMember.mockResolvedValue({ ok: true, server: { id: SERVER_ID, ownerUserId: 'someone-else' } });
+    getActiveMemberTimeout.mockResolvedValue(until);
+    const { PATCH } = await loadRoute();
+    const res = await PATCH(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/voice-settings`, {
+        method: 'PATCH',
+        body: JSON.stringify({ allowCamera: false }),
+      }),
+      ctx()
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'actor_timed_out', until: until.toISOString() });
+    expect(updateServerVoiceSettings).not.toHaveBeenCalled();
+  });
+
+  it('the owner is never asked about a timeout', async () => {
+    requireServerMember.mockResolvedValue({ ok: true, server: { id: SERVER_ID, ownerUserId: UID } });
+    updateServerVoiceSettings.mockResolvedValue(sampleRow);
+    const { PATCH } = await loadRoute();
+    const res = await PATCH(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/voice-settings`, {
+        method: 'PATCH',
+        body: JSON.stringify({ allowCamera: true }),
+      }),
+      ctx()
+    );
+    expect(res.status).toBe(200);
+    expect(getActiveMemberTimeout).not.toHaveBeenCalled();
   });
 });

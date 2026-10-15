@@ -5,6 +5,7 @@ import { getDb } from '@/lib/db';
 import { requireMaterializedSession, requireServerMember } from '@/lib/api-auth';
 import { canReviewJoinRequests, isUuid, toDecisionJson } from '@/lib/join-requests';
 import { withApiSecurity } from '@/lib/security-headers';
+import { refuseTimedOutActor } from '@/lib/actor-timeout';
 import { notifyMemberJoined } from '@/lib/bots/welcome';
 
 export const dynamic = 'force-dynamic';
@@ -24,6 +25,7 @@ const DecisionSchema = z.object({ action: z.enum(['approve', 'reject']) }).stric
  * `banned`, the request is rejected).
  * reject: `member.join_rejected` is audited; the user cannot ask again for
  * the cooldown (JOIN_REQUEST_REJECTION_COOLDOWN_MS).
+ * A timed-out moderator is refused (403 `actor_timed_out`, lib/actor-timeout.ts).
  * A request that was already decided answers 409 `not_pending`. A request
  * id of ANOTHER server is unknown here (404: the lookup is scoped to the
  * URL's server, whose permissions were checked), and a server or request
@@ -62,6 +64,9 @@ async function handlePost(
     if (!canReviewJoinRequests(await getUserPermissions(getDb(), uid, serverId))) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
+    // A timed-out moderator decides nothing (lib/actor-timeout.ts).
+    const timedOut = await refuseTimedOutActor(serverId, uid, member.server?.ownerUserId);
+    if (timedOut) return timedOut;
 
     if (body.action === 'approve') {
       const result = await approveJoinRequest(getDb(), { serverId, requestId, decidedBy: uid });

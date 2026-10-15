@@ -16,6 +16,7 @@ import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
 import { CorePermission, authorizeChannelVisibility, authorizeServerPermission } from '@/lib/permissions';
+import { refuseTimedOutActor } from '@/lib/actor-timeout';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -171,6 +172,9 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
 
     const auth = await authorizeServerPermission(session.uid, serverId, CorePermission.MANAGE_CHANNELS);
     if (!auth.ok) return auth.response;
+    // A timed-out member edits no channels (lib/actor-timeout.ts).
+    const timedOut = await refuseTimedOutActor(serverId, session.uid, access.ownerUserId);
+    if (timedOut) return timedOut;
 
     let body: z.infer<typeof PatchChannelSchema>;
     try {
@@ -265,6 +269,9 @@ async function handleDelete(req: Request, ctx: RouteContext): Promise<NextRespon
 
     const auth = await authorizeServerPermission(session.uid, serverId, CorePermission.MANAGE_CHANNELS);
     if (!auth.ok) return auth.response;
+    // …nor deletes them.
+    const timedOut = await refuseTimedOutActor(serverId, session.uid, access.ownerUserId);
+    if (timedOut) return timedOut;
 
     // Bot API v2 §1.1: the bots granted this channel lose it with the
     // channel (the rows cascade) — read who they are first.

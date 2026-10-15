@@ -5,6 +5,7 @@ import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { authorizeServerPermission } from '@/lib/permissions';
 import { withApiSecurity } from '@/lib/security-headers';
+import { refuseTimedOutActor } from '@/lib/actor-timeout';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -72,6 +73,13 @@ async function handleDelete(
       !hasPermission(auth.permissions, CorePermission.MANAGE_SERVER)
     ) {
       return NextResponse.json({ error: 'You can only revoke invites you created' }, { status: 403 });
+    }
+    // Revoking SOMEONE ELSE'S invite is management, which a timed-out member
+    // may not do (lib/actor-timeout.ts). Taking back your own stays allowed,
+    // like deleting your own message.
+    if (invite.createdBy !== session.uid) {
+      const timedOut = await refuseTimedOutActor(serverId, session.uid, server.ownerUserId);
+      if (timedOut) return timedOut;
     }
     await revokeInvite(getDb(), inviteId);
     void logAction(getDb(), {

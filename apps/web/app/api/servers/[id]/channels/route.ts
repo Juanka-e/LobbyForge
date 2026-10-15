@@ -17,6 +17,7 @@ import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
 import { CorePermission, authorizeServerPermission, hasPermission } from '@/lib/permissions';
 import { requireVerifiedEmail } from '@/lib/mail/verification';
+import { refuseTimedOutActor } from '@/lib/actor-timeout';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -160,6 +161,9 @@ async function handlePost(req: Request, ctx: { params: Promise<{ id: string }> }
     // "general" channel that every other member reads.
     const auth = await authorizeServerPermission(session.uid, serverId, CorePermission.MANAGE_CHANNELS);
     if (!auth.ok) return auth.response;
+    // A timed-out member creates no channels (lib/actor-timeout.ts).
+    const timedOut = await refuseTimedOutActor(serverId, session.uid, access.server.ownerUserId);
+    if (timedOut) return timedOut;
 
     const created = await createChannel(getDb(), {
       serverId,

@@ -15,6 +15,7 @@ import { getServerById, logAction, type BotRow } from '@lobbyforge/db';
 import { getDb } from '@/lib/db';
 import { requireMaterializedSession, type ApiResult } from '@/lib/api-auth';
 import { authorizeServerPermission } from '@/lib/permissions';
+import { isWriteRequest, refuseTimedOutActor } from '@/lib/actor-timeout';
 import { BOT_NAME_MAX_LENGTH, botTrustLevel, isBuiltInType, type BotPermissionId, type BotTrustLevel } from './catalog';
 import { parseModerationSettings, parseWelcomeSettings } from './settings';
 import { isDefaultBuiltInBotName, normalizeBuiltInSettings } from './bot-i18n-server';
@@ -120,7 +121,11 @@ export interface BotManager {
   isOwner: boolean;
 }
 
-/** Signed-in member of an existing server holding MANAGE_SERVER. */
+/**
+ * Signed-in member of an existing server holding MANAGE_SERVER. A write
+ * (anything but GET/HEAD) is also refused to a timed-out manager — 403
+ * `actor_timed_out` (lib/actor-timeout.ts); reading the settings is not.
+ */
 export async function requireBotManager(req: Request, serverId: string): Promise<ApiResult<{ manager: BotManager }>> {
   const session = requireMaterializedSession(req);
   if (!session.ok) return session;
@@ -128,6 +133,10 @@ export async function requireBotManager(req: Request, serverId: string): Promise
   if (!server) return { ok: false, response: NextResponse.json({ error: 'Server not found' }, { status: 404 }) };
   const auth = await authorizeServerPermission(session.session.uid, serverId, CorePermission.MANAGE_SERVER);
   if (!auth.ok) return { ok: false, response: auth.response };
+  if (isWriteRequest(req)) {
+    const timedOut = await refuseTimedOutActor(serverId, session.session.uid, server.ownerUserId);
+    if (timedOut) return { ok: false, response: timedOut };
+  }
   return {
     ok: true,
     manager: {

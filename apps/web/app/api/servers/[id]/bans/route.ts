@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { CorePermission, hasPermission } from '@lobbyforge/core';
 import {
   banUser,
-  getActiveMemberTimeout,
   getServerById,
   getUserPermissions,
   isServerMember,
@@ -16,6 +15,7 @@ import { getDb } from '@/lib/db';
 import { readGuestSession } from '@/lib/guest-session';
 import { withApiSecurity } from '@/lib/security-headers';
 import { authorizeModerationTarget } from '@/lib/member-authorization';
+import { refuseTimedOutActor } from '@/lib/actor-timeout';
 import { publishAccessInvalidation } from '@/lib/access-invalidation';
 import { queueMemberVoiceSync } from '@/lib/voice-moderation';
 import { emitMemberEvent } from '@/lib/bots/events';
@@ -265,15 +265,8 @@ async function handleDelete(
     // `actor_timed_out`): lifting a ban is as much a moderation act as
     // setting one, and used to slip past the timeout. The owner cannot be
     // timed out, so is never refused.
-    if (session.uid !== server.ownerUserId) {
-      const timedOutUntil = await getActiveMemberTimeout(getDb(), serverId, session.uid);
-      if (timedOutUntil) {
-        return NextResponse.json(
-          { error: 'You are timed out in this server', code: 'actor_timed_out', until: timedOutUntil.toISOString() },
-          { status: 403 }
-        );
-      }
-    }
+    const timedOut = await refuseTimedOutActor(serverId, session.uid, server.ownerUserId);
+    if (timedOut) return timedOut;
 
     const stillBanned = await isCurrentlyBanned(getDb(), serverId, userId);
     if (!stillBanned) {

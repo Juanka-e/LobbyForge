@@ -1,9 +1,10 @@
 /**
  * POST /api/servers/{id}/channels/{channelId}/polls/{pollId}/close — close a
  * poll before its time (docs/CHAT_POLLS.md). The poll's creator, or anyone
- * with MANAGE_MESSAGES (the owner and administrators included). A poll that
- * has already closed answers 409. The final results stay in the channel,
- * visible to everyone; a `poll_update` tells every open lobby.
+ * with MANAGE_MESSAGES (the owner and administrators included) who is not
+ * timed out (403 `actor_timed_out`). A poll that has already closed answers
+ * 409. The final results stay in the channel, visible to everyone; a
+ * `poll_update` tells every open lobby.
  */
 import { NextResponse } from 'next/server';
 import { closeMessagePoll, getUserPermissions, logAction } from '@lobbyforge/db';
@@ -11,6 +12,7 @@ import { getDb } from '@/lib/db';
 import { withApiSecurity } from '@/lib/security-headers';
 import { CorePermission, hasPermission } from '@/lib/permissions';
 import { authorizeChannelMessageAccess } from '@/lib/message-authorization';
+import { refuseTimedOutActor } from '@/lib/actor-timeout';
 import { publishChatPollUpdate } from '@/lib/chat-bus';
 import { loadChannelPoll, loadPollForViewer, resolvePollSession } from '@/lib/chat-polls-server';
 
@@ -39,6 +41,10 @@ async function handlePost(req: Request, ctx: RouteContext): Promise<NextResponse
       if (!hasPermission(permissions, CorePermission.MANAGE_MESSAGES)) {
         return NextResponse.json({ error: 'Forbidden', code: 'poll_close_forbidden' }, { status: 403 });
       }
+      // Closing someone else's poll is moderation, which a timed-out member
+      // may not do (lib/actor-timeout.ts); the creator may close their own.
+      const timedOut = await refuseTimedOutActor(serverId, session.uid, access.context.server.ownerUserId);
+      if (timedOut) return timedOut;
     }
 
     const result = await closeMessagePoll(getDb(), { pollId, userId: session.uid });
