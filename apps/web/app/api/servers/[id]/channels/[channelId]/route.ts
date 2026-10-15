@@ -24,7 +24,9 @@ export const runtime = 'nodejs';
 const PatchChannelSchema = z.object({
   name: ChannelNameSchema.optional(),
   topic: z.string().max(512).nullable().optional(),
-  position: z.number().int().min(0).optional(),
+  // Same bound as a role's position: an absurd value would only stretch
+  // the shift `updateChannel` runs over the server's channels.
+  position: z.number().int().min(0).max(1_000_000).optional(),
   /**
    * Role-gated visibility (0028): the ONLY roles that can see this
    * channel. [] clears every override (visible to all members again).
@@ -187,12 +189,9 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
       );
     }
 
-    const updated = await updateChannel(getDb(), channelId, {
-      ...(body.name !== undefined ? { name: body.name } : {}),
-      ...(body.topic !== undefined ? { topic: body.topic } : {}),
-      ...(body.position !== undefined ? { position: body.position } : {}),
-    });
-
+    // Everything that can refuse the request runs BEFORE the first write:
+    // a 400 used to arrive after the name / topic / position had already
+    // been saved, so a "refused" edit was half applied.
     if (body.visibleToRoleIds !== undefined) {
       // Every referenced role must belong to this server — a foreign
       // role id would silently never match anyone.
@@ -205,6 +204,15 @@ async function handlePatch(req: Request, ctx: RouteContext): Promise<NextRespons
           { status: 400 }
         );
       }
+    }
+
+    const updated = await updateChannel(getDb(), channelId, {
+      ...(body.name !== undefined ? { name: body.name } : {}),
+      ...(body.topic !== undefined ? { topic: body.topic } : {}),
+      ...(body.position !== undefined ? { position: body.position } : {}),
+    });
+
+    if (body.visibleToRoleIds !== undefined) {
       await setChannelRoleOverrides(getDb(), channelId, body.visibleToRoleIds);
       if (body.visibleToRoleIds.length > 0) {
         // Bot API v2 §1.1: a private channel may only be granted to a bot

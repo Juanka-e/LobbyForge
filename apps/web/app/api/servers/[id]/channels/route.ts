@@ -29,7 +29,7 @@ const CreateChannelSchema = z.object({
   type: z.enum(CHANNEL_TYPES),
   topic: z.string().max(512).optional(),
   pluginId: z.string().max(64).optional(),
-  position: z.number().int().min(0).optional(),
+  position: z.number().int().min(0).max(1_000_000).optional(),
 });
 
 function getSessionSecret(): string {
