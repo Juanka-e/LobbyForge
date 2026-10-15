@@ -88,7 +88,11 @@ function nextMessage(ws: WebSocket & { __queue?: Record<string, unknown>[] }, ti
     return Promise.resolve(queue.shift()!);
   }
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('message timeout')), timeoutMs);
+    const timer = setTimeout(() => {
+      // Detach too: a waiter left behind would swallow the next frame.
+      cleanup();
+      reject(new Error('message timeout'));
+    }, timeoutMs);
     // The collector is the SINGLE source of frames — resolve only by
     // draining the queue, so a waiter-resolved frame never leaves a
     // ghost copy behind for the next read.
@@ -371,6 +375,58 @@ describe('beta-review S6 — subscription caps + in-flight subscribe on close', 
     resolveAuthz!({ ok: true, kind: 'chat', serverId: 'srv-1', resourceId: 'ch-1', channelId: 'ch-1' });
     await new Promise((r) => setTimeout(r, 50));
     expect(subscriberMocks.acquireTopicSubscription).not.toHaveBeenCalled();
+  });
+});
+
+describe('G9 — an unsubscribe cancels a subscribe that is still authorizing', () => {
+  it('the late authorization does not add the topic', async () => {
+    const pendingAuthz: Array<(value: unknown) => void> = [];
+    authorizeMocks.authorizeTopicSubscribe.mockImplementation(
+      () => new Promise((resolve) => { pendingAuthz.push(resolve); })
+    );
+    baseUrl = await start();
+    const ws = await connect(baseUrl);
+    await nextMessage(ws); // hello
+    ws.send(JSON.stringify({ type: 'subscribe', topic: 'chat:srv-1:ch-1' }));
+    await vi.waitFor(() => expect(pendingAuthz).toHaveLength(1));
+
+    ws.send(JSON.stringify({ type: 'unsubscribe', topic: 'chat:srv-1:ch-1' }));
+    expect(await nextMessage(ws)).toMatchObject({ type: 'unsubscribed', topic: 'chat:srv-1:ch-1' });
+
+    pendingAuthz[0]!({ ok: true, kind: 'chat', serverId: 'srv-1', resourceId: 'ch-1', channelId: 'ch-1' });
+    await expect(nextMessage(ws, 200)).rejects.toThrow('message timeout');
+    expect(subscriberMocks.acquireTopicSubscription).not.toHaveBeenCalled();
+
+    // A fresh subscribe afterwards works as usual.
+    ws.send(JSON.stringify({ type: 'subscribe', topic: 'chat:srv-1:ch-1' }));
+    await vi.waitFor(() => expect(pendingAuthz).toHaveLength(2));
+    pendingAuthz[1]!({ ok: true, kind: 'chat', serverId: 'srv-1', resourceId: 'ch-1', channelId: 'ch-1' });
+    expect(await nextMessage(ws)).toMatchObject({ type: 'subscribed', topic: 'chat:srv-1:ch-1' });
+    expect(subscriberMocks.acquireTopicSubscription).toHaveBeenCalledTimes(1);
+    ws.close();
+  });
+
+  it('subscribe → unsubscribe → subscribe while authorizing ends subscribed once', async () => {
+    const pendingAuthz: Array<(value: unknown) => void> = [];
+    authorizeMocks.authorizeTopicSubscribe.mockImplementation(
+      () => new Promise((resolve) => { pendingAuthz.push(resolve); })
+    );
+    baseUrl = await start();
+    const ws = await connect(baseUrl);
+    await nextMessage(ws); // hello
+    ws.send(JSON.stringify({ type: 'subscribe', topic: 'chat:srv-1:ch-1' }));
+    ws.send(JSON.stringify({ type: 'unsubscribe', topic: 'chat:srv-1:ch-1' }));
+    ws.send(JSON.stringify({ type: 'subscribe', topic: 'chat:srv-1:ch-1' }));
+    await vi.waitFor(() => expect(pendingAuthz).toHaveLength(2));
+    expect((await nextMessage(ws)).type).toBe('unsubscribed');
+
+    const ok = { ok: true, kind: 'chat', serverId: 'srv-1', resourceId: 'ch-1', channelId: 'ch-1' };
+    pendingAuthz[0]!(ok); // the cancelled one
+    pendingAuthz[1]!(ok);
+    expect(await nextMessage(ws)).toMatchObject({ type: 'subscribed', topic: 'chat:srv-1:ch-1' });
+    await expect(nextMessage(ws, 200)).rejects.toThrow('message timeout');
+    expect(subscriberMocks.acquireTopicSubscription).toHaveBeenCalledTimes(1);
+    ws.close();
   });
 });
 

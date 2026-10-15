@@ -38,6 +38,9 @@ interface ConnectionState {
    * this socket (null = healthy). Past the grace window the socket
    * closes — realtime never fails open indefinitely. */
   revocationUnavailableSince: number | null;
+  /** Subscribes still authorizing, per topic. An `unsubscribe` cancels
+   * them, so a slow authorization cannot add a topic the client left. */
+  pendingSubscribes: Map<string, Set<{ cancelled: boolean }>>;
 }
 
 function getEnvPort(): number {
@@ -174,6 +177,37 @@ function send(socket: WebSocket, msg: ServerMessage): void {
   } catch (err) {
     console.warn(`[ws-gateway] send failed: ${(err as Error).message}`);
   }
+}
+
+/**
+ * Register a subscribe that is about to authorize. `cancelled` turns true
+ * when an `unsubscribe` for the topic arrives first; `done()` forgets it.
+ */
+function beginPendingSubscribe(state: ConnectionState, topic: string): { cancelled: boolean; done: () => void } {
+  let forTopic = state.pendingSubscribes.get(topic);
+  if (!forTopic) {
+    forTopic = new Set();
+    state.pendingSubscribes.set(topic, forTopic);
+  }
+  const pending = {
+    cancelled: false,
+    done: () => {
+      const current = state.pendingSubscribes.get(topic);
+      if (!current) return;
+      current.delete(pending);
+      if (current.size === 0) state.pendingSubscribes.delete(topic);
+    },
+  };
+  forTopic.add(pending);
+  return pending;
+}
+
+/** An `unsubscribe` cancels every subscribe of that topic still authorizing. */
+function cancelPendingSubscribes(state: ConnectionState, topic: string): void {
+  const forTopic = state.pendingSubscribes.get(topic);
+  if (!forTopic) return;
+  for (const pending of forTopic) pending.cancelled = true;
+  state.pendingSubscribes.delete(topic);
 }
 
 function recordSubscribe(state: ConnectionState): boolean {
@@ -540,6 +574,7 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
       subscribeTimestamps: [],
       alive: true,
       revocationUnavailableSince: null,
+      pendingSubscribes: new Map(),
     };
     connections.set(socket, state);
     liveState = state;
@@ -610,8 +645,13 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
           });
           return;
         }
+        const pending = beginPendingSubscribe(state, msg.topic);
         try {
           const authz = await authorizeTopicSubscribe(getDb(), state.guest.uid, msg.topic);
+          // The client unsubscribed while this was authorizing: it already
+          // has its `unsubscribed`, so adding the topic now would leave a
+          // live subscription nobody wants.
+          if (pending.cancelled) return;
           if (!authz.ok) {
             send(socket, {
               type: 'error',
@@ -688,8 +728,11 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
             code: 'internal_error',
             message: 'Subscription failed',
           });
+        } finally {
+          pending.done();
         }
       } else {
+        cancelPendingSubscribes(state, msg.topic);
         if (state.subs.has(msg.topic)) {
           state.subs.remove(msg.topic);
         }
