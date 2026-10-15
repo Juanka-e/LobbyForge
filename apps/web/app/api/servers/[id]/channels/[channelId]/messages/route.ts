@@ -27,6 +27,9 @@ import { readMessagePollId } from '@/lib/chat-polls';
 import { loadPollViewsForMessages } from '@/lib/chat-polls-server';
 import { MESSAGE_BODY_MAX_BYTES } from '@/lib/message-limits';
 import { mentionsEveryoneOrHere } from '@/lib/everyone-mention';
+import { MAX_MENTIONS } from '@/lib/mentions';
+import { mentionEveryoneRefusal, resolveMessageMentions } from '@/lib/message-mentions-server';
+import { notifyMentionedMembers } from '@/lib/mention-notify';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -41,6 +44,11 @@ export const runtime = 'nodejs';
 const CreateMessageSchema = z.object({
   content: MessageContentSchema,
   replyToId: z.string().uuid().optional(),
+  // docs/PROFILES.md "Mentions": the members the composer's picker
+  // inserted. Only a hint — the server keeps those that are members and
+  // whose name is in the text, adds typed @handles, and stores the result
+  // in `metadata.mentions` itself.
+  mentions: z.array(z.string().uuid()).max(MAX_MENTIONS).optional(),
 }).strict();
 
 function getSessionSecret(): string {
@@ -215,7 +223,7 @@ async function handlePost(
     const activeTimeout = await getActiveMemberTimeout(getDb(), serverId, session.uid);
     if (activeTimeout) {
       return NextResponse.json(
-        { error: 'You are timed out in this server', until: activeTimeout.toISOString() },
+        { error: 'You are timed out in this server', code: 'timed_out', until: activeTimeout.toISOString() },
         { status: 403 }
       );
     }
@@ -228,7 +236,7 @@ async function handlePost(
         serverId,
         CorePermission.MENTION_EVERYONE
       );
-      if (!mentionAuth.ok) return mentionAuth.response;
+      if (!mentionAuth.ok) return mentionEveryoneRefusal(mentionAuth.response);
     }
     // Bots milestone: the server's Moderation Bot (if enabled) checks the
     // message before it is stored. A blocked sender gets a 422 whose
@@ -248,10 +256,12 @@ async function handlePost(
       });
     }
 
+    const mentions = await resolveMessageMentions(getDb(), serverId, body.content, body.mentions ?? []);
     const created = await createMessage(getDb(), {
       channelId,
       userId: session.uid,
       content: body.content,
+      ...(mentions.length > 0 ? { metadata: { mentions } } : {}),
       ...(body.replyToId !== undefined ? { replyToId: body.replyToId } : {}),
     });
     publishChatMessage({
@@ -267,6 +277,11 @@ async function handlePost(
         createdAt: created.createdAt.toISOString(),
       },
     });
+    // docs/PROFILES.md "Mentions": each member it names hears it on their
+    // own feed (a badge on the channel, a desktop notification).
+    if (mentions.length > 0) {
+      notifyMentionedMembers({ serverId, channelId, messageId: created.id, authorId: session.uid, mentions });
+    }
     // Bot API v2: bots' outgoing event endpoints (fire-and-forget, cached
     // per server — no query per bot).
     emitMessageEvent({

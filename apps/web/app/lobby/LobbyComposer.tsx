@@ -2,7 +2,6 @@
 
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useT } from '@/lib/i18n/client';
-import { moderationBlockedMessageKey } from '@/lib/bots/catalog';
 import { commandsInDisplayOrder, filterCommands, type ChannelCommand } from '@/lib/bots/command-options';
 import { interactionStore } from '@/lib/bots/interaction-store';
 import type { InvokedInteraction } from '@/lib/bots/client-api';
@@ -15,6 +14,8 @@ import EmailUnverifiedNotice, {
   handleEmailUnverified,
   useEmailRestriction,
 } from '@/components/email-verification/EmailUnverifiedNotice';
+import { contentMentions } from '@/lib/mentions';
+import { composerRefusalMessage } from '@/lib/chat-refusals';
 
 /**
  * The lobby's message composer. Plain text posts to the channel; typing
@@ -54,6 +55,8 @@ export function LobbyComposer({
   const listboxId = useId();
   const hintId = useId();
   const [value, setValue] = useState('');
+  /** Members picked from the @ list since the last post: id → the name inserted. */
+  const pickedMentions = useRef(new Map<string, string>());
   const [status, setStatus] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -199,23 +202,25 @@ export function LobbyComposer({
     setSending(true);
     setStatus(null);
     try {
+      // docs/PROFILES.md "Mentions": the members picked from the list whose
+      // name is still in the text. The server checks them again.
+      const mentions = [...pickedMentions.current].filter(([, label]) => contentMentions(content, label)).map(([userId]) => userId);
       const res = await fetch(`/api/servers/${serverId}/channels/${channelId}/messages`, {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify(mentions.length > 0 ? { content, mentions } : { content }),
       });
       if (!res.ok) {
-        const detail = (await res.json().catch(() => ({}))) as { error?: string; code?: string; rule?: string };
+        const detail = (await res.json().catch(() => ({}))) as { error?: string; code?: string; rule?: string; until?: string };
         // The status was stale: the composer locks now, keeping the draft.
         if (handleEmailUnverified(res.status, detail)) return;
-        // The Moderation Bot's refusal is explained in the reader's language.
-        if (detail.code === 'blocked_by_moderation') {
-          throw new Error(t(moderationBlockedMessageKey(detail.rule)));
-        }
-        throw new Error(detail.error ?? t('lobbyMain.composer.failed', { status: res.status }));
+        throw new Error(composerRefusalMessage(t, res.status, detail));
       }
-      const created = (await res.json()) as { message?: { id: string; content: string; userId: string | null; createdAt: string } };
+      const created = (await res.json()) as {
+        message?: { id: string; content: string; userId: string | null; createdAt: string; metadata?: Record<string, unknown> };
+      };
+      pickedMentions.current.clear();
       setValue('');
       setStatus(t('lobbyMain.composer.sent'));
       if (created.message) {
@@ -343,6 +348,7 @@ export function LobbyComposer({
             if (v.trim() && !v.startsWith('/')) handleTyping();
           }}
           members={members}
+          onMention={(userId, label) => pickedMentions.current.set(userId, label)}
           placeholder={t('lobbyMain.composer.placeholder', { name: channelName })}
           disabled={sending}
           inputRef={inputRef}

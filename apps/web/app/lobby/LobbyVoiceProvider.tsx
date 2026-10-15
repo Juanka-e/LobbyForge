@@ -188,7 +188,8 @@ export interface LobbyVoiceContextValue {
   toggleMic: () => Promise<void>;
   toggleCamera: () => Promise<void>;
   toggleScreenShare: () => Promise<void>;
-  setScreenSharePreference: (quality: ScreenQuality, fps: ScreenFps) => Promise<void>;
+  /** Applies at once; resolves whether it was also saved for next time. */
+  setScreenSharePreference: (quality: ScreenQuality, fps: ScreenFps) => Promise<boolean>;
   toggleDeafen: () => void;
   setMainViewMode: (mode: MainViewMode) => void;
   setActiveTextChannel: (channelId: string, channelName: string) => void;
@@ -1482,13 +1483,20 @@ export function LobbyVoiceProvider({
     const next = { ...voicePrefsRef.current, screenQuality: quality, screenFps: fps };
     voicePrefsRef.current = next;
     setScreenSharePreferenceState({ quality, fps });
-    const response = await fetch('/api/settings/me', {
-      method: 'PATCH',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ audio: next }),
-    });
-    if (!response.ok) throw new Error('Could not save stream quality preference.');
+    // The choice applies to this call at once; saving it for next time is
+    // best effort. It used to throw an English error that every caller
+    // dropped as an unhandled rejection.
+    try {
+      const response = await fetch('/api/settings/me', {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audio: next }),
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
   }, []);
 
   const toggleDeafen = useCallback(() => {
@@ -2216,6 +2224,11 @@ export function useLobbyVoice(): LobbyVoiceContextValue {
     throw new Error('useLobbyVoice must be used inside <LobbyVoiceProvider>');
   }
   return ctx;
+}
+
+/** The voice context, or null outside a <LobbyVoiceProvider> (a lobby without voice). */
+export function useOptionalLobbyVoice(): LobbyVoiceContextValue | null {
+  return useContext(LobbyVoiceContext);
 }
 
 export { ConnectionState };

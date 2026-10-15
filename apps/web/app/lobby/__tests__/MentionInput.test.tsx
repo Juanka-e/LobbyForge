@@ -9,8 +9,9 @@ import { providerPropsFor } from '@/lib/i18n/catalogue';
 
 const MEMBERS: MentionUser[] = [
   { userId: 'u1', displayName: 'Alice' },
-  { userId: 'u2', displayName: 'Bob' },
+  { userId: 'u2', displayName: 'Bob', username: 'bobby_b' },
   { userId: 'u3', displayName: 'Charlie' },
+  { userId: 'u4', displayName: 'İrem Işık' },
 ];
 
 // Wrap MentionInput so the controlled value tracks the latest onChange,
@@ -21,7 +22,7 @@ function MentionInputHarness({
   disabled,
 }: {
   members?: MentionUser[];
-  onMention?: (userId: string) => void;
+  onMention?: (userId: string, label: string) => void;
   disabled?: boolean;
 }) {
   const [value, setValue] = useState('');
@@ -74,7 +75,7 @@ describe('MentionInput', () => {
     const input = screen.getByRole('textbox') as HTMLInputElement;
     await user.type(input, '@al');
     await user.click(screen.getByRole('button', { name: /Alice/i }));
-    expect(onMention).toHaveBeenCalledWith('u1');
+    expect(onMention).toHaveBeenCalledWith('u1', 'Alice');
     // The input value now contains the @DisplayName insertion.
     expect(input.value).toContain('@Alice');
   });
@@ -93,7 +94,7 @@ describe('MentionInput', () => {
     // First item (Aaron) is highlighted by default.
     await user.keyboard('{ArrowDown}'); // -> Ava
     await user.keyboard('{Enter}');
-    expect(onMention).toHaveBeenCalledWith('u2');
+    expect(onMention).toHaveBeenCalledWith('u2', 'Ava');
   });
 
   it('closes the dropdown on Escape without inserting a mention', async () => {
@@ -126,5 +127,28 @@ describe('MentionInput', () => {
     await user.type(input, '@BO');
     expect(screen.getByRole('button', { name: /Bob/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Alice/i })).not.toBeInTheDocument();
+  });
+
+  it('matches a handle and shows it under the name', async () => {
+    const user = userEvent.setup();
+    renderInput();
+    await user.type(screen.getByRole('textbox'), '@bobby');
+    const option = screen.getByRole('button', { name: /Bob/ });
+    expect(option).toHaveTextContent('@bobby_b');
+  });
+
+  it('matches Turkish names the way a Turkish reader types them (İ/I)', async () => {
+    const user = userEvent.setup();
+    render(
+      <I18nProvider {...providerPropsFor('tr')}>
+        <MentionInputHarness />
+      </I18nProvider>
+    );
+    const input = screen.getByRole('textbox');
+    await user.type(input, '@ir');
+    expect(screen.getByRole('button', { name: /İrem Işık/ })).toBeInTheDocument();
+    await user.clear(input);
+    await user.type(input, '@ış');
+    expect(screen.getByRole('button', { name: /İrem Işık/ })).toBeInTheDocument();
   });
 });

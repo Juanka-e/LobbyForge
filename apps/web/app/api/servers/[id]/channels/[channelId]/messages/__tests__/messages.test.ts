@@ -684,7 +684,7 @@ describe('security-review AUTHZ-003: message text is author-only', () => {
       params()
     );
     expect(res.status).toBe(200);
-    expect(updateMessage).toHaveBeenCalledWith(expect.anything(), MESSAGE_ID, { content: 'edited' });
+    expect(updateMessage).toHaveBeenCalledWith(expect.anything(), MESSAGE_ID, expect.objectContaining({ content: 'edited' }));
   });
 });
 

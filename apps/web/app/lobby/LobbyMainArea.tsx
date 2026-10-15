@@ -1,6 +1,7 @@
 'use client';
 
 import { useLobbyVoice } from './LobbyVoiceProvider';
+import { useLiveMembers } from './LiveMembersProvider';
 import { LobbyVoiceView } from './LobbyVoiceView';
 import { LobbyDmView } from './LobbyDmView';
 import { LobbyActivityView } from './LobbyActivityView';
@@ -52,6 +53,8 @@ interface Channel {
   category: 'text' | 'voice';
   /** Text or announcement: polls can be posted here. */
   pollable?: boolean;
+  /** The topic an admin set; null = none. */
+  topic?: string | null;
 }
 
 interface LobbyData {
@@ -84,6 +87,7 @@ interface LobbyData {
   members?: Array<{
     id: string;
     name: string;
+    username?: string | null;
     roleName?: string | null;
     roleColor?: string | null;
     avatarUrl?: string | null;
@@ -118,16 +122,20 @@ function LobbyMainAreaLive({ data }: { data: LobbyData }) {
   const channelName = activeTextChannel?.name ?? voice.activeTextChannelName ?? 'general';
   const activeChannelId = activeTextChannel?.id ?? voice.activeTextChannelId;
   const voiceChannelName = data.voiceChannels.find((c) => c.id === voice.activeChannelId)?.name ?? t('lobbyMain.voice.fallbackName');
+  // docs/PROFILES.md "Live updates": newcomers and new names are mentionable at once.
+  const liveMembers = useLiveMembers()?.members;
+  const members = liveMembers ?? data.members;
   const memberMentions = useMemo(
     () =>
-      (data.members ?? []).map((m) => ({
+      (members ?? []).map((m) => ({
         userId: m.id,
         displayName: m.name,
+        username: m.username ?? null,
         roleName: m.roleName,
         roleColor: m.roleColor,
         avatarUrl: m.avatarUrl,
       })),
-    [data.members]
+    [members]
   );
   const composerChannels = useMemo(
     () => [...data.textChannels, ...data.voiceChannels],
@@ -159,6 +167,9 @@ function LobbyMainAreaLive({ data }: { data: LobbyData }) {
   if (voice.mainViewMode === 'dm' && voice.activeDm) {
     return (
       <LobbyDmView
+        // One instance per conversation: switching DMs never shows the last
+        // one's late answer, nor sends its unsent draft to the new person.
+        key={voice.activeDm.channelId}
         dm={voice.activeDm}
         currentUserId={data.currentUserId}
         currentDisplayName={data.currentDisplayName}
@@ -192,6 +203,7 @@ function LobbyMainAreaLive({ data }: { data: LobbyData }) {
     <main className="flex-1 flex flex-col bg-background min-w-0 relative text-[14px] animate-fade-in-up">
       <ChannelHeader
         channelName={channelName}
+        topic={activeTextChannel?.topic ?? null}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         showPinned={showPinned}
@@ -232,7 +244,7 @@ function LobbyMainAreaDemo({ data }: { data: LobbyData }) {
   const [notificationsMuted, setNotificationsMuted] = useState(false);
   return (
     <main className="flex-1 flex flex-col bg-background min-w-0 relative text-[14px] animate-fade-in-up">
-      <ChannelHeader channelName={channelName} searchQuery={searchQuery} onSearchChange={setSearchQuery} showPinned={showPinned} onTogglePinned={() => setShowPinned((value) => !value)} notificationsMuted={notificationsMuted} onToggleNotifications={() => setNotificationsMuted((value) => !value)} serverId={data.serverId} voiceChannelId={data.activeVoiceChannel?.id ?? null} />
+      <ChannelHeader channelName={channelName} topic={data.activeTextChannel?.topic ?? null} searchQuery={searchQuery} onSearchChange={setSearchQuery} showPinned={showPinned} onTogglePinned={() => setShowPinned((value) => !value)} notificationsMuted={notificationsMuted} onToggleNotifications={() => setNotificationsMuted((value) => !value)} serverId={data.serverId} voiceChannelId={data.activeVoiceChannel?.id ?? null} />
       <MessagesArea data={data} activeChannelId={data.activeTextChannel?.id ?? null} channelName={channelName} searchQuery={searchQuery} showPinned={showPinned} />
       <LobbyComposer
         channelName={channelName}
@@ -256,8 +268,11 @@ function ChannelHeader({
   serverId,
   voiceChannelId,
   onOpenActivities,
+  topic = null,
 }: {
   channelName: string;
+  /** The channel's own topic; nothing is shown without one. */
+  topic?: string | null;
   searchQuery: string;
   onSearchChange: (value: string) => void;
   showPinned: boolean;
@@ -270,16 +285,20 @@ function ChannelHeader({
 }) {
   const t = useT();
   return (
-    <header className="h-16 pl-16 pr-6 md:pl-6 flex items-center justify-between border-b border-border-subtle bg-surface-dim/80 backdrop-blur-md z-10 sticky top-0 shadow-sm">
-      <div className="flex items-center gap-3">
-        <span className="material-symbols-outlined text-[24px] text-text-secondary">tag</span>
-        <h2 className="font-body-lg font-bold text-text-primary">{channelName}</h2>
-        <div className="h-4 w-[1px] bg-border-subtle mx-2" />
-        <p className="font-label-sm hidden md:block text-text-secondary">
-          {t('lobbyMain.channel.topic')}
-        </p>
+    <header className="h-16 pl-16 pr-6 md:pl-6 flex items-center justify-between gap-2 border-b border-border-subtle bg-surface-dim/80 backdrop-blur-md z-10 sticky top-0 shadow-sm">
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="material-symbols-outlined flex-none text-[24px] text-text-secondary" aria-hidden>tag</span>
+        <h2 className="min-w-0 truncate font-body-lg font-bold text-text-primary" title={channelName}>{channelName}</h2>
+        {topic ? (
+          <>
+            <div className="mx-2 hidden h-4 w-[1px] flex-none bg-border-subtle md:block" />
+            <p className="hidden min-w-0 truncate font-label-sm text-text-secondary md:block" title={topic} data-testid="channel-topic">
+              {topic}
+            </p>
+          </>
+        ) : null}
       </div>
-      <div className="flex items-center gap-4">
+      <div className="flex flex-none items-center gap-4">
         {/* Opens the activities hub in the centre column — it used to
             navigate to the developer-facing /room page. */}
         {serverId && voiceChannelId ? (
@@ -293,11 +312,11 @@ function ChannelHeader({
             <span className="hidden sm:inline">{t('lobbyMain.activities.title')}</span>
           </button>
         ) : null}
-        <button type="button" onClick={onToggleNotifications} title={notificationsMuted ? t('lobbyMain.channel.notificationsEnable') : t('lobbyMain.channel.notificationsMute')} className={notificationsMuted ? 'text-danger hover:text-danger/80' : 'hover:text-text-primary transition-colors text-text-secondary'}>
-          <span className="material-symbols-outlined">{notificationsMuted ? 'notifications_off' : 'notifications'}</span>
+        <button type="button" onClick={onToggleNotifications} title={notificationsMuted ? t('lobbyMain.channel.notificationsEnable') : t('lobbyMain.channel.notificationsMute')} aria-label={notificationsMuted ? t('lobbyMain.channel.notificationsEnable') : t('lobbyMain.channel.notificationsMute')} className={notificationsMuted ? 'text-danger hover:text-danger/80' : 'hover:text-text-primary transition-colors text-text-secondary'}>
+          <span className="material-symbols-outlined" aria-hidden>{notificationsMuted ? 'notifications_off' : 'notifications'}</span>
         </button>
-        <button type="button" onClick={onTogglePinned} aria-pressed={showPinned} title={showPinned ? t('lobbyMain.channel.showAll') : t('lobbyMain.channel.showPinned')} className={showPinned ? 'text-primary' : 'hover:text-text-primary transition-colors text-text-secondary'}>
-          <span className="material-symbols-outlined">push_pin</span>
+        <button type="button" onClick={onTogglePinned} aria-pressed={showPinned} title={showPinned ? t('lobbyMain.channel.showAll') : t('lobbyMain.channel.showPinned')} aria-label={t('lobbyMain.channel.showPinned')} className={showPinned ? 'text-primary' : 'hover:text-text-primary transition-colors text-text-secondary'}>
+          <span className="material-symbols-outlined" aria-hidden>push_pin</span>
         </button>
         <div className="relative hidden lg:block w-48">
           <span className="material-symbols-outlined absolute left-2 top-1/2 -translate-y-1/2 text-[18px] text-text-secondary">search</span>
@@ -315,15 +334,18 @@ function ChannelHeader({
 }
 
 function MessagesArea({ data, activeChannelId, channelName, searchQuery, showPinned }: { data: LobbyData; activeChannelId: string | null; channelName: string; searchQuery: string; showPinned: boolean }) {
+  const liveMembers = useLiveMembers()?.members;
+  const members = liveMembers ?? data.members;
   const knownNames = useMemo(() => {
     const names: Record<string, string> = {};
     if (data.currentUserId) names[data.currentUserId] = data.currentDisplayName;
+    for (const m of data.messages) if (m.authorId) names[m.authorId] = m.author;
     // Members too: the "↳ <user> used /<command>" header names whoever ran
     // the command, who need not have written anything in the loaded window.
-    for (const member of data.members ?? []) names[member.id] = member.name;
-    for (const m of data.messages) if (m.authorId) names[m.authorId] = m.author;
+    // Live rows last, so a renamed member reads with their new name.
+    for (const member of members ?? []) names[member.id] = member.name;
     return names;
-  }, [data.currentUserId, data.currentDisplayName, data.messages, data.members]);
+  }, [data.currentUserId, data.currentDisplayName, data.messages, members]);
 
   // When switching channels, we show the SSR messages for the initial
   // channel, and for other channels we show a loading state until the
