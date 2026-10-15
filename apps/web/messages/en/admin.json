@@ -28,6 +28,7 @@
   "admin.audit.action.app.upsert": "installed or updated an app",
   "admin.audit.action.ban.create": "banned a member",
   "admin.audit.action.ban.remove": "lifted a ban",
+  "admin.audit.action.ban.update": "changed a ban",
   "admin.audit.action.bot.create": "added a bot",
   "admin.audit.action.bot.delete": "deleted a bot",
   "admin.audit.action.bot.disable": "turned a bot off",

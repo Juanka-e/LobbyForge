@@ -22,6 +22,7 @@ const ACTION_LABEL_KEYS: Record<string, string> = {
   'bot.update': 'admin.audit.action.bot.update',
   'ban.create': 'admin.audit.action.ban.create',
   'ban.remove': 'admin.audit.action.ban.remove',
+  'ban.update': 'admin.audit.action.ban.update',
   'channel.create': 'admin.audit.action.channel.create',
   'channel.delete': 'admin.audit.action.channel.delete',
   'channel.update': 'admin.audit.action.channel.update',

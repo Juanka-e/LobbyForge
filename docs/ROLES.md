@@ -135,6 +135,16 @@ counted in `hiddenChannelCount`, never named.
 
 All eight sit behind `withApiSecurity(...)` (now generic over `TContext` for the `[roleId]` and `[userId]` segments).
 
+**Banning someone who is already banned** (`POST /api/servers/{id}/bans`,
+`BAN_MEMBERS`) updates that ban instead of creating a second one: the new
+moderator, the new expiry (none means permanent, as for a new ban) and
+the new reason (an omitted reason keeps the stored one). It answers
+**200** with the stored ban and audits `ban.update` with the previous
+values; a new ban answers **201** and audits `ban.create`. So a temporary
+ban can be made permanent, or ended sooner or later, without lifting it
+first. It used to answer 201 and audit a `ban.create` while the old ban
+stayed as it was.
+
 ### Join requests
 
 When a server's access policy holds newcomers for approval (see

@@ -183,6 +183,14 @@ async function handlePost(req: Request, ctx: { params: Promise<{ id: string }> }
     // beta-review (S2): banUser now removes the membership in the SAME
     // transaction as the ban insert (it used to leave it in place — the
     // banned user kept posting messages and minting LiveKit tokens).
+    //
+    // Security review 2026-10 (A6): banning a user who is ALREADY actively
+    // banned updates that ban (new moderator, expiry and — when given —
+    // reason) and answers 200 with the stored ban, audited as `ban.update`
+    // with what it said before. Chosen over a 409 so a moderator can
+    // escalate a temporary ban to a permanent one (or change its end)
+    // without lifting it first. A new ban answers 201 and audits
+    // `ban.create`. Both audit rows record what was STORED.
     const result = await banUser(getDb(), {
       serverId,
       userId: body.userId,
@@ -196,8 +204,6 @@ async function handlePost(req: Request, ctx: { params: Promise<{ id: string }> }
           return refuse('You cannot ban yourself', 'self_action', 400);
         case 'cannot_ban_owner':
           return refuse('Cannot ban the server owner', 'target_is_owner', 400);
-        case 'already_banned':
-          return refuse('User is already banned', 'already_banned', 409);
       }
     }
     // LF-SEC-003: a ban must close the target's live server topics
@@ -215,15 +221,31 @@ async function handlePost(req: Request, ctx: { params: Promise<{ id: string }> }
     // server (a LiveKit session outlives the REST membership).
     queueMemberVoiceSync(serverId, body.userId);
     if (wasMember) emitMemberEvent({ serverId, userId: body.userId, event: 'member_leave', reason: 'ban' });
+    const auditAction = result.created ? 'ban.create' : 'ban.update';
     void logAction(getDb(), {
       serverId,
       actorUserId: session.uid,
-      action: 'ban.create',
+      action: auditAction,
       targetType: 'user',
       targetId: body.userId,
-      metadata: { reason: body.reason ?? null, expiresAt: expiresAt?.toISOString() ?? null },
-    }).catch((err) => console.error('[audit] ban.create failed:', (err as Error).message));
-    return NextResponse.json({ ban: toJson({ ...result.ban, displayName: null }) }, { status: 201 });
+      metadata: {
+        reason: result.ban.reason,
+        expiresAt: result.ban.expiresAt?.toISOString() ?? null,
+        ...(result.previous
+          ? {
+              previous: {
+                bannedBy: result.previous.bannedBy,
+                reason: result.previous.reason,
+                expiresAt: result.previous.expiresAt?.toISOString() ?? null,
+              },
+            }
+          : {}),
+      },
+    }).catch((err) => console.error(`[audit] ${auditAction} failed:`, (err as Error).message));
+    return NextResponse.json(
+      { ban: toJson({ ...result.ban, displayName: null }) },
+      { status: result.created ? 201 : 200 }
+    );
   } catch {
     return NextResponse.json(
       { error: 'Failed to create ban' },

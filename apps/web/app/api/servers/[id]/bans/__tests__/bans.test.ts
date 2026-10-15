@@ -265,20 +265,85 @@ describe('POST /api/servers/{id}/bans', () => {
     expect(await res.json()).toMatchObject({ code: 'self_action' });
   });
 
-  it('returns 409 when the user is already banned', async () => {
+  // Security review 2026-10 (A6): re-banning an actively banned user
+  // answered 201 and audited a `ban.create` while the old ban stayed as it
+  // was. The ban is now updated in place (an escalation works): 200, the
+  // stored ban, and a `ban.update` audit row with what it said before.
+  it('re-banning an actively banned user updates the ban: 200 and a ban.update audit of what was stored', async () => {
     getServerById.mockResolvedValue(mockServer(OWNER_ID));
     isServerMember.mockResolvedValue(true);
     getUserPermissions.mockResolvedValue(['ban_members']);
-    banUser.mockResolvedValue({ ok: false, error: 'already_banned' });
+    banUser.mockResolvedValue({
+      ok: true,
+      created: false,
+      ban: {
+        id: 'ban-1',
+        serverId: SERVER_ID,
+        userId: TARGET_ID,
+        bannedBy: USER_ID,
+        reason: 'spam',
+        expiresAt: null,
+        createdAt: new Date('2026-06-11T00:00:00Z'),
+      },
+      previous: { bannedBy: OWNER_ID, reason: 'spam', expiresAt: new Date('2026-06-12T00:00:00Z') },
+    });
     const { POST } = await loadRoute();
     const req = new Request(`https://example.test/api/servers/${SERVER_ID}/bans`, {
       method: 'POST',
       headers: { cookie: makeSessionCookie() },
+      // No expiry: escalate the temporary ban to a permanent one.
       body: JSON.stringify({ userId: TARGET_ID }),
     });
     const res = await POST(req, { params: Promise.resolve({ id: SERVER_ID }) });
-    expect(res.status).toBe(409);
-    expect(await res.json()).toMatchObject({ code: 'already_banned' });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ban: { id: 'ban-1', reason: 'spam', expiresAt: null } });
+    expect(logAction).toHaveBeenCalledTimes(1);
+    expect(logAction).toHaveBeenCalledWith(expect.anything(), {
+      serverId: SERVER_ID,
+      actorUserId: USER_ID,
+      action: 'ban.update',
+      targetType: 'user',
+      targetId: TARGET_ID,
+      metadata: {
+        reason: 'spam',
+        expiresAt: null,
+        previous: { bannedBy: OWNER_ID, reason: 'spam', expiresAt: '2026-06-12T00:00:00.000Z' },
+      },
+    });
+  });
+
+  it('a new ban audits ban.create with the stored values', async () => {
+    getServerById.mockResolvedValue(mockServer(OWNER_ID));
+    isServerMember.mockResolvedValue(true);
+    getUserPermissions.mockResolvedValue(['ban_members']);
+    const expiresAt = '2026-12-01T00:00:00.000Z';
+    banUser.mockResolvedValue({
+      ok: true,
+      created: true,
+      ban: {
+        id: 'ban-2',
+        serverId: SERVER_ID,
+        userId: TARGET_ID,
+        bannedBy: USER_ID,
+        reason: 'flood',
+        expiresAt: new Date(expiresAt),
+        createdAt: new Date('2026-06-11T00:00:00Z'),
+      },
+    });
+    const { POST } = await loadRoute();
+    const res = await POST(
+      new Request(`https://example.test/api/servers/${SERVER_ID}/bans`, {
+        method: 'POST',
+        headers: { cookie: makeSessionCookie() },
+        body: JSON.stringify({ userId: TARGET_ID, reason: 'flood', expiresAt }),
+      }),
+      { params: Promise.resolve({ id: SERVER_ID }) }
+    );
+    expect(res.status).toBe(201);
+    expect(logAction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: 'ban.create', metadata: { reason: 'flood', expiresAt } })
+    );
   });
 
   it('403 actor_timed_out: a timed-out moderator cannot ban', async () => {
@@ -306,6 +371,7 @@ describe('POST /api/servers/{id}/bans', () => {
     getUserPermissions.mockResolvedValue(['ban_members']);
     banUser.mockResolvedValue({
       ok: true,
+      created: true,
       ban: {
         id: 'ban-new',
         serverId: SERVER_ID,
@@ -342,6 +408,7 @@ describe('POST /api/servers/{id}/bans — security-review AUTHZ-002 non-member b
   function banRow() {
     return {
       ok: true,
+      created: true,
       ban: {
         id: 'ban-left',
         serverId: SERVER_ID,
@@ -536,6 +603,7 @@ describe('POST /api/servers/{id}/bans — beta-review S2 access revocation', () 
       callOrder.push('ban');
       return {
         ok: true,
+        created: true,
         ban: {
           id: 'ban-new',
           serverId: SERVER_ID,

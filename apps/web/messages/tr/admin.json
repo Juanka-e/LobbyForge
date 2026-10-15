@@ -28,6 +28,7 @@
   "admin.audit.action.app.upsert": "bir uygulamayı yükledi ya da güncelledi",
   "admin.audit.action.ban.create": "bir üyeyi yasakladı",
   "admin.audit.action.ban.remove": "bir yasağı kaldırdı",
+  "admin.audit.action.ban.update": "bir yasağı değiştirdi",
   "admin.audit.action.bot.create": "bir bot ekledi",
   "admin.audit.action.bot.delete": "bir botu sildi",
   "admin.audit.action.bot.disable": "bir botu kapattı",
