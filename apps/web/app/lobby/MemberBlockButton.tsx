@@ -33,10 +33,13 @@ export function MemberBlockButton({
       className={`p-1 rounded transition-all flex-shrink-0 ${
         blocked
           ? 'opacity-100 text-danger hover:bg-danger/10'
-          : 'opacity-0 group-hover:opacity-100 text-text-muted hover:bg-surface-container hover:text-danger'
+          : // Revealed on hover and on keyboard focus; never an invisible
+            // target on a touch screen (one tap there blocked someone) —
+            // touch users block from the profile card's menu.
+            'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:hidden text-text-muted hover:bg-surface-container hover:text-danger'
       }`}
     >
-      <span className="material-symbols-outlined text-[14px]">
+      <span className="material-symbols-outlined text-[14px]" aria-hidden>
         {blocked ? 'remove_circle' : 'block'}
       </span>
     </button>

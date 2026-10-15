@@ -80,9 +80,8 @@ export function LobbyVoiceFooter({ serverName, hasUser, displayName }: LobbyVoic
                 {stateLabel}
               </span>
             </div>
-            <button className="text-[13px] text-text-secondary hover:text-text-primary transition-colors truncate text-left">
-              {serverName}
-            </button>
+            {/* The community's name — plain text (it was a button that did nothing). */}
+            <span className="text-[13px] text-text-secondary truncate text-left">{serverName}</span>
           </div>
           <div className="flex items-center gap-0.5">
             <button

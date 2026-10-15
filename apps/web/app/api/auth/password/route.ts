@@ -24,15 +24,21 @@ async function handlePost(req: Request): Promise<NextResponse> {
 
   const result = BodySchema.safeParse(await req.json().catch(() => null));
   if (!result.success) {
+    // A code beside the English text: the settings page says it in the
+    // account's language.
+    const tooShort = result.error.issues.some((issue) => issue.path[0] === 'newPassword' && issue.code === 'too_small');
     return NextResponse.json(
-      { error: result.error.issues[0]?.message ?? 'Invalid password payload.' },
+      {
+        error: result.error.issues[0]?.message ?? 'Invalid password payload.',
+        code: tooShort ? 'password_too_short' : 'invalid_password',
+      },
       { status: 400 }
     );
   }
   const input = result.data;
   if (input.currentPassword === input.newPassword) {
     return NextResponse.json(
-      { error: 'New password must differ from the current one.' },
+      { error: 'New password must differ from the current one.', code: 'same_password' },
       { status: 400 }
     );
   }
@@ -54,7 +60,7 @@ async function handlePost(req: Request): Promise<NextResponse> {
     !credentials.passwordHash ||
     !currentPasswordValid
   ) {
-    return NextResponse.json({ error: 'Current password is incorrect.' }, { status: 403 });
+    return NextResponse.json({ error: 'Current password is incorrect.', code: 'wrong_current_password' }, { status: 403 });
   }
   await clearAccountAttempts(subject);
 
@@ -69,7 +75,7 @@ async function handlePost(req: Request): Promise<NextResponse> {
   });
   if (!updated) {
     return NextResponse.json(
-      { error: 'Password changed in another session. Sign in again and retry.' },
+      { error: 'Password changed in another session. Sign in again and retry.', code: 'password_changed_elsewhere' },
       { status: 409 }
     );
   }

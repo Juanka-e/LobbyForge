@@ -96,11 +96,19 @@ export function LobbyDmView({
         if (!msg?.id) return;
         setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
       });
+      // Back from a lost connection: read the conversation again at once
+      // instead of waiting for the next poll.
+      const offReconnect = client.onReconnect(() => void load());
+      const unsubscribe = unsub;
+      unsub = () => {
+        unsubscribe();
+        offReconnect();
+      };
     } catch {
       // WS unavailable — the poll delivers.
     }
     return () => unsub?.();
-  }, [dm.channelId]);
+  }, [dm.channelId, load]);
 
   useEffect(() => {
     const timer = setInterval(() => void load(), POLL_INTERVAL_MS);

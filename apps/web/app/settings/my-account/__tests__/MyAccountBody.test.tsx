@@ -90,12 +90,13 @@ describe('MyAccountBody — password change', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('a refused change keeps the dialog open with the error', async () => {
-    respondWith(403, { error: 'Current password is incorrect.' });
+  it('a refused change keeps the dialog open with the error — in the account’s language, by code', async () => {
+    respondWith(403, { error: 'English text from the server', code: 'wrong_current_password' });
     renderBody();
     submitChange(EN);
 
-    expect(await screen.findByText('Current password is incorrect.')).toBeInTheDocument();
+    expect(await screen.findByText('Your current password is incorrect.')).toBeInTheDocument();
+    expect(screen.queryByText('English text from the server')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: EN.submit })).toBeInTheDocument();
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });

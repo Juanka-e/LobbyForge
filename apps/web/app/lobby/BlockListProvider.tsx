@@ -12,7 +12,8 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 interface BlockListContextValue {
   blockedIds: Set<string>;
   isBlocked: (userId: string) => boolean;
-  toggleBlock: (userId: string) => Promise<void>;
+  /** Resolves false when the server refused or could not be reached (nothing changed). */
+  toggleBlock: (userId: string) => Promise<boolean>;
   refresh: () => Promise<void>;
 }
 
@@ -62,8 +63,10 @@ export function BlockListProvider({ children }: { children: ReactNode }) {
         else next.add(userId);
         return next;
       });
+      return true;
     } catch {
-      // State stays synced with server on failure.
+      // State stays synced with server on failure; the caller says so.
+      return false;
     }
   }, [blockedIds]);
 
@@ -88,6 +91,6 @@ export function useBlockList(): BlockListContextValue {
 const NO_PROVIDER: BlockListContextValue = {
   blockedIds: new Set(),
   isBlocked: () => false,
-  toggleBlock: async () => {},
+  toggleBlock: async () => false,
   refresh: async () => {},
 };
