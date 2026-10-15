@@ -28,6 +28,7 @@ import type { PresenceStatus } from '@/lib/presence-status';
 import { handleEmailUnverified, requestVerificationFocus } from '@/components/email-verification/email-status-store';
 import { useLobbyVoice } from './LobbyVoiceProvider';
 import { useBlockList } from './BlockListProvider';
+import { useLiveMembers } from './LiveMembersProvider';
 
 /**
  * One profile card for the whole lobby (docs/PROFILES.md).
@@ -49,10 +50,13 @@ export interface ProfileMemberSeed {
   status?: 'in-voice' | 'online' | 'offline';
   presence?: PresenceStatus;
   isGuest?: boolean;
+  username?: string | null;
   avatarUrl?: string | null;
   bannerRef?: string | null;
   statusText?: string | null;
   bio?: string | null;
+  pronouns?: string | null;
+  accentColor?: string | null;
   roles?: Array<Pick<ProfileRoleView, 'id' | 'name' | 'color' | 'icon' | 'position'>>;
 }
 
@@ -128,7 +132,7 @@ export function ProfileCardProvider({
   serverId,
   serverName,
   currentUserId,
-  members,
+  members: renderedMembers,
   children,
 }: {
   serverId: string;
@@ -140,6 +144,9 @@ export function ProfileCardProvider({
   const t = useT();
   const voice = useLobbyVoice();
   const blockList = useBlockList();
+  // docs/PROFILES.md "Live updates": the live rows when the lobby has them.
+  const live = useLiveMembers();
+  const members = live?.members ?? renderedMembers;
   const [card, setCard] = useState<CardState | null>(null);
   const [full, setFull] = useState<FullState | null>(null);
   const [loaded, setLoaded] = useState<{ userId: string; data: MemberProfileResponse | null } | null>(null);
@@ -174,8 +181,11 @@ export function ProfileCardProvider({
         // profile being looked at, never shipped with the list.
         bannerUrl: userImageUrl(userId, 'banner', member.bannerRef),
         isGuest: member.isGuest ?? false,
+        username: member.username ?? null,
         statusText: member.statusText ?? null,
         bio: member.bio ?? null,
+        pronouns: member.pronouns ?? null,
+        accentColor: member.accentColor ?? null,
         roles: memberRoles.get(userId) ?? member.roles ?? [],
         // No presence or voice state from the page render: it goes stale.
         // The member list passes its live ones when it opens a card; any
@@ -186,6 +196,35 @@ export function ProfileCardProvider({
   );
 
   const activeUserId = full?.userId ?? card?.userId ?? null;
+
+  // A live re-read of someone (new roles, name, avatar — or they left)
+  // retires what this provider derived from older data: the role overlay
+  // and the "removed through a card" mark (they may have come back), and
+  // an open card re-reads their profile.
+  const liveVersions = live?.versions;
+  const seenVersions = useRef<ReadonlyMap<string, number>>(new Map());
+  useEffect(() => {
+    if (!liveVersions) return;
+    const changed: string[] = [];
+    for (const [userId, version] of liveVersions) {
+      if (seenVersions.current.get(userId) !== version) changed.push(userId);
+    }
+    seenVersions.current = liveVersions;
+    if (changed.length === 0) return;
+    setMemberRoles((current) => {
+      if (!changed.some((userId) => current.has(userId))) return current;
+      const next = new Map(current);
+      for (const userId of changed) next.delete(userId);
+      return next;
+    });
+    setRemovedUserIds((current) => {
+      if (!changed.some((userId) => current.has(userId))) return current;
+      const next = new Set(current);
+      for (const userId of changed) next.delete(userId);
+      return next;
+    });
+    if (activeUserId && changed.includes(activeUserId)) setRefreshTick((tick) => tick + 1);
+  }, [liveVersions, activeUserId]);
 
   // Load (or reuse) the profile of whoever is showing.
   useEffect(() => {
@@ -330,12 +369,17 @@ export function ProfileCardProvider({
 
   const toggleBlock = useCallback(
     (userId: string) => {
-      void blockList.toggleBlock(userId).then(() => {
+      void blockList.toggleBlock(userId).then((ok) => {
+        // A refused or failed (un)block changed nothing — say so.
+        if (!ok) {
+          showToast(t('shell.profile.error.blockFailed'));
+          return;
+        }
         invalidateMemberProfile(serverId, userId);
         setRefreshTick((tick) => tick + 1);
       });
     },
-    [blockList, serverId]
+    [blockList, serverId, showToast, t]
   );
 
   const value = useMemo<ProfileCardContextValue>(

@@ -14,6 +14,7 @@ import { authorizeModerationTarget } from '@/lib/member-authorization';
 import { publishAccessInvalidation } from '@/lib/access-invalidation';
 import { findUngrantablePermissions, UNGRANTABLE_PERMISSIONS_ERROR } from '@/lib/role-grant-policy';
 import { queueMemberVoiceSync } from '@/lib/voice-moderation';
+import { publishMembersChanged } from '@/lib/member-bus';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -168,6 +169,8 @@ async function handlePut(
     // beta-review (S2): losing CONNECT_VOICE / SPEAK or a gated voice
     // channel must take effect in a LIVE LiveKit session too.
     queueMemberVoiceSync(serverId, targetUserId);
+    // docs/PROFILES.md "Live updates": every open lobby regroups them.
+    publishMembersChanged(serverId, [targetUserId]);
     void logAction(getDb(), {
       serverId,
       actorUserId: session.uid,

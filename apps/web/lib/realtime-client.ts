@@ -80,6 +80,8 @@ export type Topic =
   | `activity-state:${string}:${string}`
   | `chat:${string}:${string}`
   | `presence:${string}`
+  /** "These members changed — re-read them" (docs/PROFILES.md "Live updates"). */
+  | `members:${string}`
   | `dm:${string}`
   /** Events for one signed-in user only — ephemeral bot answers (BOT_API_V2 §4.3). */
   | `user:${string}`;

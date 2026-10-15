@@ -10,6 +10,7 @@
   "lobby.apps.title": "Activities",
   "lobby.dm.empty": "No conversations yet",
   "lobby.dm.title": "Direct Messages",
+  "lobby.dm.unread": "Unread messages",
   "lobby.meta.description": "Your self-hosted community in a single 1280px window.",
   "lobby.meta.title": "Standalone Lobby - LobbyForge",
   "lobby.nav.close": "Close navigation menu",

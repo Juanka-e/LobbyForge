@@ -10,6 +10,8 @@ const checkDmChannelAccess = vi.fn();
 const listDmMessages = vi.fn();
 const sendDmMessage = vi.fn();
 const getDmRecipientEligibility = vi.fn();
+const getDmChannelParticipants = vi.fn();
+const publishDmActivity = vi.fn();
 
 vi.mock('@/lib/api-auth', () => ({ requireMaterializedSession }));
 vi.mock('@lobbyforge/db', () => ({
@@ -21,7 +23,9 @@ vi.mock('@lobbyforge/db', () => ({
   checkDmChannelAccess,
   listDmMessages,
   sendDmMessage,
+  getDmChannelParticipants,
 }));
+vi.mock('@/lib/dm-notify', () => ({ publishDmActivity }));
 vi.mock('@/lib/db', () => ({ getDb: () => ({ __mockDb: true }) }));
 vi.mock('@/lib/security-headers', () => ({ withApiSecurity: (handler: unknown) => handler }));
 
@@ -250,6 +254,23 @@ describe('POST /api/dm/{channelId}/messages', () => {
     );
     expect(res.status).toBe(201);
     expect(sendDmMessage).toHaveBeenCalledWith({ __mockDb: true }, CHANNEL_ID, UID, 'hello', null);
+  });
+
+  it('tells the DM lists of both participants, without the message text (docs/PROFILES.md "Live updates")', async () => {
+    isDmChannelParticipant.mockResolvedValue(true);
+    checkDmChannelAccess.mockResolvedValue('ok');
+    sendDmMessage.mockResolvedValue({ id: 'm4', authorId: UID, content: 'secret', replyToId: null, createdAt: new Date('2026-01-03') });
+    getDmChannelParticipants.mockResolvedValue({ userAId: UID, userBId: OTHER_UID });
+    publishDmActivity.mockClear();
+    const { POST } = await import('../[channelId]/messages/route.js');
+    const res = await POST(
+      new Request(`https://example.test/api/dm/${CHANNEL_ID}/messages`, { method: 'POST', body: JSON.stringify({ content: 'secret' }) }),
+      ctx()
+    );
+    expect(res.status).toBe(201);
+    await vi.waitFor(() => expect(publishDmActivity).toHaveBeenCalledTimes(1));
+    expect(publishDmActivity).toHaveBeenCalledWith({ channelId: CHANNEL_ID, authorId: UID, participantIds: [UID, OTHER_UID] });
+    expect(JSON.stringify(publishDmActivity.mock.calls)).not.toContain('secret');
   });
 
   it('returns 404 when not a participant', async () => {

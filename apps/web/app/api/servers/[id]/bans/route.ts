@@ -19,6 +19,7 @@ import { authorizeModerationTarget } from '@/lib/member-authorization';
 import { publishAccessInvalidation } from '@/lib/access-invalidation';
 import { queueMemberVoiceSync } from '@/lib/voice-moderation';
 import { emitMemberEvent } from '@/lib/bots/events';
+import { publishMembersRemoved } from '@/lib/member-bus';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -214,7 +215,11 @@ async function handlePost(req: Request, ctx: { params: Promise<{ id: string }> }
     // beta-review (S2): drop the user from every live voice room of the
     // server (a LiveKit session outlives the REST membership).
     queueMemberVoiceSync(serverId, body.userId);
-    if (wasMember) emitMemberEvent({ serverId, userId: body.userId, event: 'member_leave', reason: 'ban' });
+    if (wasMember) {
+      emitMemberEvent({ serverId, userId: body.userId, event: 'member_leave', reason: 'ban' });
+      // docs/PROFILES.md "Live updates": open lobbies drop them from the list.
+      publishMembersRemoved(serverId, [body.userId]);
+    }
     void logAction(getDb(), {
       serverId,
       actorUserId: session.uid,

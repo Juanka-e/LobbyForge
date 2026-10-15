@@ -54,6 +54,7 @@ import DmLinkSection from './DmLinkSection';
 import MobileNav from './MobileNav';
 import { BlockListProvider } from './BlockListProvider';
 import { ProfileCardProvider } from './ProfileCardProvider';
+import { LiveMembersBoundary } from './LiveMembersProvider';
 import EmailVerificationBanner from '@/components/email-verification/EmailVerificationBanner';
 import { EmailStatusSeed } from '@/components/email-verification/email-status-store';
 import type { EmailStatus } from '@/components/email-verification/email-status';
@@ -69,7 +70,9 @@ import { getTranslator } from '@/lib/i18n/server';
 import type { Translator } from '@/lib/i18n/core';
 import { pluginName, pluginSummary } from '@/lib/plugin-catalog-text';
 import { initialOf } from '@/lib/initial';
-import { projectDmChannel, projectMemberProfile } from '@/lib/profile-privacy';
+import { projectDmChannel } from '@/lib/profile-privacy';
+import { compareLobbyMembers, toLobbyMember, type LobbyMember } from '@/lib/lobby-members';
+import { readMessageMentions, type StoredMention } from '@/lib/mentions';
 import { notifyMemberJoined } from '@/lib/bots/welcome';
 import { resolveAutoJoinServerId } from '@/lib/lobby-auto-join';
 import { botMessageForViewer, withDefaultNameFlag } from '@/lib/bots/bot-i18n-server';
@@ -101,6 +104,8 @@ interface Channel {
   category: ChannelCategory;
   /** A text or announcement channel: polls can be posted here (docs/CHAT_POLLS.md). */
   pollable?: boolean;
+  /** The channel's topic, as an admin set it; null = none (the header shows nothing). */
+  topic?: string | null;
 }
 interface VoiceUser {
   id: string;
@@ -108,29 +113,7 @@ interface VoiceUser {
   speaking?: boolean;
   muted?: boolean;
 }
-interface Member {
-  id: string;
-  name: string;
-  status: 'in-voice' | 'online' | 'offline';
-  /** The status the member chose (drives the dot color). */
-  presence?: PresenceStatus;
-  muted?: boolean;
-  grayscale?: boolean;
-  roleName?: string | null;
-  roleColor?: string | null;
-  roleIcon?: string | null;
-  /** The account's own name, and the nickname that replaces it here (names are never hidden). */
-  globalDisplayName?: string;
-  nickname?: string | null;
-  statusText?: string | null;
-  bio?: string | null;
-  roles?: Array<{ id: string; name: string; color: string | null; icon: string | null; position: number; displaySeparately: boolean }>;
-  isGuest?: boolean;
-  /** Short image URL (security-review FILE-001) — never a data URL. */
-  avatarUrl?: string | null;
-  /** Banner reference; the profile popover builds the URL when it opens. */
-  bannerRef?: string | null;
-}
+type Member = LobbyMember;
 interface ChatMessage {
   id: string;
   authorId: string | null;
@@ -153,6 +136,8 @@ interface ChatMessage {
   app?: { pluginId: string; name: string } | null;
   /** A poll message: the poll as this viewer sees it (docs/CHAT_POLLS.md). */
   poll?: ChatPollView | null;
+  /** Members the message names (docs/PROFILES.md "Mentions"). */
+  mentions?: StoredMention[];
 }
 interface LobbyData {
   serverName: string;
@@ -307,32 +292,9 @@ function buildMembers(
         status = p.channelId && voiceChannelIds.has(p.channelId) ? 'in-voice' : 'online';
       }
       const presence: PresenceStatus = status === 'offline' ? 'offline' : toPresenceStatus(p?.status);
-      return {
-        id: s.userId,
-        name: s.displayName,
-        status,
-        presence,
-        grayscale: status === 'offline' || undefined,
-        // The display role (`pickDisplayRole`): the highest one other than
-        // @everyone, worked out by the query from every role held — the
-        // same one the Members page shows.
-        roleName: s.roleName,
-        roleColor: s.roleColor,
-        roleIcon: s.roleIcon,
-        roles: s.roles,
-        isGuest: s.isGuest,
-        globalDisplayName: s.globalDisplayName,
-        nickname: s.nickname,
-        // security-review FILE-001 / AUTHZ-005: short avatar URL + banner
-        // reference (never data URLs), and avatar / banner / bio / status
-        // only when the member's profile visibility allows this viewer.
-        ...projectMemberProfile(s, viewerUserId),
-      } satisfies Member;
+      return toLobbyMember(s, viewerUserId, { status, presence });
     })
-    .sort((a, b) => {
-      const order: Record<Member['status'], number> = { 'in-voice': 0, online: 1, offline: 2 };
-      return order[a.status] - order[b.status] || a.name.localeCompare(b.name);
-    });
+    .sort(compareLobbyMembers);
 }
 
 function buildVoiceUsers(
@@ -456,6 +418,7 @@ function buildMessages(
       pinned: typeof m.metadata.$pinnedAt === 'string',
       // The same per-viewer projection GET .../messages attaches.
       poll: polls.get(m.id) ?? null,
+      mentions: readMessageMentions(m.metadata),
     } satisfies ChatMessage;
   });
 }
@@ -530,7 +493,13 @@ async function loadLiveData(
   const voiceChannels: Channel[] = [];
   for (const c of allChannels) {
     const cat = toCategory(c.type);
-    const row: Channel = { id: c.id, name: c.name, category: cat, pollable: isPollChannelType(c.type) };
+    const row: Channel = {
+      id: c.id,
+      name: c.name,
+      category: cat,
+      pollable: isPollChannelType(c.type),
+      topic: c.topic && c.topic.trim() ? c.topic : null,
+    };
     if (cat === 'text') textChannels.push(row);
     else voiceChannels.push(row);
   }
@@ -1109,6 +1078,7 @@ function LobbyShell({
     // The server-read email status reaches every lock in the lobby (banner,
     // composer, voice list) for the first paint.
     <EmailStatusSeed status={emailStatus}>
+    <LiveMembersBoundary serverId={data.isLive ? data.serverId : null} initialMembers={data.members}>
     <div className="flex w-full h-dvh bg-surface-dim overflow-hidden">
       {canVoiceConnect ? (
         <BlockListProvider>
@@ -1137,6 +1107,7 @@ function LobbyShell({
         shell
       )}
     </div>
+    </LiveMembersBoundary>
     </EmailStatusSeed>
   );
 }

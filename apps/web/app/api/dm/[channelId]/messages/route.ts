@@ -7,11 +7,13 @@ import {
   listDmMessages,
   sendDmMessage,
   deleteDmMessage,
+  getDmChannelParticipants,
 } from '@lobbyforge/db';
 import { requireMaterializedSession } from '@/lib/api-auth';
 import { getDb } from '@/lib/db';
 import { withApiSecurity } from '@/lib/security-headers';
 import { publishDmMessage } from '@/lib/dm-bus';
+import { publishDmActivity } from '@/lib/dm-notify';
 import { requireVerifiedEmail } from '@/lib/mail/verification';
 import { MESSAGE_BODY_MAX_BYTES } from '@/lib/message-limits';
 
@@ -133,6 +135,14 @@ async function handlePost(
         createdAt: message.createdAt.toISOString(),
       },
     });
+    // Both participants' DM lists hear it — a first message from someone
+    // new shows up in the recipient's list without a reload.
+    void Promise.resolve()
+      .then(() => getDmChannelParticipants(db, channelId))
+      .then((pair) => {
+        if (pair) publishDmActivity({ channelId, authorId: uid, participantIds: [pair.userAId, pair.userBId] });
+      })
+      .catch(() => {});
     return NextResponse.json(
       {
         message: {
