@@ -28,6 +28,9 @@ function summary(
     roleIcon: null,
     statusText: 'In a match',
     bio: 'Plays support',
+    username: null,
+    pronouns: null,
+    accentColor: null,
     roles: [],
     joinedAt: new Date('2026-01-01T00:00:00Z'),
     ...overrides,
@@ -39,8 +42,10 @@ const VISIBLE = {
   bannerRef: 'abcdefabcdef',
   statusText: 'In a match',
   bio: 'Plays support',
+  pronouns: null,
+  accentColor: null,
 };
-const HIDDEN = { avatarUrl: null, bannerRef: null, statusText: null, bio: null };
+const HIDDEN = { avatarUrl: null, bannerRef: null, statusText: null, bio: null, pronouns: null, accentColor: null };
 
 describe('canViewProfile — security-review AUTHZ-005', () => {
   const stranger = { isSelf: false, sharesServer: false };
@@ -175,5 +180,15 @@ describe('projectBlockedUser — block list', () => {
     expect(hidden.blockedAvatarUrl).toBeNull();
     expect(hidden.blockedDisplayName).toBe('Alice');
     expect(hidden).not.toHaveProperty('blockedAvatarRef');
+  });
+});
+
+describe('projectMemberProfile — 0050 profile fields', () => {
+  const fields = { pronouns: 'she/her', accentColor: '#5865f2' };
+
+  it('pronouns and the profile colour follow the profile visibility like the bio', () => {
+    expect(projectMemberProfile(summary('everyone', fields), VIEWER)).toMatchObject(fields);
+    expect(projectMemberProfile(summary('nobody', fields), VIEWER)).toMatchObject({ pronouns: null, accentColor: null });
+    expect(projectMemberProfile(summary('nobody', fields), MEMBER)).toMatchObject(fields);
   });
 });

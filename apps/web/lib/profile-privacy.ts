@@ -7,9 +7,10 @@
  * that shows another user's profile now goes through this module, the
  * same way presence goes through `applyPresencePrivacy`.
  *
- * What a viewer who is NOT allowed loses: avatar, banner, bio and status
- * text. The display name always stays — members must stay identifiable
- * (moderation, mentions, chat authorship); the settings copy says so.
+ * What a viewer who is NOT allowed loses: avatar, banner, bio, status
+ * text, pronouns and the profile colour (0050). The display name and the
+ * handle always stay — members must stay identifiable (moderation,
+ * mentions, chat authorship); the settings copy says so.
  *
  * Scopes:
  *   - everyone        any signed-in viewer
@@ -63,6 +64,9 @@ export interface MemberProfileView {
   bannerRef: string | null;
   statusText: string | null;
   bio: string | null;
+  /** 0050 (docs/PROFILES.md "Profile fields"). */
+  pronouns: string | null;
+  accentColor: string | null;
 }
 
 const HIDDEN_MEMBER_PROFILE: MemberProfileView = {
@@ -70,6 +74,8 @@ const HIDDEN_MEMBER_PROFILE: MemberProfileView = {
   bannerRef: null,
   statusText: null,
   bio: null,
+  pronouns: null,
+  accentColor: null,
 };
 
 /**
@@ -78,7 +84,8 @@ const HIDDEN_MEMBER_PROFILE: MemberProfileView = {
  * of that server.
  */
 export function projectMemberProfile(
-  summary: Pick<MemberSummary, 'userId' | 'avatarRef' | 'bannerRef' | 'statusText' | 'bio' | 'profileVisibility'>,
+  summary: Pick<MemberSummary, 'userId' | 'avatarRef' | 'bannerRef' | 'statusText' | 'bio' | 'profileVisibility'> &
+    Partial<Pick<MemberSummary, 'pronouns' | 'accentColor'>>,
   viewerUserId: string | null,
   relation: { sharesServer: boolean } = { sharesServer: true }
 ): MemberProfileView {
@@ -92,6 +99,8 @@ export function projectMemberProfile(
     bannerRef: userImageUrl(summary.userId, 'banner', summary.bannerRef) ? summary.bannerRef : null,
     statusText: summary.statusText,
     bio: summary.bio,
+    pronouns: summary.pronouns ?? null,
+    accentColor: summary.accentColor ?? null,
   };
 }
 

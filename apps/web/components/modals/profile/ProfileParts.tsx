@@ -5,6 +5,7 @@ import { useT } from '@/lib/i18n/client';
 import { initialOf } from '@/lib/initial';
 import { PRESENCE_DOT_CLASS, type PresenceStatus } from '@/lib/presence-status';
 import { bannerBandColor, sampleAvatarColor } from '@/lib/profile-accent';
+import { normalizeAccentColor } from '@/lib/profile-fields';
 import type { MutualServerView, ProfileRoleView } from '@/lib/member-profile';
 
 /**
@@ -33,10 +34,19 @@ export function presenceLabelKey(presence: PresenceStatus, isSelf = false): stri
   }
 }
 
-/** The banner band's colour for this member (sampled avatar → role colour → accent). */
-export function useBannerColor(avatarUrl: string | null | undefined, roles: ReadonlyArray<{ color: string | null }> | undefined): string {
+/**
+ * The banner band's colour for this member: the profile colour they chose
+ * (0050), else the sampled avatar → role colour → theme accent.
+ */
+export function useBannerColor(
+  avatarUrl: string | null | undefined,
+  roles: ReadonlyArray<{ color: string | null }> | undefined,
+  accentColor?: string | null
+): string {
+  const chosen = normalizeAccentColor(accentColor);
   const [sampled, setSampled] = useState<string | null>(null);
   useEffect(() => {
+    if (chosen) return;
     let cancelled = false;
     setSampled(null);
     void sampleAvatarColor(avatarUrl).then((color) => {
@@ -45,8 +55,8 @@ export function useBannerColor(avatarUrl: string | null | undefined, roles: Read
     return () => {
       cancelled = true;
     };
-  }, [avatarUrl]);
-  return bannerBandColor(sampled, roles);
+  }, [avatarUrl, chosen]);
+  return chosen ?? bannerBandColor(sampled, roles);
 }
 
 /** A grey bar while a part of the profile is still loading. */
@@ -132,11 +142,14 @@ export function ProfileAvatar({
   textClass = 'text-3xl',
   onOpen,
   isSelf = false,
+  accentColor,
 }: {
   name: string;
   avatarUrl: string | null;
   /** The dot on the avatar; none when the status is not shown at all. */
   presence: PresenceStatus | null;
+  /** The profile colour (0050): a thin ring at the photo's edge. */
+  accentColor?: string | null;
   sizeClass?: string;
   textClass?: string;
   /** Open the photo in the image viewer (only with a photo). */
@@ -171,6 +184,14 @@ export function ProfileAvatar({
           {face}
         </div>
       )}
+      {normalizeAccentColor(accentColor) ? (
+        <span
+          aria-hidden
+          data-profile-accent-ring
+          className="pointer-events-none absolute inset-[5px] rounded-full"
+          style={{ boxShadow: `0 0 0 2px ${normalizeAccentColor(accentColor)}` }}
+        />
+      ) : null}
       {presence ? (
         <span
           role="img"
@@ -200,6 +221,8 @@ export function ProfileNameBlock({
   displayName,
   globalDisplayName,
   nickname,
+  username,
+  pronouns,
   isGuest,
   isOwner,
   presence,
@@ -210,6 +233,10 @@ export function ProfileNameBlock({
   displayName: string;
   globalDisplayName?: string | null;
   nickname?: string | null;
+  /** The handle (0050), shown as `@name`. */
+  username?: string | null;
+  /** Free-text pronouns (0050); null when unset or withheld. */
+  pronouns?: string | null;
   isGuest: boolean;
   isOwner?: boolean;
   presence: PresenceStatus | null;
@@ -240,6 +267,22 @@ export function ProfileNameBlock({
       {showGlobal ? (
         <p className="mt-0.5 truncate text-sm text-text-secondary" title={t('shell.profile.globalNameTitle')}>
           {globalDisplayName}
+        </p>
+      ) : null}
+      {username || pronouns ? (
+        <p className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 text-sm text-text-secondary" data-testid="profile-handle-line">
+          {username ? (
+            <span className="truncate font-medium text-text-primary" title={t('shell.profile.usernameTitle')} data-testid="profile-username">
+              @{username}
+            </span>
+          ) : null}
+          {username && pronouns ? <span aria-hidden>·</span> : null}
+          {pronouns ? (
+            <span className="truncate" data-testid="profile-pronouns">
+              <span className="sr-only">{t('shell.profile.pronouns')}: </span>
+              {pronouns}
+            </span>
+          ) : null}
         </p>
       ) : null}
       <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">

@@ -200,8 +200,12 @@ async function handleGet(
       avatarUrl: blockedMe ? null : projected.avatarUrl,
       bannerUrl: limited ? null : userImageUrl(record.userId, 'banner', projected.bannerRef),
       isGuest: record.isGuest,
+      // A handle is a name: shown like the display name, block or not.
+      username: record.username,
       statusText: limited ? null : projected.statusText,
       bio: limited ? null : projected.bio,
+      pronouns: limited ? null : projected.pronouns,
+      accentColor: limited ? null : projected.accentColor,
       presence,
       inVoice,
       roles: visibleRoles(record),

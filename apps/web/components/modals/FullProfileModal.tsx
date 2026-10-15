@@ -25,7 +25,7 @@ import { MessageBox } from './profile/ProfileControls';
 import { ProfileMenu } from './profile/ProfileMenu';
 import { ModerationDialog } from './profile/ModerationDialog';
 import { useProfileActions } from './profile/useProfileActions';
-import { buildProfileMenuItems, EDIT_PROFILE_HREF } from './profile/profileMenuItems';
+import { buildProfileMenuItems, editProfileHref } from './profile/profileMenuItems';
 import { TimedOutLine, type ProfileTab } from './UserProfilePopover';
 
 export interface FullProfileModalProps {
@@ -91,7 +91,7 @@ export function FullProfileModal({
   const view = user ? mergeProfileView(user, profile, self?.status ?? null) : null;
   const can = profile?.viewerCan ?? null;
   const isSelf = can?.isSelf ?? Boolean(self);
-  const bandColor = useBannerColor(view?.avatarUrl, view?.roles);
+  const bandColor = useBannerColor(view?.avatarUrl, view?.roles, view?.limited ? null : view?.accentColor);
   const actions = useProfileActions({
     serverId,
     userId,
@@ -111,6 +111,7 @@ export function FullProfileModal({
     userId,
     name: view.displayName,
     isSelf,
+    serverId,
     data: profile,
     isBlocked,
     onCopyId: () => void actions.copyUserId(),
@@ -172,13 +173,14 @@ export function FullProfileModal({
                   avatarUrl={view.avatarUrl}
                   presence={view.presence}
                   isSelf={isSelf}
+                  accentColor={view.limited ? null : view.accentColor}
                   sizeClass="size-[120px]"
                   textClass="text-4xl"
                   onOpen={openViewer('avatar')}
                 />
                 {isSelf ? (
                   <Link
-                    href={EDIT_PROFILE_HREF}
+                    href={editProfileHref(serverId)}
                     onClick={onClose}
                     className="mb-1 inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-on-primary hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                   >
@@ -194,6 +196,8 @@ export function FullProfileModal({
                   displayName={view.displayName}
                   globalDisplayName={view.globalDisplayName}
                   nickname={view.nickname}
+                  username={view.username}
+                  pronouns={view.limited ? null : view.pronouns}
                   isGuest={view.isGuest}
                   isOwner={view.isOwner}
                   presence={view.presence}

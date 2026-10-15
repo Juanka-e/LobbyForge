@@ -374,7 +374,7 @@ describe('the ⋯ menu', () => {
   it('your own card: Edit profile instead of moderation', () => {
     render(<Harness profile={response({}, { isSelf: true, message: false })} self={{ status: 'online', onStatusChange: () => {} }} />);
     const menu = openMenu();
-    expect(within(menu).getByRole('menuitem', { name: /Edit profile/ })).toHaveAttribute('href', '/settings/profile');
+    expect(within(menu).getByRole('menuitem', { name: /Edit profile/ })).toHaveAttribute('href', `/settings/profile?server=${SERVER}`);
     expect(within(menu).queryByRole('menuitem', { name: /Block/ })).toBeNull();
   });
 });
@@ -481,7 +481,7 @@ describe('dialog contract', () => {
     render(<Harness profile={response({}, { isSelf: true, message: false })} self={{ status: 'online', onStatusChange }} />);
     fireEvent.click(within(card()).getByRole('radio', { name: 'Idle' }));
     expect(onStatusChange).toHaveBeenCalledWith('idle');
-    expect(within(card()).getByRole('link', { name: /Edit profile/ })).toHaveAttribute('href', '/settings/profile');
+    expect(within(card()).getByRole('link', { name: /Edit profile/ })).toHaveAttribute('href', `/settings/profile?server=${SERVER}`);
   });
 });
 

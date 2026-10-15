@@ -3,8 +3,13 @@ import type { MemberProfileResponse } from '@/lib/member-profile';
 import type { ProfileMenuItem } from './ProfileMenu';
 import type { ModerationKind } from './ModerationDialog';
 
-/** Where "Edit profile" goes — the user settings' profile page. */
-export const EDIT_PROFILE_HREF = '/settings/profile';
+/**
+ * Where "Edit profile" goes — the user settings' profile page, opened on
+ * this community's nickname (`?server=`).
+ */
+export function editProfileHref(serverId?: string | null): string {
+  return serverId ? `/settings/profile?server=${encodeURIComponent(serverId)}` : '/settings/profile';
+}
 
 /**
  * The "⋯" menu of a profile (card and full profile alike): copy the ID;
@@ -16,6 +21,8 @@ export function buildProfileMenuItems(input: {
   userId: string;
   name: string;
   isSelf: boolean;
+  /** The community the card is in — "Edit profile" opens its nickname. */
+  serverId?: string | null;
   data: MemberProfileResponse | null;
   isBlocked: boolean;
   onCopyId: () => void;
@@ -30,7 +37,7 @@ export function buildProfileMenuItems(input: {
     { id: 'copy-id', label: t('shell.profile.copyId'), icon: 'content_copy', onSelect: input.onCopyId },
   ];
   if (isSelf) {
-    items.push({ id: 'edit', label: t('shell.profile.editProfile'), icon: 'edit', href: EDIT_PROFILE_HREF });
+    items.push({ id: 'edit', label: t('shell.profile.editProfile'), icon: 'edit', href: editProfileHref(input.serverId) });
     return items;
   }
   if (input.onToggleBlock) {

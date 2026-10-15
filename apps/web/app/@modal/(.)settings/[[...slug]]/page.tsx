@@ -21,9 +21,17 @@ const PAGES = {
   'voice-video': VoiceVideoPage,
 } as const;
 
-export default async function InterceptedUserSettings({ params }: { params: Promise<{ slug?: string[] }> }) {
+export default async function InterceptedUserSettings({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug?: string[] }>;
+  searchParams: Promise<{ server?: string | string[] }>;
+}) {
   const key = (await params).slug?.join('/') ?? '';
   const Page = PAGES[key as keyof typeof PAGES];
   if (!Page) notFound();
+  // The profile page opens on the community the lobby showed (`?server=`).
+  if (Page === ProfilePage) return <ProfilePage searchParams={searchParams} />;
   return <Page />;
 }

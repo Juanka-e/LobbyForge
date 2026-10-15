@@ -24,7 +24,7 @@ function makeUser(overrides: Record<string, unknown> = {}): NonNullable<BodyProp
 function renderBody(user: NonNullable<BodyProps['user']>, locale = 'en') {
   render(
     <I18nProvider {...providerPropsFor(locale)}>
-      <ProfileBody user={user} serverProfile={null} />
+      <ProfileBody user={user} communities={[]} initialServerId={null} />
     </I18nProvider>
   );
 }
