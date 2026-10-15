@@ -115,15 +115,27 @@ async function forwardProjectedActivity(
     // marketplace plugin projects itself in the plugin worker, which only
     // web can reach) is projected by the web app. A failure throws → the
     // lean event below, never unprojected state.
-    const projected = isCoreProjectedPlugin(pluginId)
-      ? projectActivityState(row.state, pluginId, viewerUserId)
-      : (await fetchHostProjection({ serverId: authz.serverId, sessionId: row.id, viewerUserId })).state;
+    const rowRevision = (row as { revision?: number }).revision;
+    let projected: unknown;
+    let status: string | undefined = row.status;
+    let revision = rowRevision ?? data.revision;
+    if (isCoreProjectedPlugin(pluginId)) {
+      projected = projectActivityState(row.state, pluginId, viewerUserId);
+    } else {
+      const host = await fetchHostProjection({ serverId: authz.serverId, sessionId: row.id, viewerUserId });
+      projected = host.state;
+      status = host.status ?? status;
+      revision = host.revision ?? revision;
+    }
     send(socket, {
       type: 'event',
       topic,
       data: {
-        status: data.status ?? row.status,
-        revision: data.revision,
+        // The status and revision of the row whose state is projected —
+        // not the bus event's: the row may already be newer than the event
+        // that triggered this read, and the client orders frames by revision.
+        status,
+        revision,
         publicSummary: data.publicSummary,
         state: projected,
       },
@@ -609,6 +621,9 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
             });
             return;
           }
+          // Projections for this topic go out in bus order: each one waits
+          // for the previous one, so a slow read cannot overtake a newer one.
+          let projectionChain: Promise<void> = Promise.resolve();
           const added = state.subs.add(msg.topic, (raw) => {
             try {
               const data = JSON.parse(raw);
@@ -630,7 +645,9 @@ export function createGateway(): { wss: WebSocketServer; server: http.Server; cl
               // use — so no subscriber ever sees another player's
               // secrets (Hushle deck/cards, Quiz correctIndex).
               if (authz.kind === 'activity-state') {
-                void forwardProjectedActivity(socket, msg.topic, authz, data, state.guest.uid);
+                projectionChain = projectionChain
+                  .then(() => forwardProjectedActivity(socket, msg.topic, authz, data, state.guest.uid))
+                  .catch(() => undefined);
                 return;
               }
               send(socket, {
