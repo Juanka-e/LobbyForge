@@ -293,7 +293,15 @@ async function handlePost(
       { message: toJson(created) },
       { status: 201, headers: { 'Cache-Control': 'no-store' } }
     );
-  } catch {
+  } catch (err) {
+    // createMessage refuses a reply target that is unknown or in another
+    // channel (code `invalid_reply`): the caller's mistake, not a 500.
+    if ((err as { code?: unknown } | null)?.code === 'invalid_reply') {
+      return NextResponse.json(
+        { error: 'The message you replied to is not in this channel', code: 'invalid_reply' },
+        { status: 400 }
+      );
+    }
     return NextResponse.json(
       { error: 'Failed to create message' },
       { status: 500 }

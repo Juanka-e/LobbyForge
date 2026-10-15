@@ -114,7 +114,7 @@ interface MessageJson {
 |---:|---|
 | 200 | `GET` / `PATCH` success (PATCH also returns 200 for an empty patch) |
 | 201 | `POST` success |
-| 400 | Body fails zod validation (empty content, > 4000 chars, invalid `replyToId` uuid, an unknown field, client `metadata` → `metadata_not_allowed`) — or query string fails (`?before=not-a-date`, `?limit=abc`) |
+| 400 | Body fails zod validation (empty content, > 4000 chars, invalid `replyToId` uuid, an unknown field, client `metadata` → `metadata_not_allowed`) — or query string fails (`?before=not-a-date`, `?limit=abc`) — or `replyToId` names a message that does not exist or is in another channel (`invalid_reply`; it used to be a 500) |
 | 401 | Cookie missing or signature invalid |
 | 413 | `POST` / `PATCH` body over 16 KiB |
 | 403 | Caller is not a member (reads) or not the author/owner (mutations); `@everyone` / `@here` in the content without Mention Everyone |

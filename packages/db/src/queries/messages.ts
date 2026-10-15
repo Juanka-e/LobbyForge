@@ -68,6 +68,19 @@ async function assertChannelAlive(db: DbClient, channelId: string): Promise<void
 }
 
 /**
+ * The error `createMessage` throws for a reply target that does not exist
+ * or lives in another channel. It carries `code: 'invalid_reply'` so the
+ * route can answer 400 instead of a 500 (security review 2026-10, A12);
+ * recognise it by the code, not `instanceof` (a second copy of the package
+ * would defeat that).
+ */
+export const INVALID_REPLY_CODE = 'invalid_reply' as const;
+
+function invalidReplyError(message: string): Error & { code: typeof INVALID_REPLY_CODE } {
+  return Object.assign(new Error(message), { code: INVALID_REPLY_CODE });
+}
+
+/**
  * Create a message. The `userId` is the materialized UUID from the
  * `lf_guest` cookie's `uid` field; the route layer is responsible for
  * making sure that field is non-null before calling. A bot message
@@ -94,10 +107,10 @@ export async function createMessage(db: DbClient, input: CreateMessageInput): Pr
       .where(eq(messages.id, input.replyToId))
       .limit(1);
     if (target.length === 0) {
-      throw new Error(`Reply target ${input.replyToId} not found`);
+      throw invalidReplyError(`Reply target ${input.replyToId} not found`);
     }
     if (target[0]?.channelId !== input.channelId) {
-      throw new Error('Reply target is in a different channel');
+      throw invalidReplyError('Reply target is in a different channel');
     }
   }
 
