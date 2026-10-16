@@ -12,6 +12,8 @@ interface DmChannelSummary {
   otherUserDisplayName: string;
   otherUserAvatarUrl: string | null;
   lastMessageAt: string;
+  /** The newest message is the other participant's. */
+  lastMessageFromOther?: boolean;
 }
 
 /** Rows the sidebar shows; the newest conversations first. */
@@ -39,6 +41,12 @@ function parseDmActivity(data: unknown): { channelId: string; fromUserId: string
  * else started appears at once, and a conversation that is not open gets an
  * unread mark until it is opened. Opening a new conversation from a profile
  * card re-reads it too.
+ *
+ * The mark does not depend on catching the event: every read after the
+ * first compares with the one before, so a conversation that moved while
+ * the feed was not live yet (just after the page rendered) or the socket
+ * was down (a laptop asleep), with the other person's message newest, is
+ * marked as well.
  */
 export default function DmLinkSection({ currentUserId }: { currentUserId: string | null }) {
   const t = useT();
@@ -50,12 +58,34 @@ export default function DmLinkSection({ currentUserId }: { currentUserId: string
   const openChannelRef = useRef(openChannelId);
   openChannelRef.current = openChannelId;
 
+  /** Each conversation's newest message time at the previous read; null before the first. */
+  const lastRead = useRef<Map<string, number> | null>(null);
+
   const load = useCallback(async (signal?: { cancelled: boolean }) => {
     try {
       const res = await fetch('/api/dm', { credentials: 'same-origin', cache: 'no-store' });
       if (!res.ok) return;
       const data = (await res.json()) as { channels?: DmChannelSummary[] };
-      if (!signal?.cancelled) setChannels(data.channels ?? []);
+      if (signal?.cancelled) return;
+      const list = data.channels ?? [];
+      const previous = lastRead.current;
+      lastRead.current = new Map(list.map((channel) => [channel.id, Date.parse(channel.lastMessageAt)]));
+      if (previous) {
+        const moved = list.filter(
+          (channel) =>
+            channel.lastMessageFromOther === true &&
+            channel.id !== openChannelRef.current &&
+            Date.parse(channel.lastMessageAt) > (previous.get(channel.id) ?? Number.NEGATIVE_INFINITY)
+        );
+        if (moved.length > 0) {
+          setUnread((current) => {
+            const next = new Set(current);
+            for (const channel of moved) next.add(channel.id);
+            return next;
+          });
+        }
+      }
+      setChannels(list);
     } catch {
       // The next event or reconnect reads again.
     } finally {
@@ -103,19 +133,23 @@ export default function DmLinkSection({ currentUserId }: { currentUserId: string
         void load();
       }, REFRESH_COALESCE_MS);
     };
-    const unsubscribe = client.subscribe(`user:${currentUserId}`, (data) => {
-      const event = parseDmActivity(data);
-      if (!event) return;
-      if (event.fromUserId && event.fromUserId !== currentUserId && event.channelId !== openChannelRef.current) {
-        setUnread((current) => (current.has(event.channelId) ? current : new Set(current).add(event.channelId)));
-      }
-      schedule();
-    });
-    const offReconnect = client.onReconnect(schedule);
+    const unsubscribe = client.subscribe(
+      `user:${currentUserId}`,
+      (data) => {
+        const event = parseDmActivity(data);
+        if (!event) return;
+        if (event.fromUserId && event.fromUserId !== currentUserId && event.channelId !== openChannelRef.current) {
+          setUnread((current) => (current.has(event.channelId) ? current : new Set(current).add(event.channelId)));
+        }
+        schedule();
+      },
+      // Live (first, or after a reconnect): a conversation started before
+      // then was never announced here — read the list again.
+      { onLive: schedule }
+    );
     return () => {
       if (timer !== null) window.clearTimeout(timer);
       unsubscribe();
-      offReconnect();
     };
   }, [currentUserId, load]);
 

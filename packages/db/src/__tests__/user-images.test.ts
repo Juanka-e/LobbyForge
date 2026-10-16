@@ -218,8 +218,8 @@ describe('listDmChannelsForUser — security-review FILE-001 / AUTHZ-005', () =>
     const channel = { id: 'dm-1', lastMessageAt };
     const { db, captured } = fakeDb([
       [
-        { channel, otherId: 'me', otherName: 'Me', otherAvatarRef: null, otherProfileVisibility: null, sharesServer: true },
-        { channel, otherId: 'bob', otherName: 'Bob', otherAvatarRef: 'abcdefabcdef', otherProfileVisibility: 'everyone', sharesServer: false },
+        { channel, otherId: 'me', otherName: 'Me', otherAvatarRef: null, otherProfileVisibility: null, sharesServer: true, lastAuthorId: 'bob' },
+        { channel, otherId: 'bob', otherName: 'Bob', otherAvatarRef: 'abcdefabcdef', otherProfileVisibility: 'everyone', sharesServer: false, lastAuthorId: 'bob' },
       ],
     ]);
     const result = await listDmChannelsForUser(db, 'me');
@@ -229,6 +229,10 @@ describe('listDmChannelsForUser — security-review FILE-001 / AUTHZ-005', () =>
     const shares = render(projection.sharesServer);
     expect(shares.sql).toContain('from memberships viewer_m');
     expect(shares.params).toEqual(['me']);
+    const lastAuthor = render(projection.lastAuthorId);
+    expect(lastAuthor.sql).toContain('from dm_messages last_m');
+    expect(lastAuthor.sql).toContain('"dm_channels"."id"');
+    expect(lastAuthor.sql).toContain('deleted_at is null');
     expect(result).toEqual([
       {
         id: 'dm-1',
@@ -238,6 +242,7 @@ describe('listDmChannelsForUser — security-review FILE-001 / AUTHZ-005', () =>
         otherUserProfileVisibility: 'everyone',
         sharesServerWithOtherUser: false,
         lastMessageAt,
+        lastMessageAuthorId: 'bob',
       },
     ]);
   });

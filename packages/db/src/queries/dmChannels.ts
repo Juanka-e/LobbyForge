@@ -37,6 +37,12 @@ export interface DmChannelSummary {
   /** Whether the caller and the other participant share a server. */
   sharesServerWithOtherUser: boolean;
   lastMessageAt: Date;
+  /**
+   * Who wrote the newest message still shown (deleted ones skipped), or
+   * null before the first. The lobby's DM list marks a conversation unread
+   * when it moved and the newest message is not the viewer's own.
+   */
+  lastMessageAuthorId: string | null;
 }
 
 export interface DmMessageRow {
@@ -120,6 +126,13 @@ export async function listDmChannelsForUser(
       otherAvatarRef: userImageRefSql(users.avatarUrl),
       otherProfileVisibility: profileVisibilitySql(users.id),
       sharesServer: sharesServerSql(userId, users.id),
+      // One index probe per conversation (idx_dm_messages_channel_created).
+      lastAuthorId: sql<string | null>`(
+        select last_m.author_id from dm_messages last_m
+        where last_m.dm_channel_id = ${dmChannels.id} and last_m.deleted_at is null
+        order by last_m.created_at desc
+        limit 1
+      )`,
     })
     .from(dmChannels)
     .leftJoin(users, or(eq(users.id, dmChannels.userAId), eq(users.id, dmChannels.userBId)))
@@ -136,6 +149,7 @@ export async function listDmChannelsForUser(
       otherUserProfileVisibility: toProfileVisibility(r.otherProfileVisibility),
       sharesServerWithOtherUser: r.sharesServer === true,
       lastMessageAt: r.channel.lastMessageAt,
+      lastMessageAuthorId: r.lastAuthorId ?? null,
     }))
     .sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime());
 }

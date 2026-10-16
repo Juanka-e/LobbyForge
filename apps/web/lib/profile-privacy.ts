@@ -111,6 +111,8 @@ export interface DmChannelView {
   otherUserDisplayName: string;
   otherUserAvatarUrl: string | null;
   lastMessageAt: Date;
+  /** The newest message is the other participant's (the DM list's unread mark). */
+  lastMessageFromOther: boolean;
 }
 
 export function projectDmChannel(channel: DmChannelSummary, viewerUserId: string): DmChannelView {
@@ -124,6 +126,7 @@ export function projectDmChannel(channel: DmChannelSummary, viewerUserId: string
     otherUserDisplayName: channel.otherUserDisplayName,
     otherUserAvatarUrl: visible ? userImageUrl(channel.otherUserId, 'avatar', channel.otherUserAvatarRef) : null,
     lastMessageAt: channel.lastMessageAt,
+    lastMessageFromOther: channel.lastMessageAuthorId !== null && channel.lastMessageAuthorId !== viewerUserId,
   };
 }
 
