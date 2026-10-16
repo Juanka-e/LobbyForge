@@ -185,7 +185,9 @@ test.describe('profile fields, mentions and live updates', () => {
     await input.fill(HANDLE.toUpperCase());
     await expect(page.getByText(`@${HANDLE} is available.`)).toBeVisible({ timeout: 10_000 });
     await page.getByRole('button', { name: 'Save', exact: true }).click();
-    await expect(page.getByText(`@${HANDLE}`, { exact: true })).toBeVisible();
+    // The saved row (the live preview above shows the handle too).
+    const savedHandle = page.getByText(`@${HANDLE}`, { exact: true });
+    await expect(savedHandle.and(page.locator(':not([data-testid="profile-preview-handle"])'))).toBeVisible();
 
     await page.getByRole('button', { name: 'Edit: Pronouns' }).click();
     await page.getByRole('textbox', { name: 'Pronouns' }).fill(PRONOUNS);
@@ -213,6 +215,9 @@ test.describe('profile fields, mentions and live updates', () => {
   });
 
   test('live member rows: a new name, a new role, a newcomer and a kick, without a reload', async () => {
+    // Ivy in the lobby too: a role heading groups ONLINE members only, as
+    // Discord's does (offline ones stay under "Offline").
+    await openLobby(ivy.page);
     const page = omar.page;
     await openLobby(page);
     await expect(memberRow(page, IVY)).toBeVisible();
@@ -250,10 +255,14 @@ test.describe('profile fields, mentions and live updates', () => {
     const composer = page.locator('[data-composer-input]');
     await composer.click();
     await composer.pressSequentially('hello @Iv');
-    await page.getByRole('button', { name: new RegExp(IVY) }).click();
+    await page.getByRole('option', { name: new RegExp(IVY) }).click();
     await composer.pressSequentially(`and @${HANDLE} again ${RUN}`);
     await composer.press('Enter');
-    await expect(page.getByText(`again ${RUN}`)).toBeVisible();
+    // Word for word: typing straight on after a pick once moved letters
+    // ("@Ivy Novak nd … a").
+    await expect(page.locator('[data-chat-message]').filter({ hasText: `again ${RUN}` }).first()).toContainText(
+      `hello @${IVY} and @${HANDLE} again ${RUN}`
+    );
 
     // Ivy's sidebar: a badge on the first channel, without a reload.
     const badge = ivy.page.getByTestId('channel-mention-badge');
@@ -278,6 +287,9 @@ test.describe('profile fields, mentions and live updates', () => {
 
   test('a first DM from someone else appears in the DM list with an unread dot', async () => {
     await openLobby(ivy.page);
+    // Her list has been read once (empty): what comes next is news to it,
+    // whether the feed's event or its catch-up read brings it.
+    await expect(ivy.page.getByText('No conversations yet')).toBeVisible({ timeout: 10_000 });
     const opened = await send(() => omar.api.post('/api/dm', { headers: ORIGIN, data: { recipientUserId: ivy.uid } }));
     expect(opened.status(), await opened.text()).toBeLessThan(300);
     const channelId = (await json<{ channel: { id: string } }>(opened)).channel.id;

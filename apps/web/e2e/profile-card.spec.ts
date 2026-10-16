@@ -661,7 +661,8 @@ test.describe('profile card', () => {
     await opener.click();
     const profile = card(page, moderator.name);
     await expect(profile).toBeVisible();
-    await expect(profile.getByRole('link', { name: 'Edit profile' })).toHaveAttribute('href', '/settings/profile');
+    // It opens Settings → Profile on this community (its nickname).
+    await expect(profile.getByRole('link', { name: 'Edit profile' })).toHaveAttribute('href', `/settings/profile?server=${serverId}`);
     await expect(profile.getByRole('textbox', { name: /Message @/ })).toHaveCount(0);
     const statuses = profile.getByRole('radiogroup', { name: 'Status' });
     await expect(statuses.getByRole('radio')).toHaveCount(4);
