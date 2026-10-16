@@ -15,16 +15,18 @@ import { __resetNotificationPrefsForTests } from '@/lib/notification-prefs';
  */
 
 const subscribers = new Map<string, (envelope: unknown) => void>();
-const reconnectListeners = new Set<() => void>();
+const liveListeners = new Set<() => void>();
 vi.mock('@/lib/realtime-client', () => ({
   getRealtimeClient: () => ({
-    subscribe: (topic: string, handler: (envelope: unknown) => void) => {
-      subscribers.set(topic, handler);
-      return () => subscribers.delete(topic);
-    },
-    onReconnect: (listener: () => void) => {
-      reconnectListeners.add(listener);
-      return () => reconnectListeners.delete(listener);
+    // The roster holds the chat topic twice (the live handler, and the
+    // history read that only wants `onLive`): keep the handler that reads.
+    subscribe: (topic: string, handler: (envelope: unknown) => void, options?: { onLive?: () => void }) => {
+      if (options?.onLive) liveListeners.add(options.onLive);
+      else subscribers.set(topic, handler);
+      return () => {
+        if (options?.onLive) liveListeners.delete(options.onLive);
+        else subscribers.delete(topic);
+      };
     },
   }),
 }));
@@ -69,7 +71,7 @@ beforeEach(() => {
   // Settings are read once per page; every case is a fresh page.
   __resetNotificationPrefsForTests();
   subscribers.clear();
-  reconnectListeners.clear();
+  liveListeners.clear();
   interactionStore.reset();
   history = [];
   olderPage = [];
@@ -231,7 +233,7 @@ describe('poll messages in the roster', () => {
   });
 });
 
-describe('a reconnect catches up (the gateway keeps no backlog)', () => {
+describe('going live catches up — first, and after a reconnect (the gateway keeps no backlog)', () => {
   it('re-reads the channel: what was posted while offline appears, what was deleted goes', async () => {
     history = [apiMessage('m2', 'second', { createdAt: '2026-10-10T10:01:00.000Z' }), apiMessage('m1', 'first')];
     await renderRoster();
@@ -239,7 +241,7 @@ describe('a reconnect catches up (the gateway keeps no backlog)', () => {
     // While the socket was down: m3 posted, m2 deleted.
     history = [apiMessage('m3', 'posted while away', { createdAt: '2026-10-10T10:02:00.000Z' }), apiMessage('m1', 'first')];
     await act(async () => {
-      for (const listener of reconnectListeners) listener();
+      for (const listener of liveListeners) listener();
     });
     expect(await screen.findByText('posted while away')).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByText('second')).toBeNull());
@@ -254,7 +256,7 @@ describe('a reconnect catches up (the gateway keeps no backlog)', () => {
     await screen.findByText('live one');
     history = [apiMessage('m3', 'newer', { createdAt: '2026-10-10T10:06:00.000Z' }), apiMessage('m1', 'first')];
     await act(async () => {
-      for (const listener of reconnectListeners) listener();
+      for (const listener of liveListeners) listener();
     });
     await screen.findByText('newer');
     expect(screen.queryByText('live one')).toBeNull();

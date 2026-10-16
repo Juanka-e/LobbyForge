@@ -18,6 +18,13 @@
  * backlog, so events published while the socket was down are gone:
  * `onReconnect` tells a subscriber that shows state to re-read it.
  *
+ * Nor does it replay what happened before a topic was live: a page renders
+ * its data, then subscribes, and an event published in between is lost.
+ * A subscriber that shows state passes `onLive`, called each time the
+ * gateway confirms the topic on a socket — the first time, after every
+ * reconnect — and at once when it joins a topic another handler already
+ * holds, so it re-reads what it shows then.
+ *
  * A subscribe the gateway refused for a passing reason (`internal_error`,
  * `rate_limited`) is retried with a capped backoff while the topic still
  * has handlers; a subscription it revoked (`access_revoked`) is asked for
@@ -113,6 +120,15 @@ export type Topic =
 
 type Handler<T = unknown> = (data: T) => void;
 
+export interface SubscribeOptions {
+  /**
+   * The topic is live: the gateway confirmed it on this socket (the first
+   * time, and again after each reconnect), or it already was when this
+   * subscriber joined. Events from before were not delivered — re-read.
+   */
+  onLive?: () => void;
+}
+
 interface QueuedMessage {
   type: 'subscribe' | 'unsubscribe';
   topic: string;
@@ -175,6 +191,9 @@ export class RealtimeClient {
   private terminal: TerminalClose | null = null;
   private readonly terminalListeners = new Set<(close: TerminalClose) => void>();
   private readonly topicRetries = new Map<string, TopicRetry>();
+  private readonly liveListeners = new Map<string, Set<() => void>>();
+  /** Topics the gateway confirmed on the current socket. */
+  private readonly liveTopics = new Set<string>();
 
   constructor(options: RealtimeClientOptions = {}) {
     this.url = options.url ?? defaultUrl();
@@ -264,6 +283,7 @@ export class RealtimeClient {
       this.heartbeatTimer = null;
     }
     this.clearTopicRetries();
+    this.liveTopics.clear();
     if (this.socket) {
       try {
         this.socket.close(1000, 'client close');
@@ -274,7 +294,7 @@ export class RealtimeClient {
     }
   }
 
-  subscribe<T = unknown>(topic: Topic, handler: Handler<T>): () => void {
+  subscribe<T = unknown>(topic: Topic, handler: Handler<T>, options: SubscribeOptions = {}): () => void {
     let set = this.subscriptions.get(topic);
     const isNewTopic = !set;
     if (!set) {
@@ -282,10 +302,29 @@ export class RealtimeClient {
       this.subscriptions.set(topic, set);
     }
     set.add(handler as Handler);
+    const { onLive } = options;
+    if (onLive) {
+      let listeners = this.liveListeners.get(topic);
+      if (!listeners) {
+        listeners = new Set();
+        this.liveListeners.set(topic, listeners);
+      }
+      listeners.add(onLive);
+      // Another handler holds the topic and it is live already: what
+      // happened before this subscriber arrived is read now.
+      if (this.liveTopics.has(topic)) {
+        queueMicrotask(() => {
+          if (this.liveListeners.get(topic)?.has(onLive)) this.callLiveListener(onLive);
+        });
+      }
+    }
     // beta-review: one wire subscription per topic, however many local
     // handlers share it (the gateway caps subscriptions per connection).
     if (isNewTopic) this.send({ type: 'subscribe', topic });
-    return () => this.unsubscribe(topic, handler);
+    return () => {
+      if (onLive) this.removeLiveListener(topic, onLive);
+      this.unsubscribe(topic, handler);
+    };
   }
 
   unsubscribe<T = unknown>(topic: Topic, handler: Handler<T>): void {
@@ -294,8 +333,33 @@ export class RealtimeClient {
     set.delete(handler as Handler);
     if (set.size === 0) {
       this.subscriptions.delete(topic);
+      this.liveTopics.delete(topic);
       this.forgetTopicRetry(topic);
       this.send({ type: 'unsubscribe', topic });
+    }
+  }
+
+  private removeLiveListener(topic: string, listener: () => void): void {
+    const listeners = this.liveListeners.get(topic);
+    if (!listeners) return;
+    listeners.delete(listener);
+    if (listeners.size === 0) this.liveListeners.delete(topic);
+  }
+
+  /** The gateway confirmed `topic` on the current socket: tell its listeners once. */
+  private markLive(topic: string): void {
+    if (!this.subscriptions.has(topic) || this.liveTopics.has(topic)) return;
+    this.liveTopics.add(topic);
+    const listeners = this.liveListeners.get(topic);
+    if (!listeners) return;
+    for (const listener of [...listeners]) this.callLiveListener(listener);
+  }
+
+  private callLiveListener(listener: () => void): void {
+    try {
+      listener();
+    } catch (err) {
+      this.onError?.(err as Error);
     }
   }
 
@@ -315,6 +379,8 @@ export class RealtimeClient {
   }
 
   private openSocket(): void {
+    // Nothing is live on a new socket until the gateway says so.
+    this.liveTopics.clear();
     try {
       this.socket = new WebSocket(this.url);
     } catch (err) {
@@ -375,7 +441,9 @@ export class RealtimeClient {
         }
       } else if (parsed.type === 'subscribed') {
         this.forgetTopicRetry(parsed.topic);
+        this.markLive(parsed.topic);
       } else if (parsed.type === 'access_revoked') {
+        this.liveTopics.delete(parsed.topic);
         this.retryRevokedTopic(parsed.topic);
       } else if (parsed.type === 'error') {
         if (parsed.code === 'internal_error' || parsed.code === 'rate_limited') {
@@ -397,6 +465,7 @@ export class RealtimeClient {
       if (this.socket !== socket) return;
       this.clearHeartbeat();
       this.clearTopicRetryTimers();
+      this.liveTopics.clear();
       this.socket = null;
       if (this.explicitClose) return;
       const code = typeof ev.code === 'number' ? ev.code : 0;

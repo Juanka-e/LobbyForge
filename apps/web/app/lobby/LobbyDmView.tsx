@@ -91,19 +91,18 @@ export function LobbyDmView({
     try {
       const client = getRealtimeClient();
       client.connect();
-      unsub = client.subscribe(`dm:${dm.channelId}`, (raw: unknown) => {
-        const msg = raw as DmMessage;
-        if (!msg?.id) return;
-        setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
-      });
-      // Back from a lost connection: read the conversation again at once
-      // instead of waiting for the next poll.
-      const offReconnect = client.onReconnect(() => void load());
-      const unsubscribe = unsub;
-      unsub = () => {
-        unsubscribe();
-        offReconnect();
-      };
+      unsub = client.subscribe(
+        `dm:${dm.channelId}`,
+        (raw: unknown) => {
+          const msg = raw as DmMessage;
+          if (!msg?.id) return;
+          setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+        },
+        // Live (first, or back from a lost connection): read the
+        // conversation again at once — a message sent before the topic
+        // was live never came here — instead of waiting for the next poll.
+        { onLive: () => void load() }
+      );
     } catch {
       // WS unavailable — the poll delivers.
     }
