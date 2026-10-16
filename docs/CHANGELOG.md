@@ -2,6 +2,30 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [0.2.0-rc.12] - 2026-10-16
+
+rc.11 plus the two entries below: "Handles, pronouns, profile colours, mentions and live members" and "Fixes from the profile-fields e2e run". Update with `lfctl update apply`. Migration 0050 is expand-only, and the ws-gateway must restart with the web image (see the upgrade notes below).
+
+- **Profiles:** a handle (`@name`), pronouns and a profile colour. The nickname is now set per community.
+- **Mentions know who they name:** they show as chips, a message that names you is highlighted, and the channel gets a badge plus a desktop notification. The `@` list finds handles.
+- **A live lobby:** joins, departures, kicks, bans, names, avatars and roles arrive without a reload, and so do new DMs, with an unread dot. Changes made just after a page opened, or while the connection was down, are caught up too.
+- **Moderation:**
+  - Bans can have a length, and the Members page lists them with "Lift ban".
+  - A timed-out moderator can no longer manage roles, channels, invites or join requests.
+- **Chat:**
+  - "Load older messages".
+  - Deleting asks first.
+  - The notification settings work.
+  - Refusals are said in your language.
+  - Picking a mention no longer moves the letters typed right after it.
+- **Fixes:**
+  - A malformed WebSocket frame could crash the realtime gateway before sign-in.
+  - Signed-out tabs reconnected every 500 ms.
+  - Paging skipped rows.
+  - Plus the rest of the three-review bug hunt below.
+- **Desktop:** the tray has "Switch instance…", and global shortcuts are opt-in.
+- **Ops:** backups include the installed marketplace bundles.
+
 ## [Unreleased] - Fixes from the profile-fields e2e run - 2026-10-16
 
 The new `e2e/profile-fields-live.spec.ts` ran against a local compose stack (7/7, twice). Getting there found these:
