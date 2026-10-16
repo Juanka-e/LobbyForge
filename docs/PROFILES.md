@@ -277,7 +277,9 @@ older clients read it as before. Who a mention names is kept beside it, in
 - the messages route (post and edit) keeps a pick only if it is a current
   member whose nickname, account name or handle stands as `@…` in the text,
   and adds every typed `@handle` of a current member
-  (`lib/message-mentions-server.ts`). An edit keeps the earlier mentions whose
+  (`lib/message-mentions-server.ts`). One entry per member and spelling: a
+  member picked as `@Ada Lovelace` and also typed as `@ada_l` is two chips
+  (and still one notification). An edit keeps the earlier mentions whose
   names are still there. At most 20.
 
 The lobby turns each stored `@text` into a chip that opens that member's card,
@@ -317,14 +319,27 @@ reload. They now arrive live.
 - `LiveMembersProvider` re-reads exactly the named rows from
   `GET /api/servers/{id}/lobby-members?ids=…` (projected for the viewer like
   the page render; owner or member only; up to 100 ids; `missing` lists those
-  no longer members), or everyone after `roles-changed` or a reconnect. The
-  member list, the profile card (an open card re-reads), chat author names,
-  the mention list and the voice roster all read these rows; status stays the
-  presence feed's.
+  no longer members), or everyone after `roles-changed` or when the topic
+  goes live. The member list, the profile card (an open card re-reads), chat
+  author names, the mention list and the voice roster all read these rows;
+  status stays the presence feed's.
 - **DMs.** A DM message also tells both participants' feeds
   (`{ type: "dm_activity", channelId, fromUserId }`, no text). The sidebar's
   DM list re-reads `GET /api/dm`, so a conversation someone else started
   appears, and one that is not open gets an unread dot until it is opened.
+  The dot does not depend on catching the event: each read after the first
+  compares with the one before, and a conversation that moved with the other
+  person's message newest (`lastMessageFromOther` in the answer) is marked
+  too — one that arrived while the socket was down, for instance.
+- **Going live.** The gateway keeps no backlog and replays nothing, so a
+  change made between the page render and the subscription — or while the
+  socket was down — never arrives as an event. Every live surface (member
+  rows, the DM list, an open channel or DM, an activity) passes `onLive` to
+  `RealtimeClient.subscribe`: it is called when the gateway confirms the topic
+  on a socket (the first time, and after every reconnect) and at once for a
+  subscriber joining a topic that is already live, and the surface re-reads
+  what it shows then. A rename made a moment after another member opened the
+  lobby used to stay stale on their screen until a reload.
 
 ## Privacy
 

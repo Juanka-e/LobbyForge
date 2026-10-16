@@ -2,6 +2,16 @@
 
 All notable changes to the LobbyForge monorepo skeleton.
 
+## [Unreleased] - Fixes from the profile-fields e2e run - 2026-10-16
+
+The new `e2e/profile-fields-live.spec.ts` ran against a local compose stack (7/7, twice). Getting there found these:
+
+- **Changes made just after a page opened were lost until a reload.** The gateway replays nothing, so an event published between the server render and the subscription never arrived: a member who renamed themselves a moment after you opened the lobby stayed under the old name. `RealtimeClient.subscribe` now takes `onLive`, called when the gateway confirms the topic on a socket (first, and after every reconnect) and at once for a subscriber joining a live topic. The member rows, the DM list, an open channel or DM, and the activity panel re-read there (docs/REALTIME.md, docs/PROFILES.md "Going live").
+- **DM unread dots are no longer lost with a missed event.** Each read of the DM list after the first compares with the one before, so a conversation that moved with the other person's message newest is marked: DMs that came in while the laptop slept get their dot too. `GET /api/dm` answers `lastMessageFromOther` per conversation.
+- **A picked mention could be stored under the member's handle.** When the same message also had `@handle` and the handle was longer than the name, `@Ivy Novak` stayed plain text. The server now keeps one entry per member and spelling, so each spelling is a chip; the notification still goes once.
+- **Typing straight on after picking a mention moved letters.** The caret was placed a frame later and jumped back over what was typed meanwhile, so "@Ivy Novak and" came out as "@Ivy Novak nd…a". It's now placed as the value is committed.
+- **The `@` suggestions are a list of options to screen readers** (`listbox` / `option`, `aria-selected` follows the arrow keys).
+
 ## [Unreleased] - Handles, pronouns, profile colours, mentions and live members - 2026-10-15
 
 - **Profile fields** (migration 0050, docs/PROFILES.md "Profile fields"):
