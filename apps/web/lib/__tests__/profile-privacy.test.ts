@@ -132,6 +132,7 @@ describe('projectDmChannel — DM list', () => {
       otherUserProfileVisibility,
       sharesServerWithOtherUser,
       lastMessageAt,
+      lastMessageAuthorId: MEMBER,
     };
   }
 
@@ -142,7 +143,14 @@ describe('projectDmChannel — DM list', () => {
       otherUserDisplayName: 'Alice',
       otherUserAvatarUrl: `/api/users/${MEMBER}/avatar?v=0123456789ab`,
       lastMessageAt,
+      lastMessageFromOther: true,
     });
+  });
+
+  it("says whether the newest message is the other participant's — never who wrote it", () => {
+    expect(projectDmChannel({ ...channel('everyone', false), lastMessageAuthorId: VIEWER }, VIEWER).lastMessageFromOther).toBe(false);
+    expect(projectDmChannel({ ...channel('everyone', false), lastMessageAuthorId: null }, VIEWER).lastMessageFromOther).toBe(false);
+    expect(projectDmChannel(channel('nobody', false), VIEWER)).not.toHaveProperty('lastMessageAuthorId');
   });
 
   it.each([

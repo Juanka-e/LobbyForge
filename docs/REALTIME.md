@@ -214,6 +214,16 @@ next `open` and again on `hello`. The backoff starts over only on
 - Liveness: any frame re-arms a 60 s timer, and the gateway sends a
   `heartbeat` frame every 30 s, so only a socket that stayed silent for two
   heartbeats is closed (which triggers a reconnect).
+- Catching up: the gateway replays nothing, so an event published before a
+  topic was live is gone — between the page render and the subscription, or
+  while the socket was down. `subscribe(topic, handler, { onLive })` calls
+  `onLive` when the gateway confirms the topic on a socket (once per socket,
+  however many `subscribed` answers arrive: the first time, and after every
+  reconnect or restored `access_revoked`), and on the next microtask for a
+  subscriber that joins a topic already live. Anything that shows state
+  re-reads it there; the lobby's member rows, DM list, open channel and DM,
+  and the activity panel all do. `onReconnect` remains for listeners that
+  are not tied to one topic.
 
 The default URL is `ws://{window.location.hostname}:19521` (HTTPS pages use the same-origin `/ws` proxy instead). Override
 via `NEXT_PUBLIC_WS_URL` (the env var the build reads).

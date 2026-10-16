@@ -327,6 +327,96 @@ describe('RealtimeClient catching up after a lost connection', () => {
   });
 });
 
+describe('RealtimeClient onLive — what happened before a topic was live', () => {
+  const hello = { type: 'hello', ok: true, uid: 'u1', at: 'now' };
+  const subscribed = (topic: string) => ({ type: 'subscribed', topic, at: 'now' });
+
+  it('is called when the gateway confirms the topic — once per socket, again after a reconnect', async () => {
+    vi.useFakeTimers();
+    const live = vi.fn();
+    const client = new RealtimeClient({ url: 'ws://test' });
+    client.subscribe('members:srv', () => {}, { onLive: live });
+    client.connect();
+    const sock = MockWebSocket.instances[0];
+    sock.open();
+    sock.receive(hello);
+    expect(live).not.toHaveBeenCalled(); // not before the gateway confirms it
+    sock.receive(subscribed('members:srv'));
+    // The subscribe sent on open and the one replayed after hello are both confirmed.
+    sock.receive(subscribed('members:srv'));
+    sock.receive(subscribed('presence:srv'));
+    expect(live).toHaveBeenCalledTimes(1);
+
+    sock.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    const next = MockWebSocket.instances[1];
+    next.open();
+    next.receive(hello);
+    expect(live).toHaveBeenCalledTimes(1);
+    next.receive(subscribed('members:srv'));
+    expect(live).toHaveBeenCalledTimes(2);
+  });
+
+  it('a subscriber that joins a topic already live is told at once; the others are not told again', async () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    const client = new RealtimeClient({ url: 'ws://test' });
+    client.subscribe('user:u1', () => {}, { onLive: first });
+    client.connect();
+    const sock = MockWebSocket.instances[0];
+    sock.open();
+    sock.receive(hello);
+    sock.receive(subscribed('user:u1'));
+    expect(first).toHaveBeenCalledTimes(1);
+
+    client.subscribe('user:u1', () => {}, { onLive: second });
+    expect(second).not.toHaveBeenCalled(); // on the next microtask, never inside subscribe()
+    await Promise.resolve();
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(first).toHaveBeenCalledTimes(1);
+    // No second wire subscription for a shared topic.
+    expect(sock.sent.filter((frame) => frame.includes('"user:u1"'))).toHaveLength(2);
+  });
+
+  it('a subscriber gone before the confirmation is not called; a revoked topic counts again once restored', async () => {
+    const gone = vi.fn();
+    const kept = vi.fn();
+    const client = new RealtimeClient({ url: 'ws://test' });
+    const off = client.subscribe('dm:c1', () => {}, { onLive: gone });
+    client.subscribe('dm:c1', () => {}, { onLive: kept });
+    client.connect();
+    const sock = MockWebSocket.instances[0];
+    sock.open();
+    sock.receive(hello);
+    off();
+    sock.receive(subscribed('dm:c1'));
+    expect(gone).not.toHaveBeenCalled();
+    expect(kept).toHaveBeenCalledTimes(1);
+
+    sock.receive({ type: 'access_revoked', topic: 'dm:c1', reason: 'kick', at: 'now' });
+    sock.receive(subscribed('dm:c1'));
+    expect(kept).toHaveBeenCalledTimes(2);
+  });
+
+  it('a throwing listener goes to onError and the others still run', () => {
+    const onError = vi.fn();
+    const after = vi.fn();
+    const client = new RealtimeClient({ url: 'ws://test', onError });
+    client.subscribe('chat:s:c', () => {}, {
+      onLive: () => {
+        throw new Error('boom');
+      },
+    });
+    client.subscribe('chat:s:c', () => {}, { onLive: after });
+    client.connect();
+    const sock = MockWebSocket.instances[0];
+    sock.open();
+    sock.receive(subscribed('chat:s:c'));
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'boom' }));
+    expect(after).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('RealtimeClient when the gateway refuses the socket (G2)', () => {
   const hello = { type: 'hello', ok: true, uid: 'u1', at: 'now' };
 

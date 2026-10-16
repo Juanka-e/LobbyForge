@@ -16,14 +16,19 @@ import { useActivitySession } from '../useActivitySession';
 
 const realtime = vi.hoisted(() => ({
   reconnectListeners: new Set<() => void>(),
+  liveListeners: new Set<() => void>(),
   handlers: new Map<string, (event: unknown) => void>(),
 }));
 vi.mock('@/lib/realtime-client', () => ({
   getRealtimeClient: () => ({
     connect: () => {},
-    subscribe: (topic: string, handler: (event: unknown) => void) => {
+    subscribe: (topic: string, handler: (event: unknown) => void, options?: { onLive?: () => void }) => {
       realtime.handlers.set(topic, handler);
-      return () => realtime.handlers.delete(topic);
+      if (options?.onLive) realtime.liveListeners.add(options.onLive);
+      return () => {
+        realtime.handlers.delete(topic);
+        if (options?.onLive) realtime.liveListeners.delete(options.onLive);
+      };
     },
     onReconnect: (listener: () => void) => {
       realtime.reconnectListeners.add(listener);
@@ -434,15 +439,15 @@ describe('useActivitySession catching up after the connection was away', () => {
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility });
   });
 
-  it('re-reads the session when the realtime socket reconnects (events sent meanwhile are lost)', async () => {
+  it('re-reads the session when its topic goes live — first, and after a reconnect (events before were never sent)', async () => {
     const { unmount } = await mountSession();
     const before = detailReads();
     act(() => {
-      for (const listener of realtime.reconnectListeners) listener();
+      for (const listener of realtime.liveListeners) listener();
     });
     await waitFor(() => expect(detailReads()).toBe(before + 1));
     unmount();
-    expect(realtime.reconnectListeners.size).toBe(0);
+    expect(realtime.liveListeners.size).toBe(0);
   });
 
   it('re-reads when the network comes back', async () => {

@@ -451,14 +451,18 @@ export function LobbyLiveRoster({ data, searchQuery = '', showPinned = false }: 
       }
     }
     void loadMessages();
-    // The gateway keeps no backlog: whatever was posted, edited or deleted
-    // while the socket was down (sleep, a network change, a gateway
-    // restart) is read again once it is back. The merge keeps live rows
-    // and deletions.
-    const offReconnect = getRealtimeClient().onReconnect(() => void loadMessages());
+    // The gateway keeps no backlog and replays nothing: whatever was posted,
+    // edited or deleted before the chat topic was live — after the read
+    // above, or while the socket was down (sleep, a network change, a
+    // gateway restart) — is read again once the gateway confirms the topic.
+    // The topic's one wire subscription is shared with the handler below;
+    // the merge keeps live rows and deletions.
+    const offLive = getRealtimeClient().subscribe(`chat:${data.serverId}:${data.channelId}`, () => {}, {
+      onLive: () => void loadMessages(),
+    });
     return () => {
       cancelled = true;
-      offReconnect();
+      offLive();
     };
   }, [data.channelId, data.serverId, reloadTick, toChatMessage]);
 

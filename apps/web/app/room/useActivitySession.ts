@@ -218,12 +218,14 @@ export function useActivitySession({
 
     void fetchOnce();
 
-    let offReconnect: (() => void) | null = null;
     try {
       const client = getRealtimeClient();
       client.connect();
-      unsubscribe = client.subscribe(`activity-state:${serverId}:${sessionId}` as const, handleEvent);
-      offReconnect = client.onReconnect(() => void fetchOnce());
+      // Live (first, or after a reconnect): a change published before the
+      // topic was live never came here — read the session again.
+      unsubscribe = client.subscribe(`activity-state:${serverId}:${sessionId}` as const, handleEvent, {
+        onLive: () => void fetchOnce(),
+      });
     } catch {
       pollFallback = true;
     }
@@ -269,7 +271,6 @@ export function useActivitySession({
       cancelled = true;
       if (refreshRef.current === fetchOnce) refreshRef.current = null;
       unsubscribe?.();
-      offReconnect?.();
       window.removeEventListener('online', onOnline);
       document.removeEventListener('visibilitychange', onVisibility);
       clearTimeout(firstCheck);

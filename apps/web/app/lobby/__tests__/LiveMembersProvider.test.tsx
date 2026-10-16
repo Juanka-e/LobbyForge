@@ -3,20 +3,20 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LobbyMember } from '@/lib/lobby-members';
 
-const { subscribers, reconnectListeners, invalidateMemberProfile } = vi.hoisted(() => ({
+const { subscribers, liveListeners, invalidateMemberProfile } = vi.hoisted(() => ({
   subscribers: new Map<string, (data: unknown) => void>(),
-  reconnectListeners: new Set<() => void>(),
+  liveListeners: new Set<() => void>(),
   invalidateMemberProfile: vi.fn(),
 }));
 vi.mock('@/lib/realtime-client', () => ({
   getRealtimeClient: () => ({
-    subscribe: (topic: string, handler: (data: unknown) => void) => {
+    subscribe: (topic: string, handler: (data: unknown) => void, options?: { onLive?: () => void }) => {
       subscribers.set(topic, handler);
-      return () => subscribers.delete(topic);
-    },
-    onReconnect: (listener: () => void) => {
-      reconnectListeners.add(listener);
-      return () => reconnectListeners.delete(listener);
+      if (options?.onLive) liveListeners.add(options.onLive);
+      return () => {
+        subscribers.delete(topic);
+        if (options?.onLive) liveListeners.delete(options.onLive);
+      };
     },
   }),
 }));
@@ -62,7 +62,7 @@ function emit(data: unknown) {
 
 beforeEach(() => {
   subscribers.clear();
-  reconnectListeners.clear();
+  liveListeners.clear();
   invalidateMemberProfile.mockClear();
   fetchCalls.length = 0;
   answer = { members: [] };
@@ -110,7 +110,7 @@ describe('LiveMembersProvider (docs/PROFILES.md "Live updates")', () => {
     await waitFor(() => expect(screen.queryByText('Alice')).toBeNull());
   });
 
-  it('a role edit or a reconnect re-reads everyone', async () => {
+  it('a role edit, or the topic going live (first, or after a reconnect), re-reads everyone', async () => {
     await renderProvider([row('a', 'Alice', { status: 'in-voice' })]);
     answer = { members: [row('a', 'Alice'), row('b', 'Bob')] };
     emit({ type: 'roles-changed' });
@@ -120,10 +120,22 @@ describe('LiveMembersProvider (docs/PROFILES.md "Live updates")', () => {
     expect(invalidateMemberProfile).toHaveBeenCalledWith(SERVER);
     answer = { members: [row('b', 'Bob')] };
     await act(async () => {
-      for (const listener of reconnectListeners) listener();
+      for (const listener of liveListeners) listener();
     });
     await waitFor(() => expect(screen.queryByText('Alice')).toBeNull());
     expect(fetchCalls).toHaveLength(2);
+  });
+
+  it('a change made between the page render and the topic going live is caught up', async () => {
+    // The page rendered Alice under her old name; she renamed herself before
+    // the gateway confirmed the topic, so no event will ever say so.
+    await renderProvider([row('a', 'Alice')]);
+    answer = { members: [row('a', 'Alicia')] };
+    await act(async () => {
+      for (const listener of liveListeners) listener();
+    });
+    expect(await screen.findByText('Alicia')).toBeInTheDocument();
+    expect(fetchCalls).toEqual([`/api/servers/${SERVER}/lobby-members`]);
   });
 
   it('ignores malformed events', async () => {

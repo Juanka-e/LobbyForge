@@ -12,7 +12,9 @@ import { compareLobbyMembers, type LobbyMember } from '@/lib/lobby-members';
  * events say WHO changed — joined, left, new roles, a new name or avatar — and
  * this provider re-reads exactly those rows from
  * `GET /api/servers/{id}/lobby-members`, projected for this viewer. A role
- * edit or a reconnect (events may have been missed) re-reads everyone.
+ * edit re-reads everyone, and so does the topic going live — once the
+ * gateway confirms it, which is after the page was rendered (a change in
+ * between was never sent here), and again after every reconnect.
  *
  * Status and presence are not this provider's: the member list keeps them
  * from the presence feed, and a re-read row keeps the ones it had.
@@ -136,28 +138,34 @@ export function LiveMembersProvider({
     };
 
     const client = getRealtimeClient();
-    const unsubscribe = client.subscribe(`members:${serverId}`, (data) => {
-      const event = parseEvent(data);
-      if (!event) return;
-      if (event.type === 'members-removed') {
-        const gone = new Set(event.userIds);
-        for (const id of gone) {
-          pendingIds.current.delete(id);
-          invalidateMemberProfile(serverId, id);
+    const unsubscribe = client.subscribe(
+      `members:${serverId}`,
+      (data) => {
+        const event = parseEvent(data);
+        if (!event) return;
+        if (event.type === 'members-removed') {
+          const gone = new Set(event.userIds);
+          for (const id of gone) {
+            pendingIds.current.delete(id);
+            invalidateMemberProfile(serverId, id);
+          }
+          setMembers((previous) => previous.filter((member) => !gone.has(member.id)));
+          bump(gone);
+          return;
         }
-        setMembers((previous) => previous.filter((member) => !gone.has(member.id)));
-        bump(gone);
-        return;
+        if (event.type === 'roles-changed') pendingFull.current = true;
+        else for (const id of event.userIds) pendingIds.current.add(id);
+        schedule();
+      },
+      {
+        // Live from here on: whatever changed since the page was rendered,
+        // or while the socket was down, was never sent — read everyone.
+        onLive: () => {
+          pendingFull.current = true;
+          schedule();
+        },
       }
-      if (event.type === 'roles-changed') pendingFull.current = true;
-      else for (const id of event.userIds) pendingIds.current.add(id);
-      schedule();
-    });
-    // Events sent while the socket was down are gone: read everyone again.
-    const offReconnect = client.onReconnect(() => {
-      pendingFull.current = true;
-      schedule();
-    });
+    );
     return () => {
       disposed = true;
       if (timer.current !== null) window.clearTimeout(timer.current);
@@ -165,7 +173,6 @@ export function LiveMembersProvider({
       pendingIds.current.clear();
       pendingFull.current = false;
       unsubscribe();
-      offReconnect();
     };
   }, [serverId]);
 
