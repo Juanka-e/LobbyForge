@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, type InputHTMLAttributes, type KeyboardEvent, type MutableRefObject } from 'react';
+import { useLayoutEffect, useRef, useState, type InputHTMLAttributes, type KeyboardEvent, type MutableRefObject } from 'react';
 import { useT } from '@/lib/i18n/client';
 import { initialOf } from '@/lib/initial';
 
@@ -67,6 +67,20 @@ export function MentionInput({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
+  /** Where the caret goes once the value with a picked mention is in the input. */
+  const pendingCaret = useRef<number | null>(null);
+
+  // Right after the new value is committed, before the next key is read: a
+  // caret placed a frame later (as it was) jumped back over what the user
+  // had typed meanwhile — "@Ivy Novak and" came out as "@Ivy Novak nd…a".
+  useLayoutEffect(() => {
+    const caret = pendingCaret.current;
+    const input = inputRef.current;
+    if (caret === null || !input) return;
+    pendingCaret.current = null;
+    input.focus();
+    input.setSelectionRange(caret, caret);
+  }, [value]);
 
   // Detect @mention trigger: find the last @ before the cursor and
   // check if the text after it (up to cursor) is a valid search string
@@ -119,15 +133,10 @@ export function MentionInput({
     const afterCursor = text.substring(cursorPos);
     const insertion = `@${user.displayName} `;
     const newValue = text.substring(0, atIdx) + insertion + afterCursor;
+    pendingCaret.current = atIdx + insertion.length;
     onChange(newValue);
     setMentionQuery(null);
     onMention?.(user.userId, user.displayName);
-    // Focus back and place cursor after the mention
-    requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      const newCursor = atIdx + insertion.length;
-      inputRef.current?.setSelectionRange(newCursor, newCursor);
-    });
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -178,11 +187,16 @@ export function MentionInput({
           <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-text-muted border-b border-border-subtle">
             {t('lobbyMain.composer.mentionMatches', { query: mentionQuery })}
           </div>
-          <ul>
+          {/* A list of choices to screen readers too: the arrow keys move the
+              selection from the input, so the options never take focus. */}
+          <ul role="listbox" aria-label={t('lobbyMain.composer.mentionMatches', { query: mentionQuery })}>
             {filtered.map((user, idx) => (
-              <li key={user.userId}>
+              <li key={user.userId} role="none">
                 <button
                   type="button"
+                  role="option"
+                  aria-selected={idx === mentionIndex}
+                  tabIndex={-1}
                   onMouseDown={(e) => {
                     e.preventDefault();
                     selectMention(user);

@@ -17,7 +17,9 @@ import { contentMentions, findHandleMentions, MAX_MENTIONS, type StoredMention }
  *   - each `@handle` in the text that belongs to a current member.
  *
  * Someone who is not a member, or a name that is not in the text, names
- * nobody. At most `MAX_MENTIONS`, in the order found.
+ * nobody. One entry per member and spelling: a member picked as "Ada" and
+ * also typed as `@ada_l` is both chips (the notification still goes once).
+ * At most `MAX_MENTIONS`, in the order found.
  */
 export async function resolveMessageMentions(
   db: DbClient,
@@ -26,7 +28,9 @@ export async function resolveMessageMentions(
   requestedIds: readonly string[] = []
 ): Promise<StoredMention[]> {
   const out: StoredMention[] = [];
+  /** `userId:text` lower-cased (a uuid has no colon): the same name twice is one entry. */
   const seen = new Set<string>();
+  const key = (userId: string, text: string) => `${userId}:${text.toLowerCase()}`;
   const ids = [...new Set(requestedIds)].slice(0, MAX_MENTIONS);
   if (ids.length > 0) {
     const members = await listMemberSummariesForServer(db, serverId, { userIds: ids });
@@ -34,14 +38,17 @@ export async function resolveMessageMentions(
     for (const id of ids) {
       const member = byId.get(id);
       if (!member) continue;
-      // The longest label first: "@Ada Lovelace" is that, not "@Ada".
+      // Every name of theirs that stands as `@…` in the text — the picked
+      // "@Ada Lovelace" and a typed "@ada_l" are both chips — longest first.
+      // (Where "@Ada" sits inside "@Ada Lovelace", the chip is the longer.)
       const labels = [member.nickname, member.globalDisplayName, member.username]
         .filter((label): label is string => typeof label === 'string' && label.trim().length > 0)
         .sort((a, b) => b.length - a.length);
-      const label = labels.find((candidate) => contentMentions(content, candidate));
-      if (!label) continue;
-      out.push({ userId: id, text: label });
-      seen.add(id);
+      for (const label of labels) {
+        if (seen.has(key(id, label)) || !contentMentions(content, label)) continue;
+        out.push({ userId: id, text: label });
+        seen.add(key(id, label));
+      }
     }
   }
   const handles = findHandleMentions(content);
@@ -50,9 +57,9 @@ export async function resolveMessageMentions(
     const byHandle = new Map(matches.map((row) => [row.username, row.userId]));
     for (const handle of handles) {
       const userId = byHandle.get(handle);
-      if (!userId || seen.has(userId)) continue;
+      if (!userId || seen.has(key(userId, handle))) continue;
       out.push({ userId, text: handle });
-      seen.add(userId);
+      seen.add(key(userId, handle));
       if (out.length >= MAX_MENTIONS) break;
     }
   }
