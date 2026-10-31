@@ -21,7 +21,7 @@
 # run never changes under it; Dependabot bumps both together.
 services:
   mailpit:
-    image: axllent/mailpit:v1.31@sha256:b68349e3a014b90c5610bfb26b2ae36f3892d7b8cf25ee140c6c71c98d2fcf48
+    image: axllent/mailpit:v1.32@sha256:0790692be935ea4420d085694f7985b1f692ca6a8771ab0e0bd8ba75ac180498
     container_name: lobbyforge-e2e-mailpit
     profiles: !reset []
     ports: !override
