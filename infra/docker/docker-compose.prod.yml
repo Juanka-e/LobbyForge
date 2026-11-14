@@ -80,7 +80,7 @@ services:
 
   # ── Certbot: Let's Encrypt certificate automation ────────────────
   certbot:
-    image: certbot/certbot:v5.8.0@sha256:f70ad0adbb7e117f0fe42a63c553f28ea451edabc0148757b6efcd9735acaa20  # LF-010-R pinned (9th-audit: v2.11.0 base EOL)
+    image: certbot/certbot:v5.10.0@sha256:c5698da859429ccee0fcc299a8000368198222d1f9e789ab6e388b491e8ce06d  # LF-010-R pinned (9th-audit: v2.11.0 base EOL)
     container_name: lobbyforge-certbot
     restart: unless-stopped
     entrypoint: >
