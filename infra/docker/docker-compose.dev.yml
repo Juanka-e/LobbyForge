@@ -212,7 +212,7 @@ services:
   # Optional: local SMTP catcher for testing email flows. UI at http://localhost:19526.
   mailpit:
     # Same pin as docker-compose.e2e-mail.yml (keep the two in step).
-    image: axllent/mailpit:v1.31@sha256:b68349e3a014b90c5610bfb26b2ae36f3892d7b8cf25ee140c6c71c98d2fcf48
+    image: axllent/mailpit:v1.34@sha256:23a2ef85bc50853ab3093645d1d64679afd8887e89da5e48a88940c172591a4e
     container_name: lobbyforge-mailpit
     restart: unless-stopped
     ports:
